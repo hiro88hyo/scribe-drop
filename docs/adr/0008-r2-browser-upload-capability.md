@@ -36,6 +36,11 @@ S3 action単位の制限はlocal signingだけが対応している。
   - `UploadPart`
   - `CompleteMultipartUpload`
   - `AbortMultipartUpload`
+- JWTに`actions`を指定するときは`scope`を併記しない。2026-07-25のstaging検証では、
+  同じ親credential、bucket、object pathに対して`actions`単独と`scope`単独は
+  `CreateMultipartUpload`と`AbortMultipartUpload`に成功した一方、
+  公式例にある`actions`と`scope`の併記はR2から`400 InvalidArgument`で拒否された。
+  最小権限を維持するため、広い`object-read-write` scopeではなくaction allowlistを正とする。
 - `GetObject`、`HeadObject`、`ListObjects*`、`ListMultipartUploads`、`ListParts`、
   `PutObject`、`CopyObject`、`DeleteObject*`はbrowser credentialへ許可しない。
 - source keyは
