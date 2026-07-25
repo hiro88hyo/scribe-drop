@@ -7,7 +7,7 @@
 shell、Pages Functionsのresponse security、Access JWT、CSRF、`GET /api/me`、
 D1の原子的job admission、所有権付きrepository、job作成・一覧・詳細API、
 型検証付きbrowser API client、ホーム・履歴・詳細の実API接続、Workers/D1
-integration testまで実装済みである。Phase 3では[ADR 0008](./adr/0008-r2-browser-upload-capability.md)を決定し、owner hash付きsource key、multipart actionだけに限定した15分のR2 Temporary Credentials、D1のupload準備状態遷移、browserの明示的multipart upload、進捗、cancel、同一画面retry、Wake Lock、最小化したIndexedDB checkpointまで実装済みである。[ADR 0009](./adr/0009-server-verified-upload-completion.md)に従う所有者付きR2 HEADと冪等なupload-completeも実装済みである。さらに、R2 Event Notificationのstrict検証、R2 HEAD再確認、D1の原子的なgeneration 1作成、個別ack/retryを行うQueue consumerを実装し、MiniflareのD1/R2 integration testまで完了している。[ADR 0010](./adr/0010-separate-attempt-and-capability-issuance.md)に従い、このPhaseではattemptを`SUBMISSION_PENDING`まで作成し、RunPod capabilityの発行と投入は行わない。stagingのD1、R2、Queue、DLQ、Pages projectとEvent Notificationを作成し、D1 migration、R2 CORS、Orchestrator deploy、実`PutObject` eventの恒久拒否経路まで検証済みである。Access保護済みWeb deploy、実multipart complete/abortとtemporary credentialの拒否境界、DLQ smoke、RunPod endpointは未完了である。
+integration testまで実装済みである。Phase 3では[ADR 0008](./adr/0008-r2-browser-upload-capability.md)を決定し、owner hash付きsource key、multipart actionだけに限定した15分のR2 Temporary Credentials、D1のupload準備状態遷移、browserの明示的multipart upload、進捗、cancel、同一画面retry、Wake Lock、最小化したIndexedDB checkpointまで実装済みである。[ADR 0009](./adr/0009-server-verified-upload-completion.md)に従う所有者付きR2 HEADと冪等なupload-completeも実装済みである。さらに、R2 Event Notificationのstrict検証、R2 HEAD再確認、D1の原子的なgeneration 1作成、個別ack/retryを行うQueue consumerを実装し、MiniflareのD1/R2 integration testまで完了している。[ADR 0010](./adr/0010-separate-attempt-and-capability-issuance.md)に従い、このPhaseではattemptを`SUBMISSION_PENDING`まで作成し、RunPod capabilityの発行と投入は行わない。stagingのD1、R2、Queue、DLQ、Pages projectとEvent Notificationを作成し、D1 migration、R2 CORS、Orchestrator deploy、実`PutObject` eventの恒久拒否経路まで検証済みである。さらにAccess保護済みWebをdeployし、実browser multipart complete、temporary credentialによるexact-object multipartとabortの成功、`PutObject`・別object・listの拒否、R2 Event Notificationからgeneration 1を一意に作成して`SUBMISSION_PENDING`へ遷移する経路、欠落R2 sourceのretryからDLQへ到達する経路を確認した。試験dataと一時resourceを削除し、Phase 3を完了した。RunPod endpointはPhase 4で構築する。
 
 本計画は[spec.md](./spec.md)とRunPodの追加security要件である[additional-spec.md](./additional-spec.md)を正とし、Phase 1からPhase 7までを、各Phaseが単独でレビュー・検証できる単位に分けて実装する。両者が矛盾する場合は追加要件と[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)を優先する。
 
@@ -74,8 +74,8 @@ integration testまで実装済みである。Phase 3では[ADR 0008](./adr/0008
 特に次を確認する。
 
 1. R2 Temporary Credentials で、単一 bucket かつ単一 object key に権限を限定できること。
-2. 一時認証情報による S3 multipart upload と abort の挙動、および `If-None-Match: *` 相当の create-only 条件が multipart で利用可能か。[ADR 0008](./adr/0008-r2-browser-upload-capability.md)で、local signingによりexact objectとmultipart actionだけへ限定し、multipart create-only条件は利用できない前提を決定済み。staging CORSは許可originの成功と不許可originの拒否を確認済みである。temporary credentialによるaction・object拒否、実multipart complete/abortはWebのAccessと親credential設定後に確認する。
-3. R2 Event Notificationの実際のメッセージ形式、ETag表現、Queue retryとDLQの設定方法。公式の[R2 event notification format](https://developers.cloudflare.com/r2/buckets/event-notifications/)、[Queuesの個別ack/retry](https://developers.cloudflare.com/queues/configuration/batching-retries/)、[DLQ](https://developers.cloudflare.com/queues/configuration/dead-letter-queues/)を確認済みである。staging subscriptionと実`PutObject`通知は確認済みであり、`CompleteMultipartUpload`のETag表現とDLQ到達を残りのstaging確認とする。
+2. 一時認証情報による S3 multipart upload と abort の挙動、および `If-None-Match: *` 相当の create-only 条件が multipart で利用可能か。[ADR 0008](./adr/0008-r2-browser-upload-capability.md)で、local signingによりexact objectとmultipart actionだけへ限定し、multipart create-only条件は利用できない前提を決定済み。stagingでは実multipart complete/abort、exact object外とaction外の拒否を確認した。R2はJWTの`actions`と`scope`の併記を`400 InvalidArgument`で拒否したため、広いscopeを除きaction allowlistだけを発行する。
+3. R2 Event Notificationの実際のメッセージ形式、ETag表現、Queue retryとDLQの設定方法。公式の[R2 event notification format](https://developers.cloudflare.com/r2/buckets/event-notifications/)、[Queuesの個別ack/retry](https://developers.cloudflare.com/queues/configuration/batching-retries/)、[DLQ](https://developers.cloudflare.com/queues/configuration/dead-letter-queues/)を確認済みである。staging subscription、実`PutObject`通知の恒久拒否、実`CompleteMultipartUpload`通知の受理とETag/HEAD照合、欠落R2 sourceのretryとDLQ到達を確認した。
 4. Pages Functions での Access JWT 検証方法、JWKS キャッシュ、複数 audience、ローカルテスト方法。[ADR 0003](./adr/0003-access-jwt-and-csrf-boundary.md)で決定済み。
 5. RunPod `/run`、`/status`、`/cancel`、job ID、result保持期間、timeoutとTTLの単位・最大値。[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)で初期方針を決定済み。
 6. D1 で claim winner の確定、submission 記録、outbox 作成を競合に耐える形で実行する方法。
@@ -229,9 +229,10 @@ exact originだけを許可するR2 CORSを適用した。固定dummy objectの�
 Queue consumerへ
 到達し、不許可actionとしてjobを安全に`FAILED`へ遷移することを確認し、検証用R2 objectと
 D1 rowは削除した。OrchestratorはQueue consumerとしてstagingへdeploy済みである。Webは
-Cloudflare Access application/policyとsecretが揃うまでdeployせず、実
-`CompleteMultipartUpload`、temporary credentialのaction/object拒否とabort、DLQ到達は
-次のstaging checkpointで確認する。
+Cloudflare Accessで保護してdeployし、実`CompleteMultipartUpload`のETag/HEAD照合、
+temporary credentialのexact-object multipart/abort成功とaction/object拒否を確認した。
+欠落R2 sourceを参照する限定messageでretryとDLQ到達を確認し、通常consumer設定へ復元後、
+試験用R2 source、D1 row、一時Workerを削除した。
 
 ### テストと完了条件
 

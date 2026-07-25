@@ -167,8 +167,6 @@ stagingではAccess policyとapplication audienceを実値で構成した後に�
 
 ## Deferred
 
-- Phase 3: Access保護済みWeb deploy、実`CompleteMultipartUpload`のETag、temporary
-  credentialのaction/object拒否とabort、DLQ運用smoke test
 - Phase 4: 本文のRunPod制御、claim、Worker sandbox、ffprobe、GPU abuse、SBOM
 - Phase 5: status polling、manifest finalize、Discord、artifact download
 - Phase 6:重複、timeout、partial failure、DLQ、concurrent finalize

@@ -2,13 +2,14 @@
 
 ## 状態
 
-Phase 3 staging checkpointの一部完了。OrchestratorとCloudflare data pathはdeploy済みで
-ある。WebはCloudflare Accessと必要なsecretを構成するまで意図的にdeployしていない。
+Phase 3 staging checkpointを完了した。Orchestrator、Access保護済みWeb、Cloudflare
+data pathをdeployし、実browser multipartからQueue ingestion、retry、DLQまで確認した。
 
 ## Source
 
 - Branch: `feature/phase-3-staging-validation`
-- Commit: `30cceec` (`chore(cloudflare): provision phase 3 staging`)
+- Orchestrator source: `30cceec` (`chore(cloudflare): provision phase 3 staging`)
+- Web source: `91dc8b8` (`fix(web): issue action-only r2 credentials`)
 - Wrangler: `4.114.0`
 - Deployment time: 2026-07-25 UTC
 
@@ -37,13 +38,10 @@ DLQ `recording-uploaded-dlq-staging`で構成した。
 
 ## Worker deployment
 
-- Current deployment ID: `c6c50ed3-9acc-40c1-8bf7-fddae66ed221`
-- Current version ID: `7066af58-5c04-4a7e-aca3-323de6e13adf`
-- Previous version ID: `6848b26d-3a4a-46f2-9681-ae49907a4979`
-- Deployment message: `source 30cceec: Phase 3 staging validation`
-
-application rollbackが必要な場合は、先にD1互換性を確認して上記previous versionを使う。
-applicationだけをrollbackする際にQueue consumerを削除または再作成しない。
+Orchestratorはsource `30cceec`、Webはsource `91dc8b8`からdeployした。deployment ID、
+version ID、URLは追跡対象へ保存せず、Cloudflareのdeployment historyを正とする。
+rollback時はD1互換性を先に確認し、直前の正常versionへ戻す。applicationだけを
+rollbackする際にQueue consumerを削除または再作成しない。
 
 ## 検証
 
@@ -62,6 +60,35 @@ applicationだけをrollbackする際にQueue consumerを削除または再作�
   - consumerはR2 HEADを行い、初回sourceとして不許可のactionを拒否した。
   - 検証jobはversion 2、attempt 0件のまま`PROCESSING_FAILED`で`FAILED`になった。
   - 確認後に検証用R2 objectと全D1 rowを削除した。
+- Accessと実browser upload:
+  - 許可identityでAccess loginし、認証後にWeb shellと`GET /api/me`へ到達した。
+  - custom origin、production `pages.dev`、preview deploymentは未認証時にAccessへ
+    redirectし、直アクセスで静的UIを迂回できないことを確認した。
+  - bucket限定親credentialから15分のTemporary Credentialを発行し、実browserで
+    `CreateMultipartUpload`、`UploadPart`、`CompleteMultipartUpload`に成功した。
+  - R2 Event Notification、Queue consumer、R2 HEADとETag/size照合を通り、jobと
+    generation 1 attemptが各1件だけ`SUBMISSION_PENDING`へ遷移した。
+  - exact objectのmultipart/abortは成功し、`PutObject`、別objectのmultipart、
+    `ListObjectsV2`は`AccessDenied`となった。
+  - JWTへ`actions`と`scope`を併記するとR2が`400 InvalidArgument`を返した。
+    [ADR 0008](../adr/0008-r2-browser-upload-capability.md)に従い、action allowlistだけを
+    発行するよう修正し、再検証した。
+  - Web Analyticsを無効化し、同一origin限定CSPを維持した。Access保護されたWeb manifestは
+    credential付きで取得する。
+- DLQ smoke:
+  - browser smokeのsourceを削除し、同じjob/source情報を持つ最初のmessageを通常設定の
+    main Queueへ送って、consumerのR2 HEAD不在による複数回の`SOURCE_NOT_FOUND` retryを
+    確認した。16分の確認枠内ではDLQ到達まで観測せず、待機を打ち切った。
+  - 最終routing確認では同じ条件のmessageを追加で1件送り、その確認中だけmain consumerを
+    `max_retries = 1`、既定retry delay 1秒へ変更した。これは5回retryの所要時間を再現する
+    試験ではなく、上限到達後のDLQ routingとtriageを確認するsmoke testである。
+  - 一時inspectorはD1の唯一のsmoke jobとbucket、key、ETag、sizeがすべて一致するmessage
+    だけをackし、`dlq_smoke_received`を確認した。raw bodyとsource keyはlogへ出していない。
+  - main consumerをbatch size 10、最大wait 5秒、最大retry 5回、retry delay 60秒、
+    staging DLQへ復元し、remote設定を再取得して確認した。
+  - 一時producer、schedule、inspector、DLQ consumerを削除した。翌checkpointの限定
+    inspectorでは残存DLQ messageを観測しなかった。browser smokeのR2 sourceが存在しない
+    状態でD1のjob、attempt、eventを削除し、関連tableが全件0であることを確認した。
 - clean sourceからの再deploy後、Cloudflare上で上記versionが100%、R2 producer 1件、
   Worker consumer 1件、期待するDLQ/retry、exact CORS、`incoming/` notification prefixに
   なっていることを再確認した。
@@ -81,17 +108,17 @@ commit `16ff4fa`でWebとR2 CORSの追跡対象設定をplaceholder化し、環�
 全request headerを含む許可originのPUT preflightが204、不許可originが403となることを
 確認した。
 
-## Access準備
+## AccessとWeb deployment
 
 同日の次checkpointでPages projectを確認し、deploymentが0件、secretが0件の状態から
-次のenvironment固有HMAC secretを暗号学的乱数で生成してproduction environmentへ直接
-登録した。値は標準出力、shell引数、Git、logへ出していない。
+environment固有HMAC secretを暗号学的乱数で生成し、bucket限定の親R2 S3 credentialと
+ともにproduction environmentへ直接登録した。値は標準出力、shell引数、Git、logへ
+出していない。登録したsecret名は次の4件である。
 
 - `CSRF_HMAC_SECRET`
 - `OWNER_HASH_HMAC_SECRET`
-
-`R2_PARENT_ACCESS_KEY_ID`と`R2_PARENT_SECRET_ACCESS_KEY`は、bucket限定の親credentialが
-未作成であるため登録していない。
+- `R2_PARENT_ACCESS_KEY_ID`
+- `R2_PARENT_SECRET_ACCESS_KEY`
 
 Access API権限を持たないWrangler OAuth credentialではなく、Zero Trust dashboardから
 Google identity providerとstaging専用self-hosted applicationを作成した。policyはexact
@@ -100,18 +127,14 @@ Bypassは追加していない。team domain、AUD、許可email、custom hostna
 保存していない。
 
 Google identity providerのconnection test、許可accountのloginを確認した。未認証の
-rootと`/api/me`はどちらも期待するAccess login boundaryへ302となり、認証後は未deployの
-Pages originによる522へ到達した。Web runtime secretが4件揃い、追跡外設定を再検証する
-までWebをdeployしない。
+rootと`/api/me`はどちらも期待するAccess login boundaryへ302となった。4件のsecret名を
+値なしで検証し、追跡外設定からWebをdeployした。認証後はWeb shellと`/api/me`へ到達し、
+custom origin、production `pages.dev`、preview deploymentの全入口がAccessで保護
+されていることを確認した。
 
-## 残るPhase 3 staging作業
+## Phase 3完了状態
 
-- Web deploy後にCloudflare Access login、JWT再検証、許可外identityの拒否を再確認する。
-- Web runtime secretをGit、log、この記録へ値を残さず登録する。
-- bucket限定の親R2 S3 credentialを作成し、Webのsecret storeだけへ登録する。
-- review済みcommitからWeb projectをdeployする。
-- 実browserの`CreateMultipartUpload`、`UploadPart`、`CompleteMultipartUpload`、abortを
-  検証する。
-- temporary credentialが別objectと許可した4つ以外の全actionを拒否することを確認する。
-- 実multipart ETag表現と、正しい`CompleteMultipartUpload`のQueue経路を確認する。
-- 上限付きretryからDLQへ到達するsmoke testと文書化したtriageを行う。
+- staging D1のjob、attempt、event、submission、outboxは全件0。
+- browser smokeのR2 sourceは削除済み。
+- main Queueは通常のOrchestrator consumer 1件、DLQは常設consumerなし。
+- 一時Worker、schedule、producer、consumerは削除済み。

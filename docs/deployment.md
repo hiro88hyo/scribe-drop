@@ -20,9 +20,12 @@ ack/retryを行うQueue consumerも実装し、MiniflareのD1/R2 integration tes
 RunPod capabilityを発行せず`SUBMISSION_PENDING`で停止する。stagingのD1、R2、Queue、
 DLQ、Pages project、Event Notificationを作成し、D1 migration、R2 CORS、実
 `PutObject`通知の恒久拒否経路を確認した。Orchestratorはstagingへdeploy済みである。
-WebはCloudflare Access application/policyとsecretが揃うまでdeployしない。実
-`CompleteMultipartUpload`のETag、temporary credentialの拒否境界・abort、DLQ到達は
-未完了である。
+WebもCloudflare Accessでcustom origin、production `pages.dev`、preview deploymentを
+保護してdeploy済みである。実browserの`CompleteMultipartUpload`、ETagとR2 HEADの
+完全一致、generation 1の一意作成、temporary credentialのexact-object multipart/abort
+成功と`PutObject`・別object・list拒否を確認した。欠落R2 sourceによるretryとDLQ到達、
+対象messageの限定ack、通常consumer設定への復元、smoke data削除まで確認し、Phase 3を
+完了した。
 
 `apps/orchestrator/wrangler.toml`と`apps/web/wrangler.toml`の全ゼロIDおよびoriginは
 安全なplaceholderであり、remote操作には使用できない。実IDと実originは追跡対象へ
@@ -62,8 +65,8 @@ D1、R2、Queue、DLQ、RunPod endpoint、Access application、secretは環境�
 
 ## Staging構築時の順序
 
-手順1から4は2026-07-25のPhase 3 staging checkpointで完了した。手順5以降と、
-temporary credentialを使うbrowser multipart検証は未完了である。
+手順1から5とtemporary credentialを使うbrowser multipart検証は2026-07-25の
+Phase 3 staging checkpointで完了した。手順6以降はPhase 4のRunPod構築で行う。
 
 1. Wranglerとrunpodctlのversion、Git branch、対象accountを確認する。
 2. staging用D1、非公開R2、Queue、DLQを作成し、実IDを追跡外Wrangler設定へ反映する。
@@ -99,12 +102,11 @@ subscription、prefix、Queue binding、Worker consumer、R2 HEAD、D1 CASの実
 確認するもので、許可する初回source actionである`CompleteMultipartUpload`の成功試験を
 代替しない。
 
-残るPhase 3 staging検証は次のとおりである。
-
-- Cloudflare Access application/policyとstaging Web secretを設定し、Webをdeployする。
-- bucket限定の親R2 S3 credentialをsecret storeへ登録する。
-- 実browser multipart complete/abort、exact object外・action外の拒否、ETagを確認する。
-- retry上限後のDLQ到達と、[operations.md](./operations.md)に沿うtriageを確認する。
+Cloudflare Access application/policy、staging Web secret、bucket限定の親R2 S3
+credentialを設定してWebをdeployした。実browser multipart complete、ETag、
+exact object外・action外の拒否、abortを確認した。欠落R2 sourceを使う上限付きretryから
+DLQへの到達と[operations.md](./operations.md)に沿う限定triageも確認し、試験用R2
+source、D1 row、一時Workerを削除した。
 
 実施結果とrollback用versionは
 [2026-07-25 Phase 3 staging deployment record](./deployments/2026-07-25-phase-3-staging.md)
