@@ -152,6 +152,36 @@ const FIND_JOB_SQL = `
   LIMIT 1
 `;
 
+const MARK_UPLOAD_READY_SQL = `
+  UPDATE jobs
+  SET
+    status = 'UPLOADING',
+    upload_expires_at = ?4,
+    updated_at = ?3,
+    version = version + 1
+  WHERE id = ?1
+    AND owner_sub = ?2
+    AND status = 'CREATED'
+    AND deleted_at IS NULL
+  RETURNING id
+`;
+
+const FAIL_UPLOAD_PREPARATION_SQL = `
+  UPDATE jobs
+  SET
+    status = 'FAILED',
+    error_code = 'INTERNAL_ERROR',
+    error_message = NULL,
+    failed_at = ?3,
+    updated_at = ?3,
+    version = version + 1
+  WHERE id = ?1
+    AND owner_sub = ?2
+    AND status = 'CREATED'
+    AND deleted_at IS NULL
+  RETURNING id
+`;
+
 const databaseJobSummaryRowSchema = z
   .object({
     actual_size_bytes: z.number().int().positive().max(MAX_FILE_SIZE_BYTES).nullable(),
@@ -184,6 +214,7 @@ const admissionDiagnosticSchema = z
   .strict();
 
 const listLimitSchema = z.number().int().min(1).max(100);
+const updatedJobIdRowsSchema = z.array(z.object({ id: ulidSchema }).strict()).max(1);
 
 type DatabaseJobSummaryRow = z.infer<typeof databaseJobSummaryRowSchema>;
 type DatabaseJobDetailRow = z.infer<typeof databaseJobDetailRowSchema>;
@@ -235,10 +266,22 @@ export interface ListJobsInput {
   readonly ownerSub: string;
 }
 
+export interface UploadPreparationTransitionInput {
+  readonly jobId: string;
+  readonly ownerSub: string;
+  readonly timestamp: string;
+}
+
+export interface MarkUploadReadyInput extends UploadPreparationTransitionInput {
+  readonly uploadExpiresAt: string;
+}
+
 export interface JobRepository {
   create(input: NewJobRecord): Promise<CreateJobRecordResult>;
+  failUploadPreparation(input: UploadPreparationTransitionInput): Promise<boolean>;
   findByOwner(ownerSub: string, jobId: string): Promise<JobDetail | undefined>;
   listByOwner(input: ListJobsInput): Promise<ListJobsResponse>;
+  markUploadReady(input: MarkUploadReadyInput): Promise<boolean>;
 }
 
 function mapSummary(row: DatabaseJobSummaryRow): JobSummary {
@@ -351,6 +394,16 @@ export function createD1JobRepository(database: JobDatabase): JobRepository {
       };
     },
 
+    async failUploadPreparation(input) {
+      const timestamp = utcDateTimeSchema.parse(input.timestamp);
+      const result = await database
+        .withSession("first-primary")
+        .prepare(FAIL_UPLOAD_PREPARATION_SQL)
+        .bind(input.jobId, input.ownerSub, timestamp)
+        .all();
+      return updatedJobIdRowsSchema.parse(result.results).length === 1;
+    },
+
     async findByOwner(ownerSub, jobId) {
       const session = database.withSession("first-primary");
       const untrustedRow = await session.prepare(FIND_JOB_SQL).bind(ownerSub, jobId).first();
@@ -392,6 +445,21 @@ export function createD1JobRepository(database: JobDatabase): JobRepository {
               })
             : null,
       };
+    },
+
+    async markUploadReady(input) {
+      const timestamp = utcDateTimeSchema.parse(input.timestamp);
+      const uploadExpiresAt = utcDateTimeSchema.parse(input.uploadExpiresAt);
+      if (Date.parse(uploadExpiresAt) <= Date.parse(timestamp)) {
+        throw new Error("Upload credential expiry must be after issuance");
+      }
+
+      const result = await database
+        .withSession("first-primary")
+        .prepare(MARK_UPLOAD_READY_SQL)
+        .bind(input.jobId, input.ownerSub, timestamp, uploadExpiresAt)
+        .all();
+      return updatedJobIdRowsSchema.parse(result.results).length === 1;
     },
   };
 }

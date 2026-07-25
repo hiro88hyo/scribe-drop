@@ -3,13 +3,12 @@
 ## 1. 現状
 
 2026-07-25
-時点でPhase 1の基盤を`feature/phase-1-foundation`に実装し、Phase 2を
-`feature/phase-2-authenticated-web`で進行している。Phase 2ではReact/Viteのapp
+時点でPhase 1とPhase 2を`develop`へ統合し、Phase 3を
+`feature/phase-3-secure-upload`で進行している。Phase 2ではReact/Viteのapp
 shell、Pages Functionsのresponse security、Access JWT、CSRF、`GET /api/me`、
 D1の原子的job admission、所有権付きrepository、job作成・一覧・詳細API、
 型検証付きbrowser API client、ホーム・履歴・詳細の実API接続、Workers/D1
-integration testまで実装済みである。Phase 2のlocal checkpointは完了しているが、
-実際のCloudflare resourceとRunPod endpointはまだ作成・deployしていない。
+integration testまで実装済みである。Phase 3では[ADR 0008](./adr/0008-r2-browser-upload-capability.md)を決定し、owner hash付きsource key、multipart actionだけに限定した15分のR2 Temporary Credentials、D1のupload準備状態遷移まで実装済みである。browser multipart、upload-complete、Queue consumer、実際のCloudflare resourceとRunPod endpointはまだ作成・deployしていない。
 
 本計画は[spec.md](./spec.md)とRunPodの追加security要件である[additional-spec.md](./additional-spec.md)を正とし、Phase 1からPhase 7までを、各Phaseが単独でレビュー・検証できる単位に分けて実装する。両者が矛盾する場合は追加要件と[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)を優先する。
 
@@ -76,7 +75,7 @@ integration testまで実装済みである。Phase 2のlocal checkpointは完�
 特に次を確認する。
 
 1. R2 Temporary Credentials で、単一 bucket かつ単一 object key に権限を限定できること。
-2. 一時認証情報による S3 multipart upload と abort の挙動、および `If-None-Match: *` 相当の create-only 条件が multipart で利用可能か。
+2. 一時認証情報による S3 multipart upload と abort の挙動、および `If-None-Match: *` 相当の create-only 条件が multipart で利用可能か。[ADR 0008](./adr/0008-r2-browser-upload-capability.md)で、local signingによりexact objectとmultipart actionだけへ限定し、multipart create-only条件は利用できない前提を決定済み。実R2の拒否・abort・CORSはstagingで確認する。
 3. R2 Event Notification の実際のメッセージ形式、ETag 表現、Queue retry と DLQ の設定方法。
 4. Pages Functions での Access JWT 検証方法、JWKS キャッシュ、複数 audience、ローカルテスト方法。[ADR 0003](./adr/0003-access-jwt-and-csrf-boundary.md)で決定済み。
 5. RunPod `/run`、`/status`、`/cancel`、job ID、result保持期間、timeoutとTTLの単位・最大値。[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)で初期方針を決定済み。
@@ -180,7 +179,9 @@ deployしないという[ADR 0007](./adr/0007-phase-2-job-admission-contract.md)
 ### 実装
 
 - owner `sub` から HMAC により `owner_hash` を生成し、ULID と nonce から source key を生成する。
-- `POST /api/jobs` で 15 分の R2 Temporary Credentials を発行する。応答後に認証情報を保存・ログ出力しない。
+- `POST /api/jobs` で、[ADR 0008](./adr/0008-r2-browser-upload-capability.md)に
+  従いexact objectとmultipart action 4種だけに限定した15分のR2 Temporary
+  Credentialsをlocal signingで発行する。応答後に認証情報を保存・ログ出力しない。
 - ブラウザに AWS SDK v3 と `@aws-sdk/lib-storage` を用いた multipart uploader を実装する。
   - 16 MiB part、並列数 3
   - byte progress、速度、ETA

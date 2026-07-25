@@ -41,10 +41,15 @@ localでは`apps/web/.dev.vars.example`を`apps/web/.dev.vars`へコピーし、
 `ACCESS_AUDIENCES`はenvironment固有の1件以上のAUD tagをJSON配列で指定する。stagingとproductionのaudienceを同じ配列に混在させない。AUD tagは検証対象の識別子でありcredentialではない。
 
 `CSRF_HMAC_SECRET`は32 byte以上のrandom secretとし、environment間で共有しない。
+`OWNER_HASH_HMAC_SECRET`と`R2_PARENT_SECRET_ACCESS_KEY`も32 byte以上とし、
+environment間で共有しない。親R2 credentialは対象bucketだけに限定し、
+[ADR 0008](./adr/0008-r2-browser-upload-capability.md)のlocal signingにだけ使用する。
+browserへはexact object、multipart action 4種、15分に限定した派生credentialだけを
+返す。
 
 `R2_BUCKET_NAME`はdeploy対象のWrangler `RECORDINGS` bindingが参照するbucket名と
-一致させる。Phase 2のlocal値はmetadata検証専用でR2へ接続しない。Phase 3ではlocal
-bindingも環境別bucket名へ揃え、credential発行とQueue検証でも同じ値を使用する。
+一致させる。local bindingも環境別bucket名へ揃え、credential発行とQueue検証でも
+同じ値を使用する。
 
 ## Orchestrator
 

@@ -2,16 +2,17 @@
 
 ## 現在の状態
 
-Phase 1の基盤は完了し、Phase 2ではlocal app shell、Pages Functionsのresponse
+Phase 1とPhase 2は`develop`へ統合済みである。Phase 2ではlocal app shell、Pages Functionsのresponse
 security、Access JWT、CSRF、`GET /api/me`、D1の原子的job admission、所有権付き
 repository、`POST/GET /api/jobs`、`GET /api/jobs/:id`とWorkers/D1 integration testを
 実装している。ホームの最近のjob、cursor方式の履歴、5秒pollingする詳細UIも実APIへ
 接続済みで、Phase 2のlocal checkpointは完了している。
 
-Phase 2の`POST /api/jobs`は[ADR 0007](./adr/0007-phase-2-job-admission-contract.md)に
-従うmetadata admission checkpointであり、R2 Temporary Credentialsを返さない。
-Phase 3の最終契約、実際のCloudflare resource、RunPod endpoint、credentialはまだ
-作成していないため、現段階ではdeployしない。
+Phase 3では[ADR 0008](./adr/0008-r2-browser-upload-capability.md)に従う
+owner hash付きsource keyと、exact object・multipart action 4種・15分に限定した
+R2 Temporary Credentialsのlocal signingまで実装している。browser multipart、
+upload-complete、R2 Event Notification consumerとstaging R2権限検証は未完了で
+あるため、現段階ではdeployしない。
 
 `apps/orchestrator/wrangler.toml`と`apps/web/wrangler.toml`の全ゼロIDは安全なplaceholderであり、remote操作には使用できない。実resource IDはstaging構築時に対象accountを確認してから設定する。
 

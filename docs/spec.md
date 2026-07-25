@@ -300,11 +300,17 @@ R2のCORSは次に限定する。
 
 * 対象バケットを1つに限定
 * 対象オブジェクトを今回の`source_key`だけに限定
+* `CreateMultipartUpload`、`UploadPart`、`CompleteMultipartUpload`、
+  `AbortMultipartUpload`だけに限定
 * 有効期限15分
 * 親R2トークンはPages Functionsのsecretに保存
 * 親R2トークンはブラウザへ返さない
 * 一時認証情報をログに記録しない
 * 一時認証情報をD1へ保存しない
+
+発行形式と権限境界は
+[ADR 0008](./adr/0008-r2-browser-upload-capability.md)を正とし、Worker内で親R2
+secretを使ってCloudflare公式形式のJWTをlocal signingする。
 
 レスポンス例:
 
@@ -348,7 +354,9 @@ leavePartsOnError: false
 * 同一画面内での再試行
 * multipart abort
 * 完了時にETagを取得
-* 可能なら`If-None-Match: *`相当のcreate-only条件を使用する
+* `CreateMultipartUpload`では`If-None-Match: *`相当のcreate-only条件を利用できない
+  ため、[ADR 0008](./adr/0008-r2-browser-upload-capability.md)の一意key、
+  exact-object credential、ETag mutation検知を適用する
 
 ページ再読込後の完全なmultipart再開は第2段階としてよいが、アップロード対象と進捗情報はIndexedDBへ保存する。
 

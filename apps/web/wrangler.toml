@@ -3,6 +3,7 @@ pages_build_output_dir = "./dist"
 compatibility_date = "2026-07-25"
 
 [vars]
+CLOUDFLARE_ACCOUNT_ID = "00000000000000000000000000000000"
 R2_BUCKET_NAME = "recording-transcriber-staging"
 
 [[d1_databases]]

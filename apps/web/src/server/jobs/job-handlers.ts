@@ -2,13 +2,14 @@ import {
   ALLOWED_MEDIA_TYPES,
   MAX_FILE_SIZE_BYTES,
   createJobRequestSchema,
-  jobActionResponseSchema,
+  createJobResponseSchema,
   listJobsQuerySchema,
   listJobsResponseSchema,
   ulidSchema,
   type AllowedMediaType,
-  type JobActionResponse,
+  type CreateJobResponse,
   type ListJobsResponse,
+  type TemporaryUploadCredentials,
 } from "@scribe-drop/contracts";
 
 import { createApiErrorResponse } from "../http/api-error.js";
@@ -19,7 +20,8 @@ import type { WebRequestData } from "../web-context.js";
 import { parseJobConfig, type JobEnvironment } from "./job-config.js";
 import { decodeJobCursor } from "./job-cursor.js";
 import { createD1JobRepository, type JobDatabase, type JobRepository } from "./job-repository.js";
-import { createPhaseTwoSourceKey } from "./job-source-key.js";
+import { createSourceKey as createFinalSourceKey } from "./job-source-key.js";
+import { createR2TemporaryUploadCredentials } from "./r2-temporary-credentials.js";
 
 const MAX_CREATE_JOB_BODY_BYTES = 16 * 1024;
 const INVALID_REQUEST_MESSAGE = "入力内容を確認してください。";
@@ -48,7 +50,20 @@ interface JobDetailHandlerContext extends JobsHandlerContext {
 export interface JobHandlerDependencies {
   readonly createJobId?: (timestampMilliseconds: number) => string;
   readonly createRepository?: (database: JobDatabase) => JobRepository;
-  readonly createSourceKey?: (jobId: string, contentType: AllowedMediaType) => string;
+  readonly createSourceKey?: (
+    ownerSub: string,
+    ownerHashHmacSecret: string,
+    jobId: string,
+    contentType: AllowedMediaType,
+  ) => Promise<string> | string;
+  readonly createTemporaryUploadCredentials?: (input: {
+    readonly accountId: string;
+    readonly bucket: string;
+    readonly key: string;
+    readonly now: Date;
+    readonly parentAccessKeyId: string;
+    readonly parentSecretAccessKey: string;
+  }) => Promise<TemporaryUploadCredentials>;
   readonly now?: () => Date;
   readonly randomBytes?: RandomBytes;
 }
@@ -189,10 +204,22 @@ export async function handleCreateJob(
     ((timestampMilliseconds: number) =>
       createUlid(timestampMilliseconds, dependencies.randomBytes));
   const jobId = createJobId(now.getTime());
-  const createSourceKey =
+  const createJobSourceKey =
     dependencies.createSourceKey ??
-    ((id: string, contentType: AllowedMediaType) =>
-      createPhaseTwoSourceKey(id, contentType, dependencies.randomBytes));
+    ((ownerSub: string, ownerHashHmacSecret: string, id: string, contentType: AllowedMediaType) =>
+      createFinalSourceKey(
+        ownerSub,
+        ownerHashHmacSecret,
+        id,
+        contentType,
+        dependencies.randomBytes,
+      ));
+  const sourceKey = await createJobSourceKey(
+    auth.sub,
+    config.ownerHashHmacSecret,
+    jobId,
+    requestResult.data.contentType,
+  );
   const repositoryFactory = dependencies.createRepository ?? createD1JobRepository;
   const repository = repositoryFactory(context.env.SCRIBE_DROP_DB);
   const result = await repository.create({
@@ -204,7 +231,7 @@ export async function handleCreateJob(
     ownerSub: auth.sub,
     sourceBucket: config.r2BucketName,
     sourceContentType: requestResult.data.contentType,
-    sourceKey: createSourceKey(jobId, requestResult.data.contentType),
+    sourceKey,
     timestamp: now.toISOString(),
     title: requestResult.data.title,
   });
@@ -228,9 +255,41 @@ export async function handleCreateJob(
     return response;
   }
 
-  const responseBody = jobActionResponseSchema.parse({
-    job: result.job,
-  }) satisfies JobActionResponse;
+  const createTemporaryUploadCredentials =
+    dependencies.createTemporaryUploadCredentials ?? createR2TemporaryUploadCredentials;
+  let responseBody: CreateJobResponse;
+  try {
+    const upload = await createTemporaryUploadCredentials({
+      accountId: config.cloudflareAccountId,
+      bucket: config.r2BucketName,
+      key: sourceKey,
+      now,
+      parentAccessKeyId: config.r2ParentAccessKeyId,
+      parentSecretAccessKey: config.r2ParentSecretAccessKey,
+    });
+    responseBody = createJobResponseSchema.parse({
+      jobId,
+      upload,
+    }) satisfies CreateJobResponse;
+
+    const markedReady = await repository.markUploadReady({
+      jobId,
+      ownerSub: auth.sub,
+      timestamp: now.toISOString(),
+      uploadExpiresAt: upload.expiresAt,
+    });
+    if (!markedReady) {
+      throw new Error("Created job could not transition to uploading");
+    }
+  } catch {
+    await repository.failUploadPreparation({
+      jobId,
+      ownerSub: auth.sub,
+      timestamp: now.toISOString(),
+    });
+    throw new Error("Upload preparation failed");
+  }
+
   return Response.json(responseBody, { status: 201 });
 }
 
