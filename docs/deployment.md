@@ -152,6 +152,9 @@ Pages commandは`--config`をサポートしないため、生成処理は
 作成する。commandはapp rootを`--cwd`に指定し、実`functions/`と`dist/`を利用する。
 Accessとsecretの設定後に、[cloudflare-access.md](./cloudflare-access.md)の
 未認証preflightを通し、commit SHAを明示してdeployする。
+PagesのWeb Analyticsは有効化しない。外部beaconの自動注入は
+[ADR 0005](./adr/0005-web-response-security-policy.md)の同一origin限定CSPと矛盾するため、
+Metrics画面でも無効であることを確認する。
 
 ```bash
 pnpm cloudflare:secrets:verify:staging
