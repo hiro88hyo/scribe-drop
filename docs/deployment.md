@@ -105,6 +105,10 @@ subscription、prefix、Queue binding、Worker consumer、R2 HEAD、D1 CASの実
 - 実browser multipart complete/abort、exact object外・action外の拒否、ETagを確認する。
 - retry上限後のDLQ到達と、[operations.md](./operations.md)に沿うtriageを確認する。
 
+実施結果とrollback用versionは
+[2026-07-25 Phase 3 staging deployment record](./deployments/2026-07-25-phase-3-staging.md)
+に記録する。
+
 ## 追跡外staging設定
 
 実account IDとD1 database IDはrepositoryへ保存しない。credential storeまたはCI secret
