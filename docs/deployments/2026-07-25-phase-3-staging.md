@@ -91,16 +91,22 @@ commit `16ff4fa`でWebとR2 CORSの追跡対象設定をplaceholder化し、環�
 - `OWNER_HASH_HMAC_SECRET`
 
 `R2_PARENT_ACCESS_KEY_ID`と`R2_PARENT_SECRET_ACCESS_KEY`は、bucket限定の親credentialが
-未作成であるため登録していない。Access application、organization、IdPの読み取りを
-Wrangler OAuth credentialで試行したがAccess APIは403を返したため、設定内容の取得や
-変更は行っていない。Access権限のあるZero Trust操作と
-[cloudflare-access.md](../cloudflare-access.md)の未認証preflightが完了するまでWebを
-deployしない。
+未作成であるため登録していない。
+
+Access API権限を持たないWrangler OAuth credentialではなく、Zero Trust dashboardから
+Google identity providerとstaging専用self-hosted applicationを作成した。policyはexact
+emailのAllowとGoogle login methodのRequireだけで構成し、Everyone、email domain全体、
+Bypassは追加していない。team domain、AUD、許可email、custom hostnameは追跡対象へ
+保存していない。
+
+Google identity providerのconnection test、許可accountのloginを確認した。未認証の
+rootと`/api/me`はどちらも期待するAccess login boundaryへ302となり、認証後は未deployの
+Pages originによる522へ到達した。Web runtime secretが4件揃い、追跡外設定を再検証する
+までWebをdeployしない。
 
 ## 残るPhase 3 staging作業
 
-- Cloudflare Access application、Google identity policy、audience、許可identityを作成して
-  検証する。
+- Web deploy後にCloudflare Access login、JWT再検証、許可外identityの拒否を再確認する。
 - Web runtime secretをGit、log、この記録へ値を残さず登録する。
 - bucket限定の親R2 S3 credentialを作成し、Webのsecret storeだけへ登録する。
 - review済みcommitからWeb projectをdeployする。
