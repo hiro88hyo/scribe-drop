@@ -65,8 +65,8 @@ describe("R2 temporary upload credentials", () => {
         objectPaths: [KEY],
         prefixPaths: [],
       },
-      scope: "object-read-write",
     });
+    expect(verified.payload).not.toHaveProperty("scope");
     expect(verified.payload).not.toHaveProperty("GetObject");
 
     const digest = new Uint8Array(

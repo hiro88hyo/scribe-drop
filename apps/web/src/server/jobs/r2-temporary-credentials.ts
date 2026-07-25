@@ -41,7 +41,6 @@ export async function createR2TemporaryUploadCredentials(
       objectPaths: [input.key],
       prefixPaths: [],
     },
-    scope: "object-read-write",
   })
     .setProtectedHeader({ alg: "HS256", typ: "JWT" })
     .setSubject(input.accountId)

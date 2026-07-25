@@ -286,9 +286,11 @@ results/{owner_hash}/{job_id}/{attempt_id}/manifest.json
 
 R2のCORSは次に限定する。
 
-* Allowed Origin: `https://transcribe.example.com`
-* Allowed Methods: multipartに必要なメソッドのみ
-* Allowed Headers: AWS Signature v4とアップロードに必要なもののみ
+* Allowed Origin: environmentごとのAccess保護対象と同一の単一exact origin。stagingの
+  実値は`SCRIBE_DROP_STAGING_WEB_ORIGIN`から追跡外設定へ生成する
+* Allowed Methods: `POST`、`PUT`、`DELETE`
+* Allowed Headers: AWS Signature v4とアップロードに必要なheaderだけ。stagingの
+  追跡対象templateは`infra/cloudflare/r2-cors.staging.json`
 * Expose Headers: `ETag`
 * ワイルドカードoriginは禁止
 

@@ -2,9 +2,11 @@
 
 ## 現在の適用範囲
 
-Phase 3ではR2 Event NotificationのQueue consumerとDLQ routingを実装しているが、
-Cloudflare resourceとstaging/production deploymentは未実施である。この文書の手順は
-staging構築時の必須runbookであり、placeholder IDのままremote操作してはならない。
+Phase 3ではR2 Event NotificationのQueue consumerとDLQ routingを実装し、stagingの
+D1、R2、Queue、DLQ、Event Notification、OrchestratorとAccess保護済みWebのdeployまで
+実施し、欠落R2 sourceのretryからDLQへの到達と限定ackもsmoke testで確認した。
+production environmentへのdeploymentは未実施である。この文書の手順は
+staging/production運用の必須runbookであり、placeholder IDのままremote操作してはならない。
 
 Queue、DLQ、D1、R2はenvironmentごとに分離する。操作前にGit branch、Wranglerの
 versionと認証先、Cloudflare account、environment、queue名を声出し確認する。

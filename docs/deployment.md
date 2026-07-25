@@ -17,10 +17,20 @@ cancel、同一画面retry、Wake Lock、最小化したIndexedDB checkpointま�
 strict検証、R2 HEAD再確認、D1 transactionによるgeneration 1の一意作成、個別
 ack/retryを行うQueue consumerも実装し、MiniflareのD1/R2 integration testを通している。
 [ADR 0010](./adr/0010-separate-attempt-and-capability-issuance.md)に従い、Phase 3では
-RunPod capabilityを発行せず`SUBMISSION_PENDING`で停止する。実R2 Event Notification、
-staging R2権限・ETag・DLQ検証は未完了であるため、現段階ではdeployしない。
+RunPod capabilityを発行せず`SUBMISSION_PENDING`で停止する。stagingのD1、R2、Queue、
+DLQ、Pages project、Event Notificationを作成し、D1 migration、R2 CORS、実
+`PutObject`通知の恒久拒否経路を確認した。Orchestratorはstagingへdeploy済みである。
+WebもCloudflare Accessでcustom origin、production `pages.dev`、preview deploymentを
+保護してdeploy済みである。実browserの`CompleteMultipartUpload`、ETagとR2 HEADの
+完全一致、generation 1の一意作成、temporary credentialのexact-object multipart/abort
+成功と`PutObject`・別object・list拒否を確認した。欠落R2 sourceによるretryとDLQ到達、
+対象messageの限定ack、通常consumer設定への復元、smoke data削除まで確認し、Phase 3を
+完了した。
 
-`apps/orchestrator/wrangler.toml`と`apps/web/wrangler.toml`の全ゼロIDは安全なplaceholderであり、remote操作には使用できない。実resource IDはstaging構築時に対象accountを確認してから設定する。
+`apps/orchestrator/wrangler.toml`と`apps/web/wrangler.toml`の全ゼロIDおよびoriginは
+安全なplaceholderであり、remote操作には使用できない。実IDと実originは追跡対象へ
+書かず、対象accountを確認してから`pnpm cloudflare:config:staging`でgit ignoredの
+Wrangler設定へ生成する。
 
 ## CLIと認証
 
@@ -55,10 +65,11 @@ D1、R2、Queue、DLQ、RunPod endpoint、Access application、secretは環境�
 
 ## Staging構築時の順序
 
-この手順は後続Phaseでresource定義とapplication実装が揃ってから実行する。
+手順1から5とtemporary credentialを使うbrowser multipart検証は2026-07-25の
+Phase 3 staging checkpointで完了した。手順6以降はPhase 4のRunPod構築で行う。
 
 1. Wranglerとrunpodctlのversion、Git branch、対象accountを確認する。
-2. staging用D1、非公開R2、Queue、DLQを作成し、実IDをWrangler設定へ反映する。
+2. staging用D1、非公開R2、Queue、DLQを作成し、実IDを追跡外Wrangler設定へ反映する。
 3. R2 CORSと`incoming/`限定Event Notificationを設定する。
 4. D1 migrationを適用し、適用済みversionを記録する。
 5. OrchestratorとWebのsecretをCloudflare secret storeへ登録する。
@@ -67,11 +78,104 @@ D1、R2、Queue、DLQ、RunPod endpoint、Access application、secretは環境�
 8. `runpodctl`でSecure Cloud、Flex、active workers 0、max workers 1、GPU 1、Network Volumeなし、FlashBoot無効、timeout、TTLを確認する。
 9. SBOM、container/dependency scan、offline起動、smoke test、重複配送、claim競合、cleanup、rollback手順を確認する。
 
+## Phase 3 staging checkpoint
+
+2026-07-25に次の環境専用resourceを作成した。
+
+- D1: `scribe-drop-staging`
+- R2: `recording-transcriber-staging`
+- Queue: `recording-uploaded-staging`
+- DLQ: `recording-uploaded-dlq-staging`
+- Pages project: `scribe-drop-web-staging`
+- Worker: `scribe-drop-orchestrator-staging`
+
+D1には`0001_initial.sql`、`0002_job_admission_indexes.sql`、
+`0003_attempt_capability_lifecycle.sql`を順に適用した。R2 Event Notificationは
+`incoming/` prefixのobject createをmain Queueへ送る。R2 CORSの追跡対象templateは
+`infra/cloudflare/r2-cors.staging.json`であり、設定済みのstaging exact originからの
+preflightは204、不許可originは403になることを実bucketで確認した。
+
+固定dummy objectを`incoming/`へ`PutObject`し、実R2 notificationがQueueと
+Orchestratorへ到達して、不許可actionとして対象jobを`PROCESSING_FAILED`で`FAILED`へ
+遷移させることを確認した。検証用objectとD1 rowは確認後に削除している。この試験は
+subscription、prefix、Queue binding、Worker consumer、R2 HEAD、D1 CASの実経路を
+確認するもので、許可する初回source actionである`CompleteMultipartUpload`の成功試験を
+代替しない。
+
+Cloudflare Access application/policy、staging Web secret、bucket限定の親R2 S3
+credentialを設定してWebをdeployした。実browser multipart complete、ETag、
+exact object外・action外の拒否、abortを確認した。欠落R2 sourceを使う上限付きretryから
+DLQへの到達と[operations.md](./operations.md)に沿う限定triageも確認し、試験用R2
+source、D1 row、一時Workerを削除した。
+
+実施結果とrollback用versionは
+[2026-07-25 Phase 3 staging deployment record](./deployments/2026-07-25-phase-3-staging.md)
+に記録する。
+
+## 追跡外staging設定
+
+実account IDとD1 database IDはrepositoryへ保存しない。credential storeまたはCI secret
+から次の環境変数を注入して設定を生成する。
+
+- `CLOUDFLARE_ACCOUNT_ID`
+- `SCRIBE_DROP_STAGING_D1_DATABASE_ID`
+- `SCRIBE_DROP_STAGING_WEB_ORIGIN`
+
+```bash
+pnpm cloudflare:config:staging:orchestrator
+git check-ignore .wrangler/deploy/orchestrator-staging.toml
+pnpm cloudflare:config:staging:r2-cors
+git check-ignore .wrangler/deploy/r2-cors-staging.json
+```
+
+R2 CORSはcustom domainがactiveになってから追跡外設定を生成して適用する。Web設定には
+同じexact originと、Access application作成後の次の非secret値が必要である。
+
+- `SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`
+- `SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`
+
+```bash
+pnpm cloudflare:config:staging:web
+git check-ignore apps/web/.wrangler/deploy/wrangler.toml
+```
+
+生成ファイルはmode `0600`、親directoryは`0700`とする。値を標準出力へ表示せず、deploy
+前に`git status`へ現れないことを確認する。Orchestratorのremote commandは追跡外設定を
+明示する。
+
+```bash
+pnpm exec wrangler deploy \
+  --config .wrangler/deploy/orchestrator-staging.toml \
+  --env staging
+```
+
+Pages commandは`--config`をサポートしないため、生成処理は
+`apps/web/.wrangler/deploy/config.json`から追跡外Wrangler設定への公式config redirectを
+作成する。commandはapp rootを`--cwd`に指定し、実`functions/`と`dist/`を利用する。
+Accessとsecretの設定後に、[cloudflare-access.md](./cloudflare-access.md)の
+未認証preflightを通し、commit SHAを明示してdeployする。
+PagesのWeb Analyticsは有効化しない。外部beaconの自動注入は
+[ADR 0005](./adr/0005-web-response-security-policy.md)の同一origin限定CSPと矛盾するため、
+Metrics画面でも無効であることを確認する。
+
+```bash
+pnpm cloudflare:secrets:verify:staging
+pnpm cloudflare:access:verify:staging
+```
+
+```bash
+pnpm exec wrangler pages deploy \
+  --cwd apps/web \
+  --branch develop \
+  --commit-hash <COMMIT_SHA>
+```
+
 resourceの作成・変更・削除とdeployの直前には、CLIの認証先、environment、resource名、IDを再確認する。dashboardだけで行った変更は残さず、Wrangler設定、migration、deployment記録へ反映する。
 
 R2 S3-compatible APIは`wrangler dev`のlocal R2 emulationでは利用できないため、
 browser uploadの自動テストはfake transportを使う。CORS、temporary credentialの
-action/object拒否、multipart、abortは専用staging bucketとstaging originで確認する。
+action/object拒否、multipart、abortは専用staging bucketと設定済みのstaging exact
+originで確認する。
 Workers R2 bindingによるupload-completeのHEAD、size、ETag、D1状態遷移はMiniflareで
 自動検証する。OrchestratorのQueue consumerも同じMiniflare上で、実migrationを適用した
 D1とR2 bindingを使い、重複配信、upload-completeとの順序逆転、サイズ不一致、

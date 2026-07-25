@@ -132,7 +132,29 @@ repository内のローカルD1状態は変更しない。
 pnpm d1:verify
 ```
 
-`apps/orchestrator/wrangler.toml` と `apps/web/wrangler.toml` のUUIDは安全なplaceholderである。remote操作やdeployの前に、対象環境で作成した実resource IDへ置き換え、accountとenvironmentを確認する。
+`apps/orchestrator/wrangler.toml` と `apps/web/wrangler.toml` のIDは安全なplaceholderで
+あり、追跡対象ファイルへ実IDを直接書かない。remote操作やdeployでは、対象accountを
+確認して実IDを環境変数から注入し、git ignoredの設定を生成する。
+
+```bash
+pnpm cloudflare:config:staging:orchestrator
+git check-ignore .wrangler/deploy/orchestrator-staging.toml
+```
+
+R2 CORS設定とWeb設定の生成には、Accessで保護する単一exact originも必要である。
+
+```bash
+pnpm cloudflare:config:staging:r2-cors
+git check-ignore .wrangler/deploy/r2-cors-staging.json
+pnpm cloudflare:config:staging:web
+git check-ignore apps/web/.wrangler/deploy/wrangler.toml
+git check-ignore apps/web/.wrangler/deploy/config.json
+```
+
+共通で`CLOUDFLARE_ACCOUNT_ID`と`SCRIBE_DROP_STAGING_D1_DATABASE_ID`を使う。Webでは
+さらに`SCRIBE_DROP_STAGING_WEB_ORIGIN`、`SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`と
+`SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`を使う。値はcredential storeまたはCI secretから
+環境へ渡し、shell scriptや追跡ファイルへ埋め込まない。
 
 ## Web
 
