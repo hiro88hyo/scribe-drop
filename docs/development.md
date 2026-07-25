@@ -162,7 +162,9 @@ Node stream型を参照するため有効にしている。いずれも依存lib
 application sourceのstrict検査は維持する。Functionsはroot標準どおり無効のままとする。
 これらの例外は依存更新時に再確認し、不要になれば削除する。
 
-browser API clientは`/api/me`、`/api/jobs`、`/api/jobs/:id`だけをsame-originかつ
-`cache: no-store`で取得し、responseを`packages/contracts`のZod schemaで再検証する。
+browser API clientは`/api/me`、`/api/jobs`、`/api/jobs/:id`、
+`/api/jobs/:id/upload-complete`だけをsame-originかつ`cache: no-store`で呼び、
+responseを`packages/contracts`のZod schemaで再検証する。upload-completeには空の
+JSON objectだけを送り、browserで観測したETag、size、keyを送らない。
 Access JWTやAccess cookieをJavaScriptへコピーしない。`/api/me`のCSRF tokenは
 React stateだけに保持し、localStorage、sessionStorage、IndexedDB、URLへ保存しない。

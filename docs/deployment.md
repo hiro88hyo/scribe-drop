@@ -12,8 +12,9 @@ Phase 3では[ADR 0008](./adr/0008-r2-browser-upload-capability.md)に従う
 owner hash付きsource keyと、exact object・multipart action 4種・15分に限定した
 R2 Temporary Credentialsのlocal signing、browserの明示的multipart、進捗、
 cancel、同一画面retry、Wake Lock、最小化したIndexedDB checkpointまで実装している。
-upload-complete、R2 Event Notification consumerとstaging R2権限検証は未完了で
-あるため、現段階ではdeployしない。
+[ADR 0009](./adr/0009-server-verified-upload-completion.md)に従う所有者付きR2 HEAD、
+完全一致size、冪等CASを使うupload-completeも実装している。R2 Event Notification
+consumerとstaging R2権限検証は未完了であるため、現段階ではdeployしない。
 
 `apps/orchestrator/wrangler.toml`と`apps/web/wrangler.toml`の全ゼロIDは安全なplaceholderであり、remote操作には使用できない。実resource IDはstaging構築時に対象accountを確認してから設定する。
 
@@ -67,6 +68,8 @@ resourceの作成・変更・削除とdeployの直前には、CLIの認証先、
 R2 S3-compatible APIは`wrangler dev`のlocal R2 emulationでは利用できないため、
 browser uploadの自動テストはfake transportを使う。CORS、temporary credentialの
 action/object拒否、multipart、abortは専用staging bucketとstaging originで確認する。
+Workers R2 bindingによるupload-completeのHEAD、size、ETag、D1状態遷移はMiniflareで
+自動検証する。
 
 RunPodへ送る`/run` payload、endpoint設定、claim後のcapability境界は[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)を正とする。RunPod API keyはOrchestratorだけに置き、WorkerにはR2の長期credential、Discord webhook、利用者metadataを渡さない。Secure Cloudを利用できない場合や上記endpoint設定を満たせない場合はdeployを停止し、例外を別ADRで承認する。
 

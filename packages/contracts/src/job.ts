@@ -155,6 +155,7 @@ export const apiErrorResponseSchema = z
 export type JobOptions = z.infer<typeof jobOptionsSchema>;
 export type CreateJobRequest = z.infer<typeof createJobRequestSchema>;
 export type CreateJobResponse = z.infer<typeof createJobResponseSchema>;
+export type UploadCompleteRequest = z.infer<typeof uploadCompleteRequestSchema>;
 export type TemporaryUploadCredentials = z.infer<typeof temporaryUploadCredentialsSchema>;
 export type JobSummary = z.infer<typeof jobSummarySchema>;
 export type JobDetail = z.infer<typeof jobDetailSchema>;

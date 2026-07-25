@@ -8,7 +8,7 @@
 shell、Pages Functionsのresponse security、Access JWT、CSRF、`GET /api/me`、
 D1の原子的job admission、所有権付きrepository、job作成・一覧・詳細API、
 型検証付きbrowser API client、ホーム・履歴・詳細の実API接続、Workers/D1
-integration testまで実装済みである。Phase 3では[ADR 0008](./adr/0008-r2-browser-upload-capability.md)を決定し、owner hash付きsource key、multipart actionだけに限定した15分のR2 Temporary Credentials、D1のupload準備状態遷移、browserの明示的multipart upload、進捗、cancel、同一画面retry、Wake Lock、最小化したIndexedDB checkpointまで実装済みである。upload-complete、Queue consumer、実際のCloudflare resourceとRunPod endpointはまだ作成・deployしていない。
+integration testまで実装済みである。Phase 3では[ADR 0008](./adr/0008-r2-browser-upload-capability.md)を決定し、owner hash付きsource key、multipart actionだけに限定した15分のR2 Temporary Credentials、D1のupload準備状態遷移、browserの明示的multipart upload、進捗、cancel、同一画面retry、Wake Lock、最小化したIndexedDB checkpointまで実装済みである。[ADR 0009](./adr/0009-server-verified-upload-completion.md)に従う所有者付きR2 HEADと冪等なupload-completeも実装済みである。Queue consumer、実際のCloudflare resourceとRunPod endpointはまだ作成・deployしていない。
 
 本計画は[spec.md](./spec.md)とRunPodの追加security要件である[additional-spec.md](./additional-spec.md)を正とし、Phase 1からPhase 7までを、各Phaseが単独でレビュー・検証できる単位に分けて実装する。両者が矛盾する場合は追加要件と[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)を優先する。
 
@@ -209,6 +209,12 @@ browser multipartのlocal checkpointでは、1 partの小容量fileでも
 `PutObject`を呼ばない。AWS SDKはupload開始時にだけlazy loadする。IndexedDBへは
 job ID、filename、content type、size、完了済みbyte、状態、更新日時だけを保存し、
 File、title、options、R2 endpoint・key・credentialは保存しない。
+
+upload-completeのlocal checkpointは
+[ADR 0009](./adr/0009-server-verified-upload-completion.md)に従い、strictな空body、
+Access/CSRF/所有権、D1上のexact source情報、R2 HEADの完全一致sizeを検証する。同じ
+ETagの再送はno-op、異なるETagは`SOURCE_MUTATED`とする。browser側の通知だけが失敗した
+場合はR2へ再uploadせず、同じjobの通知だけを再試行する。
 
 ### テストと完了条件
 

@@ -42,7 +42,6 @@ export type UploadState =
       readonly status: "error";
     }
   | {
-      readonly eTag: string;
       readonly filename: string;
       readonly jobId: string;
       readonly status: "uploaded";
@@ -119,6 +118,13 @@ export function useUpload(): {
   const controllerRef = useRef<AbortController | undefined>(undefined);
   const lastInputRef = useRef<UploadStartInput | undefined>(undefined);
   const mountedRef = useRef(true);
+  const pendingCompletionRef = useRef<
+    | {
+        readonly input: UploadStartInput;
+        readonly jobId: string;
+      }
+    | undefined
+  >(undefined);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -156,6 +162,7 @@ export function useUpload(): {
 
   const run = useCallback(async (input: UploadStartInput): Promise<void> => {
     controllerRef.current?.abort();
+    pendingCompletionRef.current = undefined;
     const controller = new AbortController();
     controllerRef.current = controller;
     lastInputRef.current = input;
@@ -175,7 +182,7 @@ export function useUpload(): {
       await saveUploadCheckpoint(checkpointFrom(jobId, input, "uploading", 0));
       wakeLock = await requestWakeLock();
 
-      const result = await uploadFileMultipart({
+      await uploadFileMultipart({
         credentials: created.upload,
         file: input.file,
         onProgress: (progress) => {
@@ -194,10 +201,15 @@ export function useUpload(): {
         },
         signal: controller.signal,
       });
+      pendingCompletionRef.current = {
+        input,
+        jobId,
+      };
+      await apiClient.completeUpload(jobId, session.csrfToken, controller.signal);
       await removeUploadCheckpoint(jobId);
+      pendingCompletionRef.current = undefined;
       if (!controller.signal.aborted && mountedRef.current) {
         setState({
-          eTag: result.eTag,
           filename: input.file.name,
           jobId,
           status: "uploaded",
@@ -238,6 +250,55 @@ export function useUpload(): {
     }
   }, []);
 
+  const resumeCompletion = useCallback(
+    async (pending: {
+      readonly input: UploadStartInput;
+      readonly jobId: string;
+    }): Promise<void> => {
+      controllerRef.current?.abort();
+      const controller = new AbortController();
+      controllerRef.current = controller;
+      setState({ filename: pending.input.file.name, status: "preparing" });
+      try {
+        const session = await apiClient.getMe(controller.signal);
+        await apiClient.completeUpload(pending.jobId, session.csrfToken, controller.signal);
+        await removeUploadCheckpoint(pending.jobId);
+        pendingCompletionRef.current = undefined;
+        if (!controller.signal.aborted && mountedRef.current) {
+          setState({
+            filename: pending.input.file.name,
+            jobId: pending.jobId,
+            status: "uploaded",
+          });
+        }
+      } catch (error) {
+        const presentation = uploadError(error);
+        await saveUploadCheckpoint(
+          checkpointFrom(
+            pending.jobId,
+            pending.input,
+            presentation.cancelled ? "cancelled" : "failed",
+            pending.input.file.size,
+          ),
+        );
+        if (mountedRef.current) {
+          setState({
+            cancelled: presentation.cancelled,
+            error: presentation.error,
+            filename: pending.input.file.name,
+            retryable: true,
+            status: "error",
+          });
+        }
+      } finally {
+        if (controllerRef.current === controller) {
+          controllerRef.current = undefined;
+        }
+      }
+    },
+    [],
+  );
+
   return {
     cancel: () => {
       controllerRef.current?.abort();
@@ -250,6 +311,11 @@ export function useUpload(): {
     },
     recoveredCheckpoints,
     retry: () => {
+      const pendingCompletion = pendingCompletionRef.current;
+      if (pendingCompletion !== undefined) {
+        void resumeCompletion(pendingCompletion);
+        return;
+      }
       const input = lastInputRef.current;
       if (input !== undefined) {
         void run(input);

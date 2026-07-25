@@ -14,6 +14,7 @@ import {
   type AllowedMediaType,
   type JobDetail,
   type JobOptions,
+  type JobStatus,
   type JobSummary,
   type ListJobsResponse,
 } from "@scribe-drop/contracts";
@@ -182,6 +183,70 @@ const FAIL_UPLOAD_PREPARATION_SQL = `
   RETURNING id
 `;
 
+const FIND_UPLOAD_TARGET_SQL = `
+  SELECT
+    id,
+    source_bucket,
+    source_key,
+    expected_size_bytes,
+    actual_size_bytes,
+    source_etag,
+    status,
+    version
+  FROM jobs
+  WHERE owner_sub = ?1
+    AND id = ?2
+    AND deleted_at IS NULL
+  LIMIT 1
+`;
+
+const COMPLETE_UPLOAD_SQL = `
+  UPDATE jobs
+  SET
+    status = 'UPLOADED',
+    actual_size_bytes = ?5,
+    source_etag = ?6,
+    uploaded_at = ?3,
+    updated_at = ?3,
+    version = version + 1
+  WHERE id = ?1
+    AND owner_sub = ?2
+    AND version = ?4
+    AND expected_size_bytes = ?5
+    AND source_bucket = ?7
+    AND source_key = ?8
+    AND source_etag IS NULL
+    AND status IN ('CREATED', 'UPLOADING')
+    AND deleted_at IS NULL
+  RETURNING ${JOB_SUMMARY_COLUMNS}
+`;
+
+const MARK_SOURCE_MUTATED_SQL = `
+  UPDATE jobs
+  SET
+    status = 'SOURCE_MUTATED',
+    error_code = 'SOURCE_ETAG_CHANGED',
+    error_message = NULL,
+    failed_at = ?3,
+    updated_at = ?3,
+    version = version + 1
+  WHERE id = ?1
+    AND owner_sub = ?2
+    AND source_etag IS NOT NULL
+    AND source_etag <> ?4
+    AND status IN (
+      'CREATED',
+      'UPLOADING',
+      'UPLOADED',
+      'SUBMISSION_PENDING',
+      'SUBMITTING',
+      'RUNNING',
+      'CANCEL_REQUESTED'
+    )
+    AND deleted_at IS NULL
+  RETURNING ${JOB_SUMMARY_COLUMNS}
+`;
+
 const databaseJobSummaryRowSchema = z
   .object({
     actual_size_bytes: z.number().int().positive().max(MAX_FILE_SIZE_BYTES).nullable(),
@@ -213,8 +278,22 @@ const admissionDiagnosticSchema = z
   })
   .strict();
 
+const databaseUploadTargetRowSchema = z
+  .object({
+    actual_size_bytes: z.number().int().positive().max(MAX_FILE_SIZE_BYTES).nullable(),
+    expected_size_bytes: z.number().int().positive().max(MAX_FILE_SIZE_BYTES),
+    id: ulidSchema,
+    source_bucket: z.string().min(3).max(63),
+    source_etag: z.string().min(1).max(512).nullable(),
+    source_key: z.string().min(1).max(1024).startsWith("incoming/"),
+    status: jobStatusSchema,
+    version: z.number().int().positive(),
+  })
+  .strict();
+
 const listLimitSchema = z.number().int().min(1).max(100);
 const updatedJobIdRowsSchema = z.array(z.object({ id: ulidSchema }).strict()).max(1);
+const updatedJobSummaryRowsSchema = z.array(databaseJobSummaryRowSchema).max(1);
 
 type DatabaseJobSummaryRow = z.infer<typeof databaseJobSummaryRowSchema>;
 type DatabaseJobDetailRow = z.infer<typeof databaseJobDetailRowSchema>;
@@ -276,10 +355,50 @@ export interface MarkUploadReadyInput extends UploadPreparationTransitionInput {
   readonly uploadExpiresAt: string;
 }
 
+export interface UploadTarget {
+  readonly actualSizeBytes: number | null;
+  readonly expectedSizeBytes: number;
+  readonly jobId: string;
+  readonly sourceBucket: string;
+  readonly sourceEtag: string | null;
+  readonly sourceKey: string;
+  readonly status: JobStatus;
+  readonly version: number;
+}
+
+export interface CompleteUploadInput {
+  readonly expectedVersion: number;
+  readonly jobId: string;
+  readonly ownerSub: string;
+  readonly sizeBytes: number;
+  readonly sourceBucket: string;
+  readonly sourceEtag: string;
+  readonly sourceKey: string;
+  readonly timestamp: string;
+}
+
+export type CompleteUploadResult =
+  | {
+      readonly job: JobSummary;
+      readonly status: "completed" | "idempotent";
+    }
+  | {
+      readonly job: JobSummary;
+      readonly status: "source_mutated";
+    }
+  | {
+      readonly status: "invalid_state";
+    }
+  | {
+      readonly status: "not_found";
+    };
+
 export interface JobRepository {
+  completeUpload(input: CompleteUploadInput): Promise<CompleteUploadResult>;
   create(input: NewJobRecord): Promise<CreateJobRecordResult>;
   failUploadPreparation(input: UploadPreparationTransitionInput): Promise<boolean>;
   findByOwner(ownerSub: string, jobId: string): Promise<JobDetail | undefined>;
+  findUploadTargetByOwner(ownerSub: string, jobId: string): Promise<UploadTarget | undefined>;
   listByOwner(input: ListJobsInput): Promise<ListJobsResponse>;
   markUploadReady(input: MarkUploadReadyInput): Promise<boolean>;
 }
@@ -316,6 +435,19 @@ function mapDetail(row: DatabaseJobDetailRow): JobDetail {
   });
 }
 
+function mapUploadTarget(row: z.infer<typeof databaseUploadTargetRowSchema>): UploadTarget {
+  return {
+    actualSizeBytes: row.actual_size_bytes,
+    expectedSizeBytes: row.expected_size_bytes,
+    jobId: row.id,
+    sourceBucket: row.source_bucket,
+    sourceEtag: row.source_etag,
+    sourceKey: row.source_key,
+    status: row.status,
+    version: row.version,
+  };
+}
+
 function calculateRetryAfterSeconds(oldestCreatedAt: string | null, now: string): number {
   if (oldestCreatedAt === null) {
     return 60;
@@ -334,6 +466,81 @@ function calculateRetryAfterSeconds(oldestCreatedAt: string | null, now: string)
 
 export function createD1JobRepository(database: JobDatabase): JobRepository {
   return {
+    async completeUpload(input) {
+      const timestamp = utcDateTimeSchema.parse(input.timestamp);
+      const sourceEtag = z.string().min(1).max(512).parse(input.sourceEtag);
+      const sizeBytes = z.number().int().positive().max(MAX_FILE_SIZE_BYTES).parse(input.sizeBytes);
+      const session = database.withSession("first-primary");
+      const completion = await session
+        .prepare(COMPLETE_UPLOAD_SQL)
+        .bind(
+          input.jobId,
+          input.ownerSub,
+          timestamp,
+          input.expectedVersion,
+          sizeBytes,
+          sourceEtag,
+          input.sourceBucket,
+          input.sourceKey,
+        )
+        .all();
+      const completedRows = updatedJobSummaryRowsSchema.parse(completion.results);
+      const completed = completedRows[0];
+      if (completed !== undefined) {
+        return {
+          job: mapSummary(completed),
+          status: "completed",
+        };
+      }
+
+      const untrustedCurrent = await session
+        .prepare(FIND_UPLOAD_TARGET_SQL)
+        .bind(input.ownerSub, input.jobId)
+        .first();
+      if (untrustedCurrent === null) {
+        return { status: "not_found" };
+      }
+      const current = mapUploadTarget(databaseUploadTargetRowSchema.parse(untrustedCurrent));
+      if (current.sourceBucket !== input.sourceBucket || current.sourceKey !== input.sourceKey) {
+        return { status: "invalid_state" };
+      }
+      if (
+        current.sourceEtag === sourceEtag &&
+        current.actualSizeBytes === sizeBytes &&
+        current.status !== "SOURCE_MUTATED"
+      ) {
+        const currentJob = await session
+          .prepare(FIND_JOB_SQL)
+          .bind(input.ownerSub, input.jobId)
+          .first();
+        if (currentJob === null) {
+          return { status: "not_found" };
+        }
+        const currentRow = databaseJobDetailRowSchema.parse(currentJob);
+        return {
+          job: mapSummary(currentRow),
+          status: "idempotent",
+        };
+      }
+      if (current.sourceEtag === null || current.sourceEtag === sourceEtag) {
+        return { status: "invalid_state" };
+      }
+
+      const mutation = await session
+        .prepare(MARK_SOURCE_MUTATED_SQL)
+        .bind(input.jobId, input.ownerSub, timestamp, sourceEtag)
+        .all();
+      const mutatedRows = updatedJobSummaryRowsSchema.parse(mutation.results);
+      const mutated = mutatedRows[0];
+      if (mutated === undefined) {
+        return { status: "invalid_state" };
+      }
+      return {
+        job: mapSummary(mutated),
+        status: "source_mutated",
+      };
+    },
+
     async create(input) {
       const timestamp = utcDateTimeSchema.parse(input.timestamp);
       const windowStart = new Date(
@@ -411,6 +618,18 @@ export function createD1JobRepository(database: JobDatabase): JobRepository {
         return undefined;
       }
       return mapDetail(databaseJobDetailRowSchema.parse(untrustedRow));
+    },
+
+    async findUploadTargetByOwner(ownerSub, jobId) {
+      const untrustedRow = await database
+        .withSession("first-primary")
+        .prepare(FIND_UPLOAD_TARGET_SQL)
+        .bind(ownerSub, jobId)
+        .first();
+      if (untrustedRow === null) {
+        return undefined;
+      }
+      return mapUploadTarget(databaseUploadTargetRowSchema.parse(untrustedRow));
     },
 
     async listByOwner(input) {

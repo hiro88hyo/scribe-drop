@@ -329,7 +329,7 @@ function UploadPanel(): JSX.Element {
       ) : null}
       {state.status === "uploaded" ? (
         <div className="upload-message upload-success" role="status">
-          <p>R2へのアップロードが完了しました。</p>
+          <p>アップロードを受け付けました。</p>
           <Link to={`/jobs/${state.jobId}`}>ジョブ詳細を確認</Link>
         </div>
       ) : null}

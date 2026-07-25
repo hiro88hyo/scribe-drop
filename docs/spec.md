@@ -652,8 +652,12 @@ WHERE id = ?
 サーバーはR2 HEADで以下を確認する。
 
 * オブジェクトが存在する
-* サイズが申告値と大きく異ならない
+* サイズが申告値と完全一致する
 * source keyが一致する
+
+request bodyは空objectだけを許可し、browserが観測したETag、size、bucket、keyは
+受け取らない。詳細は
+[ADR 0009](./adr/0009-server-verified-upload-completion.md)を正とする。
 
 ### `GET /api/jobs`
 

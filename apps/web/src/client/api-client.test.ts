@@ -121,6 +121,53 @@ describe("browser API client", () => {
     });
   });
 
+  it("notifies upload completion without sending browser-observed object metadata", async () => {
+    let capturedInput: RequestInfo | URL | undefined;
+    let capturedInit: RequestInit | undefined;
+    const fetcher: ApiFetch = (input, init) => {
+      capturedInput = input;
+      capturedInit = init;
+      return Promise.resolve(
+        jsonResponse({
+          job: {
+            actualSizeBytes: 1024,
+            completedAt: JOB_DETAIL.completedAt,
+            createdAt: JOB_DETAIL.createdAt,
+            durationSeconds: JOB_DETAIL.durationSeconds,
+            errorCode: JOB_DETAIL.errorCode,
+            expectedSizeBytes: JOB_DETAIL.expectedSizeBytes,
+            id: JOB_DETAIL.id,
+            originalFilename: JOB_DETAIL.originalFilename,
+            sourceContentType: JOB_DETAIL.sourceContentType,
+            status: "UPLOADED",
+            title: JOB_DETAIL.title,
+            updatedAt: JOB_DETAIL.updatedAt,
+          },
+        }),
+      );
+    };
+
+    const result = await createApiClient(fetcher).completeUpload(JOB_ID, CSRF_TOKEN);
+
+    expect(result.job).toMatchObject({
+      actualSizeBytes: 1024,
+      id: JOB_ID,
+      status: "UPLOADED",
+    });
+    expect(capturedInput).toBe(`/api/jobs/${JOB_ID}/upload-complete`);
+    expect(capturedInit).toMatchObject({
+      body: "{}",
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "X-CSRF-Token": CSRF_TOKEN,
+      },
+      method: "POST",
+    });
+  });
+
   it("rejects invalid create input and CSRF before issuing a request", async () => {
     let fetchCalls = 0;
     const client = createApiClient(() => {

@@ -7,14 +7,16 @@ response security、Access JWT、CSRF、`GET /api/me`、所有権付きjob API�
 原子的admission、型検証付きbrowser API clientと読み取りUIまで実装済みであり、
 Phase 3ではowner hash付きsource key、exact object・multipart action 4種・15分の
 R2 Temporary Credentials、upload準備のD1状態遷移、browser multipart、cancel、
-同一画面retryと最小化したIndexedDB checkpointまで実装済みである。
-upload-complete、Queue ingestion以降の制御は実装前の必須要件として記載する。詳細な認証判断は
+同一画面retryと最小化したIndexedDB checkpoint、所有者付きR2 HEADと冪等CASによる
+upload-completeまで実装済みである。
+Queue ingestion以降の制御は実装前の必須要件として記載する。詳細な認証判断は
 [ADR 0003](./adr/0003-access-jwt-and-csrf-boundary.md)、受付制限は
 [ADR 0004](./adr/0004-d1-job-admission-control.md)、CSPとresponse headerは
 [ADR 0005](./adr/0005-web-response-security-policy.md)、RunPod境界は
 [ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)、Phase 2のjob作成契約は
 [ADR 0007](./adr/0007-phase-2-job-admission-contract.md)、browser upload capabilityは
-[ADR 0008](./adr/0008-r2-browser-upload-capability.md)を正とする。
+[ADR 0008](./adr/0008-r2-browser-upload-capability.md)、upload完了検証は
+[ADR 0009](./adr/0009-server-verified-upload-completion.md)を正とする。
 
 ## 保護対象
 
@@ -96,6 +98,7 @@ RunPodのjob input、`job.id`、status、output、例外、DNS応答、HTTP応�
 | clickjacking                      | `frame-ancestors 'none'`と`X-Frame-Options: DENY`                                                                               | HTML responseのsecurity header                                                       |
 | browser機能・外部resourceの濫用   | `default-src 'none'`、Permissions Policy、COOP、CORP、外部CDNなし                                                               | build済みasset responseの全headerとCSP directive                                     |
 | R2接続許可を使った外部送信        | `connect-src`はR2公式hostだけ、credentialを15分・単一bucket・単一object・multipart action 4種へ限定。SDKはupload時だけlazy load | 許可外hostをCSPで拒否し、temporary credentialのaction・object拒否をstagingで統合検証 |
+| upload完了metadataの偽装          | browserからETag・size・keyを受け取らず、所有者付きD1行のexact keyをR2 HEADして完全一致sizeとETagをCAS保存                       | 他owner、空body以外、HEAD不存在、size不一致、重複・並行通知、異なるETag              |
 | job作成によるresource abuse       | D1条件付きINSERT、10件/10分rolling window、active 3件上限                                                                       | 11件目、4 active、window境界、異なるowner、並行request                               |
 | admission checkのTOCTOU           | count predicateとINSERTを単一SQL statementで実行                                                                                | 残り1枠への2並行requestで成功が1件だけ                                               |
 | D1障害時のlimit迂回               | D1 error・timeout・未知row countでfail closed                                                                                   | overload fakeでjobと後続副作用が作られない                                           |
@@ -156,7 +159,7 @@ stagingではAccess policyとapplication audienceを実値で構成した後に�
 
 ## Deferred
 
-- Phase 3: R2 temporary credential、multipart、Queue Event、source mutation
+- Phase 3: R2 Event Notification、Queue ingestion、DLQ
 - Phase 4: 本文のRunPod制御、claim、Worker sandbox、ffprobe、GPU abuse、SBOM
 - Phase 5: status polling、manifest finalize、Discord、artifact download
 - Phase 6:重複、timeout、partial failure、DLQ、concurrent finalize

@@ -2,12 +2,14 @@ import {
   apiErrorResponseSchema,
   createJobRequestSchema,
   createJobResponseSchema,
+  jobActionResponseSchema,
   jobDetailSchema,
   listJobsResponseSchema,
   meResponseSchema,
   ulidSchema,
   type CreateJobRequest,
   type CreateJobResponse,
+  type JobActionResponse,
   type JobDetail,
   type ListJobsResponse,
   type MeResponse,
@@ -46,6 +48,11 @@ export class ApiClientError extends Error {
 }
 
 export interface ScribeDropApiClient {
+  completeUpload(
+    jobId: string,
+    csrfToken: string,
+    signal?: AbortSignal,
+  ): Promise<JobActionResponse>;
   createJob(
     input: CreateJobRequest,
     csrfToken: string,
@@ -178,6 +185,27 @@ async function requestJson<Output>(
 
 export function createApiClient(fetcher: ApiFetch = globalThis.fetch): ScribeDropApiClient {
   return {
+    async completeUpload(jobId, csrfToken, signal) {
+      const idResult = ulidSchema.safeParse(jobId);
+      if (!idResult.success || csrfToken.length < 32 || csrfToken.length > 4096) {
+        throw new ApiClientError({
+          kind: "invalid_request",
+          status: 400,
+        });
+      }
+      return await requestJson(
+        fetcher,
+        `/api/jobs/${encodeURIComponent(idResult.data)}/upload-complete`,
+        jobActionResponseSchema,
+        {
+          body: "{}",
+          csrfToken,
+          method: "POST",
+          ...(signal === undefined ? {} : { signal }),
+        },
+      );
+    },
+
     async createJob(input, csrfToken, signal) {
       const inputResult = createJobRequestSchema.safeParse(input);
       if (!inputResult.success || csrfToken.length < 32 || csrfToken.length > 4096) {
