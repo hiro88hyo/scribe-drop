@@ -2,7 +2,7 @@
 
 ## 1. 現状
 
-2026-07-25 時点では、新規 Git リポジトリに設計書だけが存在し、アプリケーションコード、パッケージ設定、CI、インフラ設定、コミット履歴はない。
+2026-07-25 時点で Phase 1 の基盤を `feature/phase-1-foundation` に実装した。monorepo、契約、状態遷移、初期 D1 migration、local/staging の Wrangler 設定、構造化ログ、CI と開発文書が対象である。実際の Cloudflare resource と RunPod endpoint はまだ作成・deployしておらず、Phase 2 以降の利用者向け機能も未実装である。
 
 本計画は [spec.md](./spec.md) を正とし、Phase 1 から Phase 7 までを、各 Phase が単独でレビュー・検証できる単位に分けて実装する。
 
@@ -104,7 +104,7 @@
 - staging 用の Pages、orchestrator、D1、R2、Queue、DLQ の binding 名を Wrangler 設定へ定義する。ID や secret は placeholder とする。
 - 構造化ログの共通関数を用意し、機密フィールドを型とテストで除外する。
 - README と各環境の `.dev.vars.example` を作成する。
-- CI に lint、typecheck、Vitest、pytest、build、migration 検証、secret scan、依存関係・コンテナ scan のジョブを追加する。
+- CI に lint、typecheck、Vitest、pytest、build、migration 検証、secret scan、依存関係 scan のジョブを追加する。コンテナ scan は実際の Dockerfile と固定 base image を追加する Phase 4 で有効化する。
 
 ### テストと完了条件
 

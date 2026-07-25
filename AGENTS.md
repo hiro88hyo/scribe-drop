@@ -19,6 +19,7 @@
 - Volta の pnpm support を使うため、ローカル環境と CI で `VOLTA_FEATURE_PNPM=1` を設定する。
 - root `package.json` の `volta.node`、`volta.pnpm`、`packageManager` に project version を固定し、pnpm の値を一致させる。Corepack、nvm、mise、asdf をこのリポジトリの version 解決に併用しない。
 - `pnpm-lock.yaml` をコミットし、CI では `pnpm install --frozen-lockfile` を使う。
+- dependency の install script は原則拒否し、必要な package だけを root `pnpm-workspace.yaml` の `allowBuilds` で review 後に許可する。
 - TypeScript は全 workspace で strict mode を有効にする。
 - `noUncheckedIndexedAccess`、`exactOptionalPropertyTypes`、`useUnknownInCatchVariables` を有効にする。
 - formatter は Prettier、lint は ESLint を使う。生成物以外の lint 抑制には理由をコメントする。
@@ -40,6 +41,7 @@
 - JavaScript と Python の直接依存は意図せず浮動しないよう lockfile で固定する。
 - Docker base image、FFmpeg、faster-whisper、CTranslate2、model revision を固定する。
 - dependency update は機能変更と分離し、test と security scan を通す。
+- GitHub Actions は公式 release を確認して full commit SHA に固定し、対応する tag をコメントで残す。floating branch や major tag だけを使わない。
 
 ### Platform CLI
 
@@ -48,6 +50,7 @@
 - Cloudflare の構成は Wrangler 設定と migration を source of truth とし、dashboard だけの未記録変更を作らない。
 - RunPod の Serverless endpoint、template、GPU、運用確認には公式 CLI の `runpodctl` を使う。
 - `runpodctl` の対応バージョンを deployment 文書と CI で固定し、配布 binary の checksum を検証する。latest install script を無条件に CI で実行しない。
+- Gitleaks は `tools/versions.json` に version と配布 binary の checksum を固定し、Git 履歴と作業ツリーの両方を検査する。
 - CLI credential と API key はローカルの credential store または CI secret から渡し、リポジトリや shell script に書かない。
 - staging と production を明示的に区別し、更新・削除・deploy 前に account、resource ID、environment を確認する。
 - application runtime から Wrangler や `runpodctl` を subprocess として呼ばない。実行時の RunPod 連携は型付き HTTP client を使う。
@@ -89,6 +92,7 @@
 
 - `packages/contracts` は HTTP、Queue、RunPod、manifest の schema と公開型を管理する。
 - `packages/domain` は状態遷移、エラー分類、値オブジェクトなど純粋なロジックを管理し、Cloudflare、AWS SDK、Hono、React に依存しない。
+- `packages/observability` はallowlist方式の構造化ログ型とserializerを管理し、任意messageや任意metadataを受け付けない。
 - `packages/test-support` は fake、fixture、固定 clock、固定 ID generator を管理し、本番コードから import しない。
 - `apps/web` と `apps/orchestrator` は domain が定義する port を adapter で実装する。
 - repository だけが D1 の SQL と永続化上の状態遷移を扱う。
@@ -152,13 +156,15 @@ pnpm format:check
 pnpm typecheck
 pnpm test
 pnpm build
+pnpm d1:verify
+pnpm ci:verify
 pnpm test:e2e
 
 uv sync --project apps/runpod-worker --frozen
-uv run --project apps/runpod-worker ruff check apps/runpod-worker
-uv run --project apps/runpod-worker ruff format --check apps/runpod-worker
-uv run --project apps/runpod-worker mypy --strict apps/runpod-worker/src
-uv run --project apps/runpod-worker pytest apps/runpod-worker/tests
+uv run --directory apps/runpod-worker ruff check .
+uv run --directory apps/runpod-worker ruff format --check .
+uv run --directory apps/runpod-worker mypy --strict src tests
+uv run --directory apps/runpod-worker pytest
 ```
 
 ## 9. 文書化と ADR
@@ -193,3 +199,5 @@ CI では最低限、次を実行する。
 - ログと成果物に機密情報が含まれないことを確認している。
 - 未解決事項、手動設定、運用上の注意を明示している。
 - 設計との差異が ADR に記録されている。
+
+container scan は scan 対象の Dockerfile と固定 image が存在する Phase から必須とする。それ以前は secret scan と JavaScript/Python dependency audit を必須とし、空の container scan を成功扱いにしない。

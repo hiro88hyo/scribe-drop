@@ -1,0 +1,9 @@
+APP_ENV=local
+ALLOWED_ORIGIN=http://localhost:5173
+ACCESS_TEAM_DOMAIN=https://example.cloudflareaccess.com
+ACCESS_AUDIENCE=replace-with-access-audience
+CSRF_HMAC_SECRET=local-only-replace-with-random-secret
+OWNER_HASH_HMAC_SECRET=local-only-replace-with-random-secret
+CLOUDFLARE_ACCOUNT_ID=00000000000000000000000000000000
+R2_PARENT_ACCESS_KEY_ID=local-only-r2-access-key
+R2_PARENT_SECRET_ACCESS_KEY=local-only-r2-secret-key
