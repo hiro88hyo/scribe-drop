@@ -9,6 +9,7 @@ Cloudflare と RunPod Serverless を利用する、非公開の録音文字起�
 - [実装計画](docs/implementation-plan.md)
 - [ローカル開発環境](docs/development.md)
 - [環境変数とbinding](docs/environment-variables.md)
+- [Cloudflare Access](docs/cloudflare-access.md)
 - [継続的インテグレーション](docs/continuous-integration.md)
 - [Deployment](docs/deployment.md)
 - [Operations](docs/operations.md)

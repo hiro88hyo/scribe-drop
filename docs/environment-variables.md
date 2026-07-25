@@ -22,10 +22,18 @@ bindingは環境変数ではなくWranglerが実行時に注入する。
 定義は`apps/web/wrangler.toml`と`apps/orchestrator/wrangler.toml`を正とする。
 追跡対象のIDはplaceholderのまま維持する。stagingのremote操作では
 `CLOUDFLARE_ACCOUNT_ID`と`SCRIBE_DROP_STAGING_D1_DATABASE_ID`をcredential storeまたは
-CI secretから`pnpm cloudflare:config:staging`へ渡し、生成されたOrchestrator用
+CI secretから`pnpm cloudflare:config:staging:orchestrator`へ渡し、生成された
+Orchestrator用
 `.wrangler/deploy/orchestrator-staging.toml`とWeb用
 `apps/web/.wrangler/deploy/wrangler.toml`を使う。生成物はgit ignoredであり、値を
 logへ出さない。
+
+Web設定は`pnpm cloudflare:config:staging:web`で生成し、上記2変数に加えて次の非secret値を
+環境から渡す。
+
+- `SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`:
+  `https://<team>.cloudflareaccess.com`のexact origin
+- `SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`: staging Access applicationの単一AUD tag
 
 ## Web / Pages Functions
 
@@ -52,6 +60,14 @@ environment間で共有しない。親R2 credentialは対象bucketだけに限�
 [ADR 0008](./adr/0008-r2-browser-upload-capability.md)のlocal signingにだけ使用する。
 browserへはexact object、multipart action 4種、15分に限定した派生credentialだけを
 返す。
+
+`apps/web/wrangler.toml`の`secrets.required`は次の4件を宣言する。これらがPagesの
+production environmentへ登録される前にWebをdeployしない。
+
+- `CSRF_HMAC_SECRET`
+- `OWNER_HASH_HMAC_SECRET`
+- `R2_PARENT_ACCESS_KEY_ID`
+- `R2_PARENT_SECRET_ACCESS_KEY`
 
 `R2_BUCKET_NAME`はdeploy対象のWrangler `RECORDINGS` bindingが参照するbucket名と
 一致させる。local bindingも環境別bucket名へ揃え、credential発行とQueue検証でも

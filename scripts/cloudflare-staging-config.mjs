@@ -1,7 +1,12 @@
 const accountIdPattern = /^[0-9a-f]{32}$/u;
+const accessAudiencePattern = /^[A-Za-z0-9_-]{1,256}$/u;
+const accessTeamDomainPattern =
+  /^https:\/\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.cloudflareaccess\.com$/u;
 const d1DatabaseIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 
 const accountIdPlaceholder = "0".repeat(32);
+const accessAudiencePlaceholder = "replace-with-access-audience";
+const accessTeamDomainPlaceholder = "https://replace-with-team.cloudflareaccess.com";
 const stagingD1DatabaseIdPlaceholder = "00000000-0000-0000-0000-000000000101";
 
 function requireIdentifier(value, pattern, name) {
@@ -27,7 +32,7 @@ function replaceOnce(source, searchValue, replacement, label) {
   )}`;
 }
 
-function validatedIdentifiers(identifiers) {
+function validatedResourceIdentifiers(identifiers) {
   return {
     accountId: requireIdentifier(identifiers.accountId, accountIdPattern, "CLOUDFLARE_ACCOUNT_ID"),
     d1DatabaseId: requireIdentifier(
@@ -39,7 +44,7 @@ function validatedIdentifiers(identifiers) {
 }
 
 export function renderOrchestratorStagingConfig(template, identifiers) {
-  const { accountId, d1DatabaseId } = validatedIdentifiers(identifiers);
+  const { accountId, d1DatabaseId } = validatedResourceIdentifiers(identifiers);
   const stagingMarker = "[env.staging]";
   const stagingIndex = template.indexOf(stagingMarker);
   if (stagingIndex === -1) {
@@ -70,7 +75,17 @@ export function renderOrchestratorStagingConfig(template, identifiers) {
 }
 
 export function renderWebStagingConfig(template, identifiers) {
-  const { accountId, d1DatabaseId } = validatedIdentifiers(identifiers);
+  const { accountId, d1DatabaseId } = validatedResourceIdentifiers(identifiers);
+  const accessAudience = requireIdentifier(
+    identifiers.accessAudience,
+    accessAudiencePattern,
+    "SCRIBE_DROP_STAGING_ACCESS_AUDIENCE",
+  );
+  const accessTeamDomain = requireIdentifier(
+    identifiers.accessTeamDomain,
+    accessTeamDomainPattern,
+    "SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN",
+  );
   let rendered = replaceOnce(
     template,
     `CLOUDFLARE_ACCOUNT_ID = "${accountIdPlaceholder}"`,
@@ -82,6 +97,18 @@ export function renderWebStagingConfig(template, identifiers) {
     `database_id = "${stagingD1DatabaseIdPlaceholder}"`,
     `database_id = "${d1DatabaseId}"`,
     "web staging D1 database ID",
+  );
+  rendered = replaceOnce(
+    rendered,
+    `ACCESS_TEAM_DOMAIN = "${accessTeamDomainPlaceholder}"`,
+    `ACCESS_TEAM_DOMAIN = "${accessTeamDomain}"`,
+    "web staging Access team domain",
+  );
+  rendered = replaceOnce(
+    rendered,
+    `ACCESS_AUDIENCES = ${JSON.stringify(JSON.stringify([accessAudiencePlaceholder]))}`,
+    `ACCESS_AUDIENCES = ${JSON.stringify(JSON.stringify([accessAudience]))}`,
+    "web staging Access audience",
   );
 
   return replaceOnce(

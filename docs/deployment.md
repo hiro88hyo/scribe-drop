@@ -118,8 +118,17 @@ subscription、prefix、Queue binding、Worker consumer、R2 HEAD、D1 CASの実
 - `SCRIBE_DROP_STAGING_D1_DATABASE_ID`
 
 ```bash
-pnpm cloudflare:config:staging
+pnpm cloudflare:config:staging:orchestrator
 git check-ignore .wrangler/deploy/orchestrator-staging.toml
+```
+
+Web設定にはAccess application作成後の次の非secret値も必要である。
+
+- `SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`
+- `SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`
+
+```bash
+pnpm cloudflare:config:staging:web
 git check-ignore apps/web/.wrangler/deploy/wrangler.toml
 ```
 
@@ -135,7 +144,12 @@ pnpm exec wrangler deploy \
 
 Pages commandは`--config`をサポートしないため、生成directoryを`--cwd`で指定する。
 生成処理は同directoryへ`functions`の固定relative symlinkも作成する。Accessとsecretの
-設定後に、commit SHAを明示してdeployする。
+設定後に、[cloudflare-access.md](./cloudflare-access.md)の未認証preflightを通し、
+commit SHAを明示してdeployする。
+
+```bash
+pnpm cloudflare:access:verify:staging
+```
 
 ```bash
 pnpm exec wrangler pages deploy \

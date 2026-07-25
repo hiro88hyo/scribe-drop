@@ -137,14 +137,21 @@ pnpm d1:verify
 確認して実IDを環境変数から注入し、git ignoredの設定を生成する。
 
 ```bash
-pnpm cloudflare:config:staging
+pnpm cloudflare:config:staging:orchestrator
 git check-ignore .wrangler/deploy/orchestrator-staging.toml
+```
+
+Web設定の生成にはAccess application作成後のteam domainとaudienceも必要である。
+
+```bash
+pnpm cloudflare:config:staging:web
 git check-ignore apps/web/.wrangler/deploy/wrangler.toml
 ```
 
-生成には`CLOUDFLARE_ACCOUNT_ID`と`SCRIBE_DROP_STAGING_D1_DATABASE_ID`が必要である。
-値はcredential storeまたはCI secretから環境へ渡し、shell scriptや追跡ファイルへ
-埋め込まない。
+共通で`CLOUDFLARE_ACCOUNT_ID`と`SCRIBE_DROP_STAGING_D1_DATABASE_ID`を使う。Webでは
+さらに`SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`と
+`SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`を使う。値はcredential storeまたはCI secretから
+環境へ渡し、shell scriptや追跡ファイルへ埋め込まない。
 
 ## Web
 

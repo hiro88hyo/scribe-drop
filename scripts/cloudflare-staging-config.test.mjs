@@ -7,6 +7,8 @@ import {
 } from "./cloudflare-staging-config.mjs";
 
 const identifiers = {
+  accessAudience: "staging-access-audience",
+  accessTeamDomain: "https://scribe-drop-staging.cloudflareaccess.com",
   accountId: "a".repeat(32),
   d1DatabaseId: "12345678-1234-4abc-8def-1234567890ab",
 };
@@ -37,6 +39,8 @@ database_id = "00000000-0000-0000-0000-000000000101"
 
 test("renders the web staging identifiers and ignored-config build path", () => {
   const template = `pages_build_output_dir = "./dist"
+ACCESS_AUDIENCES = "[\\"replace-with-access-audience\\"]"
+ACCESS_TEAM_DOMAIN = "https://replace-with-team.cloudflareaccess.com"
 CLOUDFLARE_ACCOUNT_ID = "${"0".repeat(32)}"
 database_id = "00000000-0000-0000-0000-000000000101"
 `;
@@ -44,6 +48,11 @@ database_id = "00000000-0000-0000-0000-000000000101"
   const rendered = renderWebStagingConfig(template, identifiers);
 
   assert.match(rendered, /pages_build_output_dir = "\.\.\/\.\.\/dist"/u);
+  assert.match(rendered, /ACCESS_AUDIENCES = "\[\\"staging-access-audience\\"\]"/u);
+  assert.match(
+    rendered,
+    /ACCESS_TEAM_DOMAIN = "https:\/\/scribe-drop-staging\.cloudflareaccess\.com"/u,
+  );
   assert.match(rendered, new RegExp(`CLOUDFLARE_ACCOUNT_ID = "${"a".repeat(32)}"`));
   assert.match(rendered, /database_id = "12345678-1234-4abc-8def-1234567890ab"/u);
 });
@@ -56,6 +65,16 @@ test("rejects missing identifiers and template drift", () => {
   assert.throws(
     () => renderWebStagingConfig("", identifiers),
     /web staging account ID placeholder was not found/u,
+  );
+  assert.throws(
+    () =>
+      renderWebStagingConfig(
+        `CLOUDFLARE_ACCOUNT_ID = "${"0".repeat(32)}"
+database_id = "00000000-0000-0000-0000-000000000101"
+`,
+        { ...identifiers, accessTeamDomain: "https://example.com" },
+      ),
+    /SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN/u,
   );
   assert.throws(
     () =>

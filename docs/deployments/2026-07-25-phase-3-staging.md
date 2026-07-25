@@ -70,6 +70,22 @@ applicationだけをrollbackする際にQueue consumerを削除または再作�
 application bundleを変更していない。最終clean-source deploymentはbinding、trigger、
 version、remote設定の再取得で確認した。
 
+## Access準備
+
+同日の次checkpointでPages projectを確認し、deploymentが0件、secretが0件の状態から
+次のenvironment固有HMAC secretを暗号学的乱数で生成してproduction environmentへ直接
+登録した。値は標準出力、shell引数、Git、logへ出していない。
+
+- `CSRF_HMAC_SECRET`
+- `OWNER_HASH_HMAC_SECRET`
+
+`R2_PARENT_ACCESS_KEY_ID`と`R2_PARENT_SECRET_ACCESS_KEY`は、bucket限定の親credentialが
+未作成であるため登録していない。Access application、organization、IdPの読み取りを
+Wrangler OAuth credentialで試行したがAccess APIは403を返したため、設定内容の取得や
+変更は行っていない。Access権限のあるZero Trust操作と
+[cloudflare-access.md](../cloudflare-access.md)の未認証preflightが完了するまでWebを
+deployしない。
+
 ## 残るPhase 3 staging作業
 
 - Cloudflare Access application、Google identity policy、audience、許可identityを作成して
