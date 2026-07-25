@@ -147,16 +147,6 @@ describe("R2 upload Queue consumer", () => {
       sizeBytes: 1024,
       sourceEtag: "multipart-etag",
     });
-    expect(ingestion?.claimSentinelHash).toMatch(/^[0-9a-f]{64}$/u);
-    expect(ingestion?.heartbeatSentinelHash).toMatch(/^[0-9a-f]{64}$/u);
-    expect(ingestion?.webhookSentinelHash).toMatch(/^[0-9a-f]{64}$/u);
-    expect(
-      new Set([
-        ingestion?.claimSentinelHash,
-        ingestion?.heartbeatSentinelHash,
-        ingestion?.webhookSentinelHash,
-      ]).size,
-    ).toBe(3);
     expect(records.join("\n")).not.toContain(SOURCE_KEY);
     expect(records.join("\n")).not.toContain(EVENT.object.eTag);
   });

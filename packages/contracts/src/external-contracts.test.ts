@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  MAX_FILE_SIZE_BYTES,
-  RUNPOD_MAX_POLICY_DURATION_MS,
   normalizedR2ObjectCreatedEventSchema,
   r2EventNotificationSchema,
   resultManifestSchema,
   runpodClaimRequestSchema,
+  runpodClaimResponseSchema,
   runpodRunRequestSchema,
   runpodStatusResponseSchema,
   type RunpodRunRequest,
@@ -14,46 +13,19 @@ import {
 
 const JOB_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const ATTEMPT_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAW";
-const TOKEN = "t".repeat(32);
+const TOKEN = "t".repeat(43);
 
 const validRunpodRequest = {
   input: {
-    attempt_id: ATTEMPT_ID,
-    claim: {
-      token: TOKEN,
-      url: "https://hooks.transcribe.example.com/internal/runpod/claim",
-    },
-    heartbeat: {
-      token: TOKEN,
-      url: "https://hooks.transcribe.example.com/internal/runpod/heartbeat",
-    },
-    job_id: JOB_ID,
-    options: {
-      beam_size: 5,
-      language: "ja",
-      model: "large-v3-turbo",
-      vad: true,
-      word_timestamps: false,
-    },
-    results: {
-      json_put_url: "https://storage.example.com/results/transcript.json?signature=redacted",
-      manifest_put_url: "https://storage.example.com/results/manifest.json?signature=redacted",
-      markdown_put_url: "https://storage.example.com/results/transcript.md?signature=redacted",
-      srt_put_url: "https://storage.example.com/results/transcript.srt?signature=redacted",
-    },
-    schema_version: 1,
-    source: {
-      expected_etag: "etag",
-      expected_size_bytes: MAX_FILE_SIZE_BYTES,
-      url: "https://storage.example.com/incoming/source.m4a?signature=redacted",
-    },
+    attemptId: ATTEMPT_ID,
+    claimToken: TOKEN,
+    jobId: JOB_ID,
+    schemaVersion: 1,
   },
   policy: {
     executionTimeout: 21_600_000,
-    lowPriority: false,
-    ttl: 86_400_000,
+    ttl: 28_800_000,
   },
-  webhook: "https://hooks.transcribe.example.com/internal/runpod/webhook/redacted",
 } satisfies RunpodRunRequest;
 
 describe("normalizedR2ObjectCreatedEventSchema", () => {
@@ -130,35 +102,41 @@ describe("RunPod schemas", () => {
 
   it.each([
     [
-      "non-HTTPS source",
+      "presigned source URL",
       {
         ...validRunpodRequest,
         input: {
           ...validRunpodRequest.input,
-          source: {
-            ...validRunpodRequest.input.source,
-            url: "http://storage.example.com/source.m4a",
-          },
+          source: { getUrl: "https://storage.example.invalid/source?signature=redacted" },
         },
       },
     ],
     [
-      "execution timeout beyond TTL",
+      "unpinned execution timeout",
       {
         ...validRunpodRequest,
         policy: {
           ...validRunpodRequest.policy,
-          executionTimeout: 86_400_001,
+          executionTimeout: 21_600_001,
         },
       },
     ],
     [
-      "policy beyond RunPod maximum",
+      "webhook",
       {
         ...validRunpodRequest,
-        policy: {
-          ...validRunpodRequest.policy,
-          ttl: RUNPOD_MAX_POLICY_DURATION_MS + 1,
+        webhook: "https://hooks.example.invalid/internal/runpod/webhook",
+      },
+    ],
+    [
+      "s3 credentials",
+      {
+        ...validRunpodRequest,
+        s3Config: {
+          accessId: "must-not-be-accepted",
+          accessSecret: "must-not-be-accepted",
+          bucketName: "must-not-be-accepted",
+          endpointUrl: "https://storage.example.invalid",
         },
       },
     ],
@@ -180,11 +158,35 @@ describe("RunPod schemas", () => {
     expect(
       runpodClaimRequestSchema.safeParse({
         attemptId: ATTEMPT_ID,
+        claimToken: "short",
         jobId: JOB_ID,
         runpodJobId: "runpod-job-id",
-        token: "short",
       }).success,
     ).toBe(false);
+  });
+
+  it("accepts capability details only in a successful claim response", () => {
+    expect(
+      runpodClaimResponseSchema.safeParse({
+        expiresAt: "2026-07-25T02:00:00.000Z",
+        granted: true,
+        heartbeat: {
+          token: TOKEN,
+          url: "https://orchestrator.example.invalid/internal/runpod/heartbeat",
+        },
+        results: {
+          jsonPutUrl: "https://storage.example.invalid/transcript.json?signature=redacted",
+          manifestPutUrl: "https://storage.example.invalid/manifest.json?signature=redacted",
+          markdownPutUrl: "https://storage.example.invalid/transcript.md?signature=redacted",
+          srtPutUrl: "https://storage.example.invalid/transcript.srt?signature=redacted",
+        },
+        source: {
+          expectedEtag: "etag",
+          expectedSizeBytes: 1024,
+          getUrl: "https://storage.example.invalid/source?signature=redacted",
+        },
+      }).success,
+    ).toBe(true);
   });
 
   it("accepts documented RunPod terminal status metadata", () => {
@@ -195,10 +197,13 @@ describe("RunPod schemas", () => {
         id: "runpod-job-id",
         output: {
           attemptId: ATTEMPT_ID,
-          complete: true,
+          detectedLanguage: "ja",
+          durationSeconds: 123.5,
           jobId: JOB_ID,
-          manifestKey: `results/owner/${JOB_ID}/${ATTEMPT_ID}/manifest.json`,
+          manifestWritten: true,
           schemaVersion: 1,
+          segmentCount: 42,
+          status: "completed",
         },
         status: "COMPLETED",
         workerId: "worker-id",

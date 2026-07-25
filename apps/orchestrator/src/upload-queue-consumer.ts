@@ -15,7 +15,6 @@ import {
 
 const MAX_RETRY_DELAY_SECONDS = 15 * 60;
 const BASE_RETRY_DELAY_SECONDS = 15;
-const DISABLED_CAPABILITY_CONTEXT = "scribe-drop:disabled-capability:v1";
 const INITIAL_SOURCE_STATUSES = new Set(["CREATED", "UPLOADING", "UPLOADED"]);
 const MUTABLE_SOURCE_STATUSES = new Set([
   "CREATED",
@@ -64,17 +63,6 @@ export interface UploadQueueDependencies {
 
 function defaultRandomBytes(length: number): Uint8Array {
   return crypto.getRandomValues(new Uint8Array(length));
-}
-
-function encodeHex(bytes: Uint8Array): string {
-  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-async function createDisabledCapabilityHash(attemptId: string, purpose: string): Promise<string> {
-  const bytes = new TextEncoder().encode(
-    `${DISABLED_CAPABILITY_CONTEXT}\u0000${purpose}\u0000${attemptId}`,
-  );
-  return encodeHex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
 }
 
 function retryDelaySeconds(attempts: number, random: () => number): number {
@@ -273,15 +261,12 @@ async function processMessage(
   const attemptId = job.generationOneAttemptId ?? createAttemptId(now.getTime());
   const result = await repository.ingestSource({
     attemptId,
-    claimSentinelHash: await createDisabledCapabilityHash(attemptId, "claim"),
     eventId: createEventId(now.getTime()),
-    heartbeatSentinelHash: await createDisabledCapabilityHash(attemptId, "heartbeat"),
     job,
     ownerHash: parsedKey.ownerHash,
     sizeBytes: headResult.data.size,
     sourceEtag: headResult.data.etag,
     timestamp: now.toISOString(),
-    webhookSentinelHash: await createDisabledCapabilityHash(attemptId, "webhook"),
   });
   if (result === "conflict") {
     logger.warn("upload_event_state_conflict", {
