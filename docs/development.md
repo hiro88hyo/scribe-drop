@@ -132,7 +132,19 @@ repository内のローカルD1状態は変更しない。
 pnpm d1:verify
 ```
 
-`apps/orchestrator/wrangler.toml` と `apps/web/wrangler.toml` のUUIDは安全なplaceholderである。remote操作やdeployの前に、対象環境で作成した実resource IDへ置き換え、accountとenvironmentを確認する。
+`apps/orchestrator/wrangler.toml` と `apps/web/wrangler.toml` のIDは安全なplaceholderで
+あり、追跡対象ファイルへ実IDを直接書かない。remote操作やdeployでは、対象accountを
+確認して実IDを環境変数から注入し、git ignoredの設定を生成する。
+
+```bash
+pnpm cloudflare:config:staging
+git check-ignore .wrangler/deploy/orchestrator-staging.toml
+git check-ignore apps/web/.wrangler/deploy/wrangler.toml
+```
+
+生成には`CLOUDFLARE_ACCOUNT_ID`と`SCRIBE_DROP_STAGING_D1_DATABASE_ID`が必要である。
+値はcredential storeまたはCI secretから環境へ渡し、shell scriptや追跡ファイルへ
+埋め込まない。
 
 ## Web
 

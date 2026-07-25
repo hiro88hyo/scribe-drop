@@ -20,6 +20,12 @@ bindingは環境変数ではなくWranglerが実行時に注入する。
 | DLQ              | Orchestrator      | `recording-uploaded-dlq-<environment>` |
 
 定義は`apps/web/wrangler.toml`と`apps/orchestrator/wrangler.toml`を正とする。
+追跡対象のIDはplaceholderのまま維持する。stagingのremote操作では
+`CLOUDFLARE_ACCOUNT_ID`と`SCRIBE_DROP_STAGING_D1_DATABASE_ID`をcredential storeまたは
+CI secretから`pnpm cloudflare:config:staging`へ渡し、生成されたOrchestrator用
+`.wrangler/deploy/orchestrator-staging.toml`とWeb用
+`apps/web/.wrangler/deploy/wrangler.toml`を使う。生成物はgit ignoredであり、値を
+logへ出さない。
 
 ## Web / Pages Functions
 

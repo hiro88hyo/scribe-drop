@@ -1,0 +1,93 @@
+const accountIdPattern = /^[0-9a-f]{32}$/u;
+const d1DatabaseIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+
+const accountIdPlaceholder = "0".repeat(32);
+const stagingD1DatabaseIdPlaceholder = "00000000-0000-0000-0000-000000000101";
+
+function requireIdentifier(value, pattern, name) {
+  if (typeof value !== "string" || !pattern.test(value)) {
+    throw new Error(`${name} is missing or has an invalid format`);
+  }
+
+  return value;
+}
+
+function replaceOnce(source, searchValue, replacement, label) {
+  const firstIndex = source.indexOf(searchValue);
+  if (firstIndex === -1) {
+    throw new Error(`${label} placeholder was not found`);
+  }
+
+  if (source.indexOf(searchValue, firstIndex + searchValue.length) !== -1) {
+    throw new Error(`${label} placeholder is ambiguous`);
+  }
+
+  return `${source.slice(0, firstIndex)}${replacement}${source.slice(
+    firstIndex + searchValue.length,
+  )}`;
+}
+
+function validatedIdentifiers(identifiers) {
+  return {
+    accountId: requireIdentifier(identifiers.accountId, accountIdPattern, "CLOUDFLARE_ACCOUNT_ID"),
+    d1DatabaseId: requireIdentifier(
+      identifiers.d1DatabaseId,
+      d1DatabaseIdPattern,
+      "SCRIBE_DROP_STAGING_D1_DATABASE_ID",
+    ),
+  };
+}
+
+export function renderOrchestratorStagingConfig(template, identifiers) {
+  const { accountId, d1DatabaseId } = validatedIdentifiers(identifiers);
+  const stagingMarker = "[env.staging]";
+  const stagingIndex = template.indexOf(stagingMarker);
+  if (stagingIndex === -1) {
+    throw new Error("orchestrator staging environment was not found");
+  }
+
+  const baseConfig = template.slice(0, stagingIndex);
+  let stagingConfig = template.slice(stagingIndex);
+  stagingConfig = replaceOnce(
+    stagingConfig,
+    `CLOUDFLARE_ACCOUNT_ID = "${accountIdPlaceholder}"`,
+    `CLOUDFLARE_ACCOUNT_ID = "${accountId}"`,
+    "orchestrator staging account ID",
+  );
+  stagingConfig = replaceOnce(
+    stagingConfig,
+    `database_id = "${stagingD1DatabaseIdPlaceholder}"`,
+    `database_id = "${d1DatabaseId}"`,
+    "orchestrator staging D1 database ID",
+  );
+
+  return replaceOnce(
+    `${baseConfig}${stagingConfig}`,
+    'main = "src/index.ts"',
+    'main = "../../apps/orchestrator/src/index.ts"',
+    "orchestrator entrypoint",
+  );
+}
+
+export function renderWebStagingConfig(template, identifiers) {
+  const { accountId, d1DatabaseId } = validatedIdentifiers(identifiers);
+  let rendered = replaceOnce(
+    template,
+    `CLOUDFLARE_ACCOUNT_ID = "${accountIdPlaceholder}"`,
+    `CLOUDFLARE_ACCOUNT_ID = "${accountId}"`,
+    "web staging account ID",
+  );
+  rendered = replaceOnce(
+    rendered,
+    `database_id = "${stagingD1DatabaseIdPlaceholder}"`,
+    `database_id = "${d1DatabaseId}"`,
+    "web staging D1 database ID",
+  );
+
+  return replaceOnce(
+    rendered,
+    'pages_build_output_dir = "./dist"',
+    'pages_build_output_dir = "../../dist"',
+    "web build output directory",
+  );
+}
