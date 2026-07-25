@@ -65,8 +65,9 @@ environment間で共有しない。親R2 credentialは対象bucketだけに限�
 browserへはexact object、multipart action 4種、15分に限定した派生credentialだけを
 返す。
 
-`apps/web/wrangler.toml`の`secrets.required`は次の4件を宣言する。これらがPagesの
-production environmentへ登録される前にWebをdeployしない。
+次の4件がPagesのproduction environmentへ登録される前にWebをdeployしない。
+PagesのWrangler設定には必須secretの宣言構文がないため、
+`pnpm cloudflare:secrets:verify:staging`で暗号化secret名だけを検査する。
 
 - `CSRF_HMAC_SECRET`
 - `OWNER_HASH_HMAC_SECRET`

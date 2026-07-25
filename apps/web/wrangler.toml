@@ -10,14 +10,6 @@ APP_ENV = "staging"
 CLOUDFLARE_ACCOUNT_ID = "00000000000000000000000000000000"
 R2_BUCKET_NAME = "recording-transcriber-staging"
 
-[secrets]
-required = [
-  "CSRF_HMAC_SECRET",
-  "OWNER_HASH_HMAC_SECRET",
-  "R2_PARENT_ACCESS_KEY_ID",
-  "R2_PARENT_SECRET_ACCESS_KEY",
-]
-
 [[d1_databases]]
 binding = "SCRIBE_DROP_DB"
 database_name = "scribe-drop-staging"

@@ -72,9 +72,12 @@ pnpm exec wrangler pages secret put R2_PARENT_SECRET_ACCESS_KEY \
   --project-name scribe-drop-web-staging
 pnpm exec wrangler pages secret list \
   --project-name scribe-drop-web-staging
+pnpm cloudflare:secrets:verify:staging
 ```
 
-`secret list`では名前だけを確認し、値を取得しない。4件すべてを登録してからdeployする。
+`secret list`では名前だけを確認し、値を取得しない。PagesのWrangler設定は必須secretを
+宣言する構文を持たないため、deploy前に検証コマンドを実行し、4件の暗号化secret名が
+揃わない場合はfail closedとする。
 
 ## 未認証preflight
 

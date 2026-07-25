@@ -22,6 +22,7 @@
     "cloudflare:config:staging:orchestrator": "node scripts/render-cloudflare-staging-config.mjs orchestrator",
     "cloudflare:config:staging:r2-cors": "node scripts/render-cloudflare-staging-config.mjs r2-cors",
     "cloudflare:config:staging:web": "node scripts/render-cloudflare-staging-config.mjs web",
+    "cloudflare:secrets:verify:staging": "node scripts/verify-cloudflare-pages-secrets.mjs",
     "d1:migrate:local": "wrangler d1 migrations apply SCRIBE_DROP_DB --local --config apps/orchestrator/wrangler.toml",
     "d1:verify": "node scripts/verify-d1-migrations.mjs",
     "format": "pnpm format:ts && pnpm format:py",

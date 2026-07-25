@@ -153,6 +153,7 @@ Pages commandは`--config`をサポートしないため、生成directoryを`--
 commit SHAを明示してdeployする。
 
 ```bash
+pnpm cloudflare:secrets:verify:staging
 pnpm cloudflare:access:verify:staging
 ```
 
