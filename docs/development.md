@@ -148,6 +148,7 @@ pnpm cloudflare:config:staging:r2-cors
 git check-ignore .wrangler/deploy/r2-cors-staging.json
 pnpm cloudflare:config:staging:web
 git check-ignore apps/web/.wrangler/deploy/wrangler.toml
+git check-ignore apps/web/.wrangler/deploy/config.json
 ```
 
 共通で`CLOUDFLARE_ACCOUNT_ID`と`SCRIBE_DROP_STAGING_D1_DATABASE_ID`を使う。Webでは

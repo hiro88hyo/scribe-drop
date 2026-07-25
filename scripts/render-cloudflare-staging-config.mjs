@@ -4,7 +4,7 @@ import {
   mkdirSync,
   readFileSync,
   readlinkSync,
-  symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
@@ -22,6 +22,7 @@ const repositoryRoot = path.resolve(scriptDirectory, "..");
 const orchestratorOutputDirectory = path.join(repositoryRoot, ".wrangler", "deploy");
 const r2CorsOutput = path.join(orchestratorOutputDirectory, "r2-cors-staging.json");
 const webOutputDirectory = path.join(repositoryRoot, "apps", "web", ".wrangler", "deploy");
+const webConfigRedirect = path.join(webOutputDirectory, "config.json");
 const webFunctionsLink = path.join(webOutputDirectory, "functions");
 const webFunctionsTarget = "../../functions";
 const target = process.argv[2];
@@ -73,15 +74,21 @@ try {
   }
 
   if (target === "all" || target === "web") {
+    writeFileSync(
+      webConfigRedirect,
+      `${JSON.stringify({ configPath: "wrangler.toml" }, null, 2)}\n`,
+      { encoding: "utf8", mode: 0o600 },
+    );
+    chmodSync(webConfigRedirect, 0o600);
+
     try {
       const linkStats = lstatSync(webFunctionsLink);
       if (!linkStats.isSymbolicLink() || readlinkSync(webFunctionsLink) !== webFunctionsTarget) {
         throw new Error("web staging functions link exists with an unexpected target");
       }
+      unlinkSync(webFunctionsLink);
     } catch (error) {
-      if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-        symlinkSync(webFunctionsTarget, webFunctionsLink, "dir");
-      } else {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
         throw error;
       }
     }

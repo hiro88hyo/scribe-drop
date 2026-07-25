@@ -147,10 +147,11 @@ pnpm exec wrangler deploy \
   --env staging
 ```
 
-Pages commandは`--config`をサポートしないため、生成directoryを`--cwd`で指定する。
-生成処理は同directoryへ`functions`の固定relative symlinkも作成する。Accessとsecretの
-設定後に、[cloudflare-access.md](./cloudflare-access.md)の未認証preflightを通し、
-commit SHAを明示してdeployする。
+Pages commandは`--config`をサポートしないため、生成処理は
+`apps/web/.wrangler/deploy/config.json`から追跡外Wrangler設定への公式config redirectを
+作成する。commandはapp rootを`--cwd`に指定し、実`functions/`と`dist/`を利用する。
+Accessとsecretの設定後に、[cloudflare-access.md](./cloudflare-access.md)の
+未認証preflightを通し、commit SHAを明示してdeployする。
 
 ```bash
 pnpm cloudflare:secrets:verify:staging
@@ -159,7 +160,7 @@ pnpm cloudflare:access:verify:staging
 
 ```bash
 pnpm exec wrangler pages deploy \
-  --cwd apps/web/.wrangler/deploy \
+  --cwd apps/web \
   --branch develop \
   --commit-hash <COMMIT_SHA>
 ```
