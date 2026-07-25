@@ -70,6 +70,17 @@ applicationだけをrollbackする際にQueue consumerを削除または再作�
 application bundleを変更していない。最終clean-source deploymentはbinding、trigger、
 version、remote設定の再取得で確認した。
 
+## Custom staging origin
+
+staging専用のcustom originをPages projectへ関連付け、proxied DNS、TLS、Pagesの
+domain statusとHTTP verificationがactiveであることを確認した。実hostnameはこの記録を
+含む追跡対象へ保存せず、Cloudflareとgit ignoredの生成設定だけに保持する。
+
+commit `16ff4fa`でWebとR2 CORSの追跡対象設定をplaceholder化し、環境変数からexact originを
+追跡外設定へ生成するようにした。生成した設定から実bucketのCORSを更新し、AWS署名に必要な
+全request headerを含む許可originのPUT preflightが204、不許可originが403となることを
+確認した。
+
 ## Access準備
 
 同日の次checkpointでPages projectを確認し、deploymentが0件、secretが0件の状態から
