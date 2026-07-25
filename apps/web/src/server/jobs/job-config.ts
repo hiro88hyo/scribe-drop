@@ -6,13 +6,13 @@ const r2BucketNameSchema = z
   .min(3)
   .max(63)
   .regex(/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/u);
-const secretSchema = z.string().max(4096).refine(
-  (value) => {
+const secretSchema = z
+  .string()
+  .max(4096)
+  .refine((value) => {
     const byteLength = new TextEncoder().encode(value).byteLength;
     return byteLength >= 32 && byteLength <= 4096;
-  },
-  "Secret must contain between 32 and 4096 bytes",
-);
+  }, "Secret must contain between 32 and 4096 bytes");
 const accessKeyIdSchema = z.string().min(1).max(256);
 
 export interface JobEnvironment {

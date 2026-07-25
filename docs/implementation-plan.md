@@ -8,7 +8,7 @@
 shell、Pages Functionsのresponse security、Access JWT、CSRF、`GET /api/me`、
 D1の原子的job admission、所有権付きrepository、job作成・一覧・詳細API、
 型検証付きbrowser API client、ホーム・履歴・詳細の実API接続、Workers/D1
-integration testまで実装済みである。Phase 3では[ADR 0008](./adr/0008-r2-browser-upload-capability.md)を決定し、owner hash付きsource key、multipart actionだけに限定した15分のR2 Temporary Credentials、D1のupload準備状態遷移まで実装済みである。browser multipart、upload-complete、Queue consumer、実際のCloudflare resourceとRunPod endpointはまだ作成・deployしていない。
+integration testまで実装済みである。Phase 3では[ADR 0008](./adr/0008-r2-browser-upload-capability.md)を決定し、owner hash付きsource key、multipart actionだけに限定した15分のR2 Temporary Credentials、D1のupload準備状態遷移、browserの明示的multipart upload、進捗、cancel、同一画面retry、Wake Lock、最小化したIndexedDB checkpointまで実装済みである。upload-complete、Queue consumer、実際のCloudflare resourceとRunPod endpointはまだ作成・deployしていない。
 
 本計画は[spec.md](./spec.md)とRunPodの追加security要件である[additional-spec.md](./additional-spec.md)を正とし、Phase 1からPhase 7までを、各Phaseが単独でレビュー・検証できる単位に分けて実装する。両者が矛盾する場合は追加要件と[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)を優先する。
 
@@ -182,7 +182,10 @@ deployしないという[ADR 0007](./adr/0007-phase-2-job-admission-contract.md)
 - `POST /api/jobs` で、[ADR 0008](./adr/0008-r2-browser-upload-capability.md)に
   従いexact objectとmultipart action 4種だけに限定した15分のR2 Temporary
   Credentialsをlocal signingで発行する。応答後に認証情報を保存・ログ出力しない。
-- ブラウザに AWS SDK v3 と `@aws-sdk/lib-storage` を用いた multipart uploader を実装する。
+- ブラウザに固定versionのAWS SDK v3 `@aws-sdk/client-s3`を用いた明示的multipart
+  uploaderを実装する。`@aws-sdk/lib-storage`は1 partを`PutObject`へfallbackするため
+  [ADR 0008](./adr/0008-r2-browser-upload-capability.md)のchild action境界と両立せず
+  使用しない。
   - 16 MiB part、並列数 3
   - byte progress、速度、ETA
   - AbortController によるキャンセル
@@ -200,6 +203,12 @@ deployしないという[ADR 0007](./adr/0007-phase-2-job-admission-contract.md)
   - attempt generation 1 を一度だけ作成する
   - 一時障害は retry、恒久エラーは監査イベントを残して ack
 - batch の個別 ack/retry と DLQ の処理方針を実装・文書化する。
+
+browser multipartのlocal checkpointでは、1 partの小容量fileでも
+`CreateMultipartUpload`、`UploadPart`、`CompleteMultipartUpload`を使用し、
+`PutObject`を呼ばない。AWS SDKはupload開始時にだけlazy loadする。IndexedDBへは
+job ID、filename、content type、size、完了済みbyte、状態、更新日時だけを保存し、
+File、title、options、R2 endpoint・key・credentialは保存しない。
 
 ### テストと完了条件
 

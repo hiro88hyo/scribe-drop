@@ -1,5 +1,6 @@
 import {
   apiErrorResponseSchema,
+  createJobResponseSchema,
   jobDetailSchema,
   listJobsResponseSchema,
   meResponseSchema,
@@ -11,6 +12,7 @@ import { ApiClientError, createApiClient, type ApiFetch } from "./api-client.js"
 
 const JOB_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const REQUEST_ID = "00000000-0000-4000-8000-000000000020";
+const CSRF_TOKEN = "test-only-csrf-token-with-at-least-32-characters";
 
 const JOB_DETAIL = {
   actualSizeBytes: null,
@@ -66,6 +68,84 @@ describe("browser API client", () => {
       headers: { Accept: "application/json" },
       method: "GET",
     });
+  });
+
+  it("validates and creates a job with JSON, CSRF, and same-origin credentials", async () => {
+    let capturedBody: unknown;
+    let capturedInit: RequestInit | undefined;
+    const upload = {
+      accessKeyId: "temporary-access-key",
+      bucket: "recording-transcriber-test",
+      endpoint: "https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com",
+      expiresAt: "2027-01-01T00:15:00.000Z",
+      key: `incoming/0123456789abcdef0123456789abcdef/${JOB_ID}/nonce/source.m4a`,
+      region: "auto",
+      secretAccessKey: "temporary-secret-key",
+      sessionToken: "temporary-session-token",
+    } as const;
+    const fetcher: ApiFetch = (_input, init) => {
+      capturedInit = init;
+      if (typeof init?.body !== "string") {
+        throw new Error("Expected a serialized JSON request body");
+      }
+      capturedBody = JSON.parse(init.body);
+      return Promise.resolve(jsonResponse({ jobId: JOB_ID, upload }, 201));
+    };
+
+    const result = await createApiClient(fetcher).createJob(
+      {
+        contentType: "audio/mp4",
+        filename: "recording.m4a",
+        options: JOB_DETAIL.options,
+        sizeBytes: 1024,
+        title: "Weekly meeting",
+      },
+      CSRF_TOKEN,
+    );
+
+    expect(createJobResponseSchema.parse(result)).toEqual({ jobId: JOB_ID, upload });
+    expect(capturedBody).toMatchObject({
+      filename: "recording.m4a",
+      sizeBytes: 1024,
+      title: "Weekly meeting",
+    });
+    expect(capturedInit).toMatchObject({
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "X-CSRF-Token": CSRF_TOKEN,
+      },
+      method: "POST",
+    });
+  });
+
+  it("rejects invalid create input and CSRF before issuing a request", async () => {
+    let fetchCalls = 0;
+    const client = createApiClient(() => {
+      fetchCalls += 1;
+      return Promise.resolve(jsonResponse({}));
+    });
+    const input = {
+      contentType: "audio/mp4",
+      filename: "recording.m4a",
+      options: JOB_DETAIL.options,
+      sizeBytes: 1024,
+      title: "Weekly meeting",
+    } as const;
+
+    await expect(client.createJob(input, "short")).rejects.toMatchObject({
+      kind: "invalid_request",
+      status: 400,
+    });
+    await expect(
+      client.createJob({ ...input, sizeBytes: 2 * 1024 * 1024 * 1024 + 1 }, CSRF_TOKEN),
+    ).rejects.toMatchObject({
+      kind: "invalid_request",
+      status: 400,
+    });
+    expect(fetchCalls).toBe(0);
   });
 
   it("encodes an opaque cursor and validates list and detail responses", async () => {

@@ -109,7 +109,9 @@ Cloudflare Pagesは以下だけを担当する。
 * PWA対応
 * IndexedDB
 * AWS SDK for JavaScript v3
-* `@aws-sdk/lib-storage`
+* `@aws-sdk/client-s3`の明示的multipart API（`@aws-sdk/lib-storage`は
+  [ADR 0008](./adr/0008-r2-browser-upload-capability.md)の`PutObject`禁止と
+  両立しないため使用しない）
 * Cloudflare Access Pages Plugin
 
 UIライブラリは必須ではない。導入する場合も依存を増やしすぎず、モバイル優先で実装する。

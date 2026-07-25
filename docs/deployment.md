@@ -10,7 +10,8 @@ repository、`POST/GET /api/jobs`、`GET /api/jobs/:id`とWorkers/D1 integration
 
 Phase 3では[ADR 0008](./adr/0008-r2-browser-upload-capability.md)に従う
 owner hash付きsource keyと、exact object・multipart action 4種・15分に限定した
-R2 Temporary Credentialsのlocal signingまで実装している。browser multipart、
+R2 Temporary Credentialsのlocal signing、browserの明示的multipart、進捗、
+cancel、同一画面retry、Wake Lock、最小化したIndexedDB checkpointまで実装している。
 upload-complete、R2 Event Notification consumerとstaging R2権限検証は未完了で
 あるため、現段階ではdeployしない。
 
@@ -62,6 +63,10 @@ D1、R2、Queue、DLQ、RunPod endpoint、Access application、secretは環境�
 9. SBOM、container/dependency scan、offline起動、smoke test、重複配送、claim競合、cleanup、rollback手順を確認する。
 
 resourceの作成・変更・削除とdeployの直前には、CLIの認証先、environment、resource名、IDを再確認する。dashboardだけで行った変更は残さず、Wrangler設定、migration、deployment記録へ反映する。
+
+R2 S3-compatible APIは`wrangler dev`のlocal R2 emulationでは利用できないため、
+browser uploadの自動テストはfake transportを使う。CORS、temporary credentialの
+action/object拒否、multipart、abortは専用staging bucketとstaging originで確認する。
 
 RunPodへ送る`/run` payload、endpoint設定、claim後のcapability境界は[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)を正とする。RunPod API keyはOrchestratorだけに置き、WorkerにはR2の長期credential、Discord webhook、利用者metadataを渡さない。Secure Cloudを利用できない場合や上記endpoint設定を満たせない場合はdeployを停止し、例外を別ADRで承認する。
 

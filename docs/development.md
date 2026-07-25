@@ -63,6 +63,10 @@ pnpm exec wrangler whoami
 
 Cloudflare credential は Wrangler のユーザー用保存領域または CI secret で管理する。`.dev.vars` や API token はコミットしない。
 
+R2 S3-compatible APIは`wrangler dev`では利用できない。browser multipartの通常の
+local testはfake transportを使い、実R2、CORS、Temporary Credentialsは専用staging
+だけで検証する。実credentialを`.dev.vars`へ置いて通常unit testを実行しない。
+
 runpodctl は `.tools/bin/runpodctl` に導入される。
 
 ```bash
@@ -77,6 +81,11 @@ Gitleaks は `.tools/bin/gitleaks` に導入される。commit 済みの Git 履
 ```bash
 pnpm run secrets:check
 ```
+
+browser uploadは`@aws-sdk/client-s3`をupload開始時にlazy loadし、16 MiB part、
+並列3、SDK最大4 attemptで明示的multipartを実行する。小容量fileも`PutObject`へ
+fallbackしない。IndexedDBには再選択案内に必要なjob ID、filename、content type、
+size、完了済みbyte、状態、更新日時だけを保存する。
 
 ## キャッシュ
 
@@ -147,7 +156,11 @@ compileし、Miniflareのローカルlistenerを使用する。
 pnpm --filter @scribe-drop/web run test:workers
 ```
 
-Cloudflare test/config専用tsconfigだけは、公開中のMiniflare型定義にbundle内参照が残るため`skipLibCheck`を有効にしている。clientとFunctionsはroot標準どおり無効のままとする。この例外は依存更新時に再確認し、不要になれば削除する。
+Cloudflare test/config専用tsconfigは、公開中のMiniflare型定義にbundle内参照が残るため
+`skipLibCheck`を有効にしている。client専用tsconfigも、AWS SDKの公開型がbrowser buildで
+Node stream型を参照するため有効にしている。いずれも依存libraryの`.d.ts`だけを対象とし、
+application sourceのstrict検査は維持する。Functionsはroot標準どおり無効のままとする。
+これらの例外は依存更新時に再確認し、不要になれば削除する。
 
 browser API clientは`/api/me`、`/api/jobs`、`/api/jobs/:id`だけをsame-originかつ
 `cache: no-store`で取得し、responseを`packages/contracts`のZod schemaで再検証する。
