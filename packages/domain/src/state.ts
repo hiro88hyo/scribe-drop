@@ -15,6 +15,20 @@ export const JOB_STATUSES = [
 
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
+export const ACTIVE_JOB_STATUSES = [
+  "CREATED",
+  "UPLOADING",
+  "UPLOADED",
+  "SUBMISSION_PENDING",
+  "SUBMITTING",
+  "RUNNING",
+  "CANCEL_REQUESTED",
+] as const satisfies readonly JobStatus[];
+
+export const MAX_ACTIVE_JOBS_PER_OWNER = 3;
+export const MAX_JOB_CREATIONS_PER_WINDOW = 10;
+export const JOB_CREATION_WINDOW_SECONDS = 10 * 60;
+
 export const ATTEMPT_STATUSES = [
   "SUBMISSION_PENDING",
   "SUBMITTING",

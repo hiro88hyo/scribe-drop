@@ -1,5 +1,9 @@
 # 録音文字起こしサービス'ScribeDrop' 設計・実装指示書
 
+## 0. 追加要件と優先順位
+
+RunPod securityは[additional-spec.md](./additional-spec.md)と[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)を正とし、本書の11〜15章も同じ契約へ同期する。将来矛盾が生じた場合は追加要件とADR 0006を優先し、署名付きR2 URL、heartbeat情報、文字起こしoptions、per-job webhookを`/run`へ含めない。
+
 ## 1. 目的
 
 CloudflareとRunPodを利用し、以下の処理を行う個人向けWebアプリケーションを実装する。
@@ -19,7 +23,7 @@ CloudflareとRunPodを利用し、以下の処理を行う個人向けWebアプ�
 * スマートフォンでも使いやすいアップロードUX
 * 音声データと文字起こし結果の非公開性
 * 長期的なR2認証情報をブラウザやRunPodへ渡さない
-* Queue、Webhook、HTTP再送に対する冪等性
+* Queue、RunPod claim、Cron、HTTP再送に対する冪等性
 * RunPodジョブの二重投入が発生しても、文字起こし本体を二重実行しない
 * 外部サービス障害時にもジョブ状態が不整合にならない
 * ログやDiscord通知に録音内容を出さない
@@ -53,7 +57,6 @@ Cloudflare Queue                         │
 Orchestrator Worker                      │
     ├─ RunPod /run                        │
     ├─ RunPod claim API受信               │
-    ├─ RunPod webhook受信                 │
     ├─ RunPod /status照会                 │
     ├─ Discord通知                        │
     └─ Cronによる状態回復・再照会 ─────────┘
@@ -82,14 +85,13 @@ Cloudflare Pagesは以下だけを担当する。
 * R2 Event NotificationsのQueue Consumer
 * RunPodジョブ投入
 * RunPod Workerからの実行権claim
-* RunPod Webhook受信
 * RunPod `/status`照会
 * 状態遷移
 * Discord通知
 * Cronによるリカバリ
 * Dead Letter Queue処理
 
-ブラウザ向けAPIと外部Webhookを同じエンドポイントに混在させない。
+ブラウザ向けAPIとRunPod内部APIを同じ認証境界に混在させない。
 
 ---
 
@@ -426,7 +428,9 @@ CREATE TABLE job_attempts (
 
     status TEXT NOT NULL,
     claim_token_hash TEXT NOT NULL,
-    webhook_token_hash TEXT NOT NULL,
+    claim_token_expires_at TEXT NOT NULL,
+    claim_token_consumed_at TEXT,
+    heartbeat_token_hash TEXT,
 
     winning_runpod_job_id TEXT,
     result_prefix TEXT NOT NULL,
@@ -480,9 +484,10 @@ ON runpod_submissions(attempt_id);
 ```text
 submit_response
 worker_claim
-webhook
 status_poll
 ```
+
+初期migrationに存在する`webhook_token_hash`は使用せず、ADR 0006に従うforward-only migrationで除去する。上記は移行後の論理schemaであり、適用済みmigrationを書き換えない。
 
 ### 7.4 job_events
 
@@ -720,69 +725,28 @@ error_code = SOURCE_ETAG_CHANGED
 
 ## 11. RunPodジョブ投入
 
-### 11.1 URL発行
-
-Orchestratorはattemptごとに次を発行する。
-
-* source用presigned GET
-* transcript.md用presigned PUT
-* transcript.json用presigned PUT
-* transcript.srt用presigned PUT
-* manifest.json用presigned PUT
-* claim token
-* webhook token
-
-RunPodにR2 Access Keyを渡さない。
-
-presigned URLは特定オブジェクト、特定操作だけを許可する。
-
-有効期限は初期値24時間とし、RunPodの最大待機・実行時間より長くする。
-
-### 11.2 RunPod入力
+### 11.1 RunPod入力
 
 ```json
 {
   "input": {
-    "schema_version": 1,
-    "job_id": "01J...",
-    "attempt_id": "01J...",
-    "source": {
-      "url": "https://...signed...",
-      "expected_size_bytes": 12345678,
-      "expected_etag": "..."
-    },
-    "results": {
-      "markdown_put_url": "https://...signed...",
-      "json_put_url": "https://...signed...",
-      "srt_put_url": "https://...signed...",
-      "manifest_put_url": "https://...signed..."
-    },
-    "claim": {
-      "url": "https://hooks.transcribe.example.com/internal/runpod/claim",
-      "token": "..."
-    },
-    "heartbeat": {
-      "url": "https://hooks.transcribe.example.com/internal/runpod/heartbeat",
-      "token": "..."
-    },
-    "options": {
-      "language": "ja",
-      "model": "large-v3-turbo",
-      "vad": true,
-      "beam_size": 5,
-      "word_timestamps": false
-    }
+    "schemaVersion": 1,
+    "jobId": "01J...",
+    "attemptId": "01J...",
+    "claimToken": "one-time-token"
   },
-  "webhook": "https://hooks.transcribe.example.com/internal/runpod/webhook/<token>",
   "policy": {
     "executionTimeout": 21600000,
-    "ttl": 86400000,
-    "lowPriority": false
+    "ttl": 28800000
   }
 }
 ```
 
-### 11.3 二重投入への対応
+`/run`には上記以外を含めない。特にpresigned URL、R2 key、filename、title、ユーザー情報、文字起こしoption、callback URL、heartbeat情報、webhook、`s3Config`を送らない。
+
+claim tokenは256 bit以上の暗号論的乱数とし、D1にはSHA-256 hash、失効日時、消費日時だけを保存する。attemptへ結び付け、claim時にRunPod job IDへ結び付ける。成功後は同じwinnerからの再送であっても再利用させない。
+
+### 11.2 二重投入への対応
 
 RunPod `/run`には、ネットワークタイムアウト時に「投入が成功したか不明」という状態があり得る。
 
@@ -803,29 +767,45 @@ RunPod handlerはモデルのロードや音声ダウンロードより先にcla
   "jobId": "01J...",
   "attemptId": "01J...",
   "runpodJobId": "runpod-native-job-id",
-  "token": "one-time-claim-token"
+  "claimToken": "one-time-claim-token"
 }
 ```
 
 Orchestratorは以下を行う。
 
-1. claim tokenをSHA-256し、保存済みhashと比較
-2. jobとactive attemptを確認
+1. claim tokenをSHA-256し、保存済みhash、失効、消費状態を比較
+2. job、active attempt、generationを確認
 3. attemptがキャンセル済みでないことを確認
-4. `winning_runpod_job_id`がNULLなら、今回のRunPod job IDを設定
-5. 同じRunPod job IDからの再claimなら200
-6. 別RunPod job IDが既にwinnerなら409
-7. `runpod_submissions`へ記録
-8. winnerだけ処理続行を許可
+4. `winning_runpod_job_id`がNULLのときだけ、token消費とwinner設定を一つの条件付き更新で行う
+5. `runpod_submissions`へ記録
+6. winner確定後だけpresigned URLとheartbeat tokenを生成
+7. winnerだけ処理続行を許可
 
 レスポンス:
 
 ```json
 {
   "granted": true,
-  "cancelRequested": false
+  "source": {
+    "getUrl": "short-lived-presigned-url",
+    "expectedSizeBytes": 12345678,
+    "expectedEtag": "..."
+  },
+  "results": {
+    "markdownPutUrl": "short-lived-presigned-url",
+    "jsonPutUrl": "short-lived-presigned-url",
+    "srtPutUrl": "short-lived-presigned-url",
+    "manifestPutUrl": "short-lived-presigned-url"
+  },
+  "heartbeat": {
+    "url": "https://hooks.example.com/internal/runpod/heartbeat",
+    "token": "short-lived-token"
+  },
+  "expiresAt": "..."
 }
 ```
+
+source URLは1 objectへのGET、各result URLはattempt固有の1 objectへのPUTだけを許可する。list、delete、別key、別attemptへ権限を広げない。有効期限は初期2時間とし、最大入力時間のbenchmarkに基づいてheartbeatによる更新または上限延長を決める。
 
 敗者RunPodジョブは、モデルロードやダウンロードを行わず即座に終了する。
 
@@ -837,6 +817,8 @@ Orchestratorは以下を行う。
 
 これにより、RunPod `/run`が複数回成功しても高負荷なGPU処理は原則1回だけになる。
 
+claim成功responseを失った場合は同じtokenへcapabilityを再発行しない。reconciliationで旧attemptを終了させ、新しいgenerationとtokenで再投入する。
+
 ---
 
 ## 13. RunPod Worker
@@ -844,19 +826,21 @@ Orchestratorは以下を行う。
 ### 13.1 起動順序
 
 1. 入力スキーマ検証
-2. URLのhostとHTTPSを検証
-3. claim取得
+2. claim取得
+3. claim responseのURLをHTTPS、host、port、userinfo、DNS解決後IPまで検証
 4. 一時ディレクトリ作成
 5. sourceをストリーミングダウンロード
 6. 最大サイズを再検証
 7. ffprobe
 8. duration、stream、codec検証
-9. faster-whisper実行
+9. image内の固定faster-whisper modelをロードして実行
 10. 出力生成
 11. Markdown、JSON、SRTをPUT
 12. manifestを最後にPUT
-13. 一時ファイル削除
-14. 結果メタデータをreturn
+13. 一時ファイル削除とworker refresh
+14. allowlist済み結果メタデータだけをreturn
+
+claim成功前にmodelをmemoryへloadせず、model download、音声download、ffprobe、GPU推論を開始しない。
 
 ### 13.2 入力検証
 
@@ -1011,37 +995,28 @@ manifestがないattemptを完了扱いにしてはならない。
 
 ---
 
-## 14. Webhook処理
+## 14. RunPod status確認とfinalize
 
-RunPod Webhook本文だけを信用しない。
+per-job webhookは使用しない。OrchestratorがRunPod `/status/{job_id}`を定期照会し、観測したterminal statusをD1へ即時保存する。
 
-Webhook URLのtokenをSHA-256し、attemptのhashと比較する。
+以下をすべて満たした場合だけfinalizeする。
 
-Webhook受信後は次を行う。
+1. RunPod `/status`がterminalのCOMPLETED
+2. RunPod job IDがwinning jobと一致
+3. attemptが現在のactive attemptでgenerationも一致
+4. R2上にmanifestが存在
+5. manifestのjob IDとattempt IDが一致
+6. manifestの`complete`がtrue
+7. Markdown、JSON、SRTがすべて存在し、keyとbyte sizeがmanifestと一致
+8. `COMPLETED`への条件付き更新とnotification outbox作成が成功
 
-1. token検証
-2. RunPod job IDを取得
-3. `runpod_submissions`へ記録
-4. RunPod `/status/{job_id}`をOrchestratorから呼ぶ
-5. statusレスポンスを正とする
-6. RunPod job IDがwinning jobであることを確認
-7. attemptが現在のactive attemptであることを確認
-8. R2上のmanifestをHEAD/GETする
-9. manifestのjob IDとattempt IDを確認
-10. 成果物がすべて存在することを確認
-11. `COMPLETED`へ条件付き更新
-12. notification outboxを作成
-13. 重複Webhookなら200を返し、何もしない
-
-古いattemptや敗者RunPod jobからのWebhookで、現在のジョブを完了させてはならない。
-
-Webhook処理は常に短時間で200を返せる構造にする。
+status、worker output、manifestのいずれか単独では完了扱いにしない。古いattemptやloserの成果物で現在のjobを更新しない。
 
 ---
 
 ## 15. Cronによる回復処理
 
-RunPod Webhookが届かない場合に備え、Cron Triggerを5分ごとに実行する。
+Cron Triggerを5分以内の間隔で実行する。
 
 対象:
 
@@ -1054,14 +1029,14 @@ CANCEL_REQUESTED
 処理:
 
 * `winning_runpod_job_id`があるものをRunPod `/status`で照会
-* terminal状態ならWebhookと同じfinalize処理を行う
+* terminal状態をD1へ保存し、14章のfinalize処理を行う
 * heartbeatが一定時間ないものを確認
 * 実行期限を超えたものをFAILEDにする
 * notification outboxを再送する
 * 中途半端なSUBMITTING状態を回復する
 * 期限切れのUPLOADINGをEXPIREDにする
 
-CronとWebhookが同時に完了処理しても、D1の条件付きUPDATEで一方だけが成功するようにする。
+RunPodのasync resultは完了後30分だけ保持されるため、その間にterminal statusを一度も観測できなかったjobはmanifestが存在してもfail closedとし、運用者のreconciliation対象にする。複数のCronが同時に完了処理しても、D1の条件付きUPDATEで一つだけが成功するようにする。
 
 ---
 
@@ -1215,7 +1190,6 @@ Android Share Targetは第2段階とする。
 * R2一時認証情報
 * presigned URL
 * claim token
-* webhook token
 * Discord Webhook URL
 
 エラーは利用者向けメッセージと内部ログを分離する。
@@ -1270,21 +1244,21 @@ FFPROBE_INVALID_CONTAINER
 
 * 同じattemptで2つのRunPod jobがclaim
 * 最初だけgranted
-* 同じwinnerからの再claimは成功
+* 同じwinnerからの再claimもtoken再利用として拒否
+* claim response喪失後は古いattemptへcapabilityを再発行しない
 * loserは文字起こしを開始しない
 * 古いgenerationからのclaimを拒否
 
-### Webhook
+### Status pollingとfinalize
 
-* 正常Webhook
-* 同じWebhookを3回受信
-* token不正
-* RunPod statusとWebhook本文が不一致
-* loser jobからのWebhook
-* 古いattemptからのWebhook
+* terminal statusの重複poll
+* RunPod statusのunknown fieldと不正output
+* loser jobのstatus
+* 古いattemptのstatus
 * manifestなし
 * 一部成果物なし
-* CronとWebhookの同時完了
+* status未観測のまま30分経過
+* 複数Cronの同時完了
 
 ### RunPod Worker
 
@@ -1348,8 +1322,8 @@ FFPROBE_INVALID_CONTAINER
 * Queue再送でRunPod処理結果が二重反映されない
 * RunPod `/run`が重複成功してもwinnerは1つ
 * loser RunPod jobはWhisper処理を開始しない
-* Webhookが重複しても通知outboxは1件
-* Webhookが失われてもCronで完了を検出できる
+* status pollやCronが重複しても通知outboxは1件
+* RunPod result保持期間内にterminal statusを保存し、未観測時は誤完了しない
 * 古いattemptの完了で新しいattemptが上書きされない
 * manifestがない処理をCOMPLETEDにしない
 
@@ -1400,8 +1374,7 @@ FFPROBE_INVALID_CONTAINER
 
 ### Phase 5: 完了処理
 
-* Webhook
-* `/status`検証
+* `/status` pollingとterminal観測の保存
 * Cron reconciliation
 * Discord
 * artifact download
@@ -1411,7 +1384,7 @@ FFPROBE_INVALID_CONTAINER
 * 重複イベント
 * HTTPタイムアウト
 * claim競合
-* webhook重複
+* status poll重複
 * stale attempt
 * partial result
 * DLQ
@@ -1446,4 +1419,4 @@ FFPROBE_INVALID_CONTAINER
 * Cloudflare、RunPod、Google側で必要な手動設定をチェックリスト化する
 * READMEにはローカル起動、テスト、デプロイ、ロールバック手順を記載する
 
-最初のPRではPhase 1とPhase 2までを実装し、外部RunPod呼出しはfake clientにする。その後、Phase 3以降を小さいPRに分割すること。
+Phase 1とPhase 2は別々のfeature branchとPRに分け、Phase 2では外部RunPod呼出しをfake clientにする。Phase 3以降もPhaseごとに独立したfeature branchと小さいPRへ分割すること。

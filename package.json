@@ -38,7 +38,7 @@
     "secrets:check:worktree": "./.tools/bin/gitleaks dir . --redact --no-banner --verbose",
     "test": "pnpm test:ts && pnpm test:py",
     "test:py": "uv run --directory apps/runpod-worker pytest",
-    "test:ts": "vitest run",
+    "test:ts": "vitest run && pnpm --filter @scribe-drop/web run test:workers",
     "toolchain:check": "node scripts/check-toolchain.mjs",
     "typecheck": "pnpm typecheck:ts && pnpm typecheck:py",
     "typecheck:py": "uv run --directory apps/runpod-worker mypy --strict src tests",

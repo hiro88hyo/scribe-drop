@@ -20,6 +20,11 @@
     "noUncheckedIndexedAccess": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
+    "paths": {
+      "@scribe-drop/contracts": ["./packages/contracts/src/index.ts"],
+      "@scribe-drop/domain": ["./packages/domain/src/index.ts"],
+      "@scribe-drop/observability": ["./packages/observability/src/index.ts"]
+    },
     "resolveJsonModule": true,
     "skipLibCheck": false,
     "sourceMap": true,

@@ -30,32 +30,41 @@ localでは`apps/web/.dev.vars.example`を`apps/web/.dev.vars`へコピーし、
 | `APP_ENV`                     |   no   | `local`、`staging`、`production`         |
 | `ALLOWED_ORIGIN`              |   no   | 状態変更APIで許可する単一origin          |
 | `ACCESS_TEAM_DOMAIN`          |   no   | Cloudflare Access issuer/JWKSの基準      |
-| `ACCESS_AUDIENCE`             |  yes   | Access application audience              |
+| `ACCESS_AUDIENCES`            |   no   | 許可AUD tagのJSON配列                    |
 | `CSRF_HMAC_SECRET`            |  yes   | `sub`に結び付くCSRF tokenの署名          |
 | `OWNER_HASH_HMAC_SECRET`      |  yes   | owner `sub`の不可逆hash生成              |
 | `CLOUDFLARE_ACCOUNT_ID`       |   no   | R2 Temporary Credentials発行対象account  |
+| `R2_BUCKET_NAME`              |   no   | D1へ記録する環境別R2 bucket名            |
 | `R2_PARENT_ACCESS_KEY_ID`     |  yes   | object限定temporary credentialの親key    |
 | `R2_PARENT_SECRET_ACCESS_KEY` |  yes   | object限定temporary credentialの親secret |
+
+`ACCESS_AUDIENCES`はenvironment固有の1件以上のAUD tagをJSON配列で指定する。stagingとproductionのaudienceを同じ配列に混在させない。AUD tagは検証対象の識別子でありcredentialではない。
+
+`CSRF_HMAC_SECRET`は32 byte以上のrandom secretとし、environment間で共有しない。
+
+`R2_BUCKET_NAME`はdeploy対象のWrangler `RECORDINGS` bindingが参照するbucket名と
+一致させる。Phase 2のlocal値はmetadata検証専用でR2へ接続しない。Phase 3ではlocal
+bindingも環境別bucket名へ揃え、credential発行とQueue検証でも同じ値を使用する。
 
 ## Orchestrator
 
 localでは`apps/orchestrator/.dev.vars.example`を`apps/orchestrator/.dev.vars`へコピーする。
 
-| Variable                    | Secret | Purpose                                  |
-| --------------------------- | :----: | ---------------------------------------- |
-| `APP_ENV`                   |   no   | 実行環境                                 |
-| `PUBLIC_WEB_BASE_URL`       |   no   | Access保護済みジョブ詳細URLのbase        |
-| `RUNPOD_CALLBACK_BASE_URL`  |   no   | claim、heartbeat、webhook callbackのbase |
-| `RUNPOD_ENDPOINT_ID`        |  yes   | 環境別RunPod Serverless endpoint         |
-| `RUNPOD_API_KEY`            |  yes   | RunPod API認証                           |
-| `CLOUDFLARE_ACCOUNT_ID`     |   no   | R2 S3 endpointのaccount                  |
-| `R2_ACCESS_KEY_ID`          |  yes   | presigned URL発行専用key                 |
-| `R2_SECRET_ACCESS_KEY`      |  yes   | presigned URL発行専用secret              |
-| `DISCORD_WEBHOOK_URL`       |  yes   | 完了通知先                               |
-| `MULTIPART_RETENTION_HOURS` |   no   | 未完了multipart保持時間、初期値24        |
-| `SOURCE_RETENTION_DAYS`     |   no   | 元録音保持日数、初期値7                  |
-| `RESULT_RETENTION_DAYS`     |   no   | 結果保持日数、初期値90                   |
-| `AUDIT_RETENTION_DAYS`      |   no   | 監査情報保持日数、初期値180              |
+| Variable                    | Secret | Purpose                           |
+| --------------------------- | :----: | --------------------------------- |
+| `APP_ENV`                   |   no   | 実行環境                          |
+| `PUBLIC_WEB_BASE_URL`       |   no   | Access保護済みジョブ詳細URLのbase |
+| `RUNPOD_INTERNAL_BASE_URL`  |   no   | claim、heartbeat内部APIの固定base |
+| `RUNPOD_ENDPOINT_ID`        |  yes   | 環境別RunPod Serverless endpoint  |
+| `RUNPOD_API_KEY`            |  yes   | RunPod API認証                    |
+| `CLOUDFLARE_ACCOUNT_ID`     |   no   | R2 S3 endpointのaccount           |
+| `R2_ACCESS_KEY_ID`          |  yes   | presigned URL発行専用key          |
+| `R2_SECRET_ACCESS_KEY`      |  yes   | presigned URL発行専用secret       |
+| `DISCORD_WEBHOOK_URL`       |  yes   | 完了通知先                        |
+| `MULTIPART_RETENTION_HOURS` |   no   | 未完了multipart保持時間、初期値24 |
+| `SOURCE_RETENTION_DAYS`     |   no   | 元録音保持日数、初期値7           |
+| `RESULT_RETENTION_DAYS`     |   no   | 結果保持日数、初期値90            |
+| `AUDIT_RETENTION_DAYS`      |   no   | 監査情報保持日数、初期値180       |
 
 ## RunPod Worker
 
@@ -70,7 +79,7 @@ localでは`apps/runpod-worker/.env.example`を未追跡の`.env`へコピーす
 | `MAX_SOURCE_BYTES`           |   no   | streaming download上限、2 GiB       |
 | `MAX_DURATION_SECONDS`       |   no   | ffprobe duration上限、8時間         |
 | `HEARTBEAT_INTERVAL_SECONDS` |   no   | heartbeat間隔、初期値120秒          |
-| `WHISPER_MODEL_ID`           |   no   | build時に固定するmodel ID           |
-| `WHISPER_MODEL_REVISION`     |   no   | build時に固定するmodel revision     |
 
-claim、heartbeat、webhook tokenとpresigned URLはジョブ入力から受け取る一時値であり、環境変数やRunPod templateへ保存しない。
+`claimToken`だけを最小化したRunPod `/run` inputから受け取る。heartbeat tokenとpresigned URLはwinner claim成功responseからだけ受け取り、環境変数、RunPod template、永続volumeへ保存しない。per-job webhook tokenは発行しない。
+
+Whisper model IDとrevision、FFmpeg、faster-whisper、CTranslate2、CUDA、base imageはruntime環境変数で切り替えず、Phase 4でDockerfile、lockfile、image metadataへ固定する。固定値を変更する場合はimageを再buildし、SBOM、offline起動試験、vulnerability scanを通す。

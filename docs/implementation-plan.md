@@ -2,9 +2,16 @@
 
 ## 1. 現状
 
-2026-07-25 時点で Phase 1 の基盤を `feature/phase-1-foundation` に実装した。monorepo、契約、状態遷移、初期 D1 migration、local/staging の Wrangler 設定、構造化ログ、CI と開発文書が対象である。実際の Cloudflare resource と RunPod endpoint はまだ作成・deployしておらず、Phase 2 以降の利用者向け機能も未実装である。
+2026-07-25
+時点でPhase 1の基盤を`feature/phase-1-foundation`に実装し、Phase 2を
+`feature/phase-2-authenticated-web`で進行している。Phase 2ではReact/Viteのapp
+shell、Pages Functionsのresponse security、Access JWT、CSRF、`GET /api/me`、
+D1の原子的job admission、所有権付きrepository、job作成・一覧・詳細API、
+型検証付きbrowser API client、ホーム・履歴・詳細の実API接続、Workers/D1
+integration testまで実装済みである。Phase 2のlocal checkpointは完了しているが、
+実際のCloudflare resourceとRunPod endpointはまだ作成・deployしていない。
 
-本計画は [spec.md](./spec.md) を正とし、Phase 1 から Phase 7 までを、各 Phase が単独でレビュー・検証できる単位に分けて実装する。
+本計画は[spec.md](./spec.md)とRunPodの追加security要件である[additional-spec.md](./additional-spec.md)を正とし、Phase 1からPhase 7までを、各Phaseが単独でレビュー・検証できる単位に分けて実装する。両者が矛盾する場合は追加要件と[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)を優先する。
 
 ## 2. 実装原則
 
@@ -12,7 +19,7 @@
 - Python の環境構築、依存管理、lock、実行、build には uv だけを使用する。
 - Git は `main` と `develop` を長期ブランチとする git-flow で運用し、Phase ごとの作業を feature branch に分離する。
 - Cloudflare 固有処理、ドメインロジック、永続化、外部 API クライアントを分離する。
-- HTTP、Queue、Cron、Webhook、RunPod claim の入力は Zod、RunPod Worker の入力は Pydantic で検証する。
+- HTTP、Queue、Cron、RunPod claim・heartbeat・statusの入力はZod、RunPod Workerの入力はPydanticで検証する。
 - ジョブ状態遷移は domain と repository に集約し、ハンドラーから任意の状態更新を行わない。
 - D1 更新は期待 status、active attempt、version を条件に含める。更新件数 0 は成功扱いにせず、再送・競合・不正遷移を判別する。
 - R2、RunPod、Discord、時刻、ID 生成を interface 化し、単体テストでは実サービスへ接続しない。
@@ -71,15 +78,16 @@
 1. R2 Temporary Credentials で、単一 bucket かつ単一 object key に権限を限定できること。
 2. 一時認証情報による S3 multipart upload と abort の挙動、および `If-None-Match: *` 相当の create-only 条件が multipart で利用可能か。
 3. R2 Event Notification の実際のメッセージ形式、ETag 表現、Queue retry と DLQ の設定方法。
-4. Pages Functions での Access JWT 検証方法、JWKS キャッシュ、複数 audience、ローカルテスト方法。
-5. RunPod `/run`、`/status`、`/cancel`、webhook payload、job ID、timeout 単位と最大値。
+4. Pages Functions での Access JWT 検証方法、JWKS キャッシュ、複数 audience、ローカルテスト方法。[ADR 0003](./adr/0003-access-jwt-and-csrf-boundary.md)で決定済み。
+5. RunPod `/run`、`/status`、`/cancel`、job ID、result保持期間、timeoutとTTLの単位・最大値。[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)で初期方針を決定済み。
 6. D1 で claim winner の確定、submission 記録、outbox 作成を競合に耐える形で実行する方法。
 
 設計書だけでは確定できない次の項目は、該当 Phase の開始前に ADR で決定する。
 
 - `DELETE /api/jobs/:id` は論理削除を要求するが、提示された `jobs` スキーマには `deleted_at` がない。列追加と一覧からの除外規則を決める。
 - UI と Discord 通知は音声時間を表示するが、完了後の duration を保存する列がない。D1 に保存する実行メタデータを決める。
-- heartbeat 用 token の保存先がスキーマにない。webhook token と共用するか、専用 hash 列を追加するかを決める。
+- heartbeat用tokenは専用hash列へ保存する。初期migrationのwebhook tokenは[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)に従いPhase 4のforward-only migrationで除去する。
+- claim tokenの初期expiry、max workers 1でのqueue制御、投入をOrchestrator側で保留する条件をPhase 4開始時のbenchmarkに基づくADRで決める。決定前にproductionへ投入しない。
 - 「申告サイズと大きく異ならない」の許容差が未定義である。原則は完全一致とし、例外が必要なら根拠と上限を決める。
 - multipart ETag は内容ハッシュではないため、source の同一性判定にのみ使い、整合性検証を別途必要とするか決める。
 
@@ -97,7 +105,7 @@
   - job options と output format
   - ユーザー向け API request/response
   - R2 Queue event の正規化後形式
-  - RunPod input、claim、heartbeat、webhook、status
+  - RunPod input、claim、heartbeat、status
   - manifest
 - `packages/domain` に JobStatus、AttemptStatus、許可される状態遷移、公開エラーコードを定義する。
 - 初期 D1 migration を作成し、index と外部キーを含めてローカル D1 へ適用する。
@@ -120,9 +128,13 @@
 
 ## 6. Phase 2: 認証付き Web
 
+`POST /api/jobs`のPhase 2 checkpoint応答とPhase 3の最終credential応答の境界は
+[ADR 0007](./adr/0007-phase-2-job-admission-contract.md)を正とする。Phase 2単独では
+stagingまたはproductionへdeployしない。
+
 ### 実装
 
-- React、Vite、React Router による mobile-first の app shell を作成する。
+- React、Vite、React Router による mobile-first の app shell を作成する。静的assetとPages Functionsのresponse securityは[ADR 0005](./adr/0005-web-response-security-policy.md)に従う。
 - Pages Functions の `/api/*` に共通 middleware を導入する。
   - Access JWT の署名、issuer、audience、expiration、sub、email 検証
   - JWKS の安全なキャッシュと key rotation
@@ -137,8 +149,13 @@
 - cursor は `(created_at, id)` を用いて安定した降順 pagination にする。
 - owner 条件を repository query 自体に必ず含め、取得後だけの所有権判定に依存しない。
 - ジョブ作成時の上限、MIME、model、language、output format、同時実行数を検証する。
-- レート制限方式は Cloudflare の利用可能な機能を確認し、fail-open/fail-closed 方針を ADR に残す。
+- レート制限方式は Cloudflare の利用可能な機能を確認し、fail-open/fail-closed 方針を ADR に残す。[ADR 0004](./adr/0004-d1-job-admission-control.md)で決定済み。
 - トップ画面と履歴・詳細画面の読み取り UI を作成する。
+  - browser API clientは成功・失敗responseをZodで検証し、same-originかつ
+    `no-store`で取得する。
+  - 最近のjob、cursorによる履歴追加読み込み、詳細のactive status 5秒pollingを
+    loading・empty・error・retry状態とともに表示する。
+  - `/api/me`のCSRF tokenはmemoryだけに保持し、browser storageやlogへ保存しない。
 
 ### テストと完了条件
 
@@ -151,6 +168,12 @@
 ### コミット境界
 
 `phase-2: add authenticated job APIs and web shell`
+
+### 実装状況
+
+local checkpoint完了。Phase 3のR2 credential発行へ進む前に、Phase 2単独では
+deployしないという[ADR 0007](./adr/0007-phase-2-job-admission-contract.md)の制約を
+維持する。
 
 ## 7. Phase 3: アップロード
 
@@ -194,43 +217,60 @@
 
 ### Orchestrator
 
-- R2 presigned GET/PUT URL generator、RunPod client、token generator を interface として実装する。
-- claim と webhook/heartbeat token は十分な entropy を持つ値を生成し、D1 には SHA-256 hash だけを保存する。
-- attempt ごとに固有の result prefix と URL を発行する。
+- Phase 4の最初に[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)に従って旧RunPod contractを置き換え、claim tokenのexpiry/consumptionを追加するforward-only migrationを作成する。適用済み`0001_initial.sql`は変更しない。
+- transcription providerは`RunPodWhisperProvider`だけを実装する。Geminiなどの外部生成AI実装、credential、UI切替を作らず、音声と本文を外部生成AIへ送らない。
+- R2 presigned GET/PUT URL generator、RunPod client、token generatorをinterfaceとして実装する。
+- `/run`にはschema version、job ID、attempt ID、256 bit claim token、execution timeout、TTLだけを送る。presigned URL、R2 credential、callback/heartbeat、options、title、filename、email、provider、webhook、`s3Config`を含めない。
+- claimとheartbeat tokenはWeb Cryptoで十分なentropyを持つ値を生成し、D1にはSHA-256 hashと必要な発行・失効・消費時刻だけを保存する。RunPod API keyはOrchestrator secretだけに置く。
+- attemptごとに固有のresult prefixを決めるが、source/result URLとheartbeat tokenはwinner claim成功後に初めて発行する。
 - Queue からの submission を `SUBMISSION_PENDING` → `SUBMITTING` と条件付き遷移させる。
 - `/run` の成功、明示的失敗、timeout で結果不明のケースを別に扱い、submission の追跡情報を記録する。
 - claim API を実装する。
-  - hash の定時間比較
-  - current active attempt の確認
-  - winner 未確定時だけ原子的に winner を設定
-  - 同一 winner の再 claim は成功
-  - loser と古い generation は拒否
-  - 全 RunPod job ID を `runpod_submissions` に記録
-- heartbeat API を実装し、cancel 状態を返す。
+  - token hashの定時間比較、expiry、consumptionを確認
+  - current active attempt、generation、cancel状態を確認
+  - winner未確定時だけ原子的にRunPod job IDを設定
+  - claim成功時にtokenを消費し、同じwinnerからの再送を含む全再利用を拒否
+  - 別job ID、loser、古いgenerationを拒否
+  - 全RunPod job IDを`runpod_submissions`へ記録
+  - winner確定後にだけ、object/method/expiry限定R2 URLとheartbeatを返す
+- claim response喪失時は同じtokenへcapabilityを再発行せず、reconciliationで旧attemptを終了させ、新しいgenerationとtokenで再投入する。
+- presigned URLは初期2時間とし、最大入力で不足する場合の延長またはheartbeat更新方式をbenchmarkと脅威分析に基づいて確定する。
+- heartbeat APIを実装し、token、winner、attemptを検証してcancel状態を返す。URL更新を行う場合も同じ権限範囲を越えない。
 
 ### RunPod Worker
 
-- Python 3.12、Pydantic、httpx、RunPod SDK、固定した faster-whisper/CTranslate2 を用いる。
-- non-root の multi-stage Docker image を作り、model と revision を build 時に固定して取得する。
-- handler は claim 成功前に model load や source download を開始しない。
-- HTTPS と host allowlist を検証し、redirect を拒否する。
-- source を `/tmp` へ streaming download し、途中でも 2 GiB 上限を強制する。
-- ffprobe を引数配列で起動し、duration、stream 数、audio/video stream、codec/container を検証する。
-- faster-whisper を固定設定で実行し、segment 境界で cancel と heartbeat 状態を確認する。
-- Markdown、JSON、SRT を生成し、それぞれ SHA-256 と byte size を算出する。
-- 成果物を PUT した後、manifest を最後に PUT する。
-- `finally` で一時ディレクトリを削除する。
-- URL、token、本文を含まない構造化ログを出力する。
+- Python 3.12、Pydantic、httpx、固定したRunPod SDK、faster-whisper、CTranslate2を用いる。
+- non-rootのmulti-stage Docker imageを作り、modelとrevisionをbuild時に固定してimageへ含める。base imageはdigestで固定し、runtimeのmodel/code/package downloadをoffline testで拒否する。
+- production endpointはSecure Cloudを優先し、Flex、active workers 0、max workers 1、GPU 1、Network Volumeなし、永続diskなし、FlashBoot無効とする。例外は別ADRなしにdeployしない。
+- handlerは入力検証とclaim成功前にmodelのmemory load、source download、R2 URL取得、GPU推論を開始しない。
+- claim/heartbeat originはdeployment allowlistから構成する。受信URLはHTTPS、host、port、userinfo、解決後IPを検証し、localhost、private、link-local、metadata、許可外hostを拒否してredirectを無効化する。
+- sourceをtask固有`/tmp`へstreaming downloadし、途中でも2 GiB上限を強制する。
+- ffprobeを引数配列で起動し、duration、stream数、audio/video stream、codec/containerを検証する。
+- faster-whisperを固定設定で実行し、segment境界でcancelとheartbeat状態を確認する。
+- Markdownは利用者titleをRunPodへ渡さずgeneric headingで生成する。JSON、SRTと合わせてSHA-256とbyte sizeを算出する。
+- 成果物をPUTした後、manifestを最後にPUTする。
+- `finally`で一時ディレクトリを削除し、handler returnのworker refreshでworker stateを破棄する。
+- allowlist方式の共通log sanitizerを使い、URL、token、Authorization、filename、title、email、本文、segment、HTTP response body、完全なFFmpeg command/stderrを出力しない。
+- 最外層で例外をallowlist error codeへ正規化し、RunPod outputへraw exception、traceback、URL、path、本文を含めない。成功時もjob/attempt ID、status、duration、detected language、segment count、manifestWrittenだけを返す。
+- CIでSBOM、container vulnerability scan、Python dependency auditを生成する。high/critical findingの例外はADRへ期限と除去条件を残す。
 
 ### テストと完了条件
 
 - 二つの RunPod job が同じ attempt を claim しても winner は一つだけである。
-- loser と stale attempt は download、model load、Whisper を呼ばない。
+- claim tokenの再利用を同じwinnerの完全一致再送も含めて拒否し、別attempt、別RunPod job ID、期限切れ、cancel済みattemptも拒否する。
+- claim response喪失時は古いwinnerへcapabilityを再発行せず、新しいgenerationだけが回復処理を続行できる。
+- `/run` contractはpresigned URL、R2 key、PII、options、webhook、未知fieldを拒否する。
+- loserとstale attemptはURL発行、download、model load、Whisper、artifact PUTを呼ばない。
+- source/result URLは別object、別method、別attempt、期限切れで利用できない。
 - ffprobe、download、Whisper、artifact PUT、manifest PUT の各障害を個別にテストする。
-- サイズ・時間・host・redirect・stream 上限をテストする。
+- HTTP、userinfo、localhost、loopback、private、link-local、metadata、許可外host、host変更redirect、DNS rebinding対策をテストする。
+- サイズ・時間・stream上限をテストする。
 - cancel と heartbeat 障害の方針がテストされている。
 - 成果物が一部失敗した場合に manifest は作成されない。
-- 成否にかかわらず一時ファイルが削除される。
+- 正常、失敗、cancelのすべてで一時ファイルが削除され、worker refreshが要求される。
+- RunPod request、status、output、stdout、stderrにtoken、署名付きURL、元filename、本文、FFmpeg pathが含まれない。
+- modelはimage内の固定revisionだけからloadされ、networkを切ったcontainer testでも起動できる。
+- endpoint設定を`runpodctl`で取得し、Secure Cloud、0〜1 worker、volumeなし、FlashBoot無効、timeout/TTLが期待値と一致することをstagingで確認する。
 
 ### コミット境界
 
@@ -240,13 +280,14 @@
 
 ### 実装
 
-- RunPod webhook endpoint をブラウザ用 API と別 host/route に実装する。
-- webhook token を検証後、本文を完了根拠にせず `/status/{job_id}` を照会する。
-- webhook と Cron で共有する finalize service を実装する。
+- per-job RunPod webhookは使用せず、5分以内の間隔で`/status/{job_id}`をpollするreconciliationを実装する。
+- pollと手動運用から共有するfinalize serviceを実装する。
   - submission、winner、active attempt を確認
   - RunPod terminal status を確認
+  - 観測したterminal statusを30分のRunPod result保持期限内にD1へ保存
   - manifest を GET して schema、job ID、attempt ID、complete を検証
   - 各 artifact を HEAD し、key と size を検証
+  - 必要に応じてartifactのSHA-256を検証
   - attempt と job を条件付きで COMPLETED にする
   - 同じ D1 batch で一意な notification outbox を作成
 - 5 分間隔の reconciliation Cron を実装する。
@@ -262,11 +303,11 @@
 
 ### テストと完了条件
 
-- webhook の重複、本文と status の不一致、不正 token を安全に処理する。
+- status pollの重複、out-of-order、timeout、404、未知status、保持期限切れを安全に処理する。
 - loser と古い attempt は current job を更新できない。
 - manifest または artifact が不足する場合は COMPLETED にしない。
-- webhook と Cron が同時に finalize しても状態更新と outbox は一度だけである。
-- webhook が失われても Cron で完了できる。
+- 複数Cronまたは手動reconcileが同時にfinalizeしても状態更新とoutboxは一度だけである。
+- RunPod statusを観測できなかったjobはmanifestだけでCOMPLETEDにならない。
 - Discord 障害は job 完了を取り消さず、outbox から再試行される。
 - artifact URL は所有者だけが取得でき、API 応答やログへ不要に保持されない。
 
@@ -283,7 +324,7 @@
   - D1 条件付き更新
   - Queue ack/retry
   - RunPod request timeout と応答喪失
-  - webhook 重複・欠落
+  - status poll重複・欠落・result保持期限切れ
   - Discord rate limit と 5xx
 - 状態遷移と監査イベントを検証できる integration test harness を作成する。
 - DLQ の確認、replay、恒久失敗化を運用手順へ記載する。
@@ -294,10 +335,10 @@
 - `/run` 成功後に HTTP response が失われ、再投入される。
 - `/run` 成功後に D1 書込みが失敗する。
 - Queue の D1 更新後に ack が失敗する。
-- winner と loser の webhook が逆順に到着する。
-- retry 後に古い generation の完了が到着する。
+- winnerとloserのstatusが逆順に観測される。
+- retry後に古いgenerationのterminal statusが観測される。
 - artifact の一部だけがあり、manifest がない。
-- Cron と webhook が同時に完了処理する。
+- 二つのCron executionが同時に完了処理する。
 - source が処理前または処理中に上書きされる。
 
 ### 完了条件
@@ -328,6 +369,8 @@
 - 未完了 multipart、source、results、監査情報の retention を環境変数化する。
 - object 削除を非同期かつ冪等に実行する。
 - ユーザー削除を最優先し、論理削除済み job を通常 API から除外する。
+- user deleteでsource、全attempt artifact、manifest、IndexedDB metadataを削除し、D1のtitle、filename、email、本文参照を物理削除または不可逆に消去する。
+- 監査tombstoneを残す場合はkeyed job ID hash、削除日時、削除結果、allowlist error codeだけを別tableへ保持する。
 - R2 lifecycle rule とアプリ側 cleanup の責任範囲を文書化する。
 
 ### 文書化
@@ -346,7 +389,7 @@
 - 通信失敗から再試行でき、upload 後はブラウザを閉じてもサーバー処理が継続する。
 - service worker cache に API response や文字起こし本文が存在しない。
 - staging で Discord 通知、retention、削除、Cron recovery を smoke test する。
-- [spec.md](./spec.md) の受け入れ条件をチェックリストとして全件確認する。
+- [spec.md](./spec.md)と[additional-spec.md](./additional-spec.md)の受け入れ条件をチェックリストとして全件確認する。
 
 ### コミット境界
 
@@ -361,7 +404,7 @@ Android Share Target は設計書どおり別 PR とする。
 - `packages/domain`: 状態遷移、エラー分類、キー生成規則の純粋な単体テスト
 - `packages/contracts`: schema の正常・異常・境界値テスト
 - `apps/web`: component、Access/CSRF middleware、API repository integration
-- `apps/orchestrator`: Queue、claim、webhook、Cron、outbox の Workers integration
+- `apps/orchestrator`: Queue、claim、status polling、Cron、outbox の Workers integration
 - `apps/runpod-worker`: Pydantic、URL 検証、ffprobe、handler、cleanup の pytest
 - `e2e`: 外部サービスを mock した Playwright の利用者フロー
 

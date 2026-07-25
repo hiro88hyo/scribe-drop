@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ACTIVE_JOB_STATUSES,
   ATTEMPT_STATUSES,
+  JOB_CREATION_WINDOW_SECONDS,
   JOB_STATUSES,
+  MAX_ACTIVE_JOBS_PER_OWNER,
+  MAX_JOB_CREATIONS_PER_WINDOW,
   canRetryJob,
   canTransitionAttemptStatus,
   canTransitionJobStatus,
@@ -67,6 +71,21 @@ function transitionKey(from: JobStatus | AttemptStatus, to: JobStatus | AttemptS
 }
 
 describe("job state transitions", () => {
+  it("defines the versioned Phase 2 admission limits", () => {
+    expect(ACTIVE_JOB_STATUSES).toEqual([
+      "CREATED",
+      "UPLOADING",
+      "UPLOADED",
+      "SUBMISSION_PENDING",
+      "SUBMITTING",
+      "RUNNING",
+      "CANCEL_REQUESTED",
+    ]);
+    expect(MAX_ACTIVE_JOBS_PER_OWNER).toBe(3);
+    expect(MAX_JOB_CREATIONS_PER_WINDOW).toBe(10);
+    expect(JOB_CREATION_WINDOW_SECONDS).toBe(600);
+  });
+
   it("matches the complete allowed and forbidden transition matrix", () => {
     for (const from of JOB_STATUSES) {
       for (const to of JOB_STATUSES) {

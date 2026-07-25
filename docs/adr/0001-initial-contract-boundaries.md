@@ -1,6 +1,6 @@
 # ADR 0001: 初期契約境界と attempt 状態
 
-- Status: Accepted
+- Status: Accepted; RunPod webhookとWorker outputの決定はADR 0006で一部superseded
 - Date: 2026-07-25
 
 ## Context
@@ -12,7 +12,7 @@
 - `job_attempts.status` の列挙値
 - RunPod `/status` と webhook を正規化するときの状態値
 
-RunPod の外部payloadは、保存用のドメイン状態や利用者向けAPIへ直接流用しない。
+RunPod の外部payloadは、保存用のドメイン状態や利用者向けAPIへ直接流用しない。RunPod webhook、`/run` input、claim response、Worker outputに関する後続判断は[ADR 0006](./0006-minimal-runpod-capability-exchange.md)を正とする。
 
 ## Decision
 
@@ -21,7 +21,7 @@ RunPod の外部payloadは、保存用のドメイン状態や利用者向けAPI
 - attempt はsource検証後に作成するため、状態は `SUBMISSION_PENDING`、`SUBMITTING`、`RUNNING`、`CANCEL_REQUESTED`、`COMPLETED`、`FAILED`、`CANCELLED` とする。retryは既存attemptを戻さず、新しいgenerationを作成する。
 - RunPod状態は公式APIで確認できる `IN_QUEUE`、`IN_PROGRESS`、`COMPLETED`、`FAILED`、`CANCELLED`、`TIMED_OUT` を外部契約として検証し、その後に内部状態へ変換する。
 - Zod objectは未知フィールドを拒否する。RunPodの仕様追加は暗黙に保持せず、契約とfixtureを明示的に更新する。
-- RunPodへ返すWorker outputはjob ID、attempt ID、manifest keyなどの完了メタデータだけとし、文字起こし本文や署名付きURLを含めない。
+- 当初、RunPodへ返すWorker outputはjob ID、attempt ID、manifest keyなどの完了メタデータだけとした。このfield集合はADR 0006でsupersededされ、現在はjob/attempt ID、allowlist済みstatusと統計値、`manifestWritten`だけを返す。文字起こし本文や署名付きURLを含めない原則は維持する。
 
 参照:
 

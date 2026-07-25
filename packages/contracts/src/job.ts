@@ -4,6 +4,7 @@ import {
   MAX_FILE_SIZE_BYTES,
   MAX_JOB_TITLE_LENGTH,
   MAX_ORIGINAL_FILENAME_LENGTH,
+  MAX_RECORDING_DURATION_SECONDS,
   allowedMediaTypeSchema,
   httpsUrlSchema,
   jobStatusSchema,
@@ -81,6 +82,7 @@ export const jobSummarySchema = z
     actualSizeBytes: z.number().int().nonnegative().nullable(),
     completedAt: utcDateTimeSchema.nullable(),
     createdAt: utcDateTimeSchema,
+    durationSeconds: z.number().nonnegative().max(MAX_RECORDING_DURATION_SECONDS).nullable(),
     errorCode: publicErrorCodeSchema.nullable(),
     expectedSizeBytes: z.number().int().positive().max(MAX_FILE_SIZE_BYTES),
     id: ulidSchema,
@@ -157,4 +159,6 @@ export type JobSummary = z.infer<typeof jobSummarySchema>;
 export type JobDetail = z.infer<typeof jobDetailSchema>;
 export type ListJobsQuery = z.infer<typeof listJobsQuerySchema>;
 export type ListJobsResponse = z.infer<typeof listJobsResponseSchema>;
+export type JobActionResponse = z.infer<typeof jobActionResponseSchema>;
+export type MeResponse = z.infer<typeof meResponseSchema>;
 export type ApiErrorResponse = z.infer<typeof apiErrorResponseSchema>;

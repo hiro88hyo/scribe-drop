@@ -115,10 +115,41 @@ OrchestratorのWrangler設定をsource of truthとして、未適用migrationを
 pnpm d1:migrate:local
 ```
 
-CI相当の検証は一時ディレクトリへ空のD1を作成し、migrationの再適用、table、index、外部キー、CHECK制約、active attempt整合性を確認する。repository内のローカルD1状態は変更しない。
+CI相当の検証は一時ディレクトリへ空のD1を作成し、migrationの再適用、table、
+index、admission query plan、外部キー、CHECK制約、active attempt整合性を確認する。
+repository内のローカルD1状態は変更しない。
 
 ```bash
 pnpm d1:verify
 ```
 
 `apps/orchestrator/wrangler.toml` と `apps/web/wrangler.toml` のUUIDは安全なplaceholderである。remote操作やdeployの前に、対象環境で作成した実resource IDへ置き換え、accountとenvironmentを確認する。
+
+## Web
+
+Viteのclient開発serverは次で起動する。
+
+```bash
+pnpm --filter @scribe-drop/web run dev
+```
+
+このserverはReact UIの開発用であり、Pages Functionsや`public/_headers`の適用を再現しない。Functionsを含むproduction buildは次で検証する。
+
+```bash
+pnpm --filter @scribe-drop/web run build
+```
+
+Cloudflare runtime、静的`_headers`、API middleware、実D1 migration、所有権query、
+job admissionの境界・並行実行テストは次で実行する。WranglerでPages Functionsを
+compileし、Miniflareのローカルlistenerを使用する。
+
+```bash
+pnpm --filter @scribe-drop/web run test:workers
+```
+
+Cloudflare test/config専用tsconfigだけは、公開中のMiniflare型定義にbundle内参照が残るため`skipLibCheck`を有効にしている。clientとFunctionsはroot標準どおり無効のままとする。この例外は依存更新時に再確認し、不要になれば削除する。
+
+browser API clientは`/api/me`、`/api/jobs`、`/api/jobs/:id`だけをsame-originかつ
+`cache: no-store`で取得し、responseを`packages/contracts`のZod schemaで再検証する。
+Access JWTやAccess cookieをJavaScriptへコピーしない。`/api/me`のCSRF tokenは
+React stateだけに保持し、localStorage、sessionStorage、IndexedDB、URLへ保存しない。

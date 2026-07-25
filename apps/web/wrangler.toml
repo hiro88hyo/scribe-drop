@@ -2,6 +2,9 @@ name = "scribe-drop-web-staging"
 pages_build_output_dir = "./dist"
 compatibility_date = "2026-07-25"
 
+[vars]
+R2_BUCKET_NAME = "recording-transcriber-staging"
+
 [[d1_databases]]
 binding = "SCRIBE_DROP_DB"
 database_name = "scribe-drop-staging"
