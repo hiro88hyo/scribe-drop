@@ -224,8 +224,9 @@ ackまたは指数backoff付きretryを指定し、一件の一時障害で同�
 [operations.md](./operations.md)の手順で調査する。
 
 staging checkpointでは、環境専用のD1、R2、Queue、DLQ、Pages projectを作成し、3件の
-forward-only migration、`incoming/` prefixのEvent Notification、staging Pages origin
-だけを許可するR2 CORSを適用した。固定dummy objectの実`PutObject`通知がQueue consumerへ
+forward-only migration、`incoming/` prefixのEvent Notification、設定済みのstaging
+exact originだけを許可するR2 CORSを適用した。固定dummy objectの実`PutObject`通知が
+Queue consumerへ
 到達し、不許可actionとしてjobを安全に`FAILED`へ遷移することを確認し、検証用R2 objectと
 D1 rowは削除した。OrchestratorはQueue consumerとしてstagingへdeploy済みである。Webは
 Cloudflare Access application/policyとsecretが揃うまでdeployせず、実

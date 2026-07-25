@@ -24,9 +24,10 @@ WebはCloudflare Access application/policyとsecretが揃うまでdeployしな�
 `CompleteMultipartUpload`のETag、temporary credentialの拒否境界・abort、DLQ到達は
 未完了である。
 
-`apps/orchestrator/wrangler.toml`と`apps/web/wrangler.toml`の全ゼロIDは安全な
-placeholderであり、remote操作には使用できない。実IDは追跡対象へ書かず、対象accountを
-確認してから`pnpm cloudflare:config:staging`でgit ignoredのWrangler設定へ生成する。
+`apps/orchestrator/wrangler.toml`と`apps/web/wrangler.toml`の全ゼロIDおよびoriginは
+安全なplaceholderであり、remote操作には使用できない。実IDと実originは追跡対象へ
+書かず、対象accountを確認してから`pnpm cloudflare:config:staging`でgit ignoredの
+Wrangler設定へ生成する。
 
 ## CLIと認証
 
@@ -87,9 +88,9 @@ temporary credentialを使うbrowser multipart検証は未完了である。
 
 D1には`0001_initial.sql`、`0002_job_admission_indexes.sql`、
 `0003_attempt_capability_lifecycle.sql`を順に適用した。R2 Event Notificationは
-`incoming/` prefixのobject createをmain Queueへ送る。R2 CORSのsource of truthは
-`infra/cloudflare/r2-cors.staging.json`であり、staging Pages originからのpreflightは
-204、不許可originは403になることを実bucketで確認した。
+`incoming/` prefixのobject createをmain Queueへ送る。R2 CORSの追跡対象templateは
+`infra/cloudflare/r2-cors.staging.json`であり、設定済みのstaging exact originからの
+preflightは204、不許可originは403になることを実bucketで確認した。
 
 固定dummy objectを`incoming/`へ`PutObject`し、実R2 notificationがQueueと
 Orchestratorへ到達して、不許可actionとして対象jobを`PROCESSING_FAILED`で`FAILED`へ
@@ -116,13 +117,17 @@ subscription、prefix、Queue binding、Worker consumer、R2 HEAD、D1 CASの実
 
 - `CLOUDFLARE_ACCOUNT_ID`
 - `SCRIBE_DROP_STAGING_D1_DATABASE_ID`
+- `SCRIBE_DROP_STAGING_WEB_ORIGIN`
 
 ```bash
 pnpm cloudflare:config:staging:orchestrator
 git check-ignore .wrangler/deploy/orchestrator-staging.toml
+pnpm cloudflare:config:staging:r2-cors
+git check-ignore .wrangler/deploy/r2-cors-staging.json
 ```
 
-Web設定にはAccess application作成後の次の非secret値も必要である。
+R2 CORSはcustom domainがactiveになってから追跡外設定を生成して適用する。Web設定には
+同じexact originと、Access application作成後の次の非secret値が必要である。
 
 - `SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`
 - `SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`
@@ -162,7 +167,8 @@ resourceの作成・変更・削除とdeployの直前には、CLIの認証先、
 
 R2 S3-compatible APIは`wrangler dev`のlocal R2 emulationでは利用できないため、
 browser uploadの自動テストはfake transportを使う。CORS、temporary credentialの
-action/object拒否、multipart、abortは専用staging bucketとstaging originで確認する。
+action/object拒否、multipart、abortは専用staging bucketと設定済みのstaging exact
+originで確認する。
 Workers R2 bindingによるupload-completeのHEAD、size、ETag、D1状態遷移はMiniflareで
 自動検証する。OrchestratorのQueue consumerも同じMiniflare上で、実migrationを適用した
 D1とR2 bindingを使い、重複配信、upload-completeとの順序逆転、サイズ不一致、

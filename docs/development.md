@@ -141,15 +141,17 @@ pnpm cloudflare:config:staging:orchestrator
 git check-ignore .wrangler/deploy/orchestrator-staging.toml
 ```
 
-Web設定の生成にはAccess application作成後のteam domainとaudienceも必要である。
+R2 CORS設定とWeb設定の生成には、Accessで保護する単一exact originも必要である。
 
 ```bash
+pnpm cloudflare:config:staging:r2-cors
+git check-ignore .wrangler/deploy/r2-cors-staging.json
 pnpm cloudflare:config:staging:web
 git check-ignore apps/web/.wrangler/deploy/wrangler.toml
 ```
 
 共通で`CLOUDFLARE_ACCOUNT_ID`と`SCRIBE_DROP_STAGING_D1_DATABASE_ID`を使う。Webでは
-さらに`SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`と
+さらに`SCRIBE_DROP_STAGING_WEB_ORIGIN`、`SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`と
 `SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`を使う。値はcredential storeまたはCI secretから
 環境へ渡し、shell scriptや追跡ファイルへ埋め込まない。
 

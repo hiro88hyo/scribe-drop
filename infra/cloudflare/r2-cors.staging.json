@@ -3,7 +3,7 @@
     {
       "id": "scribe-drop-browser-multipart-staging",
       "allowed": {
-        "origins": ["https://scribe-drop-web-staging.pages.dev"],
+        "origins": ["https://replace-with-staging-web.example.invalid"],
         "methods": ["POST", "PUT", "DELETE"],
         "headers": [
           "authorization",

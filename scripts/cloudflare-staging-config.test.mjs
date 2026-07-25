@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   renderOrchestratorStagingConfig,
+  renderR2CorsStagingConfig,
   renderWebStagingConfig,
 } from "./cloudflare-staging-config.mjs";
 
@@ -11,6 +12,7 @@ const identifiers = {
   accessTeamDomain: "https://scribe-drop-staging.cloudflareaccess.com",
   accountId: "a".repeat(32),
   d1DatabaseId: "12345678-1234-4abc-8def-1234567890ab",
+  webOrigin: "https://scribe-drop-staging.example.invalid",
 };
 
 test("renders only the orchestrator staging identifiers", () => {
@@ -41,6 +43,7 @@ test("renders the web staging identifiers and ignored-config build path", () => 
   const template = `pages_build_output_dir = "./dist"
 ACCESS_AUDIENCES = "[\\"replace-with-access-audience\\"]"
 ACCESS_TEAM_DOMAIN = "https://replace-with-team.cloudflareaccess.com"
+ALLOWED_ORIGIN = "https://replace-with-staging-web.example.invalid"
 CLOUDFLARE_ACCOUNT_ID = "${"0".repeat(32)}"
 database_id = "00000000-0000-0000-0000-000000000101"
 `;
@@ -53,8 +56,26 @@ database_id = "00000000-0000-0000-0000-000000000101"
     rendered,
     /ACCESS_TEAM_DOMAIN = "https:\/\/scribe-drop-staging\.cloudflareaccess\.com"/u,
   );
+  assert.match(rendered, /ALLOWED_ORIGIN = "https:\/\/scribe-drop-staging\.example\.invalid"/u);
   assert.match(rendered, new RegExp(`CLOUDFLARE_ACCOUNT_ID = "${"a".repeat(32)}"`));
   assert.match(rendered, /database_id = "12345678-1234-4abc-8def-1234567890ab"/u);
+});
+
+test("renders the R2 CORS staging origin", () => {
+  const template = `{
+  "rules": [
+    {
+      "allowed": {
+        "origins": ["https://replace-with-staging-web.example.invalid"]
+      }
+    }
+  ]
+}
+`;
+
+  const rendered = renderR2CorsStagingConfig(template, identifiers);
+
+  assert.match(rendered, /"origins": \["https:\/\/scribe-drop-staging\.example\.invalid"\]/u);
 });
 
 test("rejects missing identifiers and template drift", () => {
@@ -75,6 +96,14 @@ database_id = "00000000-0000-0000-0000-000000000101"
         { ...identifiers, accessTeamDomain: "https://example.com" },
       ),
     /SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN/u,
+  );
+  assert.throws(
+    () =>
+      renderR2CorsStagingConfig(`"origins": ["https://replace-with-staging-web.example.invalid"]`, {
+        ...identifiers,
+        webOrigin: "https://example.invalid/path",
+      }),
+    /SCRIBE_DROP_STAGING_WEB_ORIGIN/u,
   );
   assert.throws(
     () =>

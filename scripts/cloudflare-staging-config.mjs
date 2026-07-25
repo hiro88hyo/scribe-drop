@@ -8,6 +8,7 @@ const accountIdPlaceholder = "0".repeat(32);
 const accessAudiencePlaceholder = "replace-with-access-audience";
 const accessTeamDomainPlaceholder = "https://replace-with-team.cloudflareaccess.com";
 const stagingD1DatabaseIdPlaceholder = "00000000-0000-0000-0000-000000000101";
+const webOriginPlaceholder = "https://replace-with-staging-web.example.invalid";
 
 function requireIdentifier(value, pattern, name) {
   if (typeof value !== "string" || !pattern.test(value)) {
@@ -30,6 +31,23 @@ function replaceOnce(source, searchValue, replacement, label) {
   return `${source.slice(0, firstIndex)}${replacement}${source.slice(
     firstIndex + searchValue.length,
   )}`;
+}
+
+function requireExactHttpsOrigin(value) {
+  if (typeof value !== "string") {
+    throw new Error("SCRIBE_DROP_STAGING_WEB_ORIGIN is missing or invalid");
+  }
+
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.origin !== value) {
+      throw new Error("invalid origin");
+    }
+  } catch {
+    throw new Error("SCRIBE_DROP_STAGING_WEB_ORIGIN is missing or invalid");
+  }
+
+  return value;
 }
 
 function validatedResourceIdentifiers(identifiers) {
@@ -86,6 +104,7 @@ export function renderWebStagingConfig(template, identifiers) {
     accessTeamDomainPattern,
     "SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN",
   );
+  const webOrigin = requireExactHttpsOrigin(identifiers.webOrigin);
   let rendered = replaceOnce(
     template,
     `CLOUDFLARE_ACCOUNT_ID = "${accountIdPlaceholder}"`,
@@ -110,11 +129,27 @@ export function renderWebStagingConfig(template, identifiers) {
     `ACCESS_AUDIENCES = ${JSON.stringify(JSON.stringify([accessAudience]))}`,
     "web staging Access audience",
   );
+  rendered = replaceOnce(
+    rendered,
+    `ALLOWED_ORIGIN = "${webOriginPlaceholder}"`,
+    `ALLOWED_ORIGIN = "${webOrigin}"`,
+    "web staging origin",
+  );
 
   return replaceOnce(
     rendered,
     'pages_build_output_dir = "./dist"',
     'pages_build_output_dir = "../../dist"',
     "web build output directory",
+  );
+}
+
+export function renderR2CorsStagingConfig(template, identifiers) {
+  const webOrigin = requireExactHttpsOrigin(identifiers.webOrigin);
+  return replaceOnce(
+    template,
+    `"origins": ["${webOriginPlaceholder}"]`,
+    `"origins": ["${webOrigin}"]`,
+    "R2 CORS staging origin",
   );
 }

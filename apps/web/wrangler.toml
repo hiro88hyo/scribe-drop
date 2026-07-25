@@ -5,7 +5,7 @@ compatibility_date = "2026-07-25"
 [vars]
 ACCESS_AUDIENCES = "[\"replace-with-access-audience\"]"
 ACCESS_TEAM_DOMAIN = "https://replace-with-team.cloudflareaccess.com"
-ALLOWED_ORIGIN = "https://scribe-drop-web-staging.pages.dev"
+ALLOWED_ORIGIN = "https://replace-with-staging-web.example.invalid"
 APP_ENV = "staging"
 CLOUDFLARE_ACCOUNT_ID = "00000000000000000000000000000000"
 R2_BUCKET_NAME = "recording-transcriber-staging"

@@ -2,15 +2,17 @@
 
 ## 適用範囲
 
-staging Webの正規origin
-`https://scribe-drop-web-staging.pages.dev`全体をCloudflare Accessで保護する。Accessを
-前段に置くだけでAPI認証済みとはみなさず、Pages Functionsは
+`SCRIBE_DROP_STAGING_WEB_ORIGIN`で指定するstaging Webの単一正規origin全体を
+Cloudflare Accessで保護する。実originはCloudflareと追跡外設定だけに保持し、
+repositoryやdeployment記録には保存しない。Accessを前段に置くだけでAPI認証済みとは
+みなさず、Pages Functionsは
 [ADR 0003](./adr/0003-access-jwt-and-csrf-boundary.md)に従って
 `Cf-Access-Jwt-Assertion`を再検証する。
 
 Access application、policy、identity provider、Pages secretが揃い、未認証preflightが
-成功するまでWebをdeployしない。preview branchや別の`*.pages.dev` hostnameを公開経路に
-追加する場合も、先にenvironment固有のAccess applicationとaudienceを用意する。
+成功するまでWebをdeployしない。Pages custom domainを先に接続してactiveになったことを
+確認し、その正規originをAccess applicationへ設定する。preview branchや別hostnameを
+公開経路に追加する場合も、先にenvironment固有のAccess applicationとaudienceを用意する。
 
 ## Staging application
 
@@ -20,7 +22,7 @@ applicationを作成する。
 | 項目                      | 値・制約                                        |
 | ------------------------- | ----------------------------------------------- |
 | Name                      | `scribe-drop-web-staging`                       |
-| Domain                    | `scribe-drop-web-staging.pages.dev`             |
+| Domain                    | `SCRIBE_DROP_STAGING_WEB_ORIGIN`のhost          |
 | Type                      | Self-hosted                                     |
 | Session duration          | 24時間                                          |
 | Allowed identity provider | staging用Google identity provider 1件だけ       |
@@ -41,6 +43,7 @@ application作成後、次の非secret値を取得する。
 
 値は追跡対象ファイルへ直接書かず、設定生成時だけ次の環境変数で渡す。
 
+- `SCRIBE_DROP_STAGING_WEB_ORIGIN`
 - `SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`
 - `SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`
 
@@ -83,8 +86,8 @@ pnpm cloudflare:config:staging:web
 pnpm cloudflare:access:verify:staging
 ```
 
-検証コマンドは`SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`を必要とし、次の場合にfail
-closedとする。
+検証コマンドは`SCRIBE_DROP_STAGING_WEB_ORIGIN`と
+`SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`を必要とし、次の場合にfail closedとする。
 
 - 2xx、401、403、404などAccess login redirect以外を返す。
 - `Location`が欠落している。

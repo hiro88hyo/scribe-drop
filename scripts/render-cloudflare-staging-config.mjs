@@ -12,6 +12,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import {
+  renderR2CorsStagingConfig,
   renderOrchestratorStagingConfig,
   renderWebStagingConfig,
 } from "./cloudflare-staging-config.mjs";
@@ -19,19 +20,21 @@ import {
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(scriptDirectory, "..");
 const orchestratorOutputDirectory = path.join(repositoryRoot, ".wrangler", "deploy");
+const r2CorsOutput = path.join(orchestratorOutputDirectory, "r2-cors-staging.json");
 const webOutputDirectory = path.join(repositoryRoot, "apps", "web", ".wrangler", "deploy");
 const webFunctionsLink = path.join(webOutputDirectory, "functions");
 const webFunctionsTarget = "../../functions";
 const target = process.argv[2];
-const allowedTargets = new Set(["all", "orchestrator", "web"]);
+const allowedTargets = new Set(["all", "orchestrator", "r2-cors", "web"]);
 if (target === undefined || !allowedTargets.has(target)) {
-  throw new Error("Expected config target: all, orchestrator, or web");
+  throw new Error("Expected config target: all, orchestrator, r2-cors, or web");
 }
 const identifiers = {
   accessAudience: process.env.SCRIBE_DROP_STAGING_ACCESS_AUDIENCE,
   accessTeamDomain: process.env.SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN,
   accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
   d1DatabaseId: process.env.SCRIBE_DROP_STAGING_D1_DATABASE_ID,
+  webOrigin: process.env.SCRIBE_DROP_STAGING_WEB_ORIGIN,
 };
 
 const configs = [
@@ -40,6 +43,12 @@ const configs = [
     render: renderOrchestratorStagingConfig,
     target: "orchestrator",
     template: path.join(repositoryRoot, "apps", "orchestrator", "wrangler.toml"),
+  },
+  {
+    output: r2CorsOutput,
+    render: renderR2CorsStagingConfig,
+    target: "r2-cors",
+    template: path.join(repositoryRoot, "infra", "cloudflare", "r2-cors.staging.json"),
   },
   {
     output: path.join(webOutputDirectory, "wrangler.toml"),

@@ -1,4 +1,3 @@
-const expectedOrigin = "https://scribe-drop-web-staging.pages.dev";
 const teamDomainPattern =
   /^https:\/\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.cloudflareaccess\.com$/u;
 const redirectStatuses = new Set([301, 302, 303, 307, 308]);
@@ -13,8 +12,20 @@ function validateTeamDomain(teamDomain) {
   return new URL(teamDomain);
 }
 
-async function verifyPath(fetchImplementation, teamUrl, path) {
-  const response = await fetchImplementation(`${expectedOrigin}${path}`, {
+function validateWebOrigin(webOrigin) {
+  try {
+    const url = new URL(webOrigin);
+    if (url.protocol !== "https:" || url.origin !== webOrigin) {
+      throw new Error("invalid origin");
+    }
+    return url;
+  } catch {
+    throw new Error("SCRIBE_DROP_STAGING_WEB_ORIGIN must be an exact HTTPS origin");
+  }
+}
+
+async function verifyPath(fetchImplementation, webUrl, teamUrl, path) {
+  const response = await fetchImplementation(`${webUrl.origin}${path}`, {
     headers: {
       Accept: "text/html,application/json",
       "User-Agent": "ScribeDrop-Access-Preflight/1.0",
@@ -33,7 +44,7 @@ async function verifyPath(fetchImplementation, teamUrl, path) {
     throw new Error(`${path} Access redirect is missing Location`);
   }
 
-  const redirectUrl = new URL(location, expectedOrigin);
+  const redirectUrl = new URL(location, webUrl.origin);
   if (
     redirectUrl.origin !== teamUrl.origin ||
     !redirectUrl.pathname.startsWith("/cdn-cgi/access/login/")
@@ -47,10 +58,11 @@ async function verifyPath(fetchImplementation, teamUrl, path) {
   };
 }
 
-export async function verifyStagingAccess(fetchImplementation, teamDomain) {
+export async function verifyStagingAccess(fetchImplementation, webOrigin, teamDomain) {
+  const webUrl = validateWebOrigin(webOrigin);
   const teamUrl = validateTeamDomain(teamDomain);
   return Promise.all([
-    verifyPath(fetchImplementation, teamUrl, "/"),
-    verifyPath(fetchImplementation, teamUrl, "/api/me"),
+    verifyPath(fetchImplementation, webUrl, teamUrl, "/"),
+    verifyPath(fetchImplementation, webUrl, teamUrl, "/api/me"),
   ]);
 }

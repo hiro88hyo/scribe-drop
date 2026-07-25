@@ -28,12 +28,16 @@ Orchestrator用
 `apps/web/.wrangler/deploy/wrangler.toml`を使う。生成物はgit ignoredであり、値を
 logへ出さない。
 
-Web設定は`pnpm cloudflare:config:staging:web`で生成し、上記2変数に加えて次の非secret値を
-環境から渡す。
+R2 CORSは`pnpm cloudflare:config:staging:r2-cors`、Web設定は
+`pnpm cloudflare:config:staging:web`で生成する。次の非secret値も環境から渡す。
 
+- `SCRIBE_DROP_STAGING_WEB_ORIGIN`: Accessで保護するstaging Webの単一exact HTTPS origin
 - `SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`:
   `https://<team>.cloudflareaccess.com`のexact origin
 - `SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`: staging Access applicationの単一AUD tag
+
+実originはCloudflareとgit ignoredの生成設定だけに保持し、追跡対象ファイルやdeployment
+記録へ保存しない。
 
 ## Web / Pages Functions
 

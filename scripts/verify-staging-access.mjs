@@ -5,6 +5,7 @@ import { verifyStagingAccess } from "./staging-access-verifier.mjs";
 try {
   const results = await verifyStagingAccess(
     fetch,
+    process.env.SCRIBE_DROP_STAGING_WEB_ORIGIN,
     process.env.SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN,
   );
   for (const result of results) {

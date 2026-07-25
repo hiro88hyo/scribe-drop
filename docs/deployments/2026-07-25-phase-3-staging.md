@@ -53,7 +53,7 @@ applicationだけをrollbackする際にQueue consumerを削除または再作�
 - 生成した追跡外Web deploy directoryからのPages Functions build: 成功。
 - D1 migration list: 3件の適用後に未適用なし。
 - 実R2 CORS preflight:
-  - staging Pagesのexact originは204となり、設定したallow-origin、method、header、
+  - 設定時点のstaging exact originは204となり、設定したallow-origin、method、header、
     exposed `ETag`、max ageを返した。
   - allowlist外originは403となり、allow-originを返さなかった。
 - 実R2 notification smoke test:
