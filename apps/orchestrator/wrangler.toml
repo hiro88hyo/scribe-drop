@@ -1,0 +1,43 @@
+name = "scribe-drop-orchestrator-local"
+main = "src/index.ts"
+compatibility_date = "2026-07-25"
+workers_dev = false
+
+[[d1_databases]]
+binding = "SCRIBE_DROP_DB"
+database_name = "scribe-drop-local"
+database_id = "00000000-0000-0000-0000-000000000001"
+migrations_dir = "../../migrations"
+
+[[r2_buckets]]
+binding = "RECORDINGS"
+bucket_name = "scribe-drop-local"
+
+[[queues.consumers]]
+queue = "recording-uploaded-local"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 5
+retry_delay = 60
+dead_letter_queue = "recording-uploaded-dlq-local"
+
+[env.staging]
+name = "scribe-drop-orchestrator-staging"
+
+[[env.staging.d1_databases]]
+binding = "SCRIBE_DROP_DB"
+database_name = "scribe-drop-staging"
+database_id = "00000000-0000-0000-0000-000000000101"
+migrations_dir = "../../migrations"
+
+[[env.staging.r2_buckets]]
+binding = "RECORDINGS"
+bucket_name = "recording-transcriber-staging"
+
+[[env.staging.queues.consumers]]
+queue = "recording-uploaded-staging"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 5
+retry_delay = 60
+dead_letter_queue = "recording-uploaded-dlq-staging"

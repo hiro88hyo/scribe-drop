@@ -1,0 +1,76 @@
+# 環境変数とbinding
+
+## 原則
+
+- local、staging、productionで値とresourceを共有しない。
+- secretの実値は`.dev.vars`、`.env`、Cloudflare secret、RunPod secret、CI secretだけへ保存し、リポジトリへ追加しない。
+- exampleファイルにはdummy値だけを置く。`local-only-`、`replace-with-`、`example.invalid`、全ゼロIDは実環境で使用しない。
+- 起動時に必要な値を検証し、欠落・未知の列挙値・不正URL・不正な数値ではfail fastにする。
+- secret、token、署名付きURL、メールアドレス、録音・文字起こし本文をログへ出さない。
+
+## Cloudflare binding
+
+bindingは環境変数ではなくWranglerが実行時に注入する。
+
+| Binding          | System            | Resource                               |
+| ---------------- | ----------------- | -------------------------------------- |
+| `SCRIBE_DROP_DB` | Web, Orchestrator | 環境別D1 database                      |
+| `RECORDINGS`     | Web, Orchestrator | 非公開R2 bucket                        |
+| Queue consumer   | Orchestrator      | `recording-uploaded-<environment>`     |
+| DLQ              | Orchestrator      | `recording-uploaded-dlq-<environment>` |
+
+定義は`apps/web/wrangler.toml`と`apps/orchestrator/wrangler.toml`を正とする。
+
+## Web / Pages Functions
+
+localでは`apps/web/.dev.vars.example`を`apps/web/.dev.vars`へコピーし、dummy secretをローカル専用のランダム値へ置き換える。
+
+| Variable                      | Secret | Purpose                                  |
+| ----------------------------- | :----: | ---------------------------------------- |
+| `APP_ENV`                     |   no   | `local`、`staging`、`production`         |
+| `ALLOWED_ORIGIN`              |   no   | 状態変更APIで許可する単一origin          |
+| `ACCESS_TEAM_DOMAIN`          |   no   | Cloudflare Access issuer/JWKSの基準      |
+| `ACCESS_AUDIENCE`             |  yes   | Access application audience              |
+| `CSRF_HMAC_SECRET`            |  yes   | `sub`に結び付くCSRF tokenの署名          |
+| `OWNER_HASH_HMAC_SECRET`      |  yes   | owner `sub`の不可逆hash生成              |
+| `CLOUDFLARE_ACCOUNT_ID`       |   no   | R2 Temporary Credentials発行対象account  |
+| `R2_PARENT_ACCESS_KEY_ID`     |  yes   | object限定temporary credentialの親key    |
+| `R2_PARENT_SECRET_ACCESS_KEY` |  yes   | object限定temporary credentialの親secret |
+
+## Orchestrator
+
+localでは`apps/orchestrator/.dev.vars.example`を`apps/orchestrator/.dev.vars`へコピーする。
+
+| Variable                    | Secret | Purpose                                  |
+| --------------------------- | :----: | ---------------------------------------- |
+| `APP_ENV`                   |   no   | 実行環境                                 |
+| `PUBLIC_WEB_BASE_URL`       |   no   | Access保護済みジョブ詳細URLのbase        |
+| `RUNPOD_CALLBACK_BASE_URL`  |   no   | claim、heartbeat、webhook callbackのbase |
+| `RUNPOD_ENDPOINT_ID`        |  yes   | 環境別RunPod Serverless endpoint         |
+| `RUNPOD_API_KEY`            |  yes   | RunPod API認証                           |
+| `CLOUDFLARE_ACCOUNT_ID`     |   no   | R2 S3 endpointのaccount                  |
+| `R2_ACCESS_KEY_ID`          |  yes   | presigned URL発行専用key                 |
+| `R2_SECRET_ACCESS_KEY`      |  yes   | presigned URL発行専用secret              |
+| `DISCORD_WEBHOOK_URL`       |  yes   | 完了通知先                               |
+| `MULTIPART_RETENTION_HOURS` |   no   | 未完了multipart保持時間、初期値24        |
+| `SOURCE_RETENTION_DAYS`     |   no   | 元録音保持日数、初期値7                  |
+| `RESULT_RETENTION_DAYS`     |   no   | 結果保持日数、初期値90                   |
+| `AUDIT_RETENTION_DAYS`      |   no   | 監査情報保持日数、初期値180              |
+
+## RunPod Worker
+
+localでは`apps/runpod-worker/.env.example`を未追跡の`.env`へコピーする。本番値はRunPod templateのsecret/environment設定から渡す。
+
+| Variable                     | Secret | Purpose                             |
+| ---------------------------- | :----: | ----------------------------------- |
+| `APP_ENV`                    |   no   | 実行環境                            |
+| `ALLOWED_SOURCE_HOSTS`       |   no   | source GET URLのhost allowlist      |
+| `ALLOWED_RESULT_HOSTS`       |   no   | artifact PUT URLのhost allowlist    |
+| `ALLOWED_ORCHESTRATOR_HOSTS` |   no   | claim/heartbeat URLのhost allowlist |
+| `MAX_SOURCE_BYTES`           |   no   | streaming download上限、2 GiB       |
+| `MAX_DURATION_SECONDS`       |   no   | ffprobe duration上限、8時間         |
+| `HEARTBEAT_INTERVAL_SECONDS` |   no   | heartbeat間隔、初期値120秒          |
+| `WHISPER_MODEL_ID`           |   no   | build時に固定するmodel ID           |
+| `WHISPER_MODEL_REVISION`     |   no   | build時に固定するmodel revision     |
+
+claim、heartbeat、webhook tokenとpresigned URLはジョブ入力から受け取る一時値であり、環境変数やRunPod templateへ保存しない。

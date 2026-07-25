@@ -1,0 +1,13 @@
+packages:
+  - apps/*
+  - packages/*
+
+allowBuilds:
+  esbuild: true
+  workerd: true
+
+engineStrict: true
+nodeVersion: 24.18.0
+pmOnFail: error
+savePrefix: ""
+strictPeerDependencies: true

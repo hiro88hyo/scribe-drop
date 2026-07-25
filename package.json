@@ -1,0 +1,57 @@
+{
+  "name": "scribe-drop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.17.0",
+  "engines": {
+    "node": "24.18.0",
+    "pnpm": "11.17.0"
+  },
+  "volta": {
+    "node": "24.18.0",
+    "pnpm": "11.17.0"
+  },
+  "scripts": {
+    "build": "pnpm --recursive --filter '@scribe-drop/*' run build",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm d1:verify && pnpm ci:verify",
+    "ci:verify": "node scripts/verify-ci-workflows.mjs",
+    "cloudflare": "wrangler",
+    "d1:migrate:local": "wrangler d1 migrations apply SCRIBE_DROP_DB --local --config apps/orchestrator/wrangler.toml",
+    "d1:verify": "node scripts/verify-d1-migrations.mjs",
+    "format": "pnpm format:ts && pnpm format:py",
+    "format:check": "pnpm format:check:ts && pnpm format:check:py",
+    "format:check:py": "uv run --directory apps/runpod-worker ruff format --check .",
+    "format:check:ts": "prettier --check .",
+    "format:py": "uv run --directory apps/runpod-worker ruff format .",
+    "format:ts": "prettier --write .",
+    "gitleaks": "./.tools/bin/gitleaks",
+    "gitleaks:install": "bash scripts/install-gitleaks.sh",
+    "lint": "pnpm lint:ts && pnpm lint:py",
+    "lint:py": "uv run --directory apps/runpod-worker ruff check .",
+    "lint:ts": "eslint . --max-warnings 0",
+    "security:audit": "pnpm audit --audit-level high && uv audit --preview-features audit-command --project apps/runpod-worker --frozen",
+    "runpodctl": "./.tools/bin/runpodctl",
+    "runpodctl:install": "bash scripts/install-runpodctl.sh",
+    "secrets:check": "pnpm secrets:check:git && pnpm secrets:check:worktree",
+    "secrets:check:git": "./.tools/bin/gitleaks git --redact --no-banner --verbose",
+    "secrets:check:worktree": "./.tools/bin/gitleaks dir . --redact --no-banner --verbose",
+    "test": "pnpm test:ts && pnpm test:py",
+    "test:py": "uv run --directory apps/runpod-worker pytest",
+    "test:ts": "vitest run",
+    "toolchain:check": "node scripts/check-toolchain.mjs",
+    "typecheck": "pnpm typecheck:ts && pnpm typecheck:py",
+    "typecheck:py": "uv run --directory apps/runpod-worker mypy --strict src tests",
+    "typecheck:ts": "pnpm --recursive --filter '@scribe-drop/*' run typecheck"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.7.0",
+    "globals": "17.7.0",
+    "prettier": "3.9.6",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.65.0",
+    "vitest": "4.1.10",
+    "wrangler": "4.114.0"
+  }
+}
