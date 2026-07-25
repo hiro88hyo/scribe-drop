@@ -14,6 +14,7 @@
     "typecheck": "tsc --project tsconfig.client.json --noEmit && tsc --project tsconfig.functions.json --noEmit && tsc --project tsconfig.config.json --noEmit && tsc --project tsconfig.test.json --noEmit"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "3.1080.0",
     "@scribe-drop/contracts": "workspace:*",
     "@scribe-drop/domain": "workspace:*",
     "@scribe-drop/observability": "workspace:*",

@@ -41,10 +41,15 @@ localでは`apps/web/.dev.vars.example`を`apps/web/.dev.vars`へコピーし、
 `ACCESS_AUDIENCES`はenvironment固有の1件以上のAUD tagをJSON配列で指定する。stagingとproductionのaudienceを同じ配列に混在させない。AUD tagは検証対象の識別子でありcredentialではない。
 
 `CSRF_HMAC_SECRET`は32 byte以上のrandom secretとし、environment間で共有しない。
+`OWNER_HASH_HMAC_SECRET`と`R2_PARENT_SECRET_ACCESS_KEY`も32 byte以上とし、
+environment間で共有しない。親R2 credentialは対象bucketだけに限定し、
+[ADR 0008](./adr/0008-r2-browser-upload-capability.md)のlocal signingにだけ使用する。
+browserへはexact object、multipart action 4種、15分に限定した派生credentialだけを
+返す。
 
 `R2_BUCKET_NAME`はdeploy対象のWrangler `RECORDINGS` bindingが参照するbucket名と
-一致させる。Phase 2のlocal値はmetadata検証専用でR2へ接続しない。Phase 3ではlocal
-bindingも環境別bucket名へ揃え、credential発行とQueue検証でも同じ値を使用する。
+一致させる。local bindingも環境別bucket名へ揃え、credential発行とQueue検証でも
+同じ値を使用する。
 
 ## Orchestrator
 
@@ -58,6 +63,7 @@ localでは`apps/orchestrator/.dev.vars.example`を`apps/orchestrator/.dev.vars`
 | `RUNPOD_ENDPOINT_ID`        |  yes   | 環境別RunPod Serverless endpoint  |
 | `RUNPOD_API_KEY`            |  yes   | RunPod API認証                    |
 | `CLOUDFLARE_ACCOUNT_ID`     |   no   | R2 S3 endpointのaccount           |
+| `R2_BUCKET_NAME`            |   no   | eventとR2 bindingの環境別bucket名 |
 | `R2_ACCESS_KEY_ID`          |  yes   | presigned URL発行専用key          |
 | `R2_SECRET_ACCESS_KEY`      |  yes   | presigned URL発行専用secret       |
 | `DISCORD_WEBHOOK_URL`       |  yes   | 完了通知先                        |
@@ -65,6 +71,11 @@ localでは`apps/orchestrator/.dev.vars.example`を`apps/orchestrator/.dev.vars`
 | `SOURCE_RETENTION_DAYS`     |   no   | 元録音保持日数、初期値7           |
 | `RESULT_RETENTION_DAYS`     |   no   | 結果保持日数、初期値90            |
 | `AUDIT_RETENTION_DAYS`      |   no   | 監査情報保持日数、初期値180       |
+
+Phase 3のQueue consumerは`APP_ENV`、`CLOUDFLARE_ACCOUNT_ID`、
+`R2_BUCKET_NAME`を起動境界で検証し、raw eventのaccount/bucketと一致しないmessageを
+恒久拒否する。`R2_BUCKET_NAME`は同じenvironmentの`RECORDINGS` bindingが参照する
+bucket名と一致させる。
 
 ## RunPod Worker
 

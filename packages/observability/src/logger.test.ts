@@ -151,6 +151,7 @@ describe("createStructuredLogger", () => {
       },
     });
 
+    // @ts-expect-error Exercise the runtime boundary used by untyped JavaScript callers.
     logger.warn("secret transcript body https://signed.example", { jobId: JOB_ID });
 
     expect(lines[0]).toContain('"event":"invalid_log_event"');

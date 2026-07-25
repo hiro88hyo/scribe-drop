@@ -1,9 +1,15 @@
 import {
   apiErrorResponseSchema,
+  createJobRequestSchema,
+  createJobResponseSchema,
+  jobActionResponseSchema,
   jobDetailSchema,
   listJobsResponseSchema,
   meResponseSchema,
   ulidSchema,
+  type CreateJobRequest,
+  type CreateJobResponse,
+  type JobActionResponse,
   type JobDetail,
   type ListJobsResponse,
   type MeResponse,
@@ -42,6 +48,16 @@ export class ApiClientError extends Error {
 }
 
 export interface ScribeDropApiClient {
+  completeUpload(
+    jobId: string,
+    csrfToken: string,
+    signal?: AbortSignal,
+  ): Promise<JobActionResponse>;
+  createJob(
+    input: CreateJobRequest,
+    csrfToken: string,
+    signal?: AbortSignal,
+  ): Promise<CreateJobResponse>;
   getJob(jobId: string, signal?: AbortSignal): Promise<JobDetail>;
   getMe(signal?: AbortSignal): Promise<MeResponse>;
   listJobs(
@@ -51,6 +67,13 @@ export interface ScribeDropApiClient {
     },
     signal?: AbortSignal,
   ): Promise<ListJobsResponse>;
+}
+
+interface JsonRequestOptions {
+  readonly body?: string;
+  readonly csrfToken?: string;
+  readonly method: "GET" | "POST";
+  readonly signal?: AbortSignal;
 }
 
 function isJsonResponse(response: Response): boolean {
@@ -101,18 +124,27 @@ async function requestJson<Output>(
   fetcher: ApiFetch,
   path: string,
   schema: ZodType<Output>,
-  signal?: AbortSignal,
+  options: JsonRequestOptions,
 ): Promise<Output> {
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+  };
+  if (options.body !== undefined) {
+    headers["Content-Type"] = "application/json";
+  }
+  if (options.csrfToken !== undefined) {
+    headers["X-CSRF-Token"] = options.csrfToken;
+  }
+
   let response: Response;
   try {
     response = await fetcher(path, {
+      ...(options.body === undefined ? {} : { body: options.body }),
       cache: "no-store",
       credentials: "same-origin",
-      headers: {
-        Accept: "application/json",
-      },
-      method: "GET",
-      ...(signal === undefined ? {} : { signal }),
+      headers,
+      method: options.method,
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
@@ -153,6 +185,43 @@ async function requestJson<Output>(
 
 export function createApiClient(fetcher: ApiFetch = globalThis.fetch): ScribeDropApiClient {
   return {
+    async completeUpload(jobId, csrfToken, signal) {
+      const idResult = ulidSchema.safeParse(jobId);
+      if (!idResult.success || csrfToken.length < 32 || csrfToken.length > 4096) {
+        throw new ApiClientError({
+          kind: "invalid_request",
+          status: 400,
+        });
+      }
+      return await requestJson(
+        fetcher,
+        `/api/jobs/${encodeURIComponent(idResult.data)}/upload-complete`,
+        jobActionResponseSchema,
+        {
+          body: "{}",
+          csrfToken,
+          method: "POST",
+          ...(signal === undefined ? {} : { signal }),
+        },
+      );
+    },
+
+    async createJob(input, csrfToken, signal) {
+      const inputResult = createJobRequestSchema.safeParse(input);
+      if (!inputResult.success || csrfToken.length < 32 || csrfToken.length > 4096) {
+        throw new ApiClientError({
+          kind: "invalid_request",
+          status: 400,
+        });
+      }
+      return await requestJson(fetcher, "/api/jobs", createJobResponseSchema, {
+        body: JSON.stringify(inputResult.data),
+        csrfToken,
+        method: "POST",
+        ...(signal === undefined ? {} : { signal }),
+      });
+    },
+
     async getJob(jobId, signal) {
       const idResult = ulidSchema.safeParse(jobId);
       if (!idResult.success) {
@@ -165,12 +234,18 @@ export function createApiClient(fetcher: ApiFetch = globalThis.fetch): ScribeDro
         fetcher,
         `/api/jobs/${encodeURIComponent(idResult.data)}`,
         jobDetailSchema,
-        signal,
+        {
+          method: "GET",
+          ...(signal === undefined ? {} : { signal }),
+        },
       );
     },
 
     getMe(signal) {
-      return requestJson(fetcher, "/api/me", meResponseSchema, signal);
+      return requestJson(fetcher, "/api/me", meResponseSchema, {
+        method: "GET",
+        ...(signal === undefined ? {} : { signal }),
+      });
     },
 
     listJobs(input, signal) {
@@ -180,7 +255,10 @@ export function createApiClient(fetcher: ApiFetch = globalThis.fetch): ScribeDro
       if (input.cursor !== undefined) {
         query.set("cursor", input.cursor);
       }
-      return requestJson(fetcher, `/api/jobs?${query.toString()}`, listJobsResponseSchema, signal);
+      return requestJson(fetcher, `/api/jobs?${query.toString()}`, listJobsResponseSchema, {
+        method: "GET",
+        ...(signal === undefined ? {} : { signal }),
+      });
     },
   };
 }

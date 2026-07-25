@@ -20,7 +20,11 @@ export default defineConfig({
           ACCESS_TEAM_DOMAIN: "https://test-team.cloudflareaccess.com",
           ALLOWED_ORIGIN: "https://example.test",
           APP_ENV: "local",
+          CLOUDFLARE_ACCOUNT_ID: "0123456789abcdef0123456789abcdef",
           CSRF_HMAC_SECRET: "local-only-test-csrf-secret-at-least-32-bytes",
+          OWNER_HASH_HMAC_SECRET: "local-only-test-owner-secret-at-least-32-bytes",
+          R2_PARENT_ACCESS_KEY_ID: "local-only-test-r2-access-key",
+          R2_PARENT_SECRET_ACCESS_KEY: "local-only-test-r2-secret-at-least-32-bytes",
           R2_BUCKET_NAME: "recording-transcriber-test",
           TEST_MIGRATIONS: await readD1Migrations(migrationsDirectory),
         },
@@ -28,6 +32,7 @@ export default defineConfig({
         d1Databases: {
           SCRIBE_DROP_DB: "00000000-0000-0000-0000-000000000301",
         },
+        r2Buckets: ["RECORDINGS"],
         serviceBindings: {
           ASSETS: await buildPagesASSETSBinding(path.join(projectDirectory, "dist")),
         },

@@ -1,4 +1,15 @@
-import type { JobDetail, JobSummary } from "@scribe-drop/contracts";
+import {
+  MAX_FILE_SIZE_BYTES,
+  MAX_JOB_TITLE_LENGTH,
+  MAX_ORIGINAL_FILENAME_LENGTH,
+  OUTPUT_FORMATS,
+  allowedMediaTypeSchema,
+  createJobRequestSchema,
+  type JobDetail,
+  type JobSummary,
+  type OutputFormat,
+  type TranscriptionLanguage,
+} from "@scribe-drop/contracts";
 import {
   Link,
   NavLink,
@@ -7,7 +18,8 @@ import {
   createBrowserRouter,
   useParams,
 } from "react-router";
-import type { JSX } from "react";
+import { useRef, useState } from "react";
+import type { ChangeEvent, DragEvent, JSX, SyntheticEvent } from "react";
 
 import {
   formatByteSize,
@@ -19,6 +31,7 @@ import {
   type UiError,
 } from "./job-presentation.js";
 import { useJobDetail, useJobHistory, useRecentJobs, useSession } from "./use-api-data.js";
+import { useUpload } from "./use-upload.js";
 
 const RECENT_JOB_LIMIT = 3;
 const HISTORY_PAGE_LIMIT = 25;
@@ -89,8 +102,96 @@ function Layout(): JSX.Element {
 }
 
 function UploadPanel(): JSX.Element {
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | undefined>(undefined);
+  const [language, setLanguage] = useState<TranscriptionLanguage>("ja");
+  const [outputFormats, setOutputFormats] = useState<readonly OutputFormat[]>(OUTPUT_FORMATS);
+  const [selectionError, setSelectionError] = useState<string | undefined>(undefined);
+  const [title, setTitle] = useState("");
+  const [vad, setVad] = useState(true);
+  const { cancel, dismissCheckpoint, recoveredCheckpoints, retry, start, state } = useUpload();
+  const active = state.status === "preparing" || state.status === "uploading";
+
+  const selectFile = (candidate: File | undefined): void => {
+    if (candidate === undefined) {
+      return;
+    }
+    if (
+      !allowedMediaTypeSchema.safeParse(candidate.type).success ||
+      candidate.size <= 0 ||
+      candidate.size > MAX_FILE_SIZE_BYTES ||
+      candidate.name.length > MAX_ORIGINAL_FILENAME_LENGTH
+    ) {
+      setFile(undefined);
+      setSelectionError("対応する音声・動画ファイル（最大2 GiB）を選択してください。");
+      return;
+    }
+
+    const inferredTitle = candidate.name.replace(/\.[^.]+$/u, "").trim();
+    setFile(candidate);
+    setSelectionError(undefined);
+    setTitle((current) =>
+      current.trim().length > 0
+        ? current
+        : (inferredTitle || "新しい文字起こし").slice(0, MAX_JOB_TITLE_LENGTH),
+    );
+  };
+
+  const toggleOutputFormat = (format: OutputFormat): void => {
+    setOutputFormats((current) =>
+      current.includes(format)
+        ? current.filter((candidate) => candidate !== format)
+        : [...current, format],
+    );
+  };
+
+  const submit = (event: SyntheticEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    if (file === undefined) {
+      setSelectionError("アップロードするファイルを選択してください。");
+      return;
+    }
+    const request = createJobRequestSchema.safeParse({
+      contentType: file.type,
+      filename: file.name,
+      options: {
+        language,
+        model: "large-v3-turbo",
+        outputFormats,
+        vad,
+      },
+      sizeBytes: file.size,
+      title,
+    });
+    if (!request.success) {
+      setSelectionError("タイトル、ファイル、出力形式を確認してください。");
+      return;
+    }
+    setSelectionError(undefined);
+    start({ file, request: request.data });
+  };
+
+  const handleFileInput = (event: ChangeEvent<HTMLInputElement>): void => {
+    selectFile(event.currentTarget.files?.[0]);
+    event.currentTarget.value = "";
+  };
+
+  const handleDrop = (event: DragEvent<HTMLElement>): void => {
+    event.preventDefault();
+    if (!active) {
+      selectFile(event.dataTransfer.files[0]);
+    }
+  };
+
   return (
-    <section aria-labelledby="upload-heading" className="upload-card">
+    <section
+      aria-labelledby="upload-heading"
+      className="upload-card"
+      onDragOver={(event) => {
+        event.preventDefault();
+      }}
+      onDrop={handleDrop}
+    >
       <div aria-hidden="true" className="upload-glyph">
         <span>↑</span>
       </div>
@@ -99,10 +200,161 @@ function UploadPanel(): JSX.Element {
         <h2 id="upload-heading">音声・動画ファイルを選択</h2>
         <p className="muted">ドラッグ＆ドロップ、または端末からファイルを選択できます。</p>
       </div>
-      <button className="primary-button" disabled type="button">
+      <input
+        accept="audio/*,video/mp4,video/quicktime,video/webm"
+        className="visually-hidden"
+        disabled={active}
+        onChange={handleFileInput}
+        ref={fileInput}
+        type="file"
+      />
+      <button
+        className="primary-button"
+        disabled={active}
+        onClick={() => {
+          fileInput.current?.click();
+        }}
+        type="button"
+      >
         ファイルを選択
       </button>
-      <p className="availability-note">アップロード機能は次の実装段階で有効になります</p>
+      <form className="upload-form" onSubmit={submit}>
+        <p className="selected-file">
+          {file === undefined
+            ? "ファイルは未選択です"
+            : `${file.name} · ${formatByteSize(file.size)}`}
+        </p>
+        <label>
+          <span>タイトル</span>
+          <input
+            disabled={active}
+            maxLength={MAX_JOB_TITLE_LENGTH}
+            onChange={(event) => {
+              setTitle(event.currentTarget.value);
+            }}
+            required
+            type="text"
+            value={title}
+          />
+        </label>
+        <label>
+          <span>言語</span>
+          <select
+            disabled={active}
+            onChange={(event) => {
+              setLanguage(event.currentTarget.value === "auto" ? "auto" : "ja");
+            }}
+            value={language}
+          >
+            <option value="ja">日本語</option>
+            <option value="auto">自動判定</option>
+          </select>
+        </label>
+        <fieldset disabled={active}>
+          <legend>出力形式</legend>
+          <div className="checkbox-row">
+            {OUTPUT_FORMATS.map((format) => (
+              <label key={format}>
+                <input
+                  checked={outputFormats.includes(format)}
+                  onChange={() => {
+                    toggleOutputFormat(format);
+                  }}
+                  type="checkbox"
+                />
+                {format === "markdown" ? "Markdown" : format.toUpperCase()}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <label className="check-label">
+          <input
+            checked={vad}
+            disabled={active}
+            onChange={(event) => {
+              setVad(event.currentTarget.checked);
+            }}
+            type="checkbox"
+          />
+          無音区間を除外する
+        </label>
+        <button className="primary-button" disabled={active || file === undefined} type="submit">
+          {active ? "アップロード中…" : "アップロードを開始"}
+        </button>
+      </form>
+
+      {selectionError === undefined ? null : (
+        <p className="upload-message upload-error" role="alert">
+          {selectionError}
+        </p>
+      )}
+      {state.status === "preparing" ? (
+        <div aria-live="polite" className="upload-progress" role="status">
+          <p>アップロードを準備しています…</p>
+        </div>
+      ) : null}
+      {state.status === "uploading" ? (
+        <div aria-live="polite" className="upload-progress" role="status">
+          <div className="progress-heading">
+            <span>{Math.round(state.progress.percent)}%</span>
+            <span>
+              {formatByteSize(state.progress.uploadedBytes)} /{" "}
+              {formatByteSize(state.progress.totalBytes)}
+            </span>
+          </div>
+          <progress max={state.progress.totalBytes} value={state.progress.uploadedBytes} />
+          <p>
+            {formatByteSize(state.progress.bytesPerSecond)}/秒
+            {state.progress.etaSeconds === null
+              ? ""
+              : ` · 残り約${String(Math.max(1, Math.ceil(state.progress.etaSeconds)))}秒`}
+          </p>
+          <button className="danger-button" onClick={cancel} type="button">
+            キャンセル
+          </button>
+        </div>
+      ) : null}
+      {state.status === "error" ? (
+        <div className="upload-message upload-error" role="alert">
+          <p>{state.error.message}</p>
+          {state.error.requestId === undefined ? null : (
+            <p className="request-id">問い合わせID: {state.error.requestId}</p>
+          )}
+          {state.retryable ? (
+            <button className="secondary-button" onClick={retry} type="button">
+              {state.cancelled ? "もう一度アップロード" : "再試行"}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      {state.status === "uploaded" ? (
+        <div className="upload-message upload-success" role="status">
+          <p>アップロードを受け付けました。</p>
+          <Link to={`/jobs/${state.jobId}`}>ジョブ詳細を確認</Link>
+        </div>
+      ) : null}
+      {recoveredCheckpoints.length === 0 ? null : (
+        <div className="recovered-uploads">
+          <h3>再選択が必要なアップロード</h3>
+          {recoveredCheckpoints.map((checkpoint) => (
+            <div key={checkpoint.jobId}>
+              <p>
+                {checkpoint.filename} · {formatByteSize(checkpoint.sizeBytes)}
+              </p>
+              <span>ページを再読み込みしたため、ファイルを再選択してください。</span>
+              <button
+                className="text-button"
+                onClick={() => {
+                  dismissCheckpoint(checkpoint.jobId);
+                }}
+                type="button"
+              >
+                表示を消す
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -139,7 +391,7 @@ function EmptyJobs(): JSX.Element {
   return (
     <div className="feedback-panel empty-jobs">
       <p>まだジョブがありません。</p>
-      <span>アップロード機能はPhase 3で有効になります。</span>
+      <span>音声・動画ファイルをアップロードすると、ここに表示されます。</span>
     </div>
   );
 }

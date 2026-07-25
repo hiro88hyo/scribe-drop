@@ -248,6 +248,17 @@ h3 {
   line-height: 1.6;
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .upload-glyph {
   display: grid;
   width: 4rem;
@@ -279,6 +290,181 @@ h3 {
 .availability-note {
   grid-column: 2 / -1;
   font-size: 0.76rem;
+}
+
+.upload-form,
+.upload-message,
+.upload-progress,
+.recovered-uploads {
+  grid-column: 1 / -1;
+}
+
+.upload-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(10rem, 0.4fr);
+  gap: 1rem 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid rgb(248 245 235 / 14%);
+}
+
+.upload-form > label {
+  display: grid;
+  gap: 0.45rem;
+  color: #d8dfdb;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.upload-form input[type="text"],
+.upload-form select {
+  width: 100%;
+  min-height: 2.8rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid rgb(248 245 235 / 22%);
+  border-radius: 0.45rem;
+  background: #20322d;
+  color: #fff;
+  font: inherit;
+}
+
+.upload-form input:focus-visible,
+.upload-form select:focus-visible,
+.upload-card button:focus-visible {
+  outline: 3px solid rgb(226 193 116 / 45%);
+  outline-offset: 2px;
+}
+
+.selected-file {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #e2c174;
+  font-size: 0.88rem;
+  overflow-wrap: anywhere;
+}
+
+.upload-form fieldset {
+  padding: 0;
+  border: 0;
+}
+
+.upload-form legend {
+  margin-bottom: 0.55rem;
+  color: #d8dfdb;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.checkbox-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+}
+
+.checkbox-row label,
+.check-label {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+  color: #d8dfdb;
+  font-size: 0.8rem;
+}
+
+.upload-form .primary-button {
+  align-self: end;
+}
+
+.upload-progress,
+.upload-message,
+.recovered-uploads {
+  padding: 1rem;
+  border: 1px solid rgb(248 245 235 / 14%);
+  border-radius: 0.65rem;
+  background: rgb(255 255 255 / 5%);
+}
+
+.upload-progress p,
+.upload-message p,
+.recovered-uploads p {
+  margin: 0;
+}
+
+.progress-heading {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.55rem;
+  font-size: 0.82rem;
+}
+
+.upload-progress progress {
+  width: 100%;
+  height: 0.7rem;
+  accent-color: #e2c174;
+}
+
+.upload-progress > p {
+  margin: 0.55rem 0 0.8rem;
+  color: #bdc6c1;
+  font-size: 0.78rem;
+}
+
+.danger-button,
+.text-button {
+  border: 0;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.danger-button {
+  padding: 0.55rem 0.75rem;
+  border: 1px solid rgb(255 190 174 / 35%);
+  border-radius: 0.45rem;
+  background: rgb(146 47 31 / 30%);
+  color: #ffd8cf;
+}
+
+.upload-error {
+  border-color: rgb(255 190 174 / 28%);
+  color: #ffd8cf;
+}
+
+.upload-error .secondary-button {
+  margin-top: 0.8rem;
+}
+
+.upload-success {
+  border-color: rgb(146 210 177 / 28%);
+  color: #ccebdc;
+}
+
+.upload-success a {
+  color: #e2c174;
+}
+
+.recovered-uploads h3 {
+  margin-bottom: 0.75rem;
+  font-family: inherit;
+  font-size: 0.9rem;
+}
+
+.recovered-uploads > div {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.3rem 1rem;
+  padding: 0.65rem 0;
+  border-top: 1px solid rgb(248 245 235 / 12%);
+}
+
+.recovered-uploads span {
+  color: #bdc6c1;
+  font-size: 0.75rem;
+}
+
+.text-button {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  background: transparent;
+  color: #e2c174;
 }
 
 .recent-section,
@@ -638,9 +824,24 @@ h3 {
     grid-template-columns: auto 1fr;
   }
 
+  .upload-form {
+    grid-template-columns: 1fr;
+  }
+
   .primary-button,
   .availability-note {
     grid-column: 1 / -1;
+  }
+
+  .recovered-uploads > div {
+    grid-template-columns: 1fr;
+  }
+
+  .text-button {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: start;
+    padding: 0.35rem 0;
   }
 
   .job-main {

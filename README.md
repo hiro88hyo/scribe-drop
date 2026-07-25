@@ -11,6 +11,7 @@ Cloudflare と RunPod Serverless を利用する、非公開の録音文字起�
 - [環境変数とbinding](docs/environment-variables.md)
 - [継続的インテグレーション](docs/continuous-integration.md)
 - [Deployment](docs/deployment.md)
+- [Operations](docs/operations.md)
 - [Threat model](docs/threat-model.md)
 - [開発標準](AGENTS.md)
 

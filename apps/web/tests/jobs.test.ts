@@ -2,7 +2,7 @@ import { ulidSchema } from "@scribe-drop/contracts";
 import { describe, expect, it } from "vitest";
 
 import { decodeJobCursor, encodeJobCursor } from "../src/server/jobs/job-cursor.js";
-import { createPhaseTwoSourceKey } from "../src/server/jobs/job-source-key.js";
+import { createSourceKey } from "../src/server/jobs/job-source-key.js";
 import { createUlid } from "../src/server/id/ulid.js";
 
 describe("job identifiers and cursors", () => {
@@ -27,14 +27,19 @@ describe("job identifiers and cursors", () => {
     expect(decodeJobCursor("not+a+base64url+cursor")).toBeUndefined();
   });
 
-  it("keeps all user-controlled values out of the Phase 2 source key", () => {
+  it("keeps all user-controlled values out of the final source key", async () => {
     const id = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
-    const key = createPhaseTwoSourceKey(id, "audio/mp4", (length) =>
-      new Uint8Array(length).fill(7),
+    const key = await createSourceKey(
+      "access-subject",
+      "test-owner-hash-secret-at-least-32-bytes",
+      id,
+      "audio/mp4",
+      (length) => new Uint8Array(length).fill(7),
     );
 
     expect(key).toMatch(
-      /^incoming\/pending\/01ARZ3NDEKTSV4RRFFQ69G5FAV\/[A-Za-z0-9_-]{22}\/source\.m4a$/u,
+      /^incoming\/[0-9a-f]{32}\/01ARZ3NDEKTSV4RRFFQ69G5FAV\/[A-Za-z0-9_-]{22}\/source\.m4a$/u,
     );
+    expect(key).not.toContain("access-subject");
   });
 });

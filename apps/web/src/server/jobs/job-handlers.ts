@@ -2,14 +2,19 @@ import {
   ALLOWED_MEDIA_TYPES,
   MAX_FILE_SIZE_BYTES,
   createJobRequestSchema,
+  createJobResponseSchema,
   jobActionResponseSchema,
   listJobsQuerySchema,
   listJobsResponseSchema,
   ulidSchema,
+  uploadCompleteRequestSchema,
   type AllowedMediaType,
+  type CreateJobResponse,
   type JobActionResponse,
   type ListJobsResponse,
+  type TemporaryUploadCredentials,
 } from "@scribe-drop/contracts";
+import { z } from "zod";
 
 import { createApiErrorResponse } from "../http/api-error.js";
 import { getRequestId, getVerifiedAuthContext } from "../http/api-boundary.js";
@@ -19,7 +24,8 @@ import type { WebRequestData } from "../web-context.js";
 import { parseJobConfig, type JobEnvironment } from "./job-config.js";
 import { decodeJobCursor } from "./job-cursor.js";
 import { createD1JobRepository, type JobDatabase, type JobRepository } from "./job-repository.js";
-import { createPhaseTwoSourceKey } from "./job-source-key.js";
+import { createSourceKey as createFinalSourceKey } from "./job-source-key.js";
+import { createR2TemporaryUploadCredentials } from "./r2-temporary-credentials.js";
 
 const MAX_CREATE_JOB_BODY_BYTES = 16 * 1024;
 const INVALID_REQUEST_MESSAGE = "入力内容を確認してください。";
@@ -28,6 +34,15 @@ const UNSUPPORTED_MEDIA_TYPE_MESSAGE = "このメディア形式は利用でき�
 const TOO_MANY_ACTIVE_JOBS_MESSAGE = "処理中のジョブが上限に達しています。";
 const RATE_LIMITED_MESSAGE = "ジョブ作成回数が上限に達しています。";
 const NOT_FOUND_MESSAGE = "指定されたジョブは存在しません。";
+const SOURCE_NOT_FOUND_MESSAGE = "アップロード済みファイルを確認できません。";
+const SOURCE_SIZE_MISMATCH_MESSAGE = "アップロード済みファイルのサイズが一致しません。";
+const SOURCE_ETAG_CHANGED_MESSAGE = "アップロード済みファイルが変更されています。";
+const INVALID_STATE_MESSAGE = "現在の状態ではこの操作を実行できません。";
+
+const r2HeadResultSchema = z.object({
+  etag: z.string().min(1).max(512),
+  size: z.number().int().positive().max(MAX_FILE_SIZE_BYTES),
+});
 
 interface JobsHandlerEnvironment extends JobEnvironment {
   readonly SCRIBE_DROP_DB: JobDatabase;
@@ -45,10 +60,35 @@ interface JobDetailHandlerContext extends JobsHandlerContext {
   };
 }
 
+interface UploadCompleteHandlerContext {
+  readonly data: WebRequestData;
+  readonly env: JobsHandlerEnvironment & {
+    readonly RECORDINGS: R2Bucket;
+  };
+  readonly params: {
+    readonly id: string | string[];
+  };
+  readonly request: Request;
+}
+
 export interface JobHandlerDependencies {
   readonly createJobId?: (timestampMilliseconds: number) => string;
   readonly createRepository?: (database: JobDatabase) => JobRepository;
-  readonly createSourceKey?: (jobId: string, contentType: AllowedMediaType) => string;
+  readonly createSourceKey?: (
+    ownerSub: string,
+    ownerHashHmacSecret: string,
+    jobId: string,
+    contentType: AllowedMediaType,
+  ) => Promise<string> | string;
+  readonly createTemporaryUploadCredentials?: (input: {
+    readonly accountId: string;
+    readonly bucket: string;
+    readonly key: string;
+    readonly now: Date;
+    readonly parentAccessKeyId: string;
+    readonly parentSecretAccessKey: string;
+  }) => Promise<TemporaryUploadCredentials>;
+  readonly headSourceObject?: (bucket: R2Bucket, key: string) => Promise<unknown>;
   readonly now?: () => Date;
   readonly randomBytes?: RandomBytes;
 }
@@ -189,10 +229,22 @@ export async function handleCreateJob(
     ((timestampMilliseconds: number) =>
       createUlid(timestampMilliseconds, dependencies.randomBytes));
   const jobId = createJobId(now.getTime());
-  const createSourceKey =
+  const createJobSourceKey =
     dependencies.createSourceKey ??
-    ((id: string, contentType: AllowedMediaType) =>
-      createPhaseTwoSourceKey(id, contentType, dependencies.randomBytes));
+    ((ownerSub: string, ownerHashHmacSecret: string, id: string, contentType: AllowedMediaType) =>
+      createFinalSourceKey(
+        ownerSub,
+        ownerHashHmacSecret,
+        id,
+        contentType,
+        dependencies.randomBytes,
+      ));
+  const sourceKey = await createJobSourceKey(
+    auth.sub,
+    config.ownerHashHmacSecret,
+    jobId,
+    requestResult.data.contentType,
+  );
   const repositoryFactory = dependencies.createRepository ?? createD1JobRepository;
   const repository = repositoryFactory(context.env.SCRIBE_DROP_DB);
   const result = await repository.create({
@@ -204,7 +256,7 @@ export async function handleCreateJob(
     ownerSub: auth.sub,
     sourceBucket: config.r2BucketName,
     sourceContentType: requestResult.data.contentType,
-    sourceKey: createSourceKey(jobId, requestResult.data.contentType),
+    sourceKey,
     timestamp: now.toISOString(),
     title: requestResult.data.title,
   });
@@ -228,9 +280,41 @@ export async function handleCreateJob(
     return response;
   }
 
-  const responseBody = jobActionResponseSchema.parse({
-    job: result.job,
-  }) satisfies JobActionResponse;
+  const createTemporaryUploadCredentials =
+    dependencies.createTemporaryUploadCredentials ?? createR2TemporaryUploadCredentials;
+  let responseBody: CreateJobResponse;
+  try {
+    const upload = await createTemporaryUploadCredentials({
+      accountId: config.cloudflareAccountId,
+      bucket: config.r2BucketName,
+      key: sourceKey,
+      now,
+      parentAccessKeyId: config.r2ParentAccessKeyId,
+      parentSecretAccessKey: config.r2ParentSecretAccessKey,
+    });
+    responseBody = createJobResponseSchema.parse({
+      jobId,
+      upload,
+    }) satisfies CreateJobResponse;
+
+    const markedReady = await repository.markUploadReady({
+      jobId,
+      ownerSub: auth.sub,
+      timestamp: now.toISOString(),
+      uploadExpiresAt: upload.expiresAt,
+    });
+    if (!markedReady) {
+      throw new Error("Created job could not transition to uploading");
+    }
+  } catch {
+    await repository.failUploadPreparation({
+      jobId,
+      ownerSub: auth.sub,
+      timestamp: now.toISOString(),
+    });
+    throw new Error("Upload preparation failed");
+  }
+
   return Response.json(responseBody, { status: 201 });
 }
 
@@ -289,4 +373,113 @@ export async function handleGetJob(
   }
 
   return Response.json(job);
+}
+
+export async function handleUploadComplete(
+  context: UploadCompleteHandlerContext,
+  dependencies: JobHandlerDependencies = {},
+): Promise<Response> {
+  const id = Array.isArray(context.params.id) ? undefined : context.params.id;
+  const idResult = ulidSchema.safeParse(id);
+  if (!idResult.success) {
+    return createApiErrorResponse({
+      code: "NOT_FOUND",
+      message: NOT_FOUND_MESSAGE,
+      requestId: getRequestId(context.data),
+      status: 404,
+    });
+  }
+
+  const bodyResult = await readBoundedJsonBody(context.request);
+  if (!bodyResult.ok || !uploadCompleteRequestSchema.safeParse(bodyResult.value).success) {
+    return invalidRequest(context.data);
+  }
+
+  const config = parseJobConfig(context.env);
+  if (config === undefined) {
+    throw new Error("Job configuration is invalid");
+  }
+
+  const auth = getVerifiedAuthContext(context.data);
+  const repositoryFactory = dependencies.createRepository ?? createD1JobRepository;
+  const repository = repositoryFactory(context.env.SCRIBE_DROP_DB);
+  const target = await repository.findUploadTargetByOwner(auth.sub, idResult.data);
+  if (target === undefined) {
+    return createApiErrorResponse({
+      code: "NOT_FOUND",
+      message: NOT_FOUND_MESSAGE,
+      requestId: getRequestId(context.data),
+      status: 404,
+    });
+  }
+  if (target.sourceBucket !== config.r2BucketName) {
+    throw new Error("Stored source bucket does not match the configured R2 binding");
+  }
+
+  const headSourceObject =
+    dependencies.headSourceObject ?? ((bucket: R2Bucket, key: string) => bucket.head(key));
+  const untrustedHead = await headSourceObject(context.env.RECORDINGS, target.sourceKey);
+  if (untrustedHead === null) {
+    return createApiErrorResponse({
+      code: "SOURCE_NOT_FOUND",
+      message: SOURCE_NOT_FOUND_MESSAGE,
+      requestId: getRequestId(context.data),
+      status: 409,
+    });
+  }
+  const headResult = r2HeadResultSchema.safeParse(untrustedHead);
+  if (!headResult.success) {
+    throw new Error("R2 HEAD returned invalid metadata");
+  }
+  if (
+    headResult.data.size !== target.expectedSizeBytes &&
+    (target.sourceEtag === null || target.sourceEtag === headResult.data.etag)
+  ) {
+    return createApiErrorResponse({
+      code: "SOURCE_SIZE_MISMATCH",
+      message: SOURCE_SIZE_MISMATCH_MESSAGE,
+      requestId: getRequestId(context.data),
+      status: 409,
+    });
+  }
+
+  const result = await repository.completeUpload({
+    expectedVersion: target.version,
+    jobId: target.jobId,
+    ownerSub: auth.sub,
+    sizeBytes: headResult.data.size,
+    sourceBucket: target.sourceBucket,
+    sourceEtag: headResult.data.etag,
+    sourceKey: target.sourceKey,
+    timestamp: (dependencies.now?.() ?? new Date()).toISOString(),
+  });
+  if (result.status === "not_found") {
+    return createApiErrorResponse({
+      code: "NOT_FOUND",
+      message: NOT_FOUND_MESSAGE,
+      requestId: getRequestId(context.data),
+      status: 404,
+    });
+  }
+  if (result.status === "source_mutated") {
+    return createApiErrorResponse({
+      code: "SOURCE_ETAG_CHANGED",
+      message: SOURCE_ETAG_CHANGED_MESSAGE,
+      requestId: getRequestId(context.data),
+      status: 409,
+    });
+  }
+  if (result.status === "invalid_state") {
+    return createApiErrorResponse({
+      code: "INVALID_STATE",
+      message: INVALID_STATE_MESSAGE,
+      requestId: getRequestId(context.data),
+      status: 409,
+    });
+  }
+
+  const responseBody = jobActionResponseSchema.parse({
+    job: result.job,
+  }) satisfies JobActionResponse;
+  return Response.json(responseBody);
 }

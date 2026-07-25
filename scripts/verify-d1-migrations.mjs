@@ -43,8 +43,12 @@ const requiredJobColumns = [
 ];
 
 const requiredAttemptColumns = [
+  "claim_consumed_at",
+  "claim_expires_at",
+  "claim_issued_at",
   "claim_token_hash",
   "generation",
+  "heartbeat_issued_at",
   "heartbeat_token_hash",
   "status",
   "webhook_token_hash",

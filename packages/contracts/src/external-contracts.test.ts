@@ -4,6 +4,7 @@ import {
   MAX_FILE_SIZE_BYTES,
   RUNPOD_MAX_POLICY_DURATION_MS,
   normalizedR2ObjectCreatedEventSchema,
+  r2EventNotificationSchema,
   resultManifestSchema,
   runpodClaimRequestSchema,
   runpodRunRequestSchema,
@@ -77,6 +78,48 @@ describe("normalizedR2ObjectCreatedEventSchema", () => {
         jobId: ATTEMPT_ID,
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("r2EventNotificationSchema", () => {
+  const validEvent = {
+    account: "0123456789abcdef0123456789abcdef",
+    action: "CompleteMultipartUpload",
+    bucket: "recording-transcriber-staging",
+    eventTime: "2026-07-25T00:00:00.000Z",
+    object: {
+      eTag: "multipart-etag",
+      key: `incoming/0123456789abcdef0123456789abcdef/${JOB_ID}/nonce/source.m4a`,
+      size: 1024,
+    },
+  };
+
+  it("accepts the documented CompleteMultipartUpload notification", () => {
+    expect(r2EventNotificationSchema.safeParse(validEvent).success).toBe(true);
+  });
+
+  it.each([
+    ["unknown action", { ...validEvent, action: "UnknownAction" }],
+    ["unknown field", { ...validEvent, token: "must-not-be-retained" }],
+    [
+      "copy without source",
+      {
+        ...validEvent,
+        action: "CopyObject",
+      },
+    ],
+    [
+      "non-copy with source",
+      {
+        ...validEvent,
+        copySource: {
+          bucket: validEvent.bucket,
+          object: "original",
+        },
+      },
+    ],
+  ])("rejects %s", (_caseName, event) => {
+    expect(r2EventNotificationSchema.safeParse(event).success).toBe(false);
   });
 });
 

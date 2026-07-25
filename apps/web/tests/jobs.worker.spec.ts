@@ -1,4 +1,5 @@
 import {
+  createJobResponseSchema,
   createJobRequestSchema,
   jobActionResponseSchema,
   jobDetailSchema,
@@ -6,12 +7,18 @@ import {
   type CreateJobRequest,
   type JobOptions,
   type JobStatus,
+  type TemporaryUploadCredentials,
 } from "@scribe-drop/contracts";
 import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { handleCreateJob, handleGetJob, handleListJobs } from "../src/server/jobs/job-handlers.js";
+import {
+  handleCreateJob,
+  handleGetJob,
+  handleListJobs,
+  handleUploadComplete,
+} from "../src/server/jobs/job-handlers.js";
 import {
   createD1JobRepository,
   type JobDatabase,
@@ -47,6 +54,8 @@ beforeAll(async () => {
 beforeEach(async () => {
   idSequence = 0;
   await env.SCRIBE_DROP_DB.exec("DELETE FROM jobs");
+  const objects = await env.RECORDINGS.list();
+  await Promise.all(objects.objects.map((object) => env.RECORDINGS.delete(object.key)));
 });
 
 function nextId(timestampMilliseconds = NOW.getTime()): string {
@@ -128,11 +137,21 @@ async function insertJob(options: InsertJobOptions): Promise<string> {
 }
 
 function handlerEnvironment(): {
+  readonly CLOUDFLARE_ACCOUNT_ID: string;
+  readonly OWNER_HASH_HMAC_SECRET: string;
+  readonly R2_PARENT_ACCESS_KEY_ID: string;
+  readonly R2_PARENT_SECRET_ACCESS_KEY: string;
   readonly R2_BUCKET_NAME: string;
+  readonly RECORDINGS: R2Bucket;
   readonly SCRIBE_DROP_DB: D1Database;
 } {
   return {
+    CLOUDFLARE_ACCOUNT_ID: env.CLOUDFLARE_ACCOUNT_ID,
+    OWNER_HASH_HMAC_SECRET: env.OWNER_HASH_HMAC_SECRET,
+    R2_PARENT_ACCESS_KEY_ID: env.R2_PARENT_ACCESS_KEY_ID,
+    R2_PARENT_SECRET_ACCESS_KEY: env.R2_PARENT_SECRET_ACCESS_KEY,
     R2_BUCKET_NAME: env.R2_BUCKET_NAME,
+    RECORDINGS: env.RECORDINGS,
     SCRIBE_DROP_DB: env.SCRIBE_DROP_DB,
   };
 }
@@ -152,6 +171,19 @@ function validCreateBody(): CreateJobRequest {
     sizeBytes: 1024,
     title: "Weekly meeting",
   });
+}
+
+function temporaryUploadCredentials(key: string): TemporaryUploadCredentials {
+  return {
+    accessKeyId: "temporary-access-key",
+    bucket: env.R2_BUCKET_NAME,
+    endpoint: `https://${env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+    expiresAt: "2027-01-01T00:25:00.000Z",
+    key,
+    region: "auto",
+    secretAccessKey: "temporary-secret-key",
+    sessionToken: "temporary-session-token",
+  };
 }
 
 describe("D1 job repository", () => {
@@ -356,6 +388,132 @@ describe("D1 job repository", () => {
     await expect(repository.create(newJob())).rejects.toThrow();
   });
 
+  it("applies upload preparation transitions once with compare-and-set semantics", async () => {
+    const repository = createD1JobRepository(env.SCRIBE_DROP_DB);
+    const readyJob = await repository.create(newJob());
+    if (readyJob.status !== "created") {
+      throw new Error("Expected the ready job to be created");
+    }
+
+    await expect(
+      repository.markUploadReady({
+        jobId: readyJob.job.id,
+        ownerSub: OWNER_A.sub,
+        timestamp: NOW.toISOString(),
+        uploadExpiresAt: "2027-01-01T00:25:00.000Z",
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      repository.markUploadReady({
+        jobId: readyJob.job.id,
+        ownerSub: OWNER_A.sub,
+        timestamp: NOW.toISOString(),
+        uploadExpiresAt: "2027-01-01T00:25:00.000Z",
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      repository.failUploadPreparation({
+        jobId: readyJob.job.id,
+        ownerSub: OWNER_A.sub,
+        timestamp: NOW.toISOString(),
+      }),
+    ).resolves.toBe(false);
+
+    const failedJob = await repository.create(
+      newJob(OWNER_B, NOW, {
+        id: nextId(),
+      }),
+    );
+    if (failedJob.status !== "created") {
+      throw new Error("Expected the failed job to be created");
+    }
+    await expect(
+      repository.failUploadPreparation({
+        jobId: failedJob.job.id,
+        ownerSub: OWNER_B.sub,
+        timestamp: NOW.toISOString(),
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      repository.failUploadPreparation({
+        jobId: failedJob.job.id,
+        ownerSub: OWNER_B.sub,
+        timestamp: NOW.toISOString(),
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it("completes upload metadata idempotently and stops on a changed ETag", async () => {
+    const repository = createD1JobRepository(env.SCRIBE_DROP_DB);
+    const created = await repository.create(newJob());
+    if (created.status !== "created") {
+      throw new Error("Expected the upload job to be created");
+    }
+    await repository.markUploadReady({
+      jobId: created.job.id,
+      ownerSub: OWNER_A.sub,
+      timestamp: NOW.toISOString(),
+      uploadExpiresAt: "2027-01-01T00:25:00.000Z",
+    });
+    const target = await repository.findUploadTargetByOwner(OWNER_A.sub, created.job.id);
+    if (target === undefined) {
+      throw new Error("Expected an owner-scoped upload target");
+    }
+    await expect(
+      repository.findUploadTargetByOwner(OWNER_B.sub, created.job.id),
+    ).resolves.toBeUndefined();
+
+    const completion = {
+      expectedVersion: target.version,
+      jobId: target.jobId,
+      ownerSub: OWNER_A.sub,
+      sizeBytes: target.expectedSizeBytes,
+      sourceBucket: target.sourceBucket,
+      sourceEtag: "original-etag",
+      sourceKey: target.sourceKey,
+      timestamp: NOW.toISOString(),
+    } as const;
+    const duplicateResults = await Promise.all([
+      repository.completeUpload(completion),
+      repository.completeUpload(completion),
+    ]);
+    expect(duplicateResults.map((result) => result.status).sort()).toEqual([
+      "completed",
+      "idempotent",
+    ]);
+    const completedJobs = duplicateResults.flatMap((result) =>
+      "job" in result ? [result.job] : [],
+    );
+    expect(completedJobs).toHaveLength(2);
+    expect(
+      completedJobs.every((job) => job.actualSizeBytes === 1024 && job.status === "UPLOADED"),
+    ).toBe(true);
+    await expect(
+      repository.completeUpload({
+        ...completion,
+        sourceEtag: "replacement-etag",
+      }),
+    ).resolves.toMatchObject({
+      job: {
+        errorCode: "SOURCE_ETAG_CHANGED",
+        status: "SOURCE_MUTATED",
+      },
+      status: "source_mutated",
+    });
+
+    const stored = await env.SCRIBE_DROP_DB.prepare(
+      "SELECT actual_size_bytes, source_etag, status, version FROM jobs WHERE id = ?1",
+    )
+      .bind(created.job.id)
+      .first();
+    expect(stored).toEqual({
+      actual_size_bytes: 1024,
+      source_etag: "original-etag",
+      status: "SOURCE_MUTATED",
+      version: 4,
+    });
+  });
+
   it("fails closed on an impossible multi-row INSERT result without running diagnostics", async () => {
     const id = nextId();
     const row = {
@@ -397,6 +555,7 @@ describe("D1 job repository", () => {
 describe("job API handlers", () => {
   it("creates metadata, lists it and returns owner-scoped detail", async () => {
     const jobId = nextId(NOW.getTime());
+    const sourceKey = `incoming/0123456789abcdef0123456789abcdef/${jobId}/handler-nonce/source.m4a`;
     const createResponse = await handleCreateJob(
       {
         data: requestData(),
@@ -409,13 +568,38 @@ describe("job API handlers", () => {
       },
       {
         createJobId: () => jobId,
-        createSourceKey: (id) => `incoming/pending/${id}/handler-nonce/source.m4a`,
+        createSourceKey: () => sourceKey,
+        createTemporaryUploadCredentials: () =>
+          Promise.resolve(temporaryUploadCredentials(sourceKey)),
         now: () => NOW,
       },
     );
     expect(createResponse.status).toBe(201);
-    const created = jobActionResponseSchema.parse(await createResponse.json());
-    expect(created.job.id).toBe(jobId);
+    const created = createJobResponseSchema.parse(await createResponse.json());
+    expect(created).toMatchObject({
+      jobId,
+      upload: {
+        expiresAt: "2027-01-01T00:25:00.000Z",
+        key: sourceKey,
+      },
+    });
+
+    const storedUpload = await env.SCRIBE_DROP_DB.prepare(
+      "SELECT source_key, status, upload_expires_at, version FROM jobs WHERE id = ?1",
+    )
+      .bind(jobId)
+      .first<{
+        source_key: string;
+        status: string;
+        upload_expires_at: string;
+        version: number;
+      }>();
+    expect(storedUpload).toEqual({
+      source_key: sourceKey,
+      status: "UPLOADING",
+      upload_expires_at: "2027-01-01T00:25:00.000Z",
+      version: 2,
+    });
 
     const detailResponse = await handleGetJob({
       data: requestData(),
@@ -427,6 +611,7 @@ describe("job API handlers", () => {
     expect(jobDetailSchema.parse(await detailResponse.json())).toMatchObject({
       id: jobId,
       options: OPTIONS,
+      status: "UPLOADING",
     });
 
     const hiddenResponse = await handleGetJob({
@@ -443,6 +628,65 @@ describe("job API handlers", () => {
         requestId: REQUEST_ID,
       },
     });
+  });
+
+  it("fails the admitted job without persisting credentials when credential signing fails", async () => {
+    const jobId = nextId(NOW.getTime());
+    const sourceKey = `incoming/0123456789abcdef0123456789abcdef/${jobId}/handler-nonce/source.m4a`;
+
+    await expect(
+      handleCreateJob(
+        {
+          data: requestData(),
+          env: handlerEnvironment(),
+          request: new Request("https://example.test/api/jobs", {
+            body: JSON.stringify(validCreateBody()),
+            headers: { "Content-Type": "application/json" },
+            method: "POST",
+          }),
+        },
+        {
+          createJobId: () => jobId,
+          createSourceKey: () => sourceKey,
+          createTemporaryUploadCredentials: () =>
+            Promise.reject(new Error("test-only credential failure")),
+          now: () => NOW,
+        },
+      ),
+    ).rejects.toThrow("Upload preparation failed");
+
+    const stored = await env.SCRIBE_DROP_DB.prepare(
+      `
+        SELECT
+          status,
+          error_code,
+          upload_expires_at,
+          failed_at,
+          version
+        FROM jobs
+        WHERE id = ?1
+      `,
+    )
+      .bind(jobId)
+      .first<{
+        error_code: string;
+        failed_at: string;
+        status: string;
+        upload_expires_at: string | null;
+        version: number;
+      }>();
+    expect(stored).toEqual({
+      error_code: "INTERNAL_ERROR",
+      failed_at: NOW.toISOString(),
+      status: "FAILED",
+      upload_expires_at: null,
+      version: 2,
+    });
+
+    const serialized = JSON.stringify(stored);
+    expect(serialized).not.toContain("temporary-access-key");
+    expect(serialized).not.toContain("temporary-secret-key");
+    expect(serialized).not.toContain("temporary-session-token");
   });
 
   it("rejects invalid size, media type, options and cursor without writing a row", async () => {
@@ -487,5 +731,126 @@ describe("job API handlers", () => {
       count: number;
     }>();
     expect(count?.count).toBe(0);
+  });
+
+  it("verifies R2 HEAD and completes the same upload notification idempotently", async () => {
+    const repository = createD1JobRepository(env.SCRIBE_DROP_DB);
+    const created = await repository.create(newJob());
+    if (created.status !== "created") {
+      throw new Error("Expected the upload job to be created");
+    }
+    await repository.markUploadReady({
+      jobId: created.job.id,
+      ownerSub: OWNER_A.sub,
+      timestamp: NOW.toISOString(),
+      uploadExpiresAt: "2027-01-01T00:25:00.000Z",
+    });
+    const target = await repository.findUploadTargetByOwner(OWNER_A.sub, created.job.id);
+    if (target === undefined) {
+      throw new Error("Expected an upload target");
+    }
+    await env.RECORDINGS.put(target.sourceKey, new Uint8Array(target.expectedSizeBytes).fill(1));
+
+    const notify = (): Promise<Response> =>
+      handleUploadComplete(
+        {
+          data: requestData(),
+          env: handlerEnvironment(),
+          params: { id: created.job.id },
+          request: new Request(`https://example.test/api/jobs/${created.job.id}/upload-complete`, {
+            body: "{}",
+            headers: { "Content-Type": "application/json" },
+            method: "POST",
+          }),
+        },
+        { now: () => NOW },
+      );
+    const firstResponse = await notify();
+    const secondResponse = await notify();
+
+    expect(firstResponse.status).toBe(200);
+    expect(secondResponse.status).toBe(200);
+    expect(jobActionResponseSchema.parse(await firstResponse.json()).job).toMatchObject({
+      actualSizeBytes: target.expectedSizeBytes,
+      id: created.job.id,
+      status: "UPLOADED",
+    });
+    expect(jobActionResponseSchema.parse(await secondResponse.json()).job).toMatchObject({
+      id: created.job.id,
+      status: "UPLOADED",
+    });
+    const stored = await env.SCRIBE_DROP_DB.prepare(
+      "SELECT status, version FROM jobs WHERE id = ?1",
+    )
+      .bind(created.job.id)
+      .first();
+    expect(stored).toEqual({
+      status: "UPLOADED",
+      version: 3,
+    });
+  });
+
+  it("rejects missing, wrong-sized, foreign-owner, and mutated source objects", async () => {
+    const repository = createD1JobRepository(env.SCRIBE_DROP_DB);
+    const created = await repository.create(newJob());
+    if (created.status !== "created") {
+      throw new Error("Expected the upload job to be created");
+    }
+    await repository.markUploadReady({
+      jobId: created.job.id,
+      ownerSub: OWNER_A.sub,
+      timestamp: NOW.toISOString(),
+      uploadExpiresAt: "2027-01-01T00:25:00.000Z",
+    });
+    const target = await repository.findUploadTargetByOwner(OWNER_A.sub, created.job.id);
+    if (target === undefined) {
+      throw new Error("Expected an upload target");
+    }
+    const request = (owner = OWNER_A): Promise<Response> =>
+      handleUploadComplete(
+        {
+          data: requestData(owner),
+          env: handlerEnvironment(),
+          params: { id: created.job.id },
+          request: new Request(`https://example.test/api/jobs/${created.job.id}/upload-complete`, {
+            body: "{}",
+            headers: { "Content-Type": "application/json" },
+            method: "POST",
+          }),
+        },
+        { now: () => NOW },
+      );
+
+    const missingResponse = await request();
+    expect(missingResponse.status).toBe(409);
+    await expect(missingResponse.json()).resolves.toMatchObject({
+      error: { code: "SOURCE_NOT_FOUND" },
+    });
+
+    await env.RECORDINGS.put(
+      target.sourceKey,
+      new Uint8Array(target.expectedSizeBytes + 1).fill(1),
+    );
+    const wrongSizeResponse = await request();
+    expect(wrongSizeResponse.status).toBe(409);
+    await expect(wrongSizeResponse.json()).resolves.toMatchObject({
+      error: { code: "SOURCE_SIZE_MISMATCH" },
+    });
+
+    await env.RECORDINGS.put(target.sourceKey, new Uint8Array(target.expectedSizeBytes).fill(1));
+    const hiddenResponse = await request(OWNER_B);
+    expect(hiddenResponse.status).toBe(404);
+
+    expect((await request()).status).toBe(200);
+    await env.RECORDINGS.put(target.sourceKey, new Uint8Array(target.expectedSizeBytes).fill(2));
+    const mutatedResponse = await request();
+    expect(mutatedResponse.status).toBe(409);
+    await expect(mutatedResponse.json()).resolves.toMatchObject({
+      error: { code: "SOURCE_ETAG_CHANGED" },
+    });
+    await expect(repository.findByOwner(OWNER_A.sub, created.job.id)).resolves.toMatchObject({
+      errorCode: "SOURCE_ETAG_CHANGED",
+      status: "SOURCE_MUTATED",
+    });
   });
 });

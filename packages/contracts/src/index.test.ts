@@ -6,6 +6,7 @@ import {
   MAX_RECORDING_DURATION_SECONDS,
   createJobRequestSchema,
   jobSummarySchema,
+  uploadCompleteRequestSchema,
   type CreateJobRequest,
 } from "./index.js";
 
@@ -106,5 +107,13 @@ describe("jobSummarySchema", () => {
         durationSeconds: MAX_RECORDING_DURATION_SECONDS + 0.001,
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("uploadCompleteRequestSchema", () => {
+  it("accepts only an empty notification body", () => {
+    expect(uploadCompleteRequestSchema.safeParse({}).success).toBe(true);
+    expect(uploadCompleteRequestSchema.safeParse({ etag: "browser-observed" }).success).toBe(false);
+    expect(uploadCompleteRequestSchema.safeParse({ sizeBytes: 1024 }).success).toBe(false);
   });
 });
