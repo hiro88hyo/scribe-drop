@@ -2,7 +2,16 @@
 
 ## 現在の状態
 
-Phase 1ではlocal検証用とstaging用のbinding名、migration、CLIを定義しているが、実際のCloudflare resource、RunPod endpoint、credentialは作成していない。Web、Orchestrator、RunPod Workerもまだ利用者向け機能を持たないため、この段階ではdeployしない。
+Phase 1の基盤は完了し、Phase 2ではlocal app shell、Pages Functionsのresponse
+security、Access JWT、CSRF、`GET /api/me`、D1の原子的job admission、所有権付き
+repository、`POST/GET /api/jobs`、`GET /api/jobs/:id`とWorkers/D1 integration testを
+実装している。ホームの最近のjob、cursor方式の履歴、5秒pollingする詳細UIも実APIへ
+接続済みで、Phase 2のlocal checkpointは完了している。
+
+Phase 2の`POST /api/jobs`は[ADR 0007](./adr/0007-phase-2-job-admission-contract.md)に
+従うmetadata admission checkpointであり、R2 Temporary Credentialsを返さない。
+Phase 3の最終契約、実際のCloudflare resource、RunPod endpoint、credentialはまだ
+作成していないため、現段階ではdeployしない。
 
 `apps/orchestrator/wrangler.toml`と`apps/web/wrangler.toml`の全ゼロIDは安全なplaceholderであり、remote操作には使用できない。実resource IDはstaging構築時に対象accountを確認してから設定する。
 
@@ -46,14 +55,17 @@ D1、R2、Queue、DLQ、RunPod endpoint、Access application、secretは環境�
 3. R2 CORSと`incoming/`限定Event Notificationを設定する。
 4. D1 migrationを適用し、適用済みversionを記録する。
 5. OrchestratorとWebのsecretをCloudflare secret storeへ登録する。
-6. 固定digestのRunPod Worker image、template、staging endpointを作成する。
+6. 固定digestのRunPod Worker image、template、staging endpointを作成する。modelをimageへ内包し、runtime downloadを無効にする。
 7. staging endpoint IDとRunPod API keyをOrchestrator secretへ登録する。
-8. smoke test、重複配送、claim競合、rollback手順を確認する。
+8. `runpodctl`でSecure Cloud、Flex、active workers 0、max workers 1、GPU 1、Network Volumeなし、FlashBoot無効、timeout、TTLを確認する。
+9. SBOM、container/dependency scan、offline起動、smoke test、重複配送、claim競合、cleanup、rollback手順を確認する。
 
 resourceの作成・変更・削除とdeployの直前には、CLIの認証先、environment、resource名、IDを再確認する。dashboardだけで行った変更は残さず、Wrangler設定、migration、deployment記録へ反映する。
+
+RunPodへ送る`/run` payload、endpoint設定、claim後のcapability境界は[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)を正とする。RunPod API keyはOrchestratorだけに置き、WorkerにはR2の長期credential、Discord webhook、利用者metadataを渡さない。Secure Cloudを利用できない場合や上記endpoint設定を満たせない場合はdeployを停止し、例外を別ADRで承認する。
 
 ## Migrationとrollback
 
 D1 migrationはforward-onlyで適用済みファイルを書き換えない。applicationと互換性のない変更はexpand、migrate、contractを複数releaseに分ける。
 
-Workerは直前の正常versionへrollbackできるようdeployment IDを記録する。DB変更を単純に戻せない場合は、旧applicationとの互換期間と修復migrationを先に準備する。RunPod templateは上書きせず、固定image digestを持つ新revisionとして作成し、endpointの切替で戻せるようにする。
+Workerは直前の正常versionへrollbackできるようdeployment IDを記録する。DB変更を単純に戻せない場合は、旧applicationとの互換期間と修復migrationを先に準備する。RunPod templateは上書きせず、固定image digestを持つ新revisionとして作成し、endpointの切替で戻せるようにする。rollback先も同じdata非永続化条件を満たし、古いimageへ戻すことでNetwork VolumeやFlashBootを再有効化しない。

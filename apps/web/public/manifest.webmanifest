@@ -1,0 +1,18 @@
+{
+  "name": "ScribeDrop",
+  "short_name": "ScribeDrop",
+  "description": "非公開の録音文字起こしワークスペース",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f3f1e9",
+  "theme_color": "#14231f",
+  "icons": [
+    {
+      "src": "/scribe-drop.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

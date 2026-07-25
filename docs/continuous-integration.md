@@ -32,7 +32,7 @@ uv audit --preview-features audit-command --project apps/runpod-worker --frozen
 - Gitleaks と runpodctl は `tools/versions.json` の version と公式 SHA-256 に固定し、検証後の binary だけを `.tools/bin` へ導入する。
 - JavaScript と Python の install はそれぞれ `pnpm-lock.yaml` と `uv.lock` を frozen mode で使用する。
 
-RunPod Worker の container vulnerability scan は Dockerfile と固定 base image を追加する Phase 4 のチェックポイントで導入する。scan 対象となる image がない現在は、成功扱いの空 job は置かない。
+RunPod Worker のSBOM生成、container vulnerability scan、image内model revisionの検証、networkを切った起動試験は、Dockerfileと固定base imageを追加するPhase 4のチェックポイントで導入する。scan対象となるimageがない現在は、成功扱いの空jobを置かない。SBOMやscan artifactにはcredential、URL、録音、文字起こしfixtureを含めない。
 
 ## Branch protection
 

@@ -7,6 +7,8 @@ export default tseslint.config(
     ignores: [
       "**/.tools/**",
       "**/.venv/**",
+      "**/.wrangler/**",
+      "**/.mf/**",
       "**/coverage/**",
       "**/dist/**",
       "**/node_modules/**",

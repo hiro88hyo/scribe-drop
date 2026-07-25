@@ -19,6 +19,7 @@ const requiredSchemaObjects = [
   "idx_job_events_job_created",
   "idx_jobs_owner_created",
   "idx_jobs_owner_created_active",
+  "idx_jobs_owner_status",
   "idx_jobs_status_updated",
   "idx_notification_outbox_pending",
   "idx_runpod_submissions_attempt",
@@ -217,6 +218,53 @@ try {
     requiredAttemptColumns,
     "job_attempts columns",
   );
+
+  const activeAdmissionPlan = executeJson(`
+    EXPLAIN QUERY PLAN
+    SELECT COUNT(*)
+    FROM jobs
+    WHERE owner_sub = 'owner-sub'
+      AND status IN (
+        'CREATED',
+        'UPLOADING',
+        'UPLOADED',
+        'SUBMISSION_PENDING',
+        'SUBMITTING',
+        'RUNNING',
+        'CANCEL_REQUESTED'
+      )
+  `);
+  if (
+    !activeAdmissionPlan.some(
+      (row) => typeof row.detail === "string" && row.detail.includes("idx_jobs_owner_status"),
+    )
+  ) {
+    throw new Error(
+      `Active admission query does not use idx_jobs_owner_status: ${JSON.stringify(
+        activeAdmissionPlan,
+      )}`,
+    );
+  }
+
+  const rollingAdmissionPlan = executeJson(`
+    EXPLAIN QUERY PLAN
+    SELECT COUNT(*)
+    FROM jobs
+    WHERE owner_sub = 'owner-sub'
+      AND created_at > '2026-07-25T00:00:00.000Z'
+      AND created_at <= '2026-07-25T00:10:00.000Z'
+  `);
+  if (
+    !rollingAdmissionPlan.some(
+      (row) => typeof row.detail === "string" && row.detail.includes("idx_jobs_owner_created"),
+    )
+  ) {
+    throw new Error(
+      `Rolling admission query does not use idx_jobs_owner_created: ${JSON.stringify(
+        rollingAdmissionPlan,
+      )}`,
+    );
+  }
 
   const jobId = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
   const attemptId = "01ARZ3NDEKTSV4RRFFQ69G5FAW";

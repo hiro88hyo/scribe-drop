@@ -1,0 +1,415 @@
+import type { JobDetail, JobSummary } from "@scribe-drop/contracts";
+import {
+  Link,
+  NavLink,
+  Outlet,
+  RouterProvider,
+  createBrowserRouter,
+  useParams,
+} from "react-router";
+import type { JSX } from "react";
+
+import {
+  formatByteSize,
+  formatDateTime,
+  formatDuration,
+  formatLanguage,
+  formatOutputFormats,
+  getStatusPresentation,
+  type UiError,
+} from "./job-presentation.js";
+import { useJobDetail, useJobHistory, useRecentJobs, useSession } from "./use-api-data.js";
+
+const RECENT_JOB_LIMIT = 3;
+const HISTORY_PAGE_LIMIT = 25;
+
+function BrandMark(): JSX.Element {
+  return (
+    <span aria-hidden="true" className="brand-mark">
+      <span />
+      <span />
+      <span />
+    </span>
+  );
+}
+
+function SessionIndicator(): JSX.Element {
+  const { retry, state } = useSession();
+
+  if (state.status === "loading") {
+    return (
+      <span aria-live="polite" className="session-indicator muted-session">
+        認証確認中
+      </span>
+    );
+  }
+  if (state.status === "error") {
+    return (
+      <button className="session-retry" onClick={retry} type="button">
+        認証を再確認
+      </button>
+    );
+  }
+  return (
+    <span className="session-indicator" title={state.value.user.email}>
+      <span aria-hidden="true" className="session-dot" />
+      {state.value.user.email}
+    </span>
+  );
+}
+
+function Layout(): JSX.Element {
+  return (
+    <div className="app-shell">
+      <header className="site-header">
+        <Link aria-label="ScribeDrop ホーム" className="brand" to="/">
+          <BrandMark />
+          <span>ScribeDrop</span>
+        </Link>
+        <div className="header-actions">
+          <nav aria-label="メインナビゲーション" className="site-nav">
+            <NavLink end to="/">
+              新しい文字起こし
+            </NavLink>
+            <NavLink to="/history">履歴</NavLink>
+          </nav>
+          <SessionIndicator />
+        </div>
+      </header>
+
+      <main>
+        <Outlet />
+      </main>
+
+      <footer className="site-footer">
+        <p>録音データと文字起こし結果は非公開で管理されます。</p>
+      </footer>
+    </div>
+  );
+}
+
+function UploadPanel(): JSX.Element {
+  return (
+    <section aria-labelledby="upload-heading" className="upload-card">
+      <div aria-hidden="true" className="upload-glyph">
+        <span>↑</span>
+      </div>
+      <div>
+        <p className="eyebrow">NEW TRANSCRIPTION</p>
+        <h2 id="upload-heading">音声・動画ファイルを選択</h2>
+        <p className="muted">ドラッグ＆ドロップ、または端末からファイルを選択できます。</p>
+      </div>
+      <button className="primary-button" disabled type="button">
+        ファイルを選択
+      </button>
+      <p className="availability-note">アップロード機能は次の実装段階で有効になります</p>
+    </section>
+  );
+}
+
+interface ErrorPanelProps {
+  readonly error: UiError;
+  readonly onRetry: () => void;
+}
+
+function ErrorPanel({ error, onRetry }: ErrorPanelProps): JSX.Element {
+  return (
+    <div className="feedback-panel error-panel" role="alert">
+      <p>{error.message}</p>
+      {error.requestId === undefined ? null : (
+        <p className="request-id">問い合わせID: {error.requestId}</p>
+      )}
+      <button className="secondary-button" onClick={onRetry} type="button">
+        再試行
+      </button>
+    </div>
+  );
+}
+
+function LoadingPanel({ label }: { readonly label: string }): JSX.Element {
+  return (
+    <div aria-live="polite" className="feedback-panel loading-panel" role="status">
+      <span aria-hidden="true" className="loading-dot" />
+      <p>{label}</p>
+    </div>
+  );
+}
+
+function EmptyJobs(): JSX.Element {
+  return (
+    <div className="feedback-panel empty-jobs">
+      <p>まだジョブがありません。</p>
+      <span>アップロード機能はPhase 3で有効になります。</span>
+    </div>
+  );
+}
+
+function StatusBadge({ status }: Pick<JobSummary, "status">): JSX.Element {
+  const presentation = getStatusPresentation(status);
+  return <span className={`status ${presentation.tone}`}>{presentation.label}</span>;
+}
+
+function JobList({ items }: { readonly items: readonly JobSummary[] }): JSX.Element {
+  return (
+    <div className="job-list">
+      {items.map((job) => (
+        <article className="job-row" key={job.id}>
+          <div className="job-main">
+            <StatusBadge status={job.status} />
+            <div>
+              <h3>{job.title}</h3>
+              <p>
+                {job.originalFilename} · {formatDateTime(job.createdAt)}
+                {job.durationSeconds === null ? null : ` · ${formatDuration(job.durationSeconds)}`}
+              </p>
+            </div>
+          </div>
+          <Link aria-label={`${job.title}の詳細`} className="row-link" to={`/jobs/${job.id}`}>
+            →
+          </Link>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function RecentJobs(): JSX.Element {
+  const { retry, state } = useRecentJobs(RECENT_JOB_LIMIT);
+
+  return (
+    <section aria-labelledby="recent-heading" className="recent-section">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">RECENT</p>
+          <h2 id="recent-heading">最近のジョブ</h2>
+        </div>
+        <Link className="text-link" to="/history">
+          すべて見る
+        </Link>
+      </div>
+      {state.status === "loading" ? <LoadingPanel label="最近のジョブを読み込んでいます" /> : null}
+      {state.status === "error" ? <ErrorPanel error={state.error} onRetry={retry} /> : null}
+      {state.status === "ready" && state.value.length === 0 ? <EmptyJobs /> : null}
+      {state.status === "ready" && state.value.length > 0 ? <JobList items={state.value} /> : null}
+    </section>
+  );
+}
+
+function HomePage(): JSX.Element {
+  return (
+    <>
+      <section className="hero">
+        <div className="hero-copy">
+          <p className="eyebrow">PRIVATE AUDIO WORKSPACE</p>
+          <h1>
+            声の記録を、
+            <br />
+            読める知識へ。
+          </h1>
+          <p>
+            長時間の録音も、ここから安全に文字起こし。
+            処理状況と成果物をひとつの場所で確認できます。
+          </p>
+        </div>
+        <div aria-label="サービスの特徴" className="trust-strip">
+          <span>Accessで保護</span>
+          <span>最大2 GiB</span>
+          <span>Markdown・SRT・JSON</span>
+        </div>
+      </section>
+      <UploadPanel />
+      <RecentJobs />
+    </>
+  );
+}
+
+function HistoryPage(): JSX.Element {
+  const { loadMore, retry, state } = useJobHistory(HISTORY_PAGE_LIMIT);
+
+  return (
+    <section className="page-section">
+      <p className="eyebrow">ARCHIVE</p>
+      <h1>文字起こし履歴</h1>
+      <p className="page-lead">所有者が確認されたジョブだけを、作成日時の新しい順に表示します。</p>
+
+      <div className="history-content">
+        {state.status === "loading" ? <LoadingPanel label="履歴を読み込んでいます" /> : null}
+        {state.status === "error" && state.error !== undefined ? (
+          <ErrorPanel error={state.error} onRetry={retry} />
+        ) : null}
+        {state.status === "ready" && state.items.length === 0 ? <EmptyJobs /> : null}
+        {state.status === "ready" && state.items.length > 0 ? (
+          <>
+            <JobList items={state.items} />
+            {state.error === undefined ? null : (
+              <div className="pagination-error" role="alert">
+                <p>{state.error.message}</p>
+              </div>
+            )}
+            {state.nextCursor === null ? (
+              <p className="list-end">すべてのジョブを表示しました。</p>
+            ) : (
+              <button
+                className="secondary-button load-more-button"
+                disabled={state.loadingMore}
+                onClick={loadMore}
+                type="button"
+              >
+                {state.loadingMore ? "読み込み中…" : "さらに読み込む"}
+              </button>
+            )}
+          </>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function DetailContent({ job }: { readonly job: JobDetail }): JSX.Element {
+  const status = getStatusPresentation(job.status);
+
+  return (
+    <>
+      <div className="detail-heading">
+        <StatusBadge status={job.status} />
+        <h1>{job.title}</h1>
+        <p>{job.originalFilename}</p>
+      </div>
+      <dl className="detail-grid">
+        <div>
+          <dt>ジョブID</dt>
+          <dd>{job.id}</dd>
+        </div>
+        <div>
+          <dt>状態</dt>
+          <dd>{status.label}</dd>
+        </div>
+        <div>
+          <dt>作成日時</dt>
+          <dd>{formatDateTime(job.createdAt)}</dd>
+        </div>
+        <div>
+          <dt>更新日時</dt>
+          <dd>{formatDateTime(job.updatedAt)}</dd>
+        </div>
+        <div>
+          <dt>完了日時</dt>
+          <dd>{job.completedAt === null ? "—" : formatDateTime(job.completedAt)}</dd>
+        </div>
+        <div>
+          <dt>音声時間</dt>
+          <dd>{job.durationSeconds === null ? "解析前" : formatDuration(job.durationSeconds)}</dd>
+        </div>
+        <div>
+          <dt>ファイルサイズ</dt>
+          <dd>
+            {formatByteSize(job.actualSizeBytes ?? job.expectedSizeBytes)}
+            {job.actualSizeBytes === null ? "（申告値）" : ""}
+          </dd>
+        </div>
+        <div>
+          <dt>メディア形式</dt>
+          <dd>{job.sourceContentType}</dd>
+        </div>
+        <div>
+          <dt>言語</dt>
+          <dd>{formatLanguage(job.options.language)}</dd>
+        </div>
+        <div>
+          <dt>モデル</dt>
+          <dd>{job.options.model}</dd>
+        </div>
+        <div>
+          <dt>VAD</dt>
+          <dd>{job.options.vad ? "有効" : "無効"}</dd>
+        </div>
+        <div>
+          <dt>出力形式</dt>
+          <dd>{formatOutputFormats(job.options.outputFormats)}</dd>
+        </div>
+      </dl>
+
+      {status.tone === "progress" || status.tone === "waiting" ? (
+        <p aria-live="polite" className="polling-note">
+          処理状態は5秒ごとに自動更新されます。
+        </p>
+      ) : null}
+      {job.errorCode === null ? null : (
+        <div className="feedback-panel error-panel">
+          <p>処理を完了できませんでした。</p>
+          <p className="request-id">エラーコード: {job.errorCode}</p>
+        </div>
+      )}
+
+      <section aria-labelledby="artifacts-heading" className="artifact-section">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">OUTPUTS</p>
+            <h2 id="artifacts-heading">成果物</h2>
+          </div>
+        </div>
+        {job.artifacts.length === 0 ? (
+          <p className="artifact-empty">
+            {job.status === "COMPLETED"
+              ? "成果物の公開準備中です。"
+              : "処理完了後に成果物がここへ表示されます。"}
+          </p>
+        ) : (
+          <ul className="artifact-list">
+            {job.artifacts.map((artifact) => (
+              <li key={artifact.format}>
+                <span>{formatOutputFormats([artifact.format])}</span>
+                <span>{formatByteSize(artifact.sizeBytes)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </>
+  );
+}
+
+function JobDetailPage(): JSX.Element {
+  const { jobId } = useParams();
+  const { retry, state } = useJobDetail(jobId);
+
+  return (
+    <section className="page-section detail-card">
+      <p className="eyebrow">JOB DETAIL</p>
+      {state.status === "loading" ? <LoadingPanel label="ジョブを読み込んでいます" /> : null}
+      {state.status === "error" ? <ErrorPanel error={state.error} onRetry={retry} /> : null}
+      {state.status === "ready" ? <DetailContent job={state.value} /> : null}
+      <Link className="text-link back-link" to="/history">
+        履歴へ戻る
+      </Link>
+    </section>
+  );
+}
+
+function NotFoundPage(): JSX.Element {
+  return (
+    <section className="page-section empty-state">
+      <p className="eyebrow">404</p>
+      <h1>ページが見つかりません</h1>
+      <Link className="primary-link" to="/">
+        ホームへ戻る
+      </Link>
+    </section>
+  );
+}
+
+const router = createBrowserRouter([
+  {
+    children: [
+      { element: <HomePage />, index: true },
+      { element: <HistoryPage />, path: "history" },
+      { element: <JobDetailPage />, path: "jobs/:jobId" },
+      { element: <NotFoundPage />, path: "*" },
+    ],
+    element: <Layout />,
+  },
+]);
+
+export function App(): JSX.Element {
+  return <RouterProvider router={router} />;
+}
