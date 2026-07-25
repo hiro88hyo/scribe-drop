@@ -63,6 +63,7 @@ localでは`apps/orchestrator/.dev.vars.example`を`apps/orchestrator/.dev.vars`
 | `RUNPOD_ENDPOINT_ID`        |  yes   | 環境別RunPod Serverless endpoint  |
 | `RUNPOD_API_KEY`            |  yes   | RunPod API認証                    |
 | `CLOUDFLARE_ACCOUNT_ID`     |   no   | R2 S3 endpointのaccount           |
+| `R2_BUCKET_NAME`            |   no   | eventとR2 bindingの環境別bucket名 |
 | `R2_ACCESS_KEY_ID`          |  yes   | presigned URL発行専用key          |
 | `R2_SECRET_ACCESS_KEY`      |  yes   | presigned URL発行専用secret       |
 | `DISCORD_WEBHOOK_URL`       |  yes   | 完了通知先                        |
@@ -70,6 +71,11 @@ localでは`apps/orchestrator/.dev.vars.example`を`apps/orchestrator/.dev.vars`
 | `SOURCE_RETENTION_DAYS`     |   no   | 元録音保持日数、初期値7           |
 | `RESULT_RETENTION_DAYS`     |   no   | 結果保持日数、初期値90            |
 | `AUDIT_RETENTION_DAYS`      |   no   | 監査情報保持日数、初期値180       |
+
+Phase 3のQueue consumerは`APP_ENV`、`CLOUDFLARE_ACCOUNT_ID`、
+`R2_BUCKET_NAME`を起動境界で検証し、raw eventのaccount/bucketと一致しないmessageを
+恒久拒否する。`R2_BUCKET_NAME`は同じenvironmentの`RECORDINGS` bindingが参照する
+bucket名と一致させる。
 
 ## RunPod Worker
 

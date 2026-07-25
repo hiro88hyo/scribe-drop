@@ -4,6 +4,7 @@ RUNPOD_INTERNAL_BASE_URL=http://localhost:8787
 RUNPOD_ENDPOINT_ID=local-endpoint-placeholder
 RUNPOD_API_KEY=local-only-runpod-api-key
 CLOUDFLARE_ACCOUNT_ID=00000000000000000000000000000000
+R2_BUCKET_NAME=scribe-drop-local
 R2_ACCESS_KEY_ID=local-only-r2-access-key
 R2_SECRET_ACCESS_KEY=local-only-r2-secret-key
 DISCORD_WEBHOOK_URL=https://discord.example.invalid/webhook-placeholder

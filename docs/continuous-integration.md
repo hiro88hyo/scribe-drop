@@ -8,11 +8,11 @@
 
 ## Job
 
-| Job                | 検査内容                                                                                                    |
-| ------------------ | ----------------------------------------------------------------------------------------------------------- |
-| `quality`          | lockfile 固定 install、toolchain、format、lint、型検査、Vitest、pytest、build、空の local D1 への migration |
-| `secrets`          | Gitleaks による完全な Git 履歴と現在の checkout の検査                                                      |
-| `dependency-audit` | `pnpm audit` と `uv audit` による直接・推移依存の既知脆弱性検査                                             |
+| Job                | 検査内容                                                                                                                                     |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `quality`          | lockfile固定install、toolchain、format、lint、型検査、Vitest、pytest、build、local D1 migration、Web/OrchestratorのWorkers/D1/R2 integration |
+| `secrets`          | Gitleaks による完全な Git 履歴と現在の checkout の検査                                                                                       |
+| `dependency-audit` | `pnpm audit` と `uv audit` による直接・推移依存の既知脆弱性検査                                                                              |
 
 `pnpm audit` と `uv audit` は脆弱性データサービスへ接続するため、通常の `pnpm check` とは分離する。ローカルで CI 相当を確認するときは次を実行する。
 

@@ -8,15 +8,19 @@ response security、Access JWT、CSRF、`GET /api/me`、所有権付きjob API�
 Phase 3ではowner hash付きsource key、exact object・multipart action 4種・15分の
 R2 Temporary Credentials、upload準備のD1状態遷移、browser multipart、cancel、
 同一画面retryと最小化したIndexedDB checkpoint、所有者付きR2 HEADと冪等CASによる
-upload-completeまで実装済みである。
-Queue ingestion以降の制御は実装前の必須要件として記載する。詳細な認証判断は
+upload-complete、strictなR2 event検証、R2 HEAD再確認、原子的なgeneration 1作成、
+個別ack/retryを行うQueue ingestionまで実装済みである。attempt作成時は
+[ADR 0010](./adr/0010-separate-attempt-and-capability-issuance.md)に従ってcapabilityを
+未発行のまま`SUBMISSION_PENDING`で停止する。RunPod以降の制御は実装前の必須要件
+として記載する。詳細な認証判断は
 [ADR 0003](./adr/0003-access-jwt-and-csrf-boundary.md)、受付制限は
 [ADR 0004](./adr/0004-d1-job-admission-control.md)、CSPとresponse headerは
 [ADR 0005](./adr/0005-web-response-security-policy.md)、RunPod境界は
 [ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)、Phase 2のjob作成契約は
 [ADR 0007](./adr/0007-phase-2-job-admission-contract.md)、browser upload capabilityは
 [ADR 0008](./adr/0008-r2-browser-upload-capability.md)、upload完了検証は
-[ADR 0009](./adr/0009-server-verified-upload-completion.md)を正とする。
+[ADR 0009](./adr/0009-server-verified-upload-completion.md)、attemptとcapabilityの
+分離は[ADR 0010](./adr/0010-separate-attempt-and-capability-issuance.md)を正とする。
 
 ## 保護対象
 
@@ -99,6 +103,10 @@ RunPodのjob input、`job.id`、status、output、例外、DNS応答、HTTP応�
 | browser機能・外部resourceの濫用   | `default-src 'none'`、Permissions Policy、COOP、CORP、外部CDNなし                                                               | build済みasset responseの全headerとCSP directive                                     |
 | R2接続許可を使った外部送信        | `connect-src`はR2公式hostだけ、credentialを15分・単一bucket・単一object・multipart action 4種へ限定。SDKはupload時だけlazy load | 許可外hostをCSPで拒否し、temporary credentialのaction・object拒否をstagingで統合検証 |
 | upload完了metadataの偽装          | browserからETag・size・keyを受け取らず、所有者付きD1行のexact keyをR2 HEADして完全一致sizeとETagをCAS保存                       | 他owner、空body以外、HEAD不存在、size不一致、重複・並行通知、異なるETag              |
+| Queue eventの偽装・別環境混入     | raw bodyをstrict検証し、account、bucket、action、生成済みkey、D1 source、R2 HEADを順に照合。body、key、ETagをlogへ出さない      | 未知field、別account/bucket、不許可action、偽key、raw secret marker                  |
+| Queue重複・部分障害               | D1 batchとversion付きCASでgeneration 1を一度だけ作り、messageごとにack/retry。一時障害だけを上限付きbackoffで再送               | 重複・順序逆転、D1更新後の再配信、batch内一件失敗、CAS競合、DLQ                      |
+| source上書き                      | eventとHEADのETagを再照合し、確定済みETagとの差分を`SOURCE_MUTATED`へ遷移。terminal jobを古いeventで巻き戻さない                | stale event、処理前後の上書き、並行mutation、terminal状態への遅延event               |
+| 未発行token sentinelの認証利用    | issued/expiryをNULLにし、domain-separated digestをlegacy列の制約充足だけに使用。hash一致だけではclaimを許可しない               | 導出したsentinel入力をtokenとして提示しても拒否                                      |
 | job作成によるresource abuse       | D1条件付きINSERT、10件/10分rolling window、active 3件上限                                                                       | 11件目、4 active、window境界、異なるowner、並行request                               |
 | admission checkのTOCTOU           | count predicateとINSERTを単一SQL statementで実行                                                                                | 残り1枠への2並行requestで成功が1件だけ                                               |
 | D1障害時のlimit迂回               | D1 error・timeout・未知row countでfail closed                                                                                   | overload fakeでjobと後続副作用が作られない                                           |
@@ -159,7 +167,7 @@ stagingではAccess policyとapplication audienceを実値で構成した後に�
 
 ## Deferred
 
-- Phase 3: R2 Event Notification、Queue ingestion、DLQ
+- Phase 3: 実R2 Event Notification subscription、staging ETag/CORS/credential拒否、DLQ運用smoke test
 - Phase 4: 本文のRunPod制御、claim、Worker sandbox、ffprobe、GPU abuse、SBOM
 - Phase 5: status polling、manifest finalize、Discord、artifact download
 - Phase 6:重複、timeout、partial failure、DLQ、concurrent finalize

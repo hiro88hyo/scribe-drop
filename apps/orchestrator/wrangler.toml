@@ -3,6 +3,11 @@ main = "src/index.ts"
 compatibility_date = "2026-07-25"
 workers_dev = false
 
+[vars]
+APP_ENV = "local"
+CLOUDFLARE_ACCOUNT_ID = "00000000000000000000000000000000"
+R2_BUCKET_NAME = "scribe-drop-local"
+
 [[d1_databases]]
 binding = "SCRIBE_DROP_DB"
 database_name = "scribe-drop-local"
@@ -23,6 +28,11 @@ dead_letter_queue = "recording-uploaded-dlq-local"
 
 [env.staging]
 name = "scribe-drop-orchestrator-staging"
+
+[env.staging.vars]
+APP_ENV = "staging"
+CLOUDFLARE_ACCOUNT_ID = "00000000000000000000000000000000"
+R2_BUCKET_NAME = "recording-transcriber-staging"
 
 [[env.staging.d1_databases]]
 binding = "SCRIBE_DROP_DB"

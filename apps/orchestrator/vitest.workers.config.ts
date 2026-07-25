@@ -1,0 +1,46 @@
+import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-pool-workers";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { defineConfig } from "vitest/config";
+
+const projectDirectory = path.dirname(fileURLToPath(import.meta.url));
+const migrationsDirectory = path.resolve(projectDirectory, "../../migrations");
+
+export default defineConfig({
+  plugins: [
+    cloudflareTest(async () => ({
+      main: path.join(projectDirectory, "src/index.ts"),
+      miniflare: {
+        bindings: {
+          APP_ENV: "local",
+          CLOUDFLARE_ACCOUNT_ID: "0123456789abcdef0123456789abcdef",
+          R2_BUCKET_NAME: "recording-transcriber-test",
+          TEST_MIGRATIONS: await readD1Migrations(migrationsDirectory),
+        },
+        compatibilityDate: "2026-07-25",
+        d1Databases: {
+          SCRIBE_DROP_DB: "00000000-0000-0000-0000-000000000401",
+        },
+        r2Buckets: ["RECORDINGS"],
+      },
+    })),
+  ],
+  resolve: {
+    alias: {
+      "@scribe-drop/contracts": path.resolve(
+        projectDirectory,
+        "../../packages/contracts/src/index.ts",
+      ),
+      "@scribe-drop/domain": path.resolve(projectDirectory, "../../packages/domain/src/index.ts"),
+      "@scribe-drop/observability": path.resolve(
+        projectDirectory,
+        "../../packages/observability/src/index.ts",
+      ),
+    },
+  },
+  root: projectDirectory,
+  test: {
+    include: ["tests/**/*.worker.spec.ts"],
+    reporters: ["default"],
+  },
+});

@@ -2,7 +2,7 @@
 
 ## 現在の状態
 
-Phase 1とPhase 2は`develop`へ統合済みである。Phase 2ではlocal app shell、Pages Functionsのresponse
+Phase 1からPhase 3までは`develop`へ統合済みである。Phase 2ではlocal app shell、Pages Functionsのresponse
 security、Access JWT、CSRF、`GET /api/me`、D1の原子的job admission、所有権付き
 repository、`POST/GET /api/jobs`、`GET /api/jobs/:id`とWorkers/D1 integration testを
 実装している。ホームの最近のjob、cursor方式の履歴、5秒pollingする詳細UIも実APIへ
@@ -13,8 +13,12 @@ owner hash付きsource keyと、exact object・multipart action 4種・15分に�
 R2 Temporary Credentialsのlocal signing、browserの明示的multipart、進捗、
 cancel、同一画面retry、Wake Lock、最小化したIndexedDB checkpointまで実装している。
 [ADR 0009](./adr/0009-server-verified-upload-completion.md)に従う所有者付きR2 HEAD、
-完全一致size、冪等CASを使うupload-completeも実装している。R2 Event Notification
-consumerとstaging R2権限検証は未完了であるため、現段階ではdeployしない。
+完全一致size、冪等CASを使うupload-completeも実装している。R2 Event Notificationの
+strict検証、R2 HEAD再確認、D1 transactionによるgeneration 1の一意作成、個別
+ack/retryを行うQueue consumerも実装し、MiniflareのD1/R2 integration testを通している。
+[ADR 0010](./adr/0010-separate-attempt-and-capability-issuance.md)に従い、Phase 3では
+RunPod capabilityを発行せず`SUBMISSION_PENDING`で停止する。実R2 Event Notification、
+staging R2権限・ETag・DLQ検証は未完了であるため、現段階ではdeployしない。
 
 `apps/orchestrator/wrangler.toml`と`apps/web/wrangler.toml`の全ゼロIDは安全なplaceholderであり、remote操作には使用できない。実resource IDはstaging構築時に対象accountを確認してから設定する。
 
@@ -69,7 +73,14 @@ R2 S3-compatible APIは`wrangler dev`のlocal R2 emulationでは利用できな�
 browser uploadの自動テストはfake transportを使う。CORS、temporary credentialの
 action/object拒否、multipart、abortは専用staging bucketとstaging originで確認する。
 Workers R2 bindingによるupload-completeのHEAD、size、ETag、D1状態遷移はMiniflareで
-自動検証する。
+自動検証する。OrchestratorのQueue consumerも同じMiniflare上で、実migrationを適用した
+D1とR2 bindingを使い、重複配信、upload-completeとの順序逆転、サイズ不一致、
+source上書きを検証する。Cloudflareが生成する実eventのETag表現とsubscription filterは
+stagingで確認する。
+
+Queue consumerはmessage単位でack/retryし、`max_retries = 5`の後は環境別DLQへ送る。
+DLQにpush consumerは常設せず、誤った自動処理を避けて
+[operations.md](./operations.md)の手順で4日以内に調査・replay判断を行う。
 
 RunPodへ送る`/run` payload、endpoint設定、claim後のcapability境界は[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)を正とする。RunPod API keyはOrchestratorだけに置き、WorkerにはR2の長期credential、Discord webhook、利用者metadataを渡さない。Secure Cloudを利用できない場合や上記endpoint設定を満たせない場合はdeployを停止し、例外を別ADRで承認する。
 

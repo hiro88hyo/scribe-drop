@@ -162,6 +162,17 @@ Node stream型を参照するため有効にしている。いずれも依存lib
 application sourceのstrict検査は維持する。Functionsはroot標準どおり無効のままとする。
 これらの例外は依存更新時に再確認し、不要になれば削除する。
 
+OrchestratorのR2 Queue consumerは、実migrationを適用したlocal D1とMiniflare R2
+bindingで検証する。test configはworkspace packageの未build `dist`を参照せず、
+各packageのTypeScript sourceへaliasする。
+
+```bash
+pnpm --filter @scribe-drop/orchestrator run test:workers
+```
+
+このtestはCloudflareのremote QueueやR2へ接続しない。raw eventをfixtureとして渡し、
+R2 HEAD、D1 transaction、再配信時の冪等性、source mutationをWorkers runtimeで確認する。
+
 browser API clientは`/api/me`、`/api/jobs`、`/api/jobs/:id`、
 `/api/jobs/:id/upload-complete`だけをsame-originかつ`cache: no-store`で呼び、
 responseを`packages/contracts`のZod schemaで再検証する。upload-completeには空の

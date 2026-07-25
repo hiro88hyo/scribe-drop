@@ -1,10 +1,30 @@
 export const LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
 export const LOG_SERVICES = ["web", "orchestrator", "runpod-worker"] as const;
 export const DEPLOYMENT_ENVIRONMENTS = ["local", "staging", "production"] as const;
+export const LOG_EVENTS = [
+  "api_request_failed",
+  "invalid_log_event",
+  "job.failed",
+  "job.submission_started",
+  "upload_event_configuration_invalid",
+  "upload_event_dependency_failure",
+  "upload_event_duplicate",
+  "upload_event_ignored",
+  "upload_event_ingested",
+  "upload_event_job_not_found",
+  "upload_event_rejected",
+  "upload_event_source_mismatch",
+  "upload_event_source_mutated",
+  "upload_event_source_rejected",
+  "upload_event_source_unavailable",
+  "upload_event_stale",
+  "upload_event_state_conflict",
+] as const;
 
 export type LogLevel = (typeof LOG_LEVELS)[number];
 export type LogService = (typeof LOG_SERVICES)[number];
 export type DeploymentEnvironment = (typeof DEPLOYMENT_ENVIRONMENTS)[number];
+export type LogEvent = (typeof LOG_EVENTS)[number];
 
 export interface SafeLogContext {
   attemptId?: string;
@@ -36,16 +56,15 @@ export interface StructuredLoggerOptions {
 }
 
 export interface StructuredLogger {
-  debug(event: string, context?: SafeLogContext): StructuredLogRecord;
-  error(event: string, context?: SafeLogContext): StructuredLogRecord;
-  info(event: string, context?: SafeLogContext): StructuredLogRecord;
-  warn(event: string, context?: SafeLogContext): StructuredLogRecord;
+  debug(event: LogEvent, context?: SafeLogContext): StructuredLogRecord;
+  error(event: LogEvent, context?: SafeLogContext): StructuredLogRecord;
+  info(event: LogEvent, context?: SafeLogContext): StructuredLogRecord;
+  warn(event: LogEvent, context?: SafeLogContext): StructuredLogRecord;
 }
 
 const ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/u;
 const SAFE_IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/u;
 const SAFE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/u;
-const SAFE_EVENT_PATTERN = /^[a-z][a-z0-9_.-]{0,99}$/u;
 const OWNER_HASH_PATTERN = /^[a-f0-9]{16,64}$/u;
 const INVALID_EVENT_NAME = "invalid_log_event";
 
@@ -61,8 +80,8 @@ function matches(value: unknown, pattern: RegExp): value is string {
   return typeof value === "string" && pattern.test(value);
 }
 
-function normalizeEvent(event: string): string {
-  return SAFE_EVENT_PATTERN.test(event) ? event : INVALID_EVENT_NAME;
+function normalizeEvent(event: string): LogEvent {
+  return LOG_EVENTS.find((allowedEvent) => allowedEvent === event) ?? INVALID_EVENT_NAME;
 }
 
 export function sanitizeLogContext(value: unknown): SafeLogContext {
@@ -116,23 +135,23 @@ class JsonStructuredLogger implements StructuredLogger {
     this.#sink = options.sink;
   }
 
-  debug(event: string, context?: SafeLogContext): StructuredLogRecord {
+  debug(event: LogEvent, context?: SafeLogContext): StructuredLogRecord {
     return this.#write("debug", event, context);
   }
 
-  error(event: string, context?: SafeLogContext): StructuredLogRecord {
+  error(event: LogEvent, context?: SafeLogContext): StructuredLogRecord {
     return this.#write("error", event, context);
   }
 
-  info(event: string, context?: SafeLogContext): StructuredLogRecord {
+  info(event: LogEvent, context?: SafeLogContext): StructuredLogRecord {
     return this.#write("info", event, context);
   }
 
-  warn(event: string, context?: SafeLogContext): StructuredLogRecord {
+  warn(event: LogEvent, context?: SafeLogContext): StructuredLogRecord {
     return this.#write("warn", event, context);
   }
 
-  #write(level: LogLevel, event: string, context?: SafeLogContext): StructuredLogRecord {
+  #write(level: LogLevel, event: LogEvent, context?: SafeLogContext): StructuredLogRecord {
     const record: StructuredLogRecord = {
       environment: this.#environment,
       event: normalizeEvent(event),

@@ -375,6 +375,10 @@ queue: recording-uploaded
 結果ファイルへの書込みではこのQueueを発火させない。
 
 Queueはat-least-onceであることを前提とし、同一イベントが複数回来ても安全に処理する。
+初回sourceとして受け入れるactionはbrowser uploaderが生成する
+`CompleteMultipartUpload`だけとする。raw eventはCloudflare公式形式の
+`account`、`action`、`bucket`、`eventTime`、`object.key`、`object.size`、
+`object.eTag`をstrictに検証し、未知field、環境違い、生成規則外keyを拒否する。
 
 ---
 
@@ -438,9 +442,11 @@ CREATE TABLE job_attempts (
 
     status TEXT NOT NULL,
     claim_token_hash TEXT NOT NULL,
-    claim_token_expires_at TEXT NOT NULL,
-    claim_token_consumed_at TEXT,
-    heartbeat_token_hash TEXT,
+    claim_issued_at TEXT,
+    claim_expires_at TEXT,
+    claim_consumed_at TEXT,
+    heartbeat_token_hash TEXT NOT NULL,
+    heartbeat_issued_at TEXT,
 
     winning_runpod_job_id TEXT,
     result_prefix TEXT NOT NULL,
@@ -468,6 +474,12 @@ CREATE UNIQUE INDEX idx_attempt_winner_runpod
 ON job_attempts(winning_runpod_job_id)
 WHERE winning_runpod_job_id IS NOT NULL;
 ```
+
+Phase 3では[ADR 0010](./adr/0010-separate-attempt-and-capability-issuance.md)に従い、
+未発行状態をissued列のNULLで表し、legacy NOT NULL hash列には認証に使用できない
+domain-separated sentinel digestを保存する。claim tokenはPhase 4のRunPod投入直前、
+heartbeat tokenはwinner claim成功時に初めて発行する。初期migrationに残る
+`webhook_token_hash`は認証に使用せず、Phase 4のforward-only table rebuildで除去する。
 
 ### 7.3 runpod_submissions
 
@@ -706,21 +718,22 @@ FAILED状態だけ許可する。
 
 Queue Consumerは各メッセージについて以下を行う。
 
-1. スキーマ検証
+1. Cloudflare公式raw eventのstrictスキーマ検証
 2. bucket確認
-3. `incoming/` prefix確認
+3. `CompleteMultipartUpload` actionと生成済み`incoming/` key形式の確認
 4. object keyからjob IDを取得
 5. D1のjobを取得
 6. source key一致確認
-7. R2 HEADでサイズとETagを再確認
+7. R2 HEADで、eventおよび申告値に対するサイズとETagを再確認
 8. D1へETagと実サイズを保存
-9. attemptがなければ作成
-10. RunPod投入
-11. 成功時だけメッセージをack
-12. 一時障害時はretry
-13. 恒久的な不正データはFAILED化してack
+9. generation 1がなければ作成し、jobとattemptを`SUBMISSION_PENDING`にする
+10. D1 transaction成功、冪等な重複、または恒久的な拒否だけを個別ack
+11. R2/D1一時障害または解消可能なCAS競合はmessage単位でretry
+12. retry上限到達時は環境別DLQへ移し、bodyをログへ出さず運用手順に従う
 
 同一のbucket、key、ETagが複数回来ても、新しいattemptを作らない。
+Phase 3のconsumerはここで終了し、RunPodへは投入しない。claim tokenの発行、
+`SUBMISSION_PENDING`からの投入、結果不明時の回復はPhase 4の責務とする。
 
 ### 10.2 source上書き
 
@@ -731,9 +744,9 @@ status = SOURCE_MUTATED
 error_code = SOURCE_ETAG_CHANGED
 ```
 
-まだRunPod処理前なら失敗として終了する。
-
-処理開始後に検出した場合はキャンセル要求を行う。
+まだRunPod処理前なら以後のsubmission対象から除外する。RunPod job IDが判明した後に
+検出した場合の`/cancel`とreconciliationはPhase 5で実装し、Phase 3では
+`SOURCE_MUTATED`への遷移によって後続処理をfail closedにする。
 
 ---
 
@@ -1248,11 +1261,13 @@ FFPROBE_INVALID_CONTAINER
 ### Queue
 
 * 同じR2イベントを2回受信
-* batch全体のretry
+* upload-completeより先・後の両順序
+* batch内の個別ack/retry
 * D1更新後にack失敗
-* RunPod POST前の失敗
-* RunPod POST成功後にレスポンス喪失
-* RunPod POST成功後にD1書込み失敗
+* malformed event、環境違い、生成規則外key
+* HEAD不在、一時障害、eventとHEADの不一致
+* サイズ不一致、source上書き、恒久拒否
+* retry上限到達後のDLQ移送
 
 ### RunPod重複
 

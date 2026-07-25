@@ -3,12 +3,11 @@
 ## 1. 現状
 
 2026-07-25
-時点でPhase 1とPhase 2を`develop`へ統合し、Phase 3を
-`feature/phase-3-secure-upload`で進行している。Phase 2ではReact/Viteのapp
+時点でPhase 1からPhase 3までを`develop`へ統合済みである。Phase 2ではReact/Viteのapp
 shell、Pages Functionsのresponse security、Access JWT、CSRF、`GET /api/me`、
 D1の原子的job admission、所有権付きrepository、job作成・一覧・詳細API、
 型検証付きbrowser API client、ホーム・履歴・詳細の実API接続、Workers/D1
-integration testまで実装済みである。Phase 3では[ADR 0008](./adr/0008-r2-browser-upload-capability.md)を決定し、owner hash付きsource key、multipart actionだけに限定した15分のR2 Temporary Credentials、D1のupload準備状態遷移、browserの明示的multipart upload、進捗、cancel、同一画面retry、Wake Lock、最小化したIndexedDB checkpointまで実装済みである。[ADR 0009](./adr/0009-server-verified-upload-completion.md)に従う所有者付きR2 HEADと冪等なupload-completeも実装済みである。Queue consumer、実際のCloudflare resourceとRunPod endpointはまだ作成・deployしていない。
+integration testまで実装済みである。Phase 3では[ADR 0008](./adr/0008-r2-browser-upload-capability.md)を決定し、owner hash付きsource key、multipart actionだけに限定した15分のR2 Temporary Credentials、D1のupload準備状態遷移、browserの明示的multipart upload、進捗、cancel、同一画面retry、Wake Lock、最小化したIndexedDB checkpointまで実装済みである。[ADR 0009](./adr/0009-server-verified-upload-completion.md)に従う所有者付きR2 HEADと冪等なupload-completeも実装済みである。さらに、R2 Event Notificationのstrict検証、R2 HEAD再確認、D1の原子的なgeneration 1作成、個別ack/retryを行うQueue consumerを実装し、MiniflareのD1/R2 integration testまで完了している。[ADR 0010](./adr/0010-separate-attempt-and-capability-issuance.md)に従い、このPhaseではattemptを`SUBMISSION_PENDING`まで作成し、RunPod capabilityの発行と投入は行わない。実際のCloudflare resource、Event Notification、staging検証、RunPod endpointはまだ作成・deployしていない。
 
 本計画は[spec.md](./spec.md)とRunPodの追加security要件である[additional-spec.md](./additional-spec.md)を正とし、Phase 1からPhase 7までを、各Phaseが単独でレビュー・検証できる単位に分けて実装する。両者が矛盾する場合は追加要件と[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)を優先する。
 
@@ -76,7 +75,7 @@ integration testまで実装済みである。Phase 3では[ADR 0008](./adr/0008
 
 1. R2 Temporary Credentials で、単一 bucket かつ単一 object key に権限を限定できること。
 2. 一時認証情報による S3 multipart upload と abort の挙動、および `If-None-Match: *` 相当の create-only 条件が multipart で利用可能か。[ADR 0008](./adr/0008-r2-browser-upload-capability.md)で、local signingによりexact objectとmultipart actionだけへ限定し、multipart create-only条件は利用できない前提を決定済み。実R2の拒否・abort・CORSはstagingで確認する。
-3. R2 Event Notification の実際のメッセージ形式、ETag 表現、Queue retry と DLQ の設定方法。
+3. R2 Event Notificationの実際のメッセージ形式、ETag表現、Queue retryとDLQの設定方法。公式の[R2 event notification format](https://developers.cloudflare.com/r2/buckets/event-notifications/)、[Queuesの個別ack/retry](https://developers.cloudflare.com/queues/configuration/batching-retries/)、[DLQ](https://developers.cloudflare.com/queues/configuration/dead-letter-queues/)を確認済みであり、実R2のETag表現と通知subscriptionはstagingで最終確認する。
 4. Pages Functions での Access JWT 検証方法、JWKS キャッシュ、複数 audience、ローカルテスト方法。[ADR 0003](./adr/0003-access-jwt-and-csrf-boundary.md)で決定済み。
 5. RunPod `/run`、`/status`、`/cancel`、job ID、result保持期間、timeoutとTTLの単位・最大値。[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)で初期方針を決定済み。
 6. D1 で claim winner の確定、submission 記録、outbox 作成を競合に耐える形で実行する方法。
@@ -85,7 +84,7 @@ integration testまで実装済みである。Phase 3では[ADR 0008](./adr/0008
 
 - `DELETE /api/jobs/:id` は論理削除を要求するが、提示された `jobs` スキーマには `deleted_at` がない。列追加と一覧からの除外規則を決める。
 - UI と Discord 通知は音声時間を表示するが、完了後の duration を保存する列がない。D1 に保存する実行メタデータを決める。
-- heartbeat用tokenは専用hash列へ保存する。初期migrationのwebhook tokenは[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)に従いPhase 4のforward-only migrationで除去する。
+- [ADR 0010](./adr/0010-separate-attempt-and-capability-issuance.md)に従い、Phase 3のforward-only migrationでclaim/heartbeatの発行状態を表すnullable列を追加済みである。Phase 4ではclaim/heartbeatの実token発行CASを実装し、初期migrationの未使用webhook token列をtable rebuildで除去する。
 - claim tokenの初期expiry、max workers 1でのqueue制御、投入をOrchestrator側で保留する条件をPhase 4開始時のbenchmarkに基づくADRで決める。決定前にproductionへ投入しない。
 - 「申告サイズと大きく異ならない」の許容差が未定義である。原則は完全一致とし、例外が必要なら根拠と上限を決める。
 - multipart ETag は内容ハッシュではないため、source の同一性判定にのみ使い、整合性検証を別途必要とするか決める。
@@ -216,6 +215,14 @@ Access/CSRF/所有権、D1上のexact source情報、R2 HEADの完全一致size�
 ETagの再送はno-op、異なるETagは`SOURCE_MUTATED`とする。browser側の通知だけが失敗した
 場合はR2へ再uploadせず、同じjobの通知だけを再試行する。
 
+Queue ingestionのlocal checkpointでは、Cloudflare公式形式のraw eventをstrictに検証し、
+`CompleteMultipartUpload`だけを初回sourceとして受け入れる。D1に記録したbucketとexact
+keyを照合した後、R2 HEADのsizeとETagがeventおよび申告値と一致する場合だけ、D1
+transactionでgeneration 1を作成してjobを`SUBMISSION_PENDING`へ遷移する。messageごとに
+ackまたは指数backoff付きretryを指定し、一件の一時障害で同じbatchの検証済みmessageを
+再配信させない。max retry後は環境別DLQへ移し、
+[operations.md](./operations.md)の手順で調査する。
+
 ### テストと完了条件
 
 - multipart 成功、part retry、abort、通信切断、同一画面での再試行をテストする。
@@ -233,7 +240,7 @@ ETagの再送はno-op、異なるETagは`SOURCE_MUTATED`とする。browser側�
 
 ### Orchestrator
 
-- Phase 4の最初に[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)に従って旧RunPod contractを置き換え、claim tokenのexpiry/consumptionを追加するforward-only migrationを作成する。適用済み`0001_initial.sql`は変更しない。
+- Phase 4の最初に[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)と[ADR 0010](./adr/0010-separate-attempt-and-capability-issuance.md)に従って旧RunPod contractを置き換える。Phase 3で追加したclaim lifecycle列を使う発行CASを実装し、未使用の`webhook_token_hash`はforward-only table rebuildで除去する。適用済みmigrationは変更しない。
 - transcription providerは`RunPodWhisperProvider`だけを実装する。Geminiなどの外部生成AI実装、credential、UI切替を作らず、音声と本文を外部生成AIへ送らない。
 - R2 presigned GET/PUT URL generator、RunPod client、token generatorをinterfaceとして実装する。
 - `/run`にはschema version、job ID、attempt ID、256 bit claim token、execution timeout、TTLだけを送る。presigned URL、R2 credential、callback/heartbeat、options、title、filename、email、provider、webhook、`s3Config`を含めない。
