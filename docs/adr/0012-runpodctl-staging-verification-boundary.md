@@ -5,8 +5,8 @@
 
 ## Context
 
-固定している`runpodctl` 2.7.2でstaging templateとendpointを作成したところ、二つの
-provider/CLI制約を確認した。
+固定している`runpodctl` 2.7.2でstaging templateとendpointを作成・更新したところ、
+複数のprovider/CLI制約を確認した。
 
 第一に、port引数を渡さないServerless templateにもRunPod側が`8888/http`と`22/tcp`を
 追加した。2.7.2のtemplate updateには空のport集合を設定する手段がなく、portを公開しない
@@ -17,6 +17,16 @@ provider/CLI制約を確認した。
 `serverless list`の実応答は`computeType`、`gpuIds`、`locations`を省略した。CLIの
 endpoint型はこれらを`omitempty`で出力するため、取得応答だけから作成時の配置条件を
 再検証できない。
+
+第三に、`serverless update --workers-min 0`と`--workers-max 0`は成功終了するが、実際の
+endpoint値を0へ更新しなかった。0が未指定値として扱われるため、staging smokeで一時的に
+1へ上げたactive workerをCLIだけでは0へ戻せない。
+
+第四に、RunPod Consoleでactive workerを0へ戻してendpointを保存すると、関連templateの
+registry credential参照が以前の値へ戻る挙動を確認した。private imageのcredentialを
+rotationした直後は、endpointだけを確認すると次回のcold startでimage pullに失敗し得る。
+また、templateやcredentialを更新しても既存のOutdatedまたはUnhealthy workerは新設定を
+読み直さず、旧imageや失効credentialを使い続ける場合がある。
 
 取得できない値を一致したものとして一般化すると、手動作成された同名endpointを誤って
 採用できる。逆に、取得応答に常に値があると仮定すると、正しく作成されたendpointでも
@@ -40,9 +50,20 @@ projectのPlatform CLI方針とsecret境界を増やすため採用しない。
 - template作成時にproviderが既定portを追加した場合だけ、RunPod Consoleでその二つの
   portを削除する一時的な手動手順を許可する。ほかの値は変更せず、直後に
   `runpodctl template get`の厳格照合を通す。照合前のtemplateをendpointへ関連付けない。
+- staging smokeのためにactive workerを1へ上げた場合、全jobがterminalであることをD1で
+  確認してからRunPod Consoleで0へ戻す。直後に`serverless get`で0〜1 worker、timeout、
+  scaler、FlashBoot、volumeを再検証する。
+- Consoleでendpointを保存した後は、追跡外planが指定するregistry credentialを
+  `template update --registry-auth-id`で再適用し、templateとendpointの両方を固定planへ
+  厳格照合する。credential原文はCLI引数や追跡対象へ渡さない。
+- revision切替またはcredential rotation後は、実jobを投入する前にworkerのtemplate、
+  image、registry credentialが追跡外state/planと一致することを確認する。旧設定の
+  OutdatedまたはUnhealthy workerが残る場合、active jobがないことを確認してConsoleで
+  そのworkerだけをterminateする。
 - `runpodctl`が空のport集合の作成または更新と、配置条件を含む安定したread responseを
-  提供したversionへ更新できた時点で手動手順と省略許容を除去する。version更新は機能変更
-  から分離し、checksum、回帰テスト、staging再検証を行う。
+  提供し、0値のworker更新とrolling worker replacementを正しく扱うversionへ更新できた
+  時点で手動手順と省略許容を除去する。version更新は機能変更から分離し、checksum、
+  回帰テスト、staging再検証を行う。
 
 ## Consequences
 
@@ -50,7 +71,8 @@ projectのPlatform CLI方針とsecret境界を増やすため採用しない。
   endpointを名前だけで採用しない。
 - worker起動前は配置条件の全項目を取得応答だけで証明できない。staging smokeと
   Secure Cloud確認がPhase 4完了条件として残る。
-- port削除はdashboardだけの恒久設定ではなく、CLIの機能不足に限定した記録済み例外となる。
-  厳格な取得後検証によってportが残ったtemplateの利用を防ぐ。
+- port削除とactive workerを0へ戻す操作はdashboardだけの恒久設定ではなく、CLIの
+  機能不足に限定した記録済み例外となる。厳格な取得後検証によってport、worker数、
+  registry credentialのdriftを持つresourceの利用を防ぐ。
 - RunPodの応答形式またはCLI実装が変わると検証が停止する。省略項目を無条件に増やさず、
   公式実装とstaging実測を確認してこのADRを更新する必要がある。

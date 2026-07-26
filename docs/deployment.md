@@ -50,8 +50,10 @@ Phase 5のlocal実装では、5分Cron、RunPod status poll、terminal状態のD
 manifest/artifact検証、原子的finalize、notification outbox、Discord再送、所有者限定
 artifact URL、cancel、新しいattemptによるretryを追加している。stagingへは
 `0005_reconciliation_completion.sql`をapplicationより先に適用し、OrchestratorとWebを
-deployしてからend-to-end smokeを行う。RunPod、Discord、R2の公開endpointへ送るglobal
-`fetch()`は[ADR 0016](./adr/0016-use-manual-redirects-in-workers.md)に従い、
+deployした。実browserのend-to-end smokeではRunPod terminal、complete manifest、
+Markdown・JSON・SRT、原子的finalize、Discord送信まで成功した。RunPod、Discord、R2の
+公開endpointへ送るglobal `fetch()`は
+[ADR 0016](./adr/0016-use-manual-redirects-in-workers.md)に従い、
 `manual` redirect modeで自動追従を拒否する。
 production environmentへのdeploymentは未実施である。
 
@@ -147,6 +149,10 @@ source、D1 row、一時Workerを削除した。
 
 Phase 4のendpoint構築と初回worker確認は
 [2026-07-26 Phase 4 staging deployment record](./deployments/2026-07-26-phase-4-staging.md)
+に記録する。
+
+Phase 5の実media、artifact、finalize、通知とRunPod revision切替は
+[2026-07-26 Phase 5 staging deployment record](./deployments/2026-07-26-phase-5-staging.md)
 に記録する。
 
 ## 追跡外staging設定

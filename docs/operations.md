@@ -7,7 +7,8 @@ D1、R2、Queue、DLQ、Event Notification、OrchestratorとAccess保護済みWe
 実施し、欠落R2 sourceのretryからDLQへの到達と限定ackもsmoke testで確認した。
 Phase 4ではstaging RunPod endpointを作成し、初回workerのRTX 4090配置、Secure Cloud、
 Ready、期限切れclaim拒否を確認した。Phase 5では5分Cronによるsubmission回収、
-status poll、finalize、cancelとnotification outboxをlocal実装・検証済みである。
+status poll、finalize、cancelとnotification outboxを実装し、stagingの実browser smokeで
+RunPod terminal、manifest、Markdown・JSON・SRT、job完了とDiscord受信まで確認した。
 production environmentへのdeploymentは未実施である。この文書の手順は
 staging/production運用の必須runbookであり、placeholder IDのままremote操作してはならない。
 
@@ -15,6 +16,18 @@ RunPodが`INVALID_MEDIA`を返した場合、利用者dataを外部toolへ送ら
 FFmpeg packageでcontainer、codec、duration、top-level JSON fieldを再現する。
 [ADR 0017](./adr/0017-validate-pinned-ffprobe-output.md)に従い、空の`programs`だけを明示的に
 受理し、未知fieldや非空programを許可するために`extra="forbid"`を緩めない。
+
+RunPod image revisionまたはprivate registry credentialを切り替える場合、実jobの投入前に
+workerが追跡外plan/stateと同じtemplate、image、registry credentialを使っていることを
+確認する。endpoint切替後もOutdated workerが旧imageを処理し、credential更新前に失敗した
+Unhealthy workerが残る場合がある。全jobがterminalであることをD1で確認してから対象
+workerだけをConsoleでterminateし、新workerの3項目一致を確認する。
+
+staging smokeのためにactive workerを1へ上げた場合、完了後は0へ戻す。固定
+`runpodctl` 2.7.2は`--workers-min 0`を成功扱いにしても値を更新しないため、
+[ADR 0012](./adr/0012-runpodctl-staging-verification-boundary.md)のdashboard補償を使う。
+Consoleでendpointを保存するとtemplateのregistry credentialが以前の値へ戻る場合が
+あるため、追跡外planのcredential IDをCLIで再適用し、標準deploy verifierを最後に通す。
 
 Queue、DLQ、D1、R2はenvironmentごとに分離する。操作前にGit branch、Wranglerの
 versionと認証先、Cloudflare account、environment、queue名を声出し確認する。

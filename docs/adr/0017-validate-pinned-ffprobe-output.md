@@ -32,5 +32,6 @@ production adapterを実行していなかった。
 - ffprobe packageやcommand outputが変わりproduction adapterとschemaがずれた場合、
   networkなし・read-only root filesystemのcontainer checkで検出できる。
 - Python codeを含むRunPod imageを再buildし、digest固定でstaging templateを更新してから
-  end-to-end smokeを再実行する必要がある。
+  end-to-end smokeを再実行する必要がある。修正版のstaging smokeでは同じ実mediaが
+  production probe、GPU推論、manifest/artifact検証を通り、job完了まで到達した。
 - `INVALID_MEDIA`の外部error contractは変更しない。

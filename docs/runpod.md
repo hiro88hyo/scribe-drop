@@ -6,9 +6,10 @@ Phase 4ではCloudflare側のsubmission、claim、heartbeat、RunPod Workerのlo
 固定model入りimageを実装した。staging専用endpointとtemplateを固定image digestから
 作成し、初回workerがReadyになるまで起動してRTX 4090のGPU配置とSecure Cloudを確認した。
 最小jobは期限切れclaimを安全に拒否して終了しており、endpoint invariantのcheckpointは
-完了した。実ID、image参照、originは追跡対象へ保存しない。実音声の処理時間、
-artifact/manifest、完了reconciliationを含むsmokeはPhase 5で行い、完了するまで
-productionへ投入しない。
+完了した。Phase 5では修正版の固定digestへ新template revisionで切り替え、実browser
+uploadからproduction media probe、GPU推論、manifest-last、Markdown・JSON・SRT、
+terminal保存、finalize、Discord通知までstaging smokeを完了した。active workerは0、
+max workerは1へ復元した。実ID、image参照、originは追跡対象へ保存しない。
 
 ## Image supply chain
 
@@ -123,6 +124,12 @@ providerがServerless templateへ既定の`8888/http`と`22/tcp`を追加し、C
 deploy commandを再実行して`template get`の厳格照合を通す。この手順はCLIが空portを
 扱えるversionへ更新するまでの一時的なdashboard例外である。
 
+同versionは`serverless update --workers-min 0`も成功終了するが、実際の値を0へ変更しない。
+smokeで一時的にactive workerを1へ上げた場合は、全jobのterminalを確認してからConsoleで
+0へ戻す。Console保存後はtemplateのregistry credentialが追跡外planと一致するか再取得し、
+戻っていた場合はcredential IDだけをCLIで再適用する。最後にtemplateとendpointの標準
+deploy verifierを通す。
+
 同versionの`serverless get`はcompute type、GPU、data centerを省略することがある。
 scriptはplanから生成する作成引数全体をテストで固定し、取得できるendpoint invariantを
 厳格照合する。省略項目は同一pending stateとtemplateがある場合だけ回復を許可し、初回
@@ -144,3 +151,9 @@ port公開なし、secretなしとし、次の非secret環境変数だけを渡�
 templateは上書きせず新revisionとして作成する。stagingのGPU benchmark、claim競合、
 artifact/manifest、cleanupを確認してからendpointを切り替える。rollbackは直前に検証済みの
 image digestとtemplate revisionへ戻し、volumeやFlashBootを有効化しない。
+
+revision切替後も既存workerは直ちに置換されず、旧imageのOutdated workerが次のrequestを
+処理する場合がある。private registry credentialをrotationした場合、失敗済みUnhealthy
+workerは新credentialを読み直さない。実jobの前にworkerのtemplate、image、registry
+credentialを追跡外plan/stateと照合し、全jobがterminalのときだけ旧workerをConsoleで
+terminateする。新workerの3項目一致と起動を確認してからsmokeを再開する。

@@ -40,8 +40,8 @@ platform objectの呼び出しcontextを保持する必要がある。RunPod cli
   失敗することを防ぐ。
 - public/private routingの意味を変更するcompatibility flagへ依存しない。将来
   Service Bindingが必要になった場合は、global fetchの代用にせず専用adapterを設計する。
-- staging smokeでRunPod submissionのaccepted記録、claim、artifact、通知を確認するまで
-  end-to-end制御は未検証として扱う。
+- このADRは原因を説明しなかったためADR 0016でsupersedeされた。ADR 0016の修正後に
+  stagingのsubmission、claim、artifact、finalize、Discord通知まで確認した。
 
 ## References
 

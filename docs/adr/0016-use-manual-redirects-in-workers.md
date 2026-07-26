@@ -40,8 +40,8 @@ provider redirectへ追従する要件がなく、redirect先を利用する必�
 - [ADR 0014](./0014-runpod-api-uses-public-fetch-routing.md)のpublic routing仮説と
   [ADR 0015](./0015-preserve-workers-fetch-context.md)のplatform context仮説は、
   staging結果と同一runtimeでの再現によりsupersedeする。
-- staging smokeでRunPod submissionのaccepted記録、claim、artifact、通知を確認するまで
-  end-to-end制御は未検証として扱う。
+- 修正後のstaging smokeでRunPod submissionのaccepted記録、claim、artifact、finalize、
+  Discord通知まで確認した。
 
 ## References
 
