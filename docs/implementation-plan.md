@@ -458,6 +458,14 @@ dependency audit、既存RunPod imageのnetworkなし・read-only container chec
 - service worker は app shell と静的 asset だけを cache し、`/api/*`、artifact、認証済み応答は cache しない。
 - installable manifest と offline 時の安全な案内を追加する。
 
+### 実装状況
+
+成果物downloadのlocal checkpointを完了した。詳細画面はowner検証済みAPIから操作時にだけ
+5分のexact-object GET capabilityを取得し、URLをReact state、log、browser storageへ
+保持せずdownloadを開始する。R2 responseは署名済み`Content-Disposition: attachment`で
+navigationではなくdownloadとして扱う。通信・schema・API障害は安全なmessageと
+問い合わせIDだけを表示し、同じ形式を再試行できる。
+
 ### 保存期間と削除
 
 - 未完了 multipart、source、results、監査情報の retention を環境変数化する。

@@ -767,10 +767,40 @@ h3 {
 }
 
 .artifact-list li {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem 1rem;
+  align-items: center;
   padding: 1rem 0;
   border-bottom: 1px solid rgb(20 35 31 / 16%);
+}
+
+.artifact-list li > div:first-child {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.artifact-list li strong {
+  font-size: 0.9rem;
+}
+
+.artifact-list li span {
+  color: #69736e;
+  font-size: 0.78rem;
+}
+
+.artifact-download-button {
+  min-width: 8.5rem;
+}
+
+.artifact-download-error {
+  grid-column: 1 / -1;
+  color: #873b35;
+  font-size: 0.8rem;
+}
+
+.artifact-download-error p {
+  margin: 0;
 }
 
 .empty-state {
@@ -855,6 +885,14 @@ h3 {
 
   .detail-grid div {
     grid-template-columns: 1fr;
+  }
+
+  .artifact-list li {
+    grid-template-columns: 1fr;
+  }
+
+  .artifact-download-button {
+    justify-self: start;
   }
 }
 

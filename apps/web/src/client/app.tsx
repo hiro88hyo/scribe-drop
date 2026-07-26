@@ -18,9 +18,10 @@ import {
   createBrowserRouter,
   useParams,
 } from "react-router";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent, JSX, SyntheticEvent } from "react";
 
+import { requestArtifactDownload } from "./artifact-download.js";
 import {
   formatByteSize,
   formatDateTime,
@@ -28,6 +29,7 @@ import {
   formatLanguage,
   formatOutputFormats,
   getStatusPresentation,
+  toUiError,
   type UiError,
 } from "./job-presentation.js";
 import { useJobDetail, useJobHistory, useRecentJobs, useSession } from "./use-api-data.js";
@@ -610,13 +612,88 @@ function DetailContent({ job }: { readonly job: JobDetail }): JSX.Element {
           <ul className="artifact-list">
             {job.artifacts.map((artifact) => (
               <li key={artifact.format}>
-                <span>{formatOutputFormats([artifact.format])}</span>
-                <span>{formatByteSize(artifact.sizeBytes)}</span>
+                <div>
+                  <strong>{formatOutputFormats([artifact.format])}</strong>
+                  <span>{formatByteSize(artifact.sizeBytes)}</span>
+                </div>
+                <ArtifactDownloadButton
+                  format={artifact.format}
+                  jobId={job.id}
+                  label={formatOutputFormats([artifact.format])}
+                />
               </li>
             ))}
           </ul>
         )}
       </section>
+    </>
+  );
+}
+
+interface ArtifactDownloadButtonProps {
+  readonly format: OutputFormat;
+  readonly jobId: string;
+  readonly label: string;
+}
+
+function ArtifactDownloadButton({
+  format,
+  jobId,
+  label,
+}: ArtifactDownloadButtonProps): JSX.Element {
+  const controller = useRef<AbortController | undefined>(undefined);
+  const [error, setError] = useState<UiError | undefined>(undefined);
+  const [pending, setPending] = useState(false);
+
+  useEffect(
+    () => () => {
+      controller.current?.abort();
+    },
+    [],
+  );
+
+  const download = (): void => {
+    controller.current?.abort();
+    const nextController = new AbortController();
+    controller.current = nextController;
+    setError(undefined);
+    setPending(true);
+    void requestArtifactDownload(jobId, format, nextController.signal)
+      .then(() => {
+        if (!nextController.signal.aborted) {
+          setPending(false);
+        }
+      })
+      .catch((downloadError: unknown) => {
+        if (
+          !nextController.signal.aborted &&
+          !(downloadError instanceof DOMException && downloadError.name === "AbortError")
+        ) {
+          setError(toUiError(downloadError));
+          setPending(false);
+        }
+      });
+  };
+
+  return (
+    <>
+      <button
+        aria-label={`${label}をダウンロード`}
+        className="secondary-button artifact-download-button"
+        disabled={pending}
+        onClick={download}
+        type="button"
+      >
+        {pending ? "準備中…" : error === undefined ? "ダウンロード" : "再試行"}
+      </button>
+      {error === undefined ? null : (
+        <div className="artifact-download-error" role="alert">
+          <p>{error.message}</p>
+          {error.requestId === undefined ? null : (
+            <p className="request-id">問い合わせID: {error.requestId}</p>
+          )}
+        </div>
+      )}
     </>
   );
 }

@@ -54,6 +54,7 @@ export async function createArtifactDownload(
     new GetObjectCommand({
       Bucket: input.bucket,
       Key: input.key,
+      ResponseContentDisposition: "attachment",
     }),
     {
       expiresIn: ARTIFACT_DOWNLOAD_TTL_SECONDS,
