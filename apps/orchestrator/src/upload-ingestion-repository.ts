@@ -36,9 +36,6 @@ const INSERT_ATTEMPT_SQL = `
     job_id,
     generation,
     status,
-    claim_token_hash,
-    heartbeat_token_hash,
-    webhook_token_hash,
     result_prefix,
     created_at,
     updated_at
@@ -50,17 +47,14 @@ const INSERT_ATTEMPT_SQL = `
     'SUBMISSION_PENDING',
     ?3,
     ?4,
-    ?5,
-    ?6,
-    ?7,
-    ?7
+    ?4
   FROM jobs
   WHERE id = ?2
-    AND version = ?8
-    AND source_bucket = ?9
-    AND source_key = ?10
-    AND expected_size_bytes = ?11
-    AND (source_etag IS NULL OR source_etag = ?12)
+    AND version = ?5
+    AND source_bucket = ?6
+    AND source_key = ?7
+    AND expected_size_bytes = ?8
+    AND (source_etag IS NULL OR source_etag = ?9)
     AND active_attempt_id IS NULL
     AND status IN ('CREATED', 'UPLOADING', 'UPLOADED')
     AND deleted_at IS NULL
@@ -212,7 +206,6 @@ const sourceJobRowSchema = z
   .strict();
 
 const updatedIdRowsSchema = z.array(z.object({ id: ulidSchema }).strict()).max(1);
-const sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/u);
 const ownerHashSchema = z.string().regex(/^[0-9a-f]{32}$/u);
 const INITIAL_SOURCE_STATUSES: ReadonlySet<JobStatus> = new Set([
   "CREATED",
@@ -235,15 +228,12 @@ export interface SourceJob {
 
 export interface IngestSourceInput {
   readonly attemptId: string;
-  readonly claimSentinelHash: string;
   readonly eventId: string;
-  readonly heartbeatSentinelHash: string;
   readonly job: SourceJob;
   readonly ownerHash: string;
   readonly sizeBytes: number;
   readonly sourceEtag: string;
   readonly timestamp: string;
-  readonly webhookSentinelHash: string;
 }
 
 export type IngestSourceResult = "conflict" | "duplicate" | "ignored" | "ingested";
@@ -278,10 +268,6 @@ function mapSourceJob(row: z.infer<typeof sourceJobRowSchema>): SourceJob {
     status: row.status,
     version: row.version,
   };
-}
-
-function validateHash(value: string): string {
-  return sha256HexSchema.parse(value);
 }
 
 export function createD1UploadIngestionRepository(database: D1Database): UploadIngestionRepository {
@@ -330,9 +316,6 @@ export function createD1UploadIngestionRepository(database: D1Database): UploadI
             .bind(
               attemptId,
               input.job.id,
-              validateHash(input.claimSentinelHash),
-              validateHash(input.heartbeatSentinelHash),
-              validateHash(input.webhookSentinelHash),
               resultPrefix,
               timestamp,
               input.job.version,

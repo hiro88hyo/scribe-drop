@@ -443,17 +443,21 @@ CREATE TABLE job_attempts (
     generation INTEGER NOT NULL,
 
     status TEXT NOT NULL,
-    claim_token_hash TEXT NOT NULL,
+    claim_token_hash TEXT,
     claim_issued_at TEXT,
     claim_expires_at TEXT,
     claim_consumed_at TEXT,
-    heartbeat_token_hash TEXT NOT NULL,
+    heartbeat_token_hash TEXT,
     heartbeat_issued_at TEXT,
+    heartbeat_expires_at TEXT,
+    heartbeat_revoked_at TEXT,
 
     winning_runpod_job_id TEXT,
     result_prefix TEXT NOT NULL,
 
     submission_started_at TEXT,
+    submission_outcome TEXT,
+    submission_finished_at TEXT,
     claimed_at TEXT,
     heartbeat_at TEXT,
     completed_at TEXT,
@@ -478,10 +482,11 @@ WHERE winning_runpod_job_id IS NOT NULL;
 ```
 
 Phase 3では[ADR 0010](./adr/0010-separate-attempt-and-capability-issuance.md)に従い、
-未発行状態をissued列のNULLで表し、legacy NOT NULL hash列には認証に使用できない
-domain-separated sentinel digestを保存する。claim tokenはPhase 4のRunPod投入直前、
-heartbeat tokenはwinner claim成功時に初めて発行する。初期migrationに残る
-`webhook_token_hash`は認証に使用せず、Phase 4のforward-only table rebuildで除去する。
+未発行状態をissued列のNULLとlegacy sentinelで表す。Phase 4では
+[ADR 0011](./adr/0011-runpod-submission-window-and-capability-lifetime.md)に従う
+forward-only table rebuildによってsentinelをNULLへ変換し、未使用の
+`webhook_token_hash`を除去する。claim tokenはRunPod投入直前、heartbeat tokenは
+winner claim成功時に初めて発行する。
 
 ### 7.3 runpod_submissions
 
@@ -511,7 +516,9 @@ worker_claim
 status_poll
 ```
 
-初期migrationに存在する`webhook_token_hash`は使用せず、ADR 0006に従うforward-only migrationで除去する。上記は移行後の論理schemaであり、適用済みmigrationを書き換えない。
+初期migrationに存在する`webhook_token_hash`は使用せず、ADR 0011に従う
+forward-only migrationで除去する。上記は移行後の論理schemaであり、適用済みmigration
+を書き換えない。
 
 ### 7.4 job_events
 

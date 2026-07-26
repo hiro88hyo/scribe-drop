@@ -75,7 +75,7 @@ jobs:
       - name: Verify D1 migrations
         run: pnpm run d1:verify
 
-      - name: Verify CI action pinning
+      - name: Verify CI and image pinning
         run: pnpm run ci:verify
 
   secrets:
@@ -124,3 +124,80 @@ jobs:
 
       - name: Audit Python dependencies
         run: uv audit --preview-features audit-command --project apps/runpod-worker --frozen
+
+  runpod-container:
+    name: RunPod container supply chain
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Reclaim unused ephemeral runner toolchains
+        run: |
+          sudo rm -rf \
+            /opt/ghc \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/local/.ghcup \
+            /usr/local/lib/android \
+            /usr/share/dotnet
+          available_kib="$(df --output=avail -k / | tail -n 1)"
+          if [ "${available_kib}" -lt 26214400 ]; then
+            echo "RunPod image build and scan require at least 25 GiB free" >&2
+            exit 1
+          fi
+
+      - name: Build fixed RunPod Worker image
+        run: |
+          docker buildx build \
+            --file apps/runpod-worker/Dockerfile \
+            --load \
+            --tag scribe-drop-runpod-worker:ci \
+            .
+
+      - name: Verify non-root offline runtime and model integrity
+        run: |
+          docker run \
+            --rm \
+            --network none \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --entrypoint python \
+            scribe-drop-runpod-worker:ci \
+            -m scribe_drop_worker.container_check
+
+      - name: Generate SPDX JSON SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: scribe-drop-runpod-worker:ci
+          format: spdx-json
+          output-file: runpod-worker.spdx.json
+          syft-version: v1.49.0
+          upload-artifact: false
+
+      - name: Scan image vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: scribe-drop-runpod-worker:ci
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: "1"
+          format: table
+          output: runpod-worker-trivy.txt
+          hide-progress: true
+          timeout: 15m
+          cache: false
+          version: v0.72.0
+
+      - name: Upload supply-chain reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: runpod-worker-supply-chain
+          path: |
+            runpod-worker.spdx.json
+            runpod-worker-trivy.txt
+          if-no-files-found: warn
+          retention-days: 14

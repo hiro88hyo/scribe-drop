@@ -443,7 +443,7 @@ RunPod上で処理する以上、GPUホスト事業者を完全には排除で�
 - claim tokenの再利用を拒否
 - 異なるattempt IDでtokenを利用できない
 - 異なるRunPod job IDによる二度目のclaimを拒否
-- winnerからの同一claim再送は冪等に成功
+- winnerからの同一claim再送もtoken再利用として拒否
 - 期限切れtokenを拒否
 - キャンセル済みattemptのclaimを拒否
 

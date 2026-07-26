@@ -6,7 +6,13 @@ import { createUlid, type RandomBytes } from "@scribe-drop/domain";
 import { createStructuredLogger, type StructuredLogger } from "@scribe-drop/observability";
 import { z } from "zod";
 
-import { parseOrchestratorConfig, type OrchestratorConfigEnvironment } from "./config.js";
+import {
+  parseOrchestratorConfig,
+  parseRunpodConfig,
+  type OrchestratorConfigEnvironment,
+  type RunpodConfig,
+  type RunpodConfigEnvironment,
+} from "./config.js";
 import { parseSourceObjectKey } from "./source-object-key.js";
 import {
   createD1UploadIngestionRepository,
@@ -15,7 +21,6 @@ import {
 
 const MAX_RETRY_DELAY_SECONDS = 15 * 60;
 const BASE_RETRY_DELAY_SECONDS = 15;
-const DISABLED_CAPABILITY_CONTEXT = "scribe-drop:disabled-capability:v1";
 const INITIAL_SOURCE_STATUSES = new Set(["CREATED", "UPLOADING", "UPLOADED"]);
 const MUTABLE_SOURCE_STATUSES = new Set([
   "CREATED",
@@ -35,7 +40,8 @@ const r2HeadResultSchema = z.object({
     .max(5 * 1024 * 1024 * 1024 * 1024),
 });
 
-export interface UploadQueueEnvironment extends OrchestratorConfigEnvironment {
+export interface UploadQueueEnvironment
+  extends OrchestratorConfigEnvironment, RunpodConfigEnvironment {
   readonly RECORDINGS: R2Bucket;
   readonly SCRIBE_DROP_DB: D1Database;
 }
@@ -60,21 +66,16 @@ export interface UploadQueueDependencies {
   readonly now?: () => Date;
   readonly random?: () => number;
   readonly randomBytes?: RandomBytes;
+  readonly submitPendingJob?: (
+    jobId: string,
+    database: D1Database,
+    config: RunpodConfig,
+    logger: StructuredLogger,
+  ) => Promise<unknown>;
 }
 
 function defaultRandomBytes(length: number): Uint8Array {
   return crypto.getRandomValues(new Uint8Array(length));
-}
-
-function encodeHex(bytes: Uint8Array): string {
-  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-async function createDisabledCapabilityHash(attemptId: string, purpose: string): Promise<string> {
-  const bytes = new TextEncoder().encode(
-    `${DISABLED_CAPABILITY_CONTEXT}\u0000${purpose}\u0000${attemptId}`,
-  );
-  return encodeHex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
 }
 
 function retryDelaySeconds(attempts: number, random: () => number): number {
@@ -273,15 +274,12 @@ async function processMessage(
   const attemptId = job.generationOneAttemptId ?? createAttemptId(now.getTime());
   const result = await repository.ingestSource({
     attemptId,
-    claimSentinelHash: await createDisabledCapabilityHash(attemptId, "claim"),
     eventId: createEventId(now.getTime()),
-    heartbeatSentinelHash: await createDisabledCapabilityHash(attemptId, "heartbeat"),
     job,
     ownerHash: parsedKey.ownerHash,
     sizeBytes: headResult.data.size,
     sourceEtag: headResult.data.etag,
     timestamp: now.toISOString(),
-    webhookSentinelHash: await createDisabledCapabilityHash(attemptId, "webhook"),
   });
   if (result === "conflict") {
     logger.warn("upload_event_state_conflict", {
@@ -302,6 +300,17 @@ async function processMessage(
     sizeBytes: headResult.data.size,
     status: "SUBMISSION_PENDING",
   });
+  if (dependencies.submitPendingJob !== undefined) {
+    const runpodConfig = parseRunpodConfig(environment);
+    if (runpodConfig === undefined) {
+      logger.error("upload_event_configuration_invalid", {
+        errorCode: "INTERNAL_ERROR",
+        jobId: job.id,
+      });
+      return "retry";
+    }
+    await dependencies.submitPendingJob(job.id, environment.SCRIBE_DROP_DB, runpodConfig, logger);
+  }
   return "ack";
 }
 

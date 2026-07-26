@@ -32,9 +32,16 @@ R2 CORSは`pnpm cloudflare:config:staging:r2-cors`、Web設定は
 `pnpm cloudflare:config:staging:web`で生成する。次の非secret値も環境から渡す。
 
 - `SCRIBE_DROP_STAGING_WEB_ORIGIN`: Accessで保護するstaging Webの単一exact HTTPS origin
+- `SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN`:
+  RunPodからclaim/heartbeatを受けるOrchestratorの単一exact HTTPS origin
 - `SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`:
   `https://<team>.cloudflareaccess.com`のexact origin
 - `SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`: staging Access applicationの単一AUD tag
+- `SCRIBE_DROP_STAGING_RUNPOD_IMAGE`: GHCRのdigest付きstaging image参照
+- `SCRIBE_DROP_STAGING_RUNPOD_IMAGE_VISIBILITY`: `private`または`public`
+- `SCRIBE_DROP_STAGING_RUNPOD_REGISTRY_AUTH_ID`: private image用のRunPod registry auth ID
+- `SCRIBE_DROP_STAGING_RUNPOD_GPU_ID`: staging benchmark対象のRunPod GPU ID
+- `SCRIBE_DROP_STAGING_RUNPOD_DATACENTER_IDS`: 許可するRunPod data center IDのリスト
 
 実originはCloudflareとgit ignoredの生成設定だけに保持し、追跡対象ファイルやdeployment
 記録へ保存しない。
@@ -104,20 +111,44 @@ Phase 3のQueue consumerは`APP_ENV`、`CLOUDFLARE_ACCOUNT_ID`、
 恒久拒否する。`R2_BUCKET_NAME`は同じenvironmentの`RECORDINGS` bindingが参照する
 bucket名と一致させる。
 
+Phase 4では`RUNPOD_INTERNAL_BASE_URL`をuserinfo、path、query、fragment、明示portのない
+単一HTTPS originに限定する。localhost、IP literal、metadata host、`.local`は拒否する。
+stagingでは`SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN`からgit ignoredのWrangler設定へ
+Custom Domainと同じ値を生成する。このoriginはCloudflare Accessの対話loginでは保護せず、
+claim/heartbeatの256 bit tokenを認証境界とする。
+
+`RUNPOD_ENDPOINT_ID`、`RUNPOD_API_KEY`、`R2_ACCESS_KEY_ID`、
+`R2_SECRET_ACCESS_KEY`はOrchestrator Workerのenvironment別encrypted secretとして登録
+する。R2 keyは対象bucketのobject read/writeだけに限定し、Orchestratorがexact object・
+method・2時間のpresigned URLを発行する用途だけに使う。
+
 ## RunPod Worker
 
 localでは`apps/runpod-worker/.env.example`を未追跡の`.env`へコピーする。本番値はRunPod templateのsecret/environment設定から渡す。
 
-| Variable                     | Secret | Purpose                             |
-| ---------------------------- | :----: | ----------------------------------- |
-| `APP_ENV`                    |   no   | 実行環境                            |
-| `ALLOWED_SOURCE_HOSTS`       |   no   | source GET URLのhost allowlist      |
-| `ALLOWED_RESULT_HOSTS`       |   no   | artifact PUT URLのhost allowlist    |
-| `ALLOWED_ORCHESTRATOR_HOSTS` |   no   | claim/heartbeat URLのhost allowlist |
-| `MAX_SOURCE_BYTES`           |   no   | streaming download上限、2 GiB       |
-| `MAX_DURATION_SECONDS`       |   no   | ffprobe duration上限、8時間         |
-| `HEARTBEAT_INTERVAL_SECONDS` |   no   | heartbeat間隔、初期値120秒          |
+| Variable                     | Secret | Purpose                                      |
+| ---------------------------- | :----: | -------------------------------------------- |
+| `APP_ENV`                    |   no   | `local`、`staging`、`production`             |
+| `ORCHESTRATOR_ORIGIN`        |   no   | claim/heartbeatの単一exact HTTPS origin      |
+| `ALLOWED_SOURCE_HOSTS`       |   no   | source GET URLのexact host allowlist         |
+| `ALLOWED_RESULT_HOSTS`       |   no   | artifact PUT URLのexact host allowlist       |
+| `MAX_SOURCE_BYTES`           |   no   | streaming download上限、最大2 GiB            |
+| `MAX_DURATION_SECONDS`       |   no   | ffprobe duration上限、最大8時間              |
+| `HEARTBEAT_INTERVAL_SECONDS` |   no   | heartbeat間隔、30〜120秒、初期値120秒        |
+| `MODEL_PATH`                 |   no   | image内の固定model path、local以外は変更不可 |
 
 `claimToken`だけを最小化したRunPod `/run` inputから受け取る。heartbeat tokenとpresigned URLはwinner claim成功responseからだけ受け取り、環境変数、RunPod template、永続volumeへ保存しない。per-job webhook tokenは発行しない。
 
-Whisper model IDとrevision、FFmpeg、faster-whisper、CTranslate2、CUDA、base imageはruntime環境変数で切り替えず、Phase 4でDockerfile、lockfile、image metadataへ固定する。固定値を変更する場合はimageを再buildし、SBOM、offline起動試験、vulnerability scanを通す。
+`ORCHESTRATOR_ORIGIN`はuserinfo、query、fragment、path、443以外のportを許可しない。
+originと2種のhost allowlistはwildcardやsuffix一致ではなくexact hostnameだけを
+受け付ける。
+requestごとに全A/AAAAを検査し、一つでもprivate、loopback、link-local、metadata相当、
+reservedのaddressを含む場合は拒否する。接続時は検証済みIPへ固定し、HTTP `Host`とTLS
+SNIだけを元hostnameに保つ。proxyとredirectは使用しない。
+
+Python依存は`uv.lock`に固定し、RunPod SDK 1.11.0、faster-whisper 1.2.1、
+CTranslate2 4.8.1、Pydantic 2.13.4、httpx 0.28.1、Hugging Face Hub 1.24.0を
+使用する。Whisper model repository/revision/hash、FFmpeg、Python package、Ubuntu
+snapshot、CUDA、base/uv imageはruntime環境変数やbuild argumentで切り替えず、
+[runpod.md](./runpod.md)、Dockerfile、lockfile、image metadataへ固定する。固定値を
+変更する場合はimageを再buildし、SBOM、offline起動試験、vulnerability scanを通す。

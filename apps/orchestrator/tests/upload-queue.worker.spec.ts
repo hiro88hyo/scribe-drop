@@ -201,11 +201,11 @@ describe("R2 upload Queue integration", () => {
           claim_issued_at,
           claim_token_hash,
           generation,
+          heartbeat_expires_at,
           heartbeat_issued_at,
           heartbeat_token_hash,
           result_prefix,
-          status,
-          webhook_token_hash
+          status
         FROM job_attempts
         WHERE job_id = ?1
       `,
@@ -218,19 +218,13 @@ describe("R2 upload Queue integration", () => {
       claim_expires_at: null,
       claim_issued_at: null,
       generation: 1,
+      heartbeat_expires_at: null,
       heartbeat_issued_at: null,
+      heartbeat_token_hash: null,
+      claim_token_hash: null,
       result_prefix: `results/${OWNER_HASH}/${JOB_ID}/${ATTEMPT_ID}/`,
       status: "SUBMISSION_PENDING",
     });
-    const hashes = [
-      attempts.results[0]?.["claim_token_hash"],
-      attempts.results[0]?.["heartbeat_token_hash"],
-      attempts.results[0]?.["webhook_token_hash"],
-    ];
-    expect(hashes.every((hash) => typeof hash === "string" && /^[0-9a-f]{64}$/u.test(hash))).toBe(
-      true,
-    );
-    expect(new Set(hashes).size).toBe(3);
 
     const eventCount = await env.SCRIBE_DROP_DB.prepare(
       "SELECT COUNT(*) AS count FROM job_events WHERE job_id = ?1",

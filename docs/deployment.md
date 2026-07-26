@@ -27,6 +27,20 @@ WebもCloudflare Accessでcustom origin、production `pages.dev`、preview deplo
 対象messageの限定ack、通常consumer設定への復元、smoke data削除まで確認し、Phase 3を
 完了した。
 
+Phase 4のCloudflare制御面では、最小`/run` payload、15分の一回限りclaim、
+environment全体で1件のsubmission gate、`accepted`・`rejected`・`unknown`の区別、
+単一winner CAS、loser記録、同一winner replay拒否、2時間のexact-object R2 URL、
+8時間のheartbeat認証を実装し、Miniflareの並行claimを含むlocal検証を通している。
+RunPod WorkerはPydantic strict入力、claim-first実行、exact hostとpublic DNS検証、
+検証済みIPへの接続固定、redirect拒否、streaming size/ETag照合、ffprobe、
+faster-whisperのclaim後遅延load、artifact integrity、manifest-last、`/tmp` cleanup、
+worker refreshまでlocal実装・テスト済みである。RunPod Workerはamd64 CUDA/cuDNN
+base digest、Ubuntu snapshot、Python/FFmpeg package、uv build image、model commitと
+5 fileの全hashを固定したmulti-stage imageを実build済みである。UID 10001、
+networkなし、read-only root filesystemでmodel/依存/native import/ffprobeを検査する
+offline checkも成功した。CIにはSPDX JSON SBOMとHigh/Criticalで失敗するTrivy scanを
+追加済みである。実endpoint、GPU benchmark、staging smokeは未完了である。
+
 `apps/orchestrator/wrangler.toml`と`apps/web/wrangler.toml`の全ゼロIDおよびoriginは
 安全なplaceholderであり、remote操作には使用できない。実IDと実originは追跡対象へ
 書かず、対象accountを確認してから`pnpm cloudflare:config:staging`でgit ignoredの
@@ -47,8 +61,8 @@ RunPod操作にはchecksum検証済みのproject-local `runpodctl`を使用す�
 
 ```bash
 pnpm run runpodctl:install
-pnpm run runpodctl -- doctor
-pnpm run runpodctl -- user
+pnpm run runpodctl doctor
+pnpm run runpodctl user
 ```
 
 `doctor`の対話入力を使う場合、API keyはユーザー領域へ保存され、リポジトリには保存されない。一時セッションやCIでは`RUNPOD_API_KEY`をsecret managerから環境変数として注入する。`runpodctl config --apiKey ...`のようにsecretをコマンドライン引数へ直接記載しない。
@@ -73,10 +87,11 @@ Phase 3 staging checkpointで完了した。手順6以降はPhase 4のRunPod構�
 3. R2 CORSと`incoming/`限定Event Notificationを設定する。
 4. D1 migrationを適用し、適用済みversionを記録する。
 5. OrchestratorとWebのsecretをCloudflare secret storeへ登録する。
-6. 固定digestのRunPod Worker image、template、staging endpointを作成する。modelをimageへ内包し、runtime downloadを無効にする。
+6. `develop`の`Publish RunPod worker` workflowでRunPod Worker imageをbuildし、SBOM、
+   scan、offline checkを通したGHCR digestからtemplateとstaging endpointを作成する。
 7. staging endpoint IDとRunPod API keyをOrchestrator secretへ登録する。
 8. `runpodctl`でSecure Cloud、Flex、active workers 0、max workers 1、GPU 1、Network Volumeなし、FlashBoot無効、timeout、TTLを確認する。
-9. SBOM、container/dependency scan、offline起動、smoke test、重複配送、claim競合、cleanup、rollback手順を確認する。
+9. GPU benchmark、smoke test、重複配送、claim競合、cleanup、rollback手順を確認する。
 
 ## Phase 3 staging checkpoint
 
@@ -119,6 +134,7 @@ source、D1 row、一時Workerを削除した。
 
 - `CLOUDFLARE_ACCOUNT_ID`
 - `SCRIBE_DROP_STAGING_D1_DATABASE_ID`
+- `SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN`
 - `SCRIBE_DROP_STAGING_WEB_ORIGIN`
 
 ```bash
@@ -187,6 +203,12 @@ DLQにpush consumerは常設せず、誤った自動処理を避けて
 [operations.md](./operations.md)の手順で4日以内に調査・replay判断を行う。
 
 RunPodへ送る`/run` payload、endpoint設定、claim後のcapability境界は[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)を正とする。RunPod API keyはOrchestratorだけに置き、WorkerにはR2の長期credential、Discord webhook、利用者metadataを渡さない。Secure Cloudを利用できない場合や上記endpoint設定を満たせない場合はdeployを停止し、例外を別ADRで承認する。
+
+RunPodから到達するOrchestratorは専用Custom Domainを使う。追跡外staging設定は
+`SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN`から`routes.custom_domain`と
+`RUNPOD_INTERNAL_BASE_URL`を同時生成する。対話loginを要求するAccess policyは付けず、
+未知path、query付きrequest、POST以外、JSON以外、4 KiB超過、schema不一致を拒否する。
+実origin、claim/heartbeat token、署名URLをdeployment記録やCLI出力へ残さない。
 
 ## Migrationとrollback
 

@@ -11,8 +11,13 @@ R2 Temporary Credentials、upload準備のD1状態遷移、browser multipart、c
 upload-complete、strictなR2 event検証、R2 HEAD再確認、原子的なgeneration 1作成、
 個別ack/retryを行うQueue ingestionまで実装済みである。attempt作成時は
 [ADR 0010](./adr/0010-separate-attempt-and-capability-issuance.md)に従ってcapabilityを
-未発行のまま`SUBMISSION_PENDING`で停止する。RunPod以降の制御は実装前の必須要件
-として記載する。詳細な認証判断は
+未発行のまま`SUBMISSION_PENDING`で停止する。Phase 4ではRunPod投入、claim、
+heartbeat、R2 capabilityのCloudflare制御面まで実装済みであり、RunPod Workerの
+claim-first application runtime、Pydantic境界、DNS pinning、streaming download、
+ffprobe、固定modelの遅延load、artifact/manifest生成までlocal実装・テスト済みである。
+固定model入りnon-root container、offline integrity check、SBOM、supply-chain scanの
+CI定義まで実装済みである。実endpointとGPU/staging検証は未完了である。
+詳細な認証判断は
 [ADR 0003](./adr/0003-access-jwt-and-csrf-boundary.md)、受付制限は
 [ADR 0004](./adr/0004-d1-job-admission-control.md)、CSPとresponse headerは
 [ADR 0005](./adr/0005-web-response-security-policy.md)、RunPod境界は
@@ -83,39 +88,42 @@ RunPodのjob input、`job.id`、status、output、例外、DNS応答、HTTP応�
 
 ## Phase 2の脅威と制御
 
-| 脅威                              | 主な制御                                                                                                                        | 必須検証                                                                             |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| Access前段や別hostnameの迂回      | 全`/api/*`でheader JWTを再検証、issuer・audience完全一致                                                                        | headerなし、不正署名、不正issuer/audience                                            |
-| algorithm confusion               | `RS256` allowlist、remote JWKSの`kid`選択                                                                                       | `none`、HS256、未知`kid`                                                             |
-| 期限・claim欠落token              | `exp`、`iat`、`sub`、`email`必須、`nbf`検証、30秒clock tolerance                                                                | 期限切れ、未来`nbf`、各claim欠落、型不正                                             |
-| key rotation時の認証停止          | remote `keys`、10分memory cache、未知`kid`再取得、旧新2鍵fixture                                                                | cache hit、rotation、取得timeout                                                     |
-| 未知`kid`によるJWKS endpoint負荷  | module-scope resolver、30秒cooldown、5秒timeout                                                                                 | cooldown中にremote fetchが増えない                                                   |
-| JWT・PIIの漏えい                  | JWT原文と全payloadを後段へ渡さない、allowlist log、safe error                                                                   | logとresponseにtoken、email、library errorがない                                     |
-| CSRF                              | exact Origin、`same-origin` Fetch Metadata、JSON限定、custom header、sub-bound HMAC                                             | header欠落・不一致、cross/same-site、text/form content type、別sub、期限切れ         |
-| CORS設定ミス                      | 静的assetの既定wildcardを削除、API境界でCORS headerを除去、preflightを許可しない                                                | 静的・Functions responseにwildcard/credential headerがない                           |
-| 他利用者jobの列挙・参照           | SQL自体に`owner_sub`と`deleted_at IS NULL`、不一致は404                                                                         | 一覧・詳細・件数・cursorから他利用者情報が漏れない                                   |
-| SQL injection                     | parameterized query、cursorとbodyのZod検証                                                                                      | title、cursor、IDへSQL断片を含めてもquery構造が変わらない                            |
-| errorによる内部情報漏えい         | stable error code、安全なmessage、server生成request ID、例外詳細をresponseへ含めない                                            | D1、JWT、JSON parseの各失敗response                                                  |
-| browser/API cacheからの情報漏えい | APIに`Cache-Control: no-store`、service workerでAPIをcacheしない                                                                | `/api/me`、一覧、詳細、error responseのcache header                                  |
-| 改変・不正なAPI response          | browser側でも成功・失敗bodyをZod検証し、raw error本文を表示・保持しない                                                         | schema不正、非JSON、過大response、network error                                      |
-| XSSからの認証済み操作             | Reactの既定escaping、dangerous HTML禁止、self-only CSP、tokenはmemoryのみ                                                       | inline/eval/外部scriptがCSPで許可されず、入力をmarkupとして実行しない                |
-| clickjacking                      | `frame-ancestors 'none'`と`X-Frame-Options: DENY`                                                                               | HTML responseのsecurity header                                                       |
-| browser機能・外部resourceの濫用   | `default-src 'none'`、Permissions Policy、COOP、CORP、外部CDNなし                                                               | build済みasset responseの全headerとCSP directive                                     |
-| R2接続許可を使った外部送信        | `connect-src`はR2公式hostだけ、credentialを15分・単一bucket・単一object・multipart action 4種へ限定。SDKはupload時だけlazy load | 許可外hostをCSPで拒否し、temporary credentialのaction・object拒否をstagingで統合検証 |
-| upload完了metadataの偽装          | browserからETag・size・keyを受け取らず、所有者付きD1行のexact keyをR2 HEADして完全一致sizeとETagをCAS保存                       | 他owner、空body以外、HEAD不存在、size不一致、重複・並行通知、異なるETag              |
-| Queue eventの偽装・別環境混入     | raw bodyをstrict検証し、account、bucket、action、生成済みkey、D1 source、R2 HEADを順に照合。body、key、ETagをlogへ出さない      | 未知field、別account/bucket、不許可action、偽key、raw secret marker                  |
-| Queue重複・部分障害               | D1 batchとversion付きCASでgeneration 1を一度だけ作り、messageごとにack/retry。一時障害だけを上限付きbackoffで再送               | 重複・順序逆転、D1更新後の再配信、batch内一件失敗、CAS競合、DLQ                      |
-| source上書き                      | eventとHEADのETagを再照合し、確定済みETagとの差分を`SOURCE_MUTATED`へ遷移。terminal jobを古いeventで巻き戻さない                | stale event、処理前後の上書き、並行mutation、terminal状態への遅延event               |
-| 未発行token sentinelの認証利用    | issued/expiryをNULLにし、domain-separated digestをlegacy列の制約充足だけに使用。hash一致だけではclaimを許可しない               | 導出したsentinel入力をtokenとして提示しても拒否                                      |
-| job作成によるresource abuse       | D1条件付きINSERT、10件/10分rolling window、active 3件上限                                                                       | 11件目、4 active、window境界、異なるowner、並行request                               |
-| admission checkのTOCTOU           | count predicateとINSERTを単一SQL statementで実行                                                                                | 残り1枠への2並行requestで成功が1件だけ                                               |
-| D1障害時のlimit迂回               | D1 error・timeout・未知row countでfail closed                                                                                   | overload fakeでjobと後続副作用が作られない                                           |
-| edge limiterの不正確性            | location-local limiterをauthoritativeにせずD1 rowを正とする                                                                     | 異なるregionを想定してもD1上限を越えない                                             |
-| request ID偽装                    | client headerを信頼せずserverで生成、形式をallowlist                                                                            | client指定値がlog correlation IDにならない                                           |
+| 脅威                              | 主な制御                                                                                                                          | 必須検証                                                                             |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Access前段や別hostnameの迂回      | 全`/api/*`でheader JWTを再検証、issuer・audience完全一致                                                                          | headerなし、不正署名、不正issuer/audience                                            |
+| algorithm confusion               | `RS256` allowlist、remote JWKSの`kid`選択                                                                                         | `none`、HS256、未知`kid`                                                             |
+| 期限・claim欠落token              | `exp`、`iat`、`sub`、`email`必須、`nbf`検証、30秒clock tolerance                                                                  | 期限切れ、未来`nbf`、各claim欠落、型不正                                             |
+| key rotation時の認証停止          | remote `keys`、10分memory cache、未知`kid`再取得、旧新2鍵fixture                                                                  | cache hit、rotation、取得timeout                                                     |
+| 未知`kid`によるJWKS endpoint負荷  | module-scope resolver、30秒cooldown、5秒timeout                                                                                   | cooldown中にremote fetchが増えない                                                   |
+| JWT・PIIの漏えい                  | JWT原文と全payloadを後段へ渡さない、allowlist log、safe error                                                                     | logとresponseにtoken、email、library errorがない                                     |
+| CSRF                              | exact Origin、`same-origin` Fetch Metadata、JSON限定、custom header、sub-bound HMAC                                               | header欠落・不一致、cross/same-site、text/form content type、別sub、期限切れ         |
+| CORS設定ミス                      | 静的assetの既定wildcardを削除、API境界でCORS headerを除去、preflightを許可しない                                                  | 静的・Functions responseにwildcard/credential headerがない                           |
+| 他利用者jobの列挙・参照           | SQL自体に`owner_sub`と`deleted_at IS NULL`、不一致は404                                                                           | 一覧・詳細・件数・cursorから他利用者情報が漏れない                                   |
+| SQL injection                     | parameterized query、cursorとbodyのZod検証                                                                                        | title、cursor、IDへSQL断片を含めてもquery構造が変わらない                            |
+| errorによる内部情報漏えい         | stable error code、安全なmessage、server生成request ID、例外詳細をresponseへ含めない                                              | D1、JWT、JSON parseの各失敗response                                                  |
+| browser/API cacheからの情報漏えい | APIに`Cache-Control: no-store`、service workerでAPIをcacheしない                                                                  | `/api/me`、一覧、詳細、error responseのcache header                                  |
+| 改変・不正なAPI response          | browser側でも成功・失敗bodyをZod検証し、raw error本文を表示・保持しない                                                           | schema不正、非JSON、過大response、network error                                      |
+| XSSからの認証済み操作             | Reactの既定escaping、dangerous HTML禁止、self-only CSP、tokenはmemoryのみ                                                         | inline/eval/外部scriptがCSPで許可されず、入力をmarkupとして実行しない                |
+| clickjacking                      | `frame-ancestors 'none'`と`X-Frame-Options: DENY`                                                                                 | HTML responseのsecurity header                                                       |
+| browser機能・外部resourceの濫用   | `default-src 'none'`、Permissions Policy、COOP、CORP、外部CDNなし                                                                 | build済みasset responseの全headerとCSP directive                                     |
+| R2接続許可を使った外部送信        | `connect-src`はR2公式hostだけ、credentialを15分・単一bucket・単一object・multipart action 4種へ限定。SDKはupload時だけlazy load   | 許可外hostをCSPで拒否し、temporary credentialのaction・object拒否をstagingで統合検証 |
+| upload完了metadataの偽装          | browserからETag・size・keyを受け取らず、所有者付きD1行のexact keyをR2 HEADして完全一致sizeとETagをCAS保存                         | 他owner、空body以外、HEAD不存在、size不一致、重複・並行通知、異なるETag              |
+| Queue eventの偽装・別環境混入     | raw bodyをstrict検証し、account、bucket、action、生成済みkey、D1 source、R2 HEADを順に照合。body、key、ETagをlogへ出さない        | 未知field、別account/bucket、不許可action、偽key、raw secret marker                  |
+| Queue重複・部分障害               | D1 batchとversion付きCASでgeneration 1を一度だけ作り、messageごとにack/retry。一時障害だけを上限付きbackoffで再送                 | 重複・順序逆転、D1更新後の再配信、batch内一件失敗、CAS競合、DLQ                      |
+| source上書き                      | eventとHEADのETagを再照合し、確定済みETagとの差分を`SOURCE_MUTATED`へ遷移。terminal jobを古いeventで巻き戻さない                  | stale event、処理前後の上書き、並行mutation、terminal状態への遅延event               |
+| 未発行tokenの認証利用             | Phase 4 migrationでlegacy sentinelをNULLへ変換。hash、issued、expiryが揃い、active attemptと許可statusが一致するときだけclaim可能 | 未発行attempt、hashだけ、期限切れ、stale attemptを拒否                               |
+| job作成によるresource abuse       | D1条件付きINSERT、10件/10分rolling window、active 3件上限                                                                         | 11件目、4 active、window境界、異なるowner、並行request                               |
+| admission checkのTOCTOU           | count predicateとINSERTを単一SQL statementで実行                                                                                  | 残り1枠への2並行requestで成功が1件だけ                                               |
+| D1障害時のlimit迂回               | D1 error・timeout・未知row countでfail closed                                                                                     | overload fakeでjobと後続副作用が作られない                                           |
+| edge limiterの不正確性            | location-local limiterをauthoritativeにせずD1 rowを正とする                                                                       | 異なるregionを想定してもD1上限を越えない                                             |
+| request ID偽装                    | client headerを信頼せずserverで生成、形式をallowlist                                                                              | client指定値がlog correlation IDにならない                                           |
 
 ## Phase 4以降のRunPod脅威と必須制御
 
-この節は[additional-spec.md](./additional-spec.md)を反映した実装要件であり、Phase 4完了までは制御済みとはみなさない。
+この節は[additional-spec.md](./additional-spec.md)を反映する。Cloudflare制御面と
+RunPod Worker application runtimeと固定imageのoffline checkはlocal検証済みだが、
+High/Critical scanのCI実行、GPU、実endpointの項目はPhase 4完了まで制御済みとは
+みなさない。
 
 | 脅威                                      | 必須制御                                                                                                                                   | 必須検証                                                                                              |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |

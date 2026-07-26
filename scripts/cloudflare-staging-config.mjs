@@ -8,6 +8,9 @@ const accountIdPlaceholder = "0".repeat(32);
 const accessAudiencePlaceholder = "replace-with-access-audience";
 const accessTeamDomainPlaceholder = "https://replace-with-team.cloudflareaccess.com";
 const stagingD1DatabaseIdPlaceholder = "00000000-0000-0000-0000-000000000101";
+const stagingOrchestratorHostnamePlaceholder = "replace-with-staging-orchestrator.example.invalid";
+const stagingOrchestratorOriginPlaceholder =
+  "https://replace-with-staging-orchestrator.example.invalid";
 const webOriginPlaceholder = "https://replace-with-staging-web.example.invalid";
 
 function requireIdentifier(value, pattern, name) {
@@ -33,18 +36,24 @@ function replaceOnce(source, searchValue, replacement, label) {
   )}`;
 }
 
-function requireExactHttpsOrigin(value) {
+function requireExactHttpsOrigin(value, name) {
   if (typeof value !== "string") {
-    throw new Error("SCRIBE_DROP_STAGING_WEB_ORIGIN is missing or invalid");
+    throw new Error(`${name} is missing or invalid`);
   }
 
   try {
     const url = new URL(value);
-    if (url.protocol !== "https:" || url.origin !== value) {
+    if (
+      url.protocol !== "https:" ||
+      url.origin !== value ||
+      url.port !== "" ||
+      url.username !== "" ||
+      url.password !== ""
+    ) {
       throw new Error("invalid origin");
     }
   } catch {
-    throw new Error("SCRIBE_DROP_STAGING_WEB_ORIGIN is missing or invalid");
+    throw new Error(`${name} is missing or invalid`);
   }
 
   return value;
@@ -63,6 +72,11 @@ function validatedResourceIdentifiers(identifiers) {
 
 export function renderOrchestratorStagingConfig(template, identifiers) {
   const { accountId, d1DatabaseId } = validatedResourceIdentifiers(identifiers);
+  const orchestratorOrigin = requireExactHttpsOrigin(
+    identifiers.orchestratorOrigin,
+    "SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN",
+  );
+  const orchestratorHostname = new URL(orchestratorOrigin).hostname;
   const stagingMarker = "[env.staging]";
   const stagingIndex = template.indexOf(stagingMarker);
   if (stagingIndex === -1) {
@@ -82,6 +96,18 @@ export function renderOrchestratorStagingConfig(template, identifiers) {
     `database_id = "${stagingD1DatabaseIdPlaceholder}"`,
     `database_id = "${d1DatabaseId}"`,
     "orchestrator staging D1 database ID",
+  );
+  stagingConfig = replaceOnce(
+    stagingConfig,
+    `pattern = "${stagingOrchestratorHostnamePlaceholder}"`,
+    `pattern = "${orchestratorHostname}"`,
+    "orchestrator staging custom domain",
+  );
+  stagingConfig = replaceOnce(
+    stagingConfig,
+    `RUNPOD_INTERNAL_BASE_URL = "${stagingOrchestratorOriginPlaceholder}"`,
+    `RUNPOD_INTERNAL_BASE_URL = "${orchestratorOrigin}"`,
+    "orchestrator staging internal origin",
   );
 
   return replaceOnce(
@@ -104,7 +130,10 @@ export function renderWebStagingConfig(template, identifiers) {
     accessTeamDomainPattern,
     "SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN",
   );
-  const webOrigin = requireExactHttpsOrigin(identifiers.webOrigin);
+  const webOrigin = requireExactHttpsOrigin(
+    identifiers.webOrigin,
+    "SCRIBE_DROP_STAGING_WEB_ORIGIN",
+  );
   let rendered = replaceOnce(
     template,
     `CLOUDFLARE_ACCOUNT_ID = "${accountIdPlaceholder}"`,
@@ -145,7 +174,10 @@ export function renderWebStagingConfig(template, identifiers) {
 }
 
 export function renderR2CorsStagingConfig(template, identifiers) {
-  const webOrigin = requireExactHttpsOrigin(identifiers.webOrigin);
+  const webOrigin = requireExactHttpsOrigin(
+    identifiers.webOrigin,
+    "SCRIBE_DROP_STAGING_WEB_ORIGIN",
+  );
   return replaceOnce(
     template,
     `"origins": ["${webOriginPlaceholder}"]`,

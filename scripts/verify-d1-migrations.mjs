@@ -48,10 +48,13 @@ const requiredAttemptColumns = [
   "claim_issued_at",
   "claim_token_hash",
   "generation",
+  "heartbeat_expires_at",
   "heartbeat_issued_at",
+  "heartbeat_revoked_at",
   "heartbeat_token_hash",
   "status",
-  "webhook_token_hash",
+  "submission_finished_at",
+  "submission_outcome",
   "winning_runpod_job_id",
 ];
 
@@ -222,6 +225,13 @@ try {
     requiredAttemptColumns,
     "job_attempts columns",
   );
+  if (
+    executeJson("PRAGMA table_info(job_attempts)").some(
+      (column) => column.name === "webhook_token_hash",
+    )
+  ) {
+    throw new Error("Unused webhook_token_hash column was not removed");
+  }
 
   const activeAdmissionPlan = executeJson(`
     EXPLAIN QUERY PLAN
@@ -279,9 +289,6 @@ try {
       job_id,
       generation,
       status,
-      claim_token_hash,
-      heartbeat_token_hash,
-      webhook_token_hash,
       result_prefix,
       created_at,
       updated_at
@@ -290,9 +297,6 @@ try {
       '${jobId}',
       1,
       'SUBMISSION_PENDING',
-      '${hash}',
-      '${hash}',
-      '${hash}',
       'results/owner/${jobId}/${attemptId}/',
       '2026-07-25T00:00:00.000Z',
       '2026-07-25T00:00:00.000Z'
@@ -306,6 +310,19 @@ try {
   if (activeAttemptRows[0]?.active_attempt_id !== attemptId) {
     throw new Error("D1 active attempt update was not persisted");
   }
+  expectSqlFailure(`
+    UPDATE job_attempts
+    SET claim_token_hash = '${hash}'
+    WHERE id = '${attemptId}';
+  `);
+  executeSql(`
+    UPDATE job_attempts
+    SET
+      claim_token_hash = '${hash}',
+      claim_issued_at = '2026-07-25T00:01:00.000Z',
+      claim_expires_at = '2026-07-25T00:16:00.000Z'
+    WHERE id = '${attemptId}';
+  `);
 
   expectSqlFailure(
     insertJobSql(
@@ -320,9 +337,6 @@ try {
       job_id,
       generation,
       status,
-      claim_token_hash,
-      heartbeat_token_hash,
-      webhook_token_hash,
       result_prefix,
       created_at,
       updated_at
@@ -331,9 +345,6 @@ try {
       '01ARZ3NDEKTSV4RRFFQ69G5FAZ',
       1,
       'SUBMISSION_PENDING',
-      '${hash}',
-      '${hash}',
-      '${hash}',
       'results/owner/orphan/',
       '2026-07-25T00:00:00.000Z',
       '2026-07-25T00:00:00.000Z'

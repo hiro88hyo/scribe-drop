@@ -1,5 +1,5 @@
 import { createStructuredLogger, type StructuredLogger } from "@scribe-drop/observability";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { parseSourceObjectKey } from "./source-object-key.js";
 import {
@@ -67,9 +67,14 @@ function environment(): UploadQueueEnvironment {
   return {
     APP_ENV: "local",
     CLOUDFLARE_ACCOUNT_ID: EVENT.account,
+    R2_ACCESS_KEY_ID: "r2-access-key-placeholder",
     // These bindings are never invoked because every unit test injects its ports.
     RECORDINGS: {} as R2Bucket,
     R2_BUCKET_NAME: EVENT.bucket,
+    R2_SECRET_ACCESS_KEY: "0000000000000000",
+    RUNPOD_API_KEY: "runpod-api-key-placeholder",
+    RUNPOD_ENDPOINT_ID: "endpoint-placeholder",
+    RUNPOD_INTERNAL_BASE_URL: "https://orchestrator.example.invalid",
     SCRIBE_DROP_DB: {} as D1Database,
   };
 }
@@ -117,6 +122,7 @@ describe("R2 upload Queue consumer", () => {
     const message = new FakeMessage(EVENT);
     const records: string[] = [];
     let ingestion: IngestSourceInput | undefined;
+    const submitPendingJob = vi.fn().mockResolvedValue("accepted");
     const repository = fakeRepository({
       ingestSource: (input) => {
         ingestion = input;
@@ -135,6 +141,7 @@ describe("R2 upload Queue consumer", () => {
         }),
       logger: logger(records),
       now: () => NOW,
+      submitPendingJob,
     });
 
     expect(message.acknowledgements).toBe(1);
@@ -147,18 +154,16 @@ describe("R2 upload Queue consumer", () => {
       sizeBytes: 1024,
       sourceEtag: "multipart-etag",
     });
-    expect(ingestion?.claimSentinelHash).toMatch(/^[0-9a-f]{64}$/u);
-    expect(ingestion?.heartbeatSentinelHash).toMatch(/^[0-9a-f]{64}$/u);
-    expect(ingestion?.webhookSentinelHash).toMatch(/^[0-9a-f]{64}$/u);
-    expect(
-      new Set([
-        ingestion?.claimSentinelHash,
-        ingestion?.heartbeatSentinelHash,
-        ingestion?.webhookSentinelHash,
-      ]).size,
-    ).toBe(3);
     expect(records.join("\n")).not.toContain(SOURCE_KEY);
     expect(records.join("\n")).not.toContain(EVENT.object.eTag);
+    expect(submitPendingJob).toHaveBeenCalledWith(
+      JOB_ID,
+      environment().SCRIBE_DROP_DB,
+      expect.objectContaining({
+        runpodEndpointId: "endpoint-placeholder",
+      }),
+      expect.any(Object),
+    );
   });
 
   it("acknowledges malformed messages without touching D1 or retaining raw fields", async () => {

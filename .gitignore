@@ -27,6 +27,9 @@ htmlcov/
 .wrangler/
 .mf/
 
+# RunPod local deployment state
+.runpod/
+
 # Test and build output
 coverage/
 dist/

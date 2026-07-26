@@ -9,6 +9,16 @@ D1の原子的job admission、所有権付きrepository、job作成・一覧・�
 型検証付きbrowser API client、ホーム・履歴・詳細の実API接続、Workers/D1
 integration testまで実装済みである。Phase 3では[ADR 0008](./adr/0008-r2-browser-upload-capability.md)を決定し、owner hash付きsource key、multipart actionだけに限定した15分のR2 Temporary Credentials、D1のupload準備状態遷移、browserの明示的multipart upload、進捗、cancel、同一画面retry、Wake Lock、最小化したIndexedDB checkpointまで実装済みである。[ADR 0009](./adr/0009-server-verified-upload-completion.md)に従う所有者付きR2 HEADと冪等なupload-completeも実装済みである。さらに、R2 Event Notificationのstrict検証、R2 HEAD再確認、D1の原子的なgeneration 1作成、個別ack/retryを行うQueue consumerを実装し、MiniflareのD1/R2 integration testまで完了している。[ADR 0010](./adr/0010-separate-attempt-and-capability-issuance.md)に従い、このPhaseではattemptを`SUBMISSION_PENDING`まで作成し、RunPod capabilityの発行と投入は行わない。stagingのD1、R2、Queue、DLQ、Pages projectとEvent Notificationを作成し、D1 migration、R2 CORS、Orchestrator deploy、実`PutObject` eventの恒久拒否経路まで検証済みである。さらにAccess保護済みWebをdeployし、実browser multipart complete、temporary credentialによるexact-object multipartとabortの成功、`PutObject`・別object・listの拒否、R2 Event Notificationからgeneration 1を一意に作成して`SUBMISSION_PENDING`へ遷移する経路、欠落R2 sourceのretryからDLQへ到達する経路を確認した。試験dataと一時resourceを削除し、Phase 3を完了した。RunPod endpointはPhase 4で構築する。
 
+Phase 4では、最小`/run`、一回限りclaim、submission gate、winner CAS、heartbeat、
+exact-object R2 capabilityのCloudflare制御面に加え、RunPod WorkerのPydantic strict
+境界、DNS pinning、streaming download、ffprobe、固定pathからの遅延model load、
+artifact integrity、manifest-last、task固有`/tmp` cleanup、worker refreshまでlocal
+実装・テスト済みである。さらにdigest固定のCUDA/cuDNN base、固定Ubuntu snapshot、
+固定revisionと全file hashを検証するmodel、non-root runtimeを持つmulti-stage imageを
+実buildし、networkなし・read-onlyのcontainer checkまで完了した。CIのSBOM・
+High/Critical container scanも追加済みである。実endpoint、GPU benchmark、staging
+smokeは未完了である。
+
 本計画は[spec.md](./spec.md)とRunPodの追加security要件である[additional-spec.md](./additional-spec.md)を正とし、Phase 1からPhase 7までを、各Phaseが単独でレビュー・検証できる単位に分けて実装する。両者が矛盾する場合は追加要件と[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)を優先する。
 
 ## 2. 実装原則

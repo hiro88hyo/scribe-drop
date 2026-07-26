@@ -1,0 +1,125 @@
+name: Publish RunPod worker
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  VOLTA_FEATURE_PNPM: "1"
+
+jobs:
+  publish-staging:
+    name: Publish staging image
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Require develop branch
+        run: |
+          if [ "${GITHUB_REF}" != "refs/heads/develop" ]; then
+            echo "Staging images can only be published from develop" >&2
+            exit 1
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Reclaim unused ephemeral runner toolchains
+        run: |
+          sudo rm -rf \
+            /opt/ghc \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/local/.ghcup \
+            /usr/local/lib/android \
+            /usr/share/dotnet
+          available_kib="$(df --output=avail -k / | tail -n 1)"
+          if [ "${available_kib}" -lt 26214400 ]; then
+            echo "RunPod image build and scan require at least 25 GiB free" >&2
+            exit 1
+          fi
+
+      - name: Build fixed RunPod Worker image
+        run: |
+          docker buildx build \
+            --file apps/runpod-worker/Dockerfile \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --load \
+            --tag scribe-drop-runpod-worker:publish \
+            .
+
+      - name: Verify non-root offline runtime and model integrity
+        run: |
+          docker run \
+            --rm \
+            --network none \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --entrypoint python \
+            scribe-drop-runpod-worker:publish \
+            -m scribe_drop_worker.container_check
+
+      - name: Generate SPDX JSON SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: scribe-drop-runpod-worker:publish
+          format: spdx-json
+          output-file: runpod-worker.spdx.json
+          syft-version: v1.49.0
+          upload-artifact: false
+
+      - name: Scan image vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: scribe-drop-runpod-worker:publish
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: "1"
+          format: table
+          output: runpod-worker-trivy.txt
+          hide-progress: true
+          timeout: 15m
+          cache: false
+          version: v0.72.0
+
+      - name: Authenticate to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "${GHCR_TOKEN}" |
+            docker login ghcr.io \
+              --username "${GITHUB_ACTOR}" \
+              --password-stdin
+
+      - name: Push commit image and record immutable reference
+        run: |
+          registry_owner="${GITHUB_REPOSITORY_OWNER,,}"
+          image="ghcr.io/${registry_owner}/scribe-drop-runpod-worker"
+          tagged_image="${image}:git-${GITHUB_SHA}"
+          docker tag scribe-drop-runpod-worker:publish "${tagged_image}"
+          docker push "${tagged_image}"
+
+          manifest_file="$(mktemp)"
+          trap 'rm -f "${manifest_file}"' EXIT
+          docker buildx imagetools inspect "${tagged_image}" --raw >"${manifest_file}"
+          digest="sha256:$(sha256sum "${manifest_file}" | cut -d ' ' -f 1)"
+          printf '%s@%s\n' "${image}" "${digest}" >runpod-worker-image.txt
+          printf 'Published immutable image: %s@%s\n' "${image}" "${digest}"
+
+      - name: Upload publication evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: runpod-worker-staging-publication
+          path: |
+            runpod-worker-image.txt
+            runpod-worker.spdx.json
+            runpod-worker-trivy.txt
+          if-no-files-found: warn
+          retention-days: 14
