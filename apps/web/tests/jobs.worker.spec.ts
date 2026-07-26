@@ -2,6 +2,7 @@ import {
   artifactDownloadResponseSchema,
   createJobResponseSchema,
   createJobRequestSchema,
+  deleteJobResponseSchema,
   jobActionResponseSchema,
   jobDetailSchema,
   listJobsResponseSchema,
@@ -10,6 +11,10 @@ import {
   type JobStatus,
   type TemporaryUploadCredentials,
 } from "@scribe-drop/contracts";
+import {
+  R2_CAPABILITY_TTL_SECONDS,
+  USER_DELETION_CAPABILITY_GRACE_SECONDS,
+} from "@scribe-drop/domain";
 import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -17,6 +22,7 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   handleCancelJob,
   handleCreateJob,
+  handleDeleteJob,
   handleGetJob,
   handleGetArtifact,
   handleListJobs,
@@ -26,6 +32,7 @@ import {
 import {
   createD1JobRepository,
   requestJobCancellation,
+  requestJobDeletion,
   retryFailedJob,
   type JobDatabase,
   type JobPreparedStatement,
@@ -1033,6 +1040,143 @@ describe("D1 job repository", () => {
       }),
     ).resolves.toEqual({ status: "invalid_state" });
   });
+
+  it("logically deletes a terminal job once and hides it from owner queries", async () => {
+    const completed = await seedCompletedJob();
+    const eventId = nextId();
+
+    await expect(
+      requestJobDeletion(env.SCRIBE_DROP_DB, {
+        eventId,
+        jobId: completed.jobId,
+        ownerSub: OWNER_A.sub,
+        timestamp: NOW.toISOString(),
+      }),
+    ).resolves.toEqual({ status: "deleted" });
+    await expect(
+      requestJobDeletion(env.SCRIBE_DROP_DB, {
+        eventId: nextId(),
+        jobId: completed.jobId,
+        ownerSub: OWNER_A.sub,
+        timestamp: NOW.toISOString(),
+      }),
+    ).resolves.toEqual({ status: "deleted" });
+
+    const repository = createD1JobRepository(env.SCRIBE_DROP_DB);
+    await expect(repository.findByOwner(OWNER_A.sub, completed.jobId)).resolves.toBeUndefined();
+    await expect(
+      repository.listByOwner({
+        limit: 100,
+        ownerSub: OWNER_A.sub,
+      }),
+    ).resolves.toEqual({ items: [], nextCursor: null });
+    const stored = await env.SCRIBE_DROP_DB.prepare(
+      `
+        SELECT
+          deleted_at,
+          deletion_not_before,
+          deletion_next_attempt_at,
+          deletion_attempt_count,
+          deletion_error_code,
+          version
+        FROM jobs
+        WHERE id = ?1
+      `,
+    )
+      .bind(completed.jobId)
+      .first();
+    expect(stored).toEqual({
+      deleted_at: NOW.toISOString(),
+      deletion_attempt_count: 0,
+      deletion_error_code: null,
+      deletion_next_attempt_at: NOW.toISOString(),
+      deletion_not_before: NOW.toISOString(),
+      version: 2,
+    });
+    const events = await env.SCRIBE_DROP_DB.prepare(
+      `
+        SELECT id, event_type, actor, metadata_json
+        FROM job_events
+        WHERE job_id = ?1
+          AND event_type = 'job_delete_requested'
+      `,
+    )
+      .bind(completed.jobId)
+      .all();
+    expect(events.results).toEqual([
+      {
+        actor: "user",
+        event_type: "job_delete_requested",
+        id: eventId,
+        metadata_json: null,
+      },
+    ]);
+  });
+
+  it("revokes an active heartbeat and waits until its R2 capabilities expire", async () => {
+    const active = await seedActiveJob("RUNNING");
+    const issuedAt = new Date(NOW.getTime() - 60_000);
+    await env.SCRIBE_DROP_DB.prepare(
+      `
+        UPDATE job_attempts
+        SET
+          heartbeat_token_hash = ?2,
+          heartbeat_issued_at = ?3,
+          heartbeat_expires_at = ?4
+        WHERE id = ?1
+      `,
+    )
+      .bind(
+        active.attemptId,
+        "a".repeat(64),
+        issuedAt.toISOString(),
+        new Date(issuedAt.getTime() + R2_CAPABILITY_TTL_SECONDS * 1_000).toISOString(),
+      )
+      .run();
+
+    await expect(
+      requestJobDeletion(env.SCRIBE_DROP_DB, {
+        eventId: nextId(),
+        jobId: active.jobId,
+        ownerSub: OWNER_A.sub,
+        timestamp: NOW.toISOString(),
+      }),
+    ).resolves.toEqual({ status: "deleted" });
+
+    const state = await env.SCRIBE_DROP_DB.prepare(
+      `
+        SELECT
+          jobs.deleted_at,
+          jobs.deletion_not_before,
+          jobs.status AS job_status,
+          attempts.status AS attempt_status,
+          attempts.heartbeat_revoked_at
+        FROM jobs
+        INNER JOIN job_attempts AS attempts ON attempts.id = jobs.active_attempt_id
+        WHERE jobs.id = ?1
+      `,
+    )
+      .bind(active.jobId)
+      .first();
+    expect(state).toEqual({
+      attempt_status: "CANCEL_REQUESTED",
+      deleted_at: NOW.toISOString(),
+      deletion_not_before: new Date(
+        issuedAt.getTime() +
+          (R2_CAPABILITY_TTL_SECONDS + USER_DELETION_CAPABILITY_GRACE_SECONDS) * 1_000,
+      ).toISOString(),
+      heartbeat_revoked_at: NOW.toISOString(),
+      job_status: "RUNNING",
+    });
+    await expect(
+      requestJobDeletion(env.SCRIBE_DROP_DB, {
+        eventId: nextId(),
+        jobId: active.jobId,
+        ownerSub: OWNER_B.sub,
+        timestamp: NOW.toISOString(),
+      }),
+    ).resolves.toEqual({ status: "not_found" });
+  });
 });
 
 describe("job API handlers", () => {
@@ -1372,6 +1516,55 @@ describe("job API handlers", () => {
       }),
     });
     expect(hiddenResponse.status).toBe(404);
+  });
+
+  it("accepts strict owner-scoped deletion and returns no job metadata", async () => {
+    const completed = await seedCompletedJob();
+    const response = await handleDeleteJob(
+      {
+        data: requestData(),
+        env: handlerEnvironment(),
+        params: { id: completed.jobId },
+        request: new Request(`https://example.test/api/jobs/${completed.jobId}`, {
+          body: "{}",
+          headers: { "Content-Type": "application/json" },
+          method: "DELETE",
+        }),
+      },
+      {
+        createEventId: () => nextId(),
+        now: () => NOW,
+      },
+    );
+    expect(response.status).toBe(202);
+    expect(deleteJobResponseSchema.parse(await response.json())).toEqual({
+      deleted: true,
+    });
+
+    const foreign = await seedCompletedJob(OWNER_B);
+    const hidden = await handleDeleteJob({
+      data: requestData(),
+      env: handlerEnvironment(),
+      params: { id: foreign.jobId },
+      request: new Request(`https://example.test/api/jobs/${foreign.jobId}`, {
+        body: "{}",
+        headers: { "Content-Type": "application/json" },
+        method: "DELETE",
+      }),
+    });
+    expect(hidden.status).toBe(404);
+
+    const unknownField = await handleDeleteJob({
+      data: requestData(),
+      env: handlerEnvironment(),
+      params: { id: foreign.jobId },
+      request: new Request(`https://example.test/api/jobs/${foreign.jobId}`, {
+        body: '{"force":true}',
+        headers: { "Content-Type": "application/json" },
+        method: "DELETE",
+      }),
+    });
+    expect(unknownField.status).toBe(400);
   });
 
   it("returns owner-scoped artifact metadata and a five-minute download capability", async () => {

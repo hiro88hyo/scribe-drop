@@ -5,6 +5,8 @@ import {
   cancelJobRequestSchema,
   createJobRequestSchema,
   createJobResponseSchema,
+  deleteJobRequestSchema,
+  deleteJobResponseSchema,
   jobActionResponseSchema,
   listJobsQuerySchema,
   listJobsResponseSchema,
@@ -14,6 +16,7 @@ import {
   uploadCompleteRequestSchema,
   type AllowedMediaType,
   type CreateJobResponse,
+  type DeleteJobResponse,
   type ArtifactDownloadResponse,
   type JobActionResponse,
   type ListJobsResponse,
@@ -32,11 +35,14 @@ import {
   createD1JobRepository,
   findArtifactDownloadByOwner,
   requestJobCancellation,
+  requestJobDeletion,
   retryFailedJob,
   type JobDatabase,
   type JobRepository,
   type RequestJobCancellationInput,
   type RequestJobCancellationResult,
+  type RequestJobDeletionInput,
+  type RequestJobDeletionResult,
   type RetryFailedJobInput,
   type RetryFailedJobResult,
 } from "./job-repository.js";
@@ -76,6 +82,17 @@ interface JobDetailHandlerContext extends JobsHandlerContext {
   readonly params: {
     readonly id: string | string[];
   };
+}
+
+interface JobDeletionHandlerContext {
+  readonly data: WebRequestData;
+  readonly env: JobEnvironment & {
+    readonly SCRIBE_DROP_DB: D1Database;
+  };
+  readonly params: {
+    readonly id: string | string[];
+  };
+  readonly request: Request;
 }
 
 interface UploadCompleteHandlerContext {
@@ -141,6 +158,10 @@ export interface JobHandlerDependencies {
     database: D1Database,
     input: RequestJobCancellationInput,
   ) => Promise<RequestJobCancellationResult>;
+  readonly requestJobDeletion?: (
+    database: D1Database,
+    input: RequestJobDeletionInput,
+  ) => Promise<RequestJobDeletionResult>;
   readonly retryFailedJob?: (
     database: D1Database,
     input: RetryFailedJobInput,
@@ -499,6 +520,59 @@ export async function handleGetArtifact(
   const response = Response.json(responseBody);
   response.headers.set("Cache-Control", "no-store");
   return response;
+}
+
+export async function handleDeleteJob(
+  context: JobDeletionHandlerContext,
+  dependencies: JobHandlerDependencies = {},
+): Promise<Response> {
+  const id = Array.isArray(context.params.id) ? undefined : context.params.id;
+  const idResult = ulidSchema.safeParse(id);
+  if (!idResult.success) {
+    return createApiErrorResponse({
+      code: "NOT_FOUND",
+      message: NOT_FOUND_MESSAGE,
+      requestId: getRequestId(context.data),
+      status: 404,
+    });
+  }
+  const bodyResult = await readBoundedJsonBody(context.request);
+  if (!bodyResult.ok || !deleteJobRequestSchema.safeParse(bodyResult.value).success) {
+    return invalidRequest(context.data);
+  }
+  const auth = getVerifiedAuthContext(context.data);
+  const timestamp = dependencies.now?.() ?? new Date();
+  const createEventId =
+    dependencies.createEventId ??
+    ((timestampMilliseconds: number) =>
+      createUlid(timestampMilliseconds, dependencies.randomBytes));
+  const deleteJob = dependencies.requestJobDeletion ?? requestJobDeletion;
+  const result = await deleteJob(context.env.SCRIBE_DROP_DB, {
+    eventId: createEventId(timestamp.getTime()),
+    jobId: idResult.data,
+    ownerSub: auth.sub,
+    timestamp: timestamp.toISOString(),
+  });
+  if (result.status === "not_found") {
+    return createApiErrorResponse({
+      code: "NOT_FOUND",
+      message: NOT_FOUND_MESSAGE,
+      requestId: getRequestId(context.data),
+      status: 404,
+    });
+  }
+  if (result.status === "invalid_state") {
+    return createApiErrorResponse({
+      code: "INVALID_STATE",
+      message: INVALID_STATE_MESSAGE,
+      requestId: getRequestId(context.data),
+      status: 409,
+    });
+  }
+  const responseBody = deleteJobResponseSchema.parse({
+    deleted: true,
+  }) satisfies DeleteJobResponse;
+  return Response.json(responseBody, { status: 202 });
 }
 
 export async function handleRetryJob(

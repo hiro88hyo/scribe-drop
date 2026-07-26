@@ -741,6 +741,62 @@ h3 {
   border-left: 2px solid #bd7f43;
 }
 
+.job-actions {
+  display: grid;
+  gap: 1rem;
+  margin-top: 3rem;
+  padding: 1.25rem;
+  border: 1px solid rgb(20 35 31 / 14%);
+  border-radius: 0.8rem;
+  background: rgb(255 255 255 / 36%);
+}
+
+.job-actions h2 {
+  margin: 0;
+  font-size: 1.8rem;
+}
+
+.job-action-buttons,
+.confirmation-panel > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.action-note,
+.confirmation-panel p {
+  margin: 0;
+  color: #69736e;
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+.light-danger-button {
+  border-color: rgb(135 59 53 / 38%);
+  background: rgb(135 59 53 / 10%);
+  color: #873b35;
+}
+
+.light-danger-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.confirmation-panel {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid rgb(135 59 53 / 24%);
+  border-radius: 0.65rem;
+  background: rgb(241 221 221 / 54%);
+}
+
+.confirmation-panel h3 {
+  margin: 0;
+  font-family: inherit;
+  font-size: 1rem;
+}
+
 .artifact-section {
   margin-top: 3rem;
 }

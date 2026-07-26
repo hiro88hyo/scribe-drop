@@ -13,6 +13,7 @@ import {
   dispatchNextNotification,
   type NotificationDispatchResult,
 } from "./notification-service.js";
+import { processPendingDeletions, type DeletionSweepResult } from "./deletion-service.js";
 import {
   createD1MaintenanceRepository,
   type MaintenanceRepository,
@@ -45,6 +46,10 @@ export interface ReconciliationDependencies {
     logger: StructuredLogger,
   ) => Promise<NotificationDispatchResult>;
   readonly randomBytes?: RandomBytes;
+  readonly processDeletions?: (
+    environment: ReconciliationEnvironment,
+    logger: StructuredLogger,
+  ) => Promise<DeletionSweepResult>;
   readonly reconcileCompletions?: (
     environment: ReconciliationEnvironment,
     logger: StructuredLogger,
@@ -60,6 +65,7 @@ export interface ReconciliationDependencies {
 export interface ReconciliationResult {
   readonly cancelledUnboundCount: number;
   readonly completion: CompletionResult;
+  readonly deletion: DeletionSweepResult;
   readonly dispatch: SubmissionDispatchResult | "none";
   readonly expiredSubmissionCount: number;
   readonly expiredUploadCount: number;
@@ -98,6 +104,11 @@ export async function reconcileJobs(
   try {
     const repositoryFactory = dependencies.createRepository ?? createD1RunpodControlRepository;
     const repository = repositoryFactory(environment.SCRIBE_DROP_DB);
+    const processDeletions =
+      dependencies.processDeletions ??
+      ((deletionEnvironment: ReconciliationEnvironment, deletionLogger: StructuredLogger) =>
+        processPendingDeletions(deletionEnvironment, deletionLogger, { now }));
+    const deletion = await processDeletions(environment, logger);
     const expired = await repository.findExpiredUnknownSubmissions(
       timestamp,
       RECONCILIATION_BATCH_SIZE,
@@ -228,6 +239,7 @@ export async function reconcileJobs(
     return {
       cancelledUnboundCount,
       completion,
+      deletion,
       dispatch,
       expiredSubmissionCount,
       expiredUploadCount,

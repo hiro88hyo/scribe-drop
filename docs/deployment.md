@@ -64,6 +64,14 @@ source上書きの状態・監査・logを検証する。`0006_phase6_failure_in
 stagingへPhase 6 applicationをdeployする場合はこのmigrationを先に適用する。Phase 6の
 ためのproduction deploymentや実serviceへの障害注入は行わない。
 
+Phase 7のlocal checkpointでは`0007_user_deletion.sql`を追加し、user deletionの
+非同期cleanup用schedule、試行回数、allowlist error codeをjob rowへ保持する。
+applicationをdeployする場合はこのmigrationをWebとOrchestratorより先に適用する。
+論理削除直後は通常APIから非表示になるが、R2の物理削除は最後に発行された2時間の
+capabilityと5分graceが失効した後に5分Cronが実行する。migrationとcleanupのlocal
+D1/R2 integration testは成功している。stagingへのmigration、deploy、実dataを使わない
+delete/Cron smokeとR2 lifecycle設定は未実施であり、完了前にproductionへ進めない。
+
 `apps/orchestrator/wrangler.toml`と`apps/web/wrangler.toml`の全ゼロIDおよびoriginは
 安全なplaceholderであり、remote操作には使用できない。実IDと実originは追跡対象へ
 書かず、対象accountを確認してから`pnpm cloudflare:config:staging`でgit ignoredの

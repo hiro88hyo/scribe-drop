@@ -21,6 +21,7 @@ import {
   type ListJobsResponse,
   type OutputFormat,
 } from "@scribe-drop/contracts";
+import { deletionNotBeforeMilliseconds } from "@scribe-drop/domain";
 import {
   ACTIVE_JOB_STATUSES,
   JOB_CREATION_WINDOW_SECONDS,
@@ -587,6 +588,129 @@ const RECORD_CANCELLATION_EVENT_SQL = `
   RETURNING id
 `;
 
+const FIND_DELETION_CONTEXT_SQL = `
+  SELECT
+    jobs.id,
+    jobs.version,
+    jobs.deleted_at,
+    jobs.active_attempt_id,
+    active_attempt.status AS active_attempt_status,
+    MAX(all_attempts.heartbeat_issued_at) AS latest_capability_issued_at
+  FROM jobs
+  LEFT JOIN job_attempts AS active_attempt ON active_attempt.id = jobs.active_attempt_id
+  LEFT JOIN job_attempts AS all_attempts ON all_attempts.job_id = jobs.id
+  WHERE jobs.owner_sub = ?1
+    AND jobs.id = ?2
+  GROUP BY
+    jobs.id,
+    jobs.version,
+    jobs.deleted_at,
+    jobs.active_attempt_id,
+    active_attempt.status
+  LIMIT 1
+`;
+
+const REQUEST_DELETION_ACTIVE_ATTEMPT_SQL = `
+  UPDATE job_attempts
+  SET
+    status = CASE
+      WHEN status = 'SUBMISSION_PENDING' THEN 'CANCELLED'
+      ELSE 'CANCEL_REQUESTED'
+    END,
+    heartbeat_revoked_at = CASE
+      WHEN heartbeat_token_hash IS NULL THEN NULL
+      ELSE ?4
+    END,
+    updated_at = ?4
+  WHERE id = ?3
+    AND job_id = ?1
+    AND status = ?5
+    AND status IN (
+      'SUBMISSION_PENDING',
+      'SUBMITTING',
+      'RUNNING',
+      'CANCEL_REQUESTED'
+    )
+    AND EXISTS (
+      SELECT 1
+      FROM jobs
+      WHERE id = ?1
+        AND owner_sub = ?2
+        AND version = ?6
+        AND active_attempt_id = ?3
+        AND deleted_at IS NULL
+    )
+  RETURNING id
+`;
+
+const MARK_JOB_DELETED_SQL = `
+  UPDATE jobs
+  SET
+    deleted_at = ?4,
+    deletion_not_before = ?5,
+    deletion_next_attempt_at = ?4,
+    deletion_attempt_count = 0,
+    deletion_error_code = NULL,
+    updated_at = ?4,
+    version = version + 1
+  WHERE id = ?1
+    AND owner_sub = ?2
+    AND version = ?3
+    AND deleted_at IS NULL
+    AND (
+      ?6 IS NULL
+      OR (
+        ?7 IS NOT NULL
+        AND (
+          ?7 NOT IN (
+            'SUBMISSION_PENDING',
+            'SUBMITTING',
+            'RUNNING',
+            'CANCEL_REQUESTED'
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM job_attempts
+            WHERE id = ?6
+              AND job_id = ?1
+              AND updated_at = ?4
+              AND status = CASE
+                WHEN ?7 = 'SUBMISSION_PENDING' THEN 'CANCELLED'
+                ELSE 'CANCEL_REQUESTED'
+              END
+          )
+        )
+      )
+    )
+  RETURNING id
+`;
+
+const RECORD_DELETION_EVENT_SQL = `
+  INSERT INTO job_events (
+    id,
+    job_id,
+    attempt_id,
+    event_type,
+    actor,
+    metadata_json,
+    created_at
+  )
+  SELECT
+    ?1,
+    jobs.id,
+    jobs.active_attempt_id,
+    'job_delete_requested',
+    'user',
+    NULL,
+    ?3
+  FROM jobs
+  WHERE jobs.id = ?2
+    AND jobs.owner_sub = ?4
+    AND jobs.deleted_at = ?3
+  ON CONFLICT DO NOTHING
+  RETURNING id
+`;
+
 const databaseJobSummaryRowSchema = z
   .object({
     actual_size_bytes: z.number().int().positive().max(MAX_FILE_SIZE_BYTES).nullable(),
@@ -662,6 +786,16 @@ const cancellationContextRowSchema = databaseJobSummaryRowSchema
   .extend({
     active_attempt_id: ulidSchema.nullable(),
     attempt_status: attemptStatusSchema.nullable(),
+    version: z.number().int().positive(),
+  })
+  .strict();
+const deletionContextRowSchema = z
+  .object({
+    active_attempt_id: ulidSchema.nullable(),
+    active_attempt_status: attemptStatusSchema.nullable(),
+    deleted_at: utcDateTimeSchema.nullable(),
+    id: ulidSchema,
+    latest_capability_issued_at: utcDateTimeSchema.nullable(),
     version: z.number().int().positive(),
   })
   .strict();
@@ -809,6 +943,24 @@ export type RequestJobCancellationResult =
   | {
       readonly job: JobSummary;
       readonly status: "cancelled" | "idempotent" | "requested";
+    }
+  | {
+      readonly status: "invalid_state";
+    }
+  | {
+      readonly status: "not_found";
+    };
+
+export interface RequestJobDeletionInput {
+  readonly eventId: string;
+  readonly jobId: string;
+  readonly ownerSub: string;
+  readonly timestamp: string;
+}
+
+export type RequestJobDeletionResult =
+  | {
+      readonly status: "deleted";
     }
   | {
       readonly status: "invalid_state";
@@ -1023,6 +1175,84 @@ export async function requestJobCancellation(
   }
   if (updatedJob !== undefined || insertedEvent !== undefined) {
     throw new Error("Cancellation transition was only partially persisted");
+  }
+  return { status: "invalid_state" };
+}
+
+export async function requestJobDeletion(
+  database: D1Database,
+  input: RequestJobDeletionInput,
+): Promise<RequestJobDeletionResult> {
+  const eventId = ulidSchema.parse(input.eventId);
+  const jobId = ulidSchema.parse(input.jobId);
+  const ownerSub = z.string().min(1).max(512).parse(input.ownerSub);
+  const timestamp = utcDateTimeSchema.parse(input.timestamp);
+  const untrustedContext = await database
+    .withSession("first-primary")
+    .prepare(FIND_DELETION_CONTEXT_SQL)
+    .bind(ownerSub, jobId)
+    .first();
+  if (untrustedContext === null) {
+    return { status: "not_found" };
+  }
+  const context = deletionContextRowSchema.parse(untrustedContext);
+  if (context.deleted_at !== null) {
+    return { status: "deleted" };
+  }
+  if (context.active_attempt_id !== null && context.active_attempt_status === null) {
+    return { status: "invalid_state" };
+  }
+
+  const requestedAtMilliseconds = Date.parse(timestamp);
+  const latestCapabilityIssuedAtMilliseconds =
+    context.latest_capability_issued_at === null
+      ? null
+      : Date.parse(context.latest_capability_issued_at);
+  const deletionNotBefore = new Date(
+    deletionNotBeforeMilliseconds(requestedAtMilliseconds, latestCapabilityIssuedAtMilliseconds),
+  ).toISOString();
+  const results = await database.batch([
+    database
+      .prepare(REQUEST_DELETION_ACTIVE_ATTEMPT_SQL)
+      .bind(
+        jobId,
+        ownerSub,
+        context.active_attempt_id,
+        timestamp,
+        context.active_attempt_status,
+        context.version,
+      ),
+    database
+      .prepare(MARK_JOB_DELETED_SQL)
+      .bind(
+        jobId,
+        ownerSub,
+        context.version,
+        timestamp,
+        deletionNotBefore,
+        context.active_attempt_id,
+        context.active_attempt_status,
+      ),
+    database.prepare(RECORD_DELETION_EVENT_SQL).bind(eventId, jobId, timestamp, ownerSub),
+  ]);
+  const updatedAttempt = updatedJobIdRowsSchema.parse(results[0]?.results ?? [])[0];
+  const updatedJob = updatedJobIdRowsSchema.parse(results[1]?.results ?? [])[0];
+  const insertedEvent = updatedJobIdRowsSchema.parse(results[2]?.results ?? [])[0];
+  const activeAttemptUpdateRequired =
+    context.active_attempt_id !== null &&
+    context.active_attempt_status !== null &&
+    ["SUBMISSION_PENDING", "SUBMITTING", "RUNNING", "CANCEL_REQUESTED"].includes(
+      context.active_attempt_status,
+    );
+  if (
+    updatedJob !== undefined &&
+    insertedEvent !== undefined &&
+    (!activeAttemptUpdateRequired || updatedAttempt !== undefined)
+  ) {
+    return { status: "deleted" };
+  }
+  if (updatedAttempt !== undefined || updatedJob !== undefined || insertedEvent !== undefined) {
+    throw new Error("Deletion transition was only partially persisted");
   }
   return { status: "invalid_state" };
 }

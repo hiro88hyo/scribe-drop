@@ -120,6 +120,9 @@ application logはallowlistされた構造化eventだけを出す。最低限、
 - `job.completed`
 - `job.failed`
 - `job.cancelled`
+- `job.deletion_deferred`
+- `job.deletion_retry`
+- `job.deletion_completed`
 - `runpod_status_unavailable`
 - `runpod_status_invalid`
 - `runpod_terminal_observed`
@@ -146,6 +149,10 @@ passthrough bodyをapplication codeで解釈しない。公開APIへのrouting�
 modeで自動追従を拒否する。3xx responseはprovider failureとして扱い、`Location`や
 response bodyをlogへ追加しない。
 
+`job.deletion_retry`の継続または増加もalert対象とする。`errorCode`は
+`RUNPOD_CANCEL_FAILED`、`R2_DELETE_FAILED`、`D1_DELETE_FAILED`のいずれかだけであり、
+object key、prefix、利用者metadata、raw exceptionを追加しない。
+
 ## Reconciliationと手動回復
 
 scheduled handlerは5分間隔で起動し、期限切れupload、結果不明submission、RunPod
@@ -161,9 +168,32 @@ terminal status、artifact、cancel request、notification outboxを同じservic
   RunPod Consoleのprovider-side retryは使わない。
 - cancelはWeb APIが`CANCEL_REQUESTED`を記録し、Cronがwinnerを再確認してRunPod
   `/cancel`を呼ぶ。RunPod API keyをWebへ複製しない。
+- deleteはWeb APIがowner条件とversion CASで即時に論理削除し、heartbeatを失効させる。
+  Cronは既知RunPod jobをcancelし、最後のR2 capabilityの2時間と5分graceが過ぎるまで
+  sourceやresultを消さない。期限後はD1由来のexact source keyと全attempt prefixを
+  繰り返しlist/deleteし、R2不存在を確認してからD1親rowを物理削除する。
 - terminal statusをD1で観測していないjobは、manifestが存在しても`COMPLETED`にしない。
 - 手動修復が必要でもjob/attempt/outboxを直接SQLで更新しない。同じrepositoryとserviceを
   使う専用repair commandを先に実装し、dry-run、CAS、監査eventを必須とする。
 
 障害ごとの自動回復、利用者retry、DLQ判断は
 [Phase 6 failure injection](./failure-injection.md)の回復区分を正とする。
+
+## User deletionの回復
+
+削除request成功後にjobが画面から消えていても、`deletion_not_before`までは正常な待機で
+ある。直ちにR2を手動削除したり、D1親rowを直接消したりしない。
+
+1. allowlist logの`job.deletion_deferred`、`job.deletion_retry`、
+   `job.deletion_completed`だけで進行を確認する。
+2. retryが継続する場合はerror codeからRunPod control、R2、D1のどこかを特定する。
+   URL、object key、title、filename、email、本文をincident記録へコピーしない。
+3. `deletion_next_attempt_at`、`deletion_not_before`、attempt count、versionだけを
+   read-onlyで確認する。安全期限前のR2不存在を成功条件にしない。
+4. dependencyを復旧し、次回Cronの冪等再実行を待つ。手動SQL更新やbucket-wide deleteを
+   行わない。
+5. `job.deletion_completed`後にD1親子rowがなく、対象exact key/prefixがなく、
+   unrelated objectが残ることを固定dummy dataだけで確認する。
+
+R2 lifecycleはapplication cleanupが長期間失敗した場合の最終防衛であり、利用者deleteの
+完了判定には使わない。lifecycle ruleの環境別設定とsmoke手順はPhase 7の残作業である。

@@ -466,6 +466,16 @@ dependency audit、既存RunPod imageのnetworkなし・read-only container chec
 navigationではなくdownloadとして扱う。通信・schema・API障害は安全なmessageと
 問い合わせIDだけを表示し、同じ形式を再試行できる。
 
+retry、cancel、deleteのlocal checkpointも完了した。利用者のretryはFAILEDから新しい
+generationを作り、cancelは状態別に即時停止または`CANCEL_REQUESTED`へ進める。deleteは
+owner、CSRF、Origin、JSON content typeを確認した後で即時に通常APIから隠し、
+[ADR 0018](./adr/0018-asynchronous-user-deletion.md)に従ってheartbeatを失効させる。
+Orchestrator Cronは既知RunPod jobをcancelし、最後のR2 capability失効後にD1所有の
+source keyと全attempt prefixを冪等に削除してから、CAS付きでD1親rowを物理削除する。
+R2/D1/RunPod failureの分類、backoff、partial artifact、foreign owner、重複request、
+unrelated object保護をunit testとWorkers integration testで検証済みである。
+retention設定、PWA、accessibility、Playwright、staging smokeは未完了である。
+
 ### 保存期間と削除
 
 - 未完了 multipart、source、results、監査情報の retention を環境変数化する。

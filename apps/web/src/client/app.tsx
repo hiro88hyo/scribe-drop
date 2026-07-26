@@ -16,24 +16,28 @@ import {
   Outlet,
   RouterProvider,
   createBrowserRouter,
+  useNavigate,
   useParams,
 } from "react-router";
 import { useEffect, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent, JSX, SyntheticEvent } from "react";
 
 import { requestArtifactDownload } from "./artifact-download.js";
+import { apiClient } from "./api-client.js";
 import {
   formatByteSize,
   formatDateTime,
   formatDuration,
   formatLanguage,
   formatOutputFormats,
+  getJobActionAvailability,
   getStatusPresentation,
   toUiError,
   type UiError,
 } from "./job-presentation.js";
 import { useJobDetail, useJobHistory, useRecentJobs, useSession } from "./use-api-data.js";
 import { useUpload } from "./use-upload.js";
+import { removeUploadCheckpoint } from "./upload-checkpoints.js";
 
 const RECENT_JOB_LIMIT = 3;
 const HISTORY_PAGE_LIMIT = 25;
@@ -519,7 +523,13 @@ function HistoryPage(): JSX.Element {
   );
 }
 
-function DetailContent({ job }: { readonly job: JobDetail }): JSX.Element {
+interface DetailContentProps {
+  readonly job: JobDetail;
+  readonly onDeleted: () => void;
+  readonly onRefresh: () => void;
+}
+
+function DetailContent({ job, onDeleted, onRefresh }: DetailContentProps): JSX.Element {
   const status = getStatusPresentation(job.status);
 
   return (
@@ -595,6 +605,8 @@ function DetailContent({ job }: { readonly job: JobDetail }): JSX.Element {
         </div>
       )}
 
+      <JobActions job={job} onDeleted={onDeleted} onRefresh={onRefresh} />
+
       <section aria-labelledby="artifacts-heading" className="artifact-section">
         <div className="section-heading">
           <div>
@@ -627,6 +639,180 @@ function DetailContent({ job }: { readonly job: JobDetail }): JSX.Element {
         )}
       </section>
     </>
+  );
+}
+
+interface JobActionsProps {
+  readonly job: JobDetail;
+  readonly onDeleted: () => void;
+  readonly onRefresh: () => void;
+}
+
+function JobActions({ job, onDeleted, onRefresh }: JobActionsProps): JSX.Element {
+  const availability = getJobActionAvailability(job.status);
+  const session = useSession();
+  const [confirmation, setConfirmation] = useState<"cancel" | "delete" | undefined>(undefined);
+  const [error, setError] = useState<UiError | undefined>(undefined);
+  const [pending, setPending] = useState<"cancel" | "delete" | "retry" | undefined>(undefined);
+
+  const runAction = (action: "cancel" | "delete" | "retry"): void => {
+    if (session.state.status !== "ready") {
+      return;
+    }
+    setConfirmation(undefined);
+    setError(undefined);
+    setPending(action);
+    const csrfToken = session.state.value.csrfToken;
+    void (async () => {
+      try {
+        if (action === "cancel") {
+          await apiClient.cancelJob(job.id, csrfToken);
+        } else if (action === "retry") {
+          await apiClient.retryJob(job.id, csrfToken);
+        } else {
+          await apiClient.deleteJob(job.id, csrfToken);
+          await removeUploadCheckpoint(job.id);
+        }
+        setPending(undefined);
+        if (action === "delete") {
+          onDeleted();
+        } else {
+          onRefresh();
+        }
+      } catch (actionError) {
+        setError(toUiError(actionError));
+        setPending(undefined);
+      }
+    })();
+  };
+
+  return (
+    <section aria-labelledby="job-actions-heading" className="job-actions">
+      <div>
+        <p className="eyebrow">ACTIONS</p>
+        <h2 id="job-actions-heading">ジョブ操作</h2>
+      </div>
+      {session.state.status === "loading" ? (
+        <p aria-live="polite" className="action-note">
+          操作権限を確認しています…
+        </p>
+      ) : null}
+      {session.state.status === "error" ? (
+        <div className="artifact-download-error" role="alert">
+          <p>{session.state.error.message}</p>
+          <button className="secondary-button" onClick={session.retry} type="button">
+            認証を再確認
+          </button>
+        </div>
+      ) : null}
+      <div className="job-action-buttons">
+        {availability.canRetry ? (
+          <button
+            className="secondary-button"
+            disabled={pending !== undefined || session.state.status !== "ready"}
+            onClick={() => {
+              runAction("retry");
+            }}
+            type="button"
+          >
+            {pending === "retry" ? "再実行を準備中…" : "新しい試行で再実行"}
+          </button>
+        ) : null}
+        {availability.canCancel ? (
+          <button
+            className="danger-button light-danger-button"
+            disabled={pending !== undefined || session.state.status !== "ready"}
+            onClick={() => {
+              setConfirmation("cancel");
+            }}
+            type="button"
+          >
+            キャンセル
+          </button>
+        ) : null}
+        <button
+          className="danger-button light-danger-button"
+          disabled={pending !== undefined || session.state.status !== "ready"}
+          onClick={() => {
+            setConfirmation("delete");
+          }}
+          type="button"
+        >
+          {pending === "delete" ? "削除を受け付けています…" : "ジョブを削除"}
+        </button>
+      </div>
+      {confirmation === "cancel" ? (
+        <div
+          aria-labelledby="cancel-confirmation-heading"
+          className="confirmation-panel"
+          role="alertdialog"
+        >
+          <h3 id="cancel-confirmation-heading">このジョブをキャンセルしますか？</h3>
+          <p>処理中の場合、安全な停止点まで少し時間がかかることがあります。</p>
+          <div>
+            <button
+              className="danger-button light-danger-button"
+              onClick={() => {
+                runAction("cancel");
+              }}
+              type="button"
+            >
+              キャンセルを確定
+            </button>
+            <button
+              className="secondary-button"
+              onClick={() => {
+                setConfirmation(undefined);
+              }}
+              type="button"
+            >
+              戻る
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {confirmation === "delete" ? (
+        <div
+          aria-labelledby="delete-confirmation-heading"
+          className="confirmation-panel"
+          role="alertdialog"
+        >
+          <h3 id="delete-confirmation-heading">このジョブを削除しますか？</h3>
+          <p>
+            履歴から直ちに非表示になり、元ファイルとすべての成果物が非同期で削除されます。
+            この操作は取り消せません。
+          </p>
+          <div>
+            <button
+              className="danger-button light-danger-button"
+              onClick={() => {
+                runAction("delete");
+              }}
+              type="button"
+            >
+              完全削除を受け付ける
+            </button>
+            <button
+              className="secondary-button"
+              onClick={() => {
+                setConfirmation(undefined);
+              }}
+              type="button"
+            >
+              戻る
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {error === undefined ? null : (
+        <div className="artifact-download-error" role="alert">
+          <p>{error.message}</p>
+          {error.requestId === undefined ? null : (
+            <p className="request-id">問い合わせID: {error.requestId}</p>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -700,6 +886,7 @@ function ArtifactDownloadButton({
 
 function JobDetailPage(): JSX.Element {
   const { jobId } = useParams();
+  const navigate = useNavigate();
   const { retry, state } = useJobDetail(jobId);
 
   return (
@@ -707,7 +894,15 @@ function JobDetailPage(): JSX.Element {
       <p className="eyebrow">JOB DETAIL</p>
       {state.status === "loading" ? <LoadingPanel label="ジョブを読み込んでいます" /> : null}
       {state.status === "error" ? <ErrorPanel error={state.error} onRetry={retry} /> : null}
-      {state.status === "ready" ? <DetailContent job={state.value} /> : null}
+      {state.status === "ready" ? (
+        <DetailContent
+          job={state.value}
+          onDeleted={() => {
+            void navigate("/history", { replace: true });
+          }}
+          onRefresh={retry}
+        />
+      ) : null}
       <Link className="text-link back-link" to="/history">
         履歴へ戻る
       </Link>

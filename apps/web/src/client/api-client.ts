@@ -3,6 +3,7 @@ import {
   artifactDownloadResponseSchema,
   createJobRequestSchema,
   createJobResponseSchema,
+  deleteJobResponseSchema,
   jobActionResponseSchema,
   jobDetailSchema,
   listJobsResponseSchema,
@@ -12,6 +13,7 @@ import {
   type ArtifactDownloadResponse,
   type CreateJobRequest,
   type CreateJobResponse,
+  type DeleteJobResponse,
   type JobActionResponse,
   type JobDetail,
   type ListJobsResponse,
@@ -63,6 +65,7 @@ export interface ScribeDropApiClient {
     csrfToken: string,
     signal?: AbortSignal,
   ): Promise<CreateJobResponse>;
+  deleteJob(jobId: string, csrfToken: string, signal?: AbortSignal): Promise<DeleteJobResponse>;
   getJob(jobId: string, signal?: AbortSignal): Promise<JobDetail>;
   getArtifact(
     jobId: string,
@@ -83,7 +86,7 @@ export interface ScribeDropApiClient {
 interface JsonRequestOptions {
   readonly body?: string;
   readonly csrfToken?: string;
-  readonly method: "GET" | "POST";
+  readonly method: "DELETE" | "GET" | "POST";
   readonly signal?: AbortSignal;
 }
 
@@ -252,6 +255,27 @@ export function createApiClient(fetcher: ApiFetch = globalThis.fetch): ScribeDro
         method: "POST",
         ...(signal === undefined ? {} : { signal }),
       });
+    },
+
+    async deleteJob(jobId, csrfToken, signal) {
+      const idResult = ulidSchema.safeParse(jobId);
+      if (!idResult.success || csrfToken.length < 32 || csrfToken.length > 4096) {
+        throw new ApiClientError({
+          kind: "invalid_request",
+          status: 400,
+        });
+      }
+      return await requestJson(
+        fetcher,
+        `/api/jobs/${encodeURIComponent(idResult.data)}`,
+        deleteJobResponseSchema,
+        {
+          body: "{}",
+          csrfToken,
+          method: "DELETE",
+          ...(signal === undefined ? {} : { signal }),
+        },
+      );
     },
 
     async getJob(jobId, signal) {

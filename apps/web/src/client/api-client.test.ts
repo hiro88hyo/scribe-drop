@@ -255,6 +255,32 @@ describe("browser API client", () => {
     });
   });
 
+  it("requests owner-scoped deletion with DELETE, an empty strict body, and CSRF", async () => {
+    let capturedInput: RequestInfo | URL | undefined;
+    let capturedInit: RequestInit | undefined;
+    const fetcher: ApiFetch = (input, init) => {
+      capturedInput = input;
+      capturedInit = init;
+      return Promise.resolve(jsonResponse({ deleted: true }, 202));
+    };
+
+    await expect(createApiClient(fetcher).deleteJob(JOB_ID, CSRF_TOKEN)).resolves.toEqual({
+      deleted: true,
+    });
+    expect(capturedInput).toBe(`/api/jobs/${JOB_ID}`);
+    expect(capturedInit).toMatchObject({
+      body: "{}",
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "X-CSRF-Token": CSRF_TOKEN,
+      },
+      method: "DELETE",
+    });
+  });
+
   it("requests an allowlisted artifact format without caching", async () => {
     let capturedInput: RequestInfo | URL | undefined;
     let capturedInit: RequestInit | undefined;

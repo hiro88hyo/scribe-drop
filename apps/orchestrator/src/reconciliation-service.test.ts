@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { RunpodConfig } from "./config.js";
 import type { MaintenanceRepository } from "./maintenance-repository.js";
 import type { RunpodControlRepository } from "./runpod-control-repository.js";
+import type { DeletionSweepResult } from "./deletion-service.js";
 import { reconcileJobs, type ReconciliationEnvironment } from "./reconciliation-service.js";
 
 const NOW = new Date("2026-07-25T00:15:00.000Z");
@@ -67,6 +68,14 @@ function testLogger(records: string[]): StructuredLogger {
   });
 }
 
+function emptyDeletionSweep(): Promise<DeletionSweepResult> {
+  return Promise.resolve({
+    completedCount: 0,
+    deferredCount: 0,
+    retryCount: 0,
+  });
+}
+
 describe("reconciliation service", () => {
   it("expires stale unknown submissions before dispatching one pending job", async () => {
     const order: string[] = [];
@@ -112,6 +121,7 @@ describe("reconciliation service", () => {
           }),
         logger: testLogger(records),
         now: () => NOW,
+        processDeletions: emptyDeletionSweep,
         dispatchNotification: () => Promise.resolve("none"),
         reconcileCompletions: () =>
           Promise.resolve({
@@ -129,6 +139,11 @@ describe("reconciliation service", () => {
         completedCount: 0,
         failedCount: 0,
         terminalObservedCount: 0,
+      },
+      deletion: {
+        completedCount: 0,
+        deferredCount: 0,
+        retryCount: 0,
       },
       dispatch: "accepted",
       expiredSubmissionCount: 1,
@@ -156,6 +171,7 @@ describe("reconciliation service", () => {
         createRepository,
         logger: testLogger(records),
         now: () => NOW,
+        processDeletions: emptyDeletionSweep,
       }),
     ).rejects.toThrow("Reconciliation configuration is invalid");
 

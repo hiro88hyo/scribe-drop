@@ -1,9 +1,10 @@
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { MAX_FILE_SIZE_BYTES, httpsUrlSchema } from "@scribe-drop/contracts";
+import { R2_CAPABILITY_TTL_SECONDS } from "@scribe-drop/domain";
 import { z } from "zod";
 
-export const R2_CAPABILITY_TTL_SECONDS = 2 * 60 * 60;
+export { R2_CAPABILITY_TTL_SECONDS } from "@scribe-drop/domain";
 
 const r2CapabilityRequestSchema = z
   .object({
