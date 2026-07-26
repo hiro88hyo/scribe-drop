@@ -56,6 +56,8 @@ consumerはbatch全体ではなくmessageごとに次を決める。
 - R2 HEAD不存在、一時的なR2/D1障害、解消可能なversion競合は指数backoffとjitterを
   指定してretryする。
 - 確定済みETagと現在のR2 HEADが異なる場合は`SOURCE_MUTATED`へ遷移し、処理を進めない。
+  active attemptがある場合は同じD1 batchでattemptを`FAILED`にし、heartbeatを失効させ、
+  jobごとに一件の`source_mutated`監査eventを残す。
 
 `apps/orchestrator/wrangler.toml`はretry上限を5、既定retry delayを60秒にし、上限到達後は
 environment別DLQへ送る。Cloudflareの
@@ -80,6 +82,13 @@ DLQには常設push consumerを付けない。障害messageを自動ackまたは
    同じmessageの再処理が安全であることを確認する。
 7. 承認済みmessageだけをmain Queueへ一度再発行する。main consumerが期待する状態へ
    遷移したことを確認してから、元DLQ messageをackする。
+
+固定Wrangler 4.114.0には個別messageのpreview、replay、ack commandがない。CLIはQueueと
+consumerのread-only確認に使い、個別message操作だけCloudflare dashboardで行う。
+strict-invalid、別environment、terminal job、stale ETag/generationはreplayしない。
+jobが安全なterminal状態で追加遷移不要と確認できた場合だけ、その一件を恒久失敗として
+ackする。`SOURCE_MUTATED`はjob、active attemptの`FAILED`、`source_mutated` eventの
+三つが一致することを確認する。active jobの整合性を証明できないmessageはackしない。
 
 Cloudflare dashboardのpreviewはmessage位置を変えないが、ackは永久削除になる。
 `wrangler queues purge`はQueue全体を削除対象にする破壊的操作なので、このrunbookでは
@@ -144,7 +153,8 @@ terminal status、artifact、cancel request、notification outboxを同じservic
 回収する。Cronが重複しても期待status、active attempt、generation、winner、versionを
 含むCASで一度だけ状態を進める。
 
-- `SUBMITTING`でprovider応答が不明なattemptは、claim期限切れ、winnerなし、
+- `SUBMITTING`でprovider応答が不明なattemptは、`submission_outcome`が`unknown`または
+  D1書込み失敗で未記録の`NULL`であり、claim期限切れ、winnerなし、
   submission記録なしを同時に満たす場合だけ`FAILED`へ収束させる。同じattemptを
   `/run`へ再送しない。
 - 利用者のretryは`FAILED` jobに新しいgeneration、attempt、token、result prefixを作る。
@@ -154,3 +164,6 @@ terminal status、artifact、cancel request、notification outboxを同じservic
 - terminal statusをD1で観測していないjobは、manifestが存在しても`COMPLETED`にしない。
 - 手動修復が必要でもjob/attempt/outboxを直接SQLで更新しない。同じrepositoryとserviceを
   使う専用repair commandを先に実装し、dry-run、CAS、監査eventを必須とする。
+
+障害ごとの自動回復、利用者retry、DLQ判断は
+[Phase 6 failure injection](./failure-injection.md)の回復区分を正とする。

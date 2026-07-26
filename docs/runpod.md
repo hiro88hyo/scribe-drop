@@ -59,6 +59,11 @@ offline checkは`--network none`、read-only root filesystem、一時`/tmp`だ�
 - native moduleをimportできる
 - ffprobe 6.1.1を起動できる
 
+Phase 6ではR2 GET/PUT timeoutを固定httpx transportで注入し、URL queryを露出せず
+`SOURCE_DOWNLOAD_FAILED`または`ARTIFACT_UPLOAD_FAILED`へ正規化する。artifact PUTの効果後に
+responseを失った場合もmanifestを作らず、partial artifactだけで完了しないことを検証する。
+Orchestrator側はmanifest欠落を保持grace中deferし、期限後にfail closedとする。
+
 CIでは最終imageにSyftのSPDX JSON SBOMとTrivyのOS/library scanを実行する。専用の
 一時runnerは不要なpreinstalled toolchainを削除し、25 GiB以上の空きを確認してから
 buildとscanを開始する。High/Critical findingはfixed/unfixedを問わずjobを失敗させる。
