@@ -175,6 +175,16 @@ Viteのclient開発serverは次で起動する。
 pnpm --filter @scribe-drop/web run dev
 ```
 
+Phase 7のbrowser E2Eは固定Playwright/Chromiumを使う。初回だけbrowserを導入し、
+OS共有libraryはPlaywright公式の`install --with-deps chromium`で準備する。managed
+serverで`sudo`を使えない場合は管理者へ依頼する。testはproduction build/previewを
+自動起動し、外部serviceをdummy routeへ置換する。
+
+```bash
+pnpm playwright:install
+pnpm test:e2e
+```
+
 このserverはReact UIの開発用であり、Pages Functionsや`public/_headers`の適用を再現しない。Functionsを含むproduction buildは次で検証する。
 
 ```bash

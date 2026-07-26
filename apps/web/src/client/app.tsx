@@ -42,6 +42,29 @@ import { removeUploadCheckpoint } from "./upload-checkpoints.js";
 const RECENT_JOB_LIMIT = 3;
 const HISTORY_PAGE_LIMIT = 25;
 
+function useOnlineStatus(): boolean {
+  const [online, setOnline] = useState(() =>
+    typeof navigator === "undefined" ? true : navigator.onLine,
+  );
+
+  useEffect(() => {
+    const markOnline = (): void => {
+      setOnline(true);
+    };
+    const markOffline = (): void => {
+      setOnline(false);
+    };
+    window.addEventListener("online", markOnline);
+    window.addEventListener("offline", markOffline);
+    return () => {
+      window.removeEventListener("online", markOnline);
+      window.removeEventListener("offline", markOffline);
+    };
+  }, []);
+
+  return online;
+}
+
 function BrandMark(): JSX.Element {
   return (
     <span aria-hidden="true" className="brand-mark">
@@ -78,8 +101,18 @@ function SessionIndicator(): JSX.Element {
 }
 
 function Layout(): JSX.Element {
+  const online = useOnlineStatus();
+
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main-content">
+        メインコンテンツへ移動
+      </a>
+      {online ? null : (
+        <div aria-live="polite" className="offline-banner" role="status">
+          オフラインです。ジョブや成果物は端末へキャッシュしていません。接続後に再試行してください。
+        </div>
+      )}
       <header className="site-header">
         <Link aria-label="ScribeDrop ホーム" className="brand" to="/">
           <BrandMark />
@@ -96,7 +129,7 @@ function Layout(): JSX.Element {
         </div>
       </header>
 
-      <main>
+      <main id="main-content" tabIndex={-1}>
         <Outlet />
       </main>
 
@@ -208,6 +241,7 @@ function UploadPanel(): JSX.Element {
       </div>
       <input
         accept="audio/*,video/mp4,video/quicktime,video/webm"
+        aria-label="文字起こしする音声・動画ファイル"
         className="visually-hidden"
         disabled={active}
         onChange={handleFileInput}
@@ -225,7 +259,7 @@ function UploadPanel(): JSX.Element {
         ファイルを選択
       </button>
       <form className="upload-form" onSubmit={submit}>
-        <p className="selected-file">
+        <p aria-live="polite" className="selected-file">
           {file === undefined
             ? "ファイルは未選択です"
             : `${file.name} · ${formatByteSize(file.size)}`}
@@ -651,9 +685,36 @@ interface JobActionsProps {
 function JobActions({ job, onDeleted, onRefresh }: JobActionsProps): JSX.Element {
   const availability = getJobActionAvailability(job.status);
   const session = useSession();
+  const cancelConfirmationButton = useRef<HTMLButtonElement>(null);
+  const cancelTrigger = useRef<HTMLButtonElement>(null);
+  const deleteConfirmationButton = useRef<HTMLButtonElement>(null);
+  const deleteTrigger = useRef<HTMLButtonElement>(null);
+  const errorPanel = useRef<HTMLDivElement>(null);
   const [confirmation, setConfirmation] = useState<"cancel" | "delete" | undefined>(undefined);
   const [error, setError] = useState<UiError | undefined>(undefined);
   const [pending, setPending] = useState<"cancel" | "delete" | "retry" | undefined>(undefined);
+
+  useEffect(() => {
+    if (confirmation === "cancel") {
+      cancelConfirmationButton.current?.focus();
+    } else if (confirmation === "delete") {
+      deleteConfirmationButton.current?.focus();
+    }
+  }, [confirmation]);
+
+  useEffect(() => {
+    if (error !== undefined) {
+      errorPanel.current?.focus();
+    }
+  }, [error]);
+
+  const closeConfirmation = (): void => {
+    const trigger = confirmation === "cancel" ? cancelTrigger : deleteTrigger;
+    setConfirmation(undefined);
+    window.requestAnimationFrame(() => {
+      trigger.current?.focus();
+    });
+  };
 
   const runAction = (action: "cancel" | "delete" | "retry"): void => {
     if (session.state.status !== "ready") {
@@ -725,6 +786,7 @@ function JobActions({ job, onDeleted, onRefresh }: JobActionsProps): JSX.Element
             onClick={() => {
               setConfirmation("cancel");
             }}
+            ref={cancelTrigger}
             type="button"
           >
             キャンセル
@@ -736,6 +798,7 @@ function JobActions({ job, onDeleted, onRefresh }: JobActionsProps): JSX.Element
           onClick={() => {
             setConfirmation("delete");
           }}
+          ref={deleteTrigger}
           type="button"
         >
           {pending === "delete" ? "削除を受け付けています…" : "ジョブを削除"}
@@ -743,29 +806,32 @@ function JobActions({ job, onDeleted, onRefresh }: JobActionsProps): JSX.Element
       </div>
       {confirmation === "cancel" ? (
         <div
+          aria-describedby="cancel-confirmation-description"
           aria-labelledby="cancel-confirmation-heading"
           className="confirmation-panel"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              closeConfirmation();
+            }
+          }}
           role="alertdialog"
         >
           <h3 id="cancel-confirmation-heading">このジョブをキャンセルしますか？</h3>
-          <p>処理中の場合、安全な停止点まで少し時間がかかることがあります。</p>
+          <p id="cancel-confirmation-description">
+            処理中の場合、安全な停止点まで少し時間がかかることがあります。
+          </p>
           <div>
             <button
               className="danger-button light-danger-button"
               onClick={() => {
                 runAction("cancel");
               }}
+              ref={cancelConfirmationButton}
               type="button"
             >
               キャンセルを確定
             </button>
-            <button
-              className="secondary-button"
-              onClick={() => {
-                setConfirmation(undefined);
-              }}
-              type="button"
-            >
+            <button className="secondary-button" onClick={closeConfirmation} type="button">
               戻る
             </button>
           </div>
@@ -773,12 +839,18 @@ function JobActions({ job, onDeleted, onRefresh }: JobActionsProps): JSX.Element
       ) : null}
       {confirmation === "delete" ? (
         <div
+          aria-describedby="delete-confirmation-description"
           aria-labelledby="delete-confirmation-heading"
           className="confirmation-panel"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              closeConfirmation();
+            }
+          }}
           role="alertdialog"
         >
           <h3 id="delete-confirmation-heading">このジョブを削除しますか？</h3>
-          <p>
+          <p id="delete-confirmation-description">
             履歴から直ちに非表示になり、元ファイルとすべての成果物が非同期で削除されます。
             この操作は取り消せません。
           </p>
@@ -788,24 +860,19 @@ function JobActions({ job, onDeleted, onRefresh }: JobActionsProps): JSX.Element
               onClick={() => {
                 runAction("delete");
               }}
+              ref={deleteConfirmationButton}
               type="button"
             >
               完全削除を受け付ける
             </button>
-            <button
-              className="secondary-button"
-              onClick={() => {
-                setConfirmation(undefined);
-              }}
-              type="button"
-            >
+            <button className="secondary-button" onClick={closeConfirmation} type="button">
               戻る
             </button>
           </div>
         </div>
       ) : null}
       {error === undefined ? null : (
-        <div className="artifact-download-error" role="alert">
+        <div className="artifact-download-error" ref={errorPanel} role="alert" tabIndex={-1}>
           <p>{error.message}</p>
           {error.requestId === undefined ? null : (
             <p className="request-id">問い合わせID: {error.requestId}</p>

@@ -479,8 +479,12 @@ checkpointも完了した。4つの保持値をstrictに検証し、source、att
 独立したcutoffでCron回収する。R2 lifecycle JSONは同じ値から生成し、`incoming/`の
 incomplete multipart abort/source expirationと`results/` expirationを最終防衛にする。
 forward-only migration、unit test、D1/R2 Workers integration、renderer drift testまで
-成功している。PWA、accessibility、Playwright、staging smokeと実lifecycle適用は未完了で
-ある。
+成功している。PWAはsame-originのreview済みstatic assetだけをcacheし、API、artifact、
+navigation response、Access redirectを保存しない。installable manifest、固定offline
+案内、online状態、keyboard/focus、mobile表示を実装した。mock API/R2を使うPlaywrightで
+通信失敗からのretry、multipart upload、poll、download、delete、PC drag-and-drop、
+Android相当file chooser、Cache Storage内容を検証済みである。staging smokeと実lifecycle
+適用は未完了である。
 
 ### 保存期間と削除
 

@@ -24,6 +24,12 @@ export default tseslint.config(
       globals: globals.nodeBuiltin,
     },
   },
+  {
+    files: ["apps/web/public/service-worker.js"],
+    languageOptions: {
+      globals: globals.serviceworker,
+    },
+  },
   ...tseslint.configs.strictTypeChecked.map((config) => ({
     ...config,
     files: ["**/*.{ts,tsx}"],
