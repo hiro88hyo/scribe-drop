@@ -1,6 +1,6 @@
 # ADR 0014: RunPod API subrequestはpublic fetch routingを使う
 
-- Status: Accepted
+- Status: Superseded by [ADR 0015](./0015-preserve-workers-fetch-context.md)
 - Date: 2026-07-26
 
 ## Context

@@ -115,9 +115,9 @@ logや通知へobject key、ETag、token、URL queryを追加しない。
 header、API keyを追加で記録しない。RunPod JSON control APIへのsubrequestは
 `Accept-Encoding: gzip`を固定し、Workers runtimeが対応するencoding以外の圧縮済み
 passthrough bodyをapplication codeで解釈しない。公開APIへのroutingは
-[ADR 0014](./adr/0014-runpod-api-uses-public-fetch-routing.md)の
-`global_fetch_strictly_public`を使用する。同一zoneの内部通信が必要になってもこの経路へ
-載せず、Service Bindingを設計する。
+[ADR 0015](./adr/0015-preserve-workers-fetch-context.md)に従い、client生成時にglobal
+`fetch`の関数値を保存せず、request実行時にplatform contextを保持して呼び出す。
+同一zoneの内部通信が必要な場合は、この経路へ載せずService Bindingを設計する。
 
 ## Reconciliationと手動回復
 

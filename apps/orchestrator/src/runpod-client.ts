@@ -6,6 +6,8 @@ import {
   type RunpodStatusResponse,
 } from "@scribe-drop/contracts";
 
+import { resolvePlatformFetch } from "./platform-fetch.js";
+
 const RUNPOD_API_ORIGIN = "https://api.runpod.ai";
 const RUNPOD_SUBMISSION_TIMEOUT_MS = 15_000;
 const RUNPOD_CONTROL_TIMEOUT_MS = 15_000;
@@ -117,7 +119,7 @@ async function readBoundedJson(response: Response): Promise<unknown> {
 }
 
 export function createRunpodClient(options: RunpodClientOptions): RunpodClient {
-  const fetchImplementation = options.fetch ?? fetch;
+  const fetchImplementation = resolvePlatformFetch(options.fetch);
   const timeoutMilliseconds = options.timeoutMilliseconds ?? RUNPOD_SUBMISSION_TIMEOUT_MS;
   const runUrl = `${RUNPOD_API_ORIGIN}/v2/${encodeURIComponent(options.endpointId)}/run`;
   const jobUrl = (runpodJobId: string, operation: "cancel" | "status"): string =>

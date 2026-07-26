@@ -17,6 +17,30 @@ const REQUEST = {
 } satisfies RunpodRunRequest;
 
 describe("RunPod client", () => {
+  it("resolves the Workers platform fetch when the request executes", async () => {
+    const client = createRunpodClient({
+      apiKey: "runpod-api-key-placeholder",
+      endpointId: "endpoint-id",
+    });
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({
+        id: "runpod-job-id",
+        status: "IN_QUEUE",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      await expect(client.submit(REQUEST)).resolves.toEqual({
+        outcome: "accepted",
+        runpodJobId: "runpod-job-id",
+      });
+      expect(fetchMock).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("submits only the strict request and accepts a valid queue response", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       Response.json({
