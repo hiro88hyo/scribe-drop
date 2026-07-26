@@ -219,6 +219,7 @@ const FAIL_UPLOAD_PREPARATION_SQL = `
 const FIND_UPLOAD_TARGET_SQL = `
   SELECT
     id,
+    active_attempt_id,
     source_bucket,
     source_key,
     expected_size_bytes,
@@ -265,6 +266,7 @@ const MARK_SOURCE_MUTATED_SQL = `
     version = version + 1
   WHERE id = ?1
     AND owner_sub = ?2
+    AND version = ?5
     AND source_etag IS NOT NULL
     AND source_etag <> ?4
     AND status IN (
@@ -278,6 +280,74 @@ const MARK_SOURCE_MUTATED_SQL = `
     )
     AND deleted_at IS NULL
   RETURNING ${JOB_SUMMARY_COLUMNS}
+`;
+
+const FAIL_ACTIVE_ATTEMPT_SOURCE_MUTATED_SQL = `
+  UPDATE job_attempts
+  SET
+    status = 'FAILED',
+    error_code = 'SOURCE_ETAG_CHANGED',
+    error_message = NULL,
+    heartbeat_revoked_at = CASE
+      WHEN heartbeat_token_hash IS NULL THEN NULL
+      ELSE ?4
+    END,
+    failed_at = ?4,
+    updated_at = ?4
+  WHERE id = ?3
+    AND job_id = ?1
+    AND status IN (
+      'SUBMISSION_PENDING',
+      'SUBMITTING',
+      'RUNNING',
+      'CANCEL_REQUESTED'
+    )
+    AND EXISTS (
+      SELECT 1
+      FROM jobs
+      WHERE id = ?1
+        AND owner_sub = ?2
+        AND version = ?6
+        AND active_attempt_id = ?3
+        AND source_etag IS NOT NULL
+        AND source_etag <> ?5
+        AND status IN (
+          'SUBMISSION_PENDING',
+          'SUBMITTING',
+          'RUNNING',
+          'CANCEL_REQUESTED'
+        )
+        AND deleted_at IS NULL
+    )
+  RETURNING id
+`;
+
+const RECORD_SOURCE_MUTATED_EVENT_SQL = `
+  INSERT INTO job_events (
+    id,
+    job_id,
+    attempt_id,
+    event_type,
+    actor,
+    metadata_json,
+    created_at
+  )
+  SELECT
+    ?1,
+    ?2,
+    active_attempt_id,
+    'source_mutated',
+    'web',
+    NULL,
+    ?3
+  FROM jobs
+  WHERE id = ?2
+    AND owner_sub = ?4
+    AND status = 'SOURCE_MUTATED'
+    AND error_code = 'SOURCE_ETAG_CHANGED'
+    AND updated_at = ?3
+  ON CONFLICT DO NOTHING
+  RETURNING id
 `;
 
 const INSERT_RETRY_ATTEMPT_SQL = `
@@ -561,6 +631,7 @@ const admissionDiagnosticSchema = z
 
 const databaseUploadTargetRowSchema = z
   .object({
+    active_attempt_id: ulidSchema.nullable(),
     actual_size_bytes: z.number().int().positive().max(MAX_FILE_SIZE_BYTES).nullable(),
     expected_size_bytes: z.number().int().positive().max(MAX_FILE_SIZE_BYTES),
     id: ulidSchema,
@@ -606,6 +677,9 @@ export interface JobPreparedStatement {
 }
 
 export interface JobDatabaseSession {
+  batch(
+    statements: JobPreparedStatement[],
+  ): Promise<readonly { readonly results: readonly unknown[] }[]>;
   prepare(query: string): JobPreparedStatement;
 }
 
@@ -657,6 +731,7 @@ export interface MarkUploadReadyInput extends UploadPreparationTransitionInput {
 }
 
 export interface UploadTarget {
+  readonly activeAttemptId: string | null;
   readonly actualSizeBytes: number | null;
   readonly expectedSizeBytes: number;
   readonly jobId: string;
@@ -674,6 +749,7 @@ export interface ArtifactDownloadTarget {
 }
 
 export interface CompleteUploadInput {
+  readonly eventId: string;
   readonly expectedVersion: number;
   readonly jobId: string;
   readonly ownerSub: string;
@@ -791,6 +867,7 @@ function mapDetail(
 
 function mapUploadTarget(row: z.infer<typeof databaseUploadTargetRowSchema>): UploadTarget {
   return {
+    activeAttemptId: row.active_attempt_id,
     actualSizeBytes: row.actual_size_bytes,
     expectedSizeBytes: row.expected_size_bytes,
     jobId: row.id,
@@ -1037,15 +1114,48 @@ export function createD1JobRepository(database: JobDatabase): JobRepository {
       if (current.sourceEtag === null || current.sourceEtag === sourceEtag) {
         return { status: "invalid_state" };
       }
+      if (current.version !== input.expectedVersion) {
+        return { status: "invalid_state" };
+      }
 
-      const mutation = await session
-        .prepare(MARK_SOURCE_MUTATED_SQL)
-        .bind(input.jobId, input.ownerSub, timestamp, sourceEtag)
-        .all();
-      const mutatedRows = updatedJobSummaryRowsSchema.parse(mutation.results);
+      const results = await session.batch([
+        session
+          .prepare(FAIL_ACTIVE_ATTEMPT_SOURCE_MUTATED_SQL)
+          .bind(
+            input.jobId,
+            input.ownerSub,
+            current.activeAttemptId,
+            timestamp,
+            sourceEtag,
+            input.expectedVersion,
+          ),
+        session
+          .prepare(MARK_SOURCE_MUTATED_SQL)
+          .bind(input.jobId, input.ownerSub, timestamp, sourceEtag, input.expectedVersion),
+        session
+          .prepare(RECORD_SOURCE_MUTATED_EVENT_SQL)
+          .bind(ulidSchema.parse(input.eventId), input.jobId, timestamp, input.ownerSub),
+      ]);
+      const updatedAttempt = updatedJobIdRowsSchema.parse(results[0]?.results ?? [])[0];
+      const mutatedRows = updatedJobSummaryRowsSchema.parse(results[1]?.results ?? []);
       const mutated = mutatedRows[0];
       if (mutated === undefined) {
+        const insertedEvent = updatedJobIdRowsSchema.parse(results[2]?.results ?? [])[0];
+        if (updatedAttempt !== undefined || insertedEvent !== undefined) {
+          throw new Error("Source mutation transition was only partially persisted");
+        }
         return { status: "invalid_state" };
+      }
+      const insertedEvent = updatedJobIdRowsSchema.parse(results[2]?.results ?? [])[0];
+      if (
+        insertedEvent === undefined ||
+        (current.activeAttemptId !== null &&
+          ["SUBMISSION_PENDING", "SUBMITTING", "RUNNING", "CANCEL_REQUESTED"].includes(
+            current.status,
+          ) &&
+          updatedAttempt === undefined)
+      ) {
+        throw new Error("Source mutation transition was only partially persisted");
       }
       return {
         job: mapSummary(mutated),

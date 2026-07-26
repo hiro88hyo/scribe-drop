@@ -3,9 +3,15 @@ import { env, exports } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { runpodClaimResponseSchema } from "@scribe-drop/contracts";
+import { createStructuredLogger } from "@scribe-drop/observability";
+import { DeterministicFaultPlan, inspectStructuredLogs } from "@scribe-drop/test-support";
 
 import { hashCapabilityToken } from "../src/capability-token.js";
-import { createD1RunpodControlRepository } from "../src/runpod-control-repository.js";
+import {
+  createD1RunpodControlRepository,
+  type RunpodControlRepository,
+} from "../src/runpod-control-repository.js";
+import { submitPendingRunpodJob } from "../src/runpod-submission-service.js";
 
 const NOW = "2026-07-25T00:00:00.000Z";
 const JOB_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -225,6 +231,118 @@ describe("D1 RunPod control repository", () => {
         timestamp: "2026-07-25T00:15:01.000Z",
       }),
     ).resolves.toBe(false);
+  });
+
+  it("recovers an unpersisted submission outcome after a deterministic D1 failure", async () => {
+    const repository = createD1RunpodControlRepository(env.SCRIBE_DROP_DB);
+    const faults = new DeterministicFaultPlan([
+      {
+        occurrences: [1],
+        point: "d1.recordSubmissionAccepted",
+      },
+    ]);
+    const records: string[] = [];
+    const structuredLogger = createStructuredLogger({
+      environment: "local",
+      now: () => new Date(NOW),
+      service: "orchestrator",
+      sink: (record) => {
+        records.push(record);
+      },
+    });
+    let providerAcceptances = 0;
+    const faultingRepository: RunpodControlRepository = {
+      ...repository,
+      recordSubmissionAccepted: (input) =>
+        faults.before("d1.recordSubmissionAccepted", () =>
+          repository.recordSubmissionAccepted(input),
+        ),
+    };
+    const dependencies = {
+      createRepository: () => faultingRepository,
+      createRunpodClient: () => ({
+        submit: () => {
+          providerAcceptances += 1;
+          return Promise.resolve({
+            outcome: "accepted" as const,
+            runpodJobId: "accepted-provider-job",
+          });
+        },
+      }),
+      logger: structuredLogger,
+      now: () => new Date(NOW),
+      randomBytes: (length: number) => new Uint8Array(length),
+    } satisfies Parameters<typeof submitPendingRunpodJob>[2];
+
+    await expect(submitPendingRunpodJob(JOB_ID, env, dependencies)).rejects.toMatchObject({
+      point: "d1.recordSubmissionAccepted",
+    });
+    await expect(
+      submitPendingRunpodJob(JOB_ID, env, {
+        ...dependencies,
+        createRepository: () => repository,
+      }),
+    ).resolves.toBe("deferred");
+    expect(providerAcceptances).toBe(1);
+
+    await expect(
+      repository.findExpiredUnknownSubmissions("2026-07-25T00:15:00.000Z", 25),
+    ).resolves.toEqual([
+      {
+        attemptId: ATTEMPT_ID,
+        claimExpiresAt: "2026-07-25T00:15:00.000Z",
+        jobId: JOB_ID,
+      },
+    ]);
+    await expect(
+      repository.failExpiredUnknownSubmission({
+        attemptId: ATTEMPT_ID,
+        eventId: FIRST_EVENT_ID,
+        jobId: JOB_ID,
+        timestamp: "2026-07-25T00:15:00.000Z",
+      }),
+    ).resolves.toBe(true);
+
+    const state = await env.SCRIBE_DROP_DB.prepare(
+      `
+        SELECT
+          jobs.status AS job_status,
+          attempts.status AS attempt_status,
+          attempts.submission_outcome
+        FROM jobs
+        INNER JOIN job_attempts AS attempts ON attempts.id = jobs.active_attempt_id
+        WHERE jobs.id = ?1
+      `,
+    )
+      .bind(JOB_ID)
+      .first();
+    expect(state).toEqual({
+      attempt_status: "FAILED",
+      job_status: "FAILED",
+      submission_outcome: null,
+    });
+    const related = await env.SCRIBE_DROP_DB.prepare(
+      `
+        SELECT
+          (SELECT COUNT(*) FROM runpod_submissions WHERE attempt_id = ?1) AS submissions,
+          (SELECT COUNT(*) FROM job_events WHERE attempt_id = ?1) AS events,
+          (SELECT COUNT(*) FROM notification_outbox WHERE job_id = ?2) AS outbox
+      `,
+    )
+      .bind(ATTEMPT_ID, JOB_ID)
+      .first();
+    expect(related).toEqual({
+      events: 1,
+      outbox: 0,
+      submissions: 0,
+    });
+    expect(
+      inspectStructuredLogs(records, ["claimToken", "accepted-provider-job", "fixture transcript"])
+        .events,
+    ).toEqual(["job.submission_started", "job.submission_deferred"]);
+    expect(() => {
+      faults.assertExhausted();
+    }).not.toThrow();
   });
 
   it("does not expire an unknown submission after any RunPod job ID is recorded", async () => {

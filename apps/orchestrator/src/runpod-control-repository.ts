@@ -356,7 +356,10 @@ const FIND_EXPIRED_UNKNOWN_SUBMISSIONS_SQL = `
   FROM job_attempts AS attempts
   INNER JOIN jobs ON jobs.id = attempts.job_id
   WHERE attempts.status = 'SUBMITTING'
-    AND attempts.submission_outcome = 'unknown'
+    AND (
+      attempts.submission_outcome IS NULL
+      OR attempts.submission_outcome = 'unknown'
+    )
     AND attempts.claim_expires_at <= ?1
     AND attempts.winning_runpod_job_id IS NULL
     AND jobs.active_attempt_id = attempts.id
@@ -382,7 +385,10 @@ const FAIL_EXPIRED_UNKNOWN_ATTEMPT_SQL = `
   WHERE id = ?1
     AND job_id = ?2
     AND status = 'SUBMITTING'
-    AND submission_outcome = 'unknown'
+    AND (
+      submission_outcome IS NULL
+      OR submission_outcome = 'unknown'
+    )
     AND claim_expires_at <= ?3
     AND winning_runpod_job_id IS NULL
     AND NOT EXISTS (
@@ -420,7 +426,10 @@ const FAIL_EXPIRED_UNKNOWN_JOB_SQL = `
       WHERE id = ?2
         AND job_id = ?1
         AND status = 'FAILED'
-        AND submission_outcome = 'unknown'
+        AND (
+          submission_outcome IS NULL
+          OR submission_outcome = 'unknown'
+        )
         AND failed_at = ?3
         AND winning_runpod_job_id IS NULL
         AND NOT EXISTS (

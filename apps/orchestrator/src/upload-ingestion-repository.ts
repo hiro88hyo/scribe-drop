@@ -147,6 +147,72 @@ const MARK_SOURCE_MUTATED_SQL = `
   RETURNING id
 `;
 
+const FAIL_ACTIVE_ATTEMPT_SOURCE_MUTATED_SQL = `
+  UPDATE job_attempts
+  SET
+    status = 'FAILED',
+    error_code = 'SOURCE_ETAG_CHANGED',
+    error_message = NULL,
+    heartbeat_revoked_at = CASE
+      WHEN heartbeat_token_hash IS NULL THEN NULL
+      ELSE ?3
+    END,
+    failed_at = ?3,
+    updated_at = ?3
+  WHERE id = ?5
+    AND job_id = ?1
+    AND status IN (
+      'SUBMISSION_PENDING',
+      'SUBMITTING',
+      'RUNNING',
+      'CANCEL_REQUESTED'
+    )
+    AND EXISTS (
+      SELECT 1
+      FROM jobs
+      WHERE id = ?1
+        AND version = ?2
+        AND active_attempt_id = ?5
+        AND source_etag IS NOT NULL
+        AND source_etag <> ?4
+        AND status IN (
+          'SUBMISSION_PENDING',
+          'SUBMITTING',
+          'RUNNING',
+          'CANCEL_REQUESTED'
+        )
+        AND deleted_at IS NULL
+    )
+  RETURNING id
+`;
+
+const RECORD_SOURCE_MUTATED_EVENT_SQL = `
+  INSERT INTO job_events (
+    id,
+    job_id,
+    attempt_id,
+    event_type,
+    actor,
+    metadata_json,
+    created_at
+  )
+  SELECT
+    ?1,
+    ?2,
+    active_attempt_id,
+    'source_mutated',
+    'queue',
+    NULL,
+    ?3
+  FROM jobs
+  WHERE id = ?2
+    AND status = 'SOURCE_MUTATED'
+    AND error_code = 'SOURCE_ETAG_CHANGED'
+    AND updated_at = ?3
+  ON CONFLICT DO NOTHING
+  RETURNING id
+`;
+
 const FAIL_SOURCE_SQL = `
   UPDATE jobs
   SET
@@ -211,6 +277,12 @@ const INITIAL_SOURCE_STATUSES: ReadonlySet<JobStatus> = new Set([
   "CREATED",
   "UPLOADING",
   "UPLOADED",
+]);
+const ACTIVE_ATTEMPT_JOB_STATUSES: ReadonlySet<JobStatus> = new Set([
+  "SUBMISSION_PENDING",
+  "SUBMITTING",
+  "RUNNING",
+  "CANCEL_REQUESTED",
 ]);
 
 export interface SourceJob {
@@ -372,14 +444,33 @@ export function createD1UploadIngestionRepository(database: D1Database): UploadI
       const parsedEventId = ulidSchema.parse(eventId);
       const results = await database.batch([
         database
+          .prepare(FAIL_ACTIVE_ATTEMPT_SOURCE_MUTATED_SQL)
+          .bind(job.id, job.version, parsedTimestamp, sourceEtag, job.activeAttemptId),
+        database
           .prepare(MARK_SOURCE_MUTATED_SQL)
           .bind(job.id, job.version, parsedTimestamp, sourceEtag),
         database
-          .prepare(RECORD_REJECTION_EVENT_SQL)
-          .bind(parsedEventId, job.id, parsedTimestamp, "SOURCE_MUTATED", "SOURCE_ETAG_CHANGED"),
+          .prepare(RECORD_SOURCE_MUTATED_EVENT_SQL)
+          .bind(parsedEventId, job.id, parsedTimestamp),
       ]);
-      const updated = updatedIdRowsSchema.parse(results[0]?.results ?? [])[0];
-      return updated !== undefined;
+      const updatedAttempt = updatedIdRowsSchema.parse(results[0]?.results ?? [])[0];
+      const updatedJob = updatedIdRowsSchema.parse(results[1]?.results ?? [])[0];
+      const insertedEvent = updatedIdRowsSchema.parse(results[2]?.results ?? [])[0];
+      if (updatedJob === undefined) {
+        if (updatedAttempt !== undefined || insertedEvent !== undefined) {
+          throw new Error("Source mutation transition was only partially persisted");
+        }
+        return false;
+      }
+      if (
+        insertedEvent === undefined ||
+        (job.activeAttemptId !== null &&
+          ACTIVE_ATTEMPT_JOB_STATUSES.has(job.status) &&
+          updatedAttempt === undefined)
+      ) {
+        throw new Error("Source mutation transition was only partially persisted");
+      }
+      return true;
     },
   };
 }
