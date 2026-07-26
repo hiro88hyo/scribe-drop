@@ -48,8 +48,10 @@ Phase 5のlocal実装では、5分Cron、RunPod status poll、terminal状態のD
 manifest/artifact検証、原子的finalize、notification outbox、Discord再送、所有者限定
 artifact URL、cancel、新しいattemptによるretryを追加している。stagingへは
 `0005_reconciliation_completion.sql`をapplicationより先に適用し、OrchestratorとWebを
-deployしてからend-to-end smokeを行う。production environmentへのdeploymentは未実施で
-ある。
+deployしてからend-to-end smokeを行う。RunPod、Discord、R2の公開endpointへ送るglobal
+`fetch()`は[ADR 0014](./adr/0014-runpod-api-uses-public-fetch-routing.md)に従い
+`global_fetch_strictly_public`を固定し、同一zoneの内部通信には流用しない。
+production environmentへのdeploymentは未実施である。
 
 `apps/orchestrator/wrangler.toml`と`apps/web/wrangler.toml`の全ゼロIDおよびoriginは
 安全なplaceholderであり、remote操作には使用できない。実IDと実originは追跡対象へ

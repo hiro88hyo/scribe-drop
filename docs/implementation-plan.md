@@ -28,8 +28,9 @@ Phase 5では[ADR 0013](./adr/0013-reconciliation-and-fresh-attempt-retry.md)に
 原子的finalize、notification outbox、Discord再送、所有者限定artifact URL、
 cancelと新しいattemptによるretryを実装した。forward-only migration、unit test、
 Workers/D1/R2 integration、型検査、build、secret scan、dependency auditまでlocalで
-検証済みである。次にstagingへ適用し、Phase 4のstale job回収と実end-to-end smokeを
-行う。
+検証済みである。stagingではRunPod公開APIへのWorker subrequestを
+[ADR 0014](./adr/0014-runpod-api-uses-public-fetch-routing.md)のpublic routingへ固定する。
+次にPhase 4のstale job回収と実end-to-end smokeを完了する。
 
 本計画は[spec.md](./spec.md)とRunPodの追加security要件である[additional-spec.md](./additional-spec.md)を正とし、Phase 1からPhase 7までを、各Phaseが単独でレビュー・検証できる単位に分けて実装する。両者が矛盾する場合は追加要件と[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)を優先する。
 
