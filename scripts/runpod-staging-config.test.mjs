@@ -65,12 +65,37 @@ test("generates minimal template and endpoint CLI arguments", () => {
   assert.ok(templateArguments.includes("--registry-auth-id"));
   assert.equal(templateArguments.includes("--volume-in-gb"), false);
   assert.equal(templateArguments.includes("--ports"), false);
-  assert.deepEqual(endpointArguments.slice(0, 2), ["serverless", "create"]);
-  assert.ok(endpointArguments.includes("--flash-boot=false"));
-  assert.ok(endpointArguments.includes("--workers-min"));
-  assert.ok(endpointArguments.includes("--workers-max"));
-  assert.equal(endpointArguments.includes("--network-volume-id"), false);
-  assert.equal(endpointArguments.includes("--model-reference"), false);
+  assert.deepEqual(endpointArguments, [
+    "serverless",
+    "create",
+    "--name",
+    "scribe-drop-staging",
+    "--template-id",
+    "template_staging",
+    "--compute-type",
+    "GPU",
+    "--gpu-id",
+    "NVIDIA L4",
+    "--gpu-count",
+    "1",
+    "--workers-min",
+    "0",
+    "--workers-max",
+    "1",
+    "--data-center-ids",
+    "AP-JP-1,EU-SE-1",
+    "--min-cuda-version",
+    "12.8",
+    "--scale-by",
+    "requests",
+    "--scale-threshold",
+    "1",
+    "--idle-timeout",
+    "5",
+    "--flash-boot=false",
+    "--execution-timeout",
+    "21600",
+  ]);
 });
 
 test("validates template and endpoint create responses", () => {
@@ -110,6 +135,66 @@ test("validates template and endpoint create responses", () => {
 
   assert.equal(templateId, "template_staging");
   assert.equal(endpointId, "endpoint_staging");
+});
+
+test("accepts runpodctl read responses that omit create-only placement fields", () => {
+  const plan = createRunpodStagingPlan(validInput);
+
+  assert.equal(
+    validateCreatedRunpodEndpoint(
+      {
+        id: "endpoint_staging",
+        name: "scribe-drop-staging",
+        templateId: "template_staging",
+        gpuCount: 1,
+        workersMax: 1,
+        idleTimeout: 5,
+        executionTimeoutMs: 21_600_000,
+        minCudaVersion: "12.8",
+        scalerType: "REQUEST_COUNT",
+        scalerValue: 1,
+        flashboot: false,
+      },
+      plan,
+      "template_staging",
+    ),
+    "endpoint_staging",
+  );
+});
+
+test("rejects provider-reported placement fields that contradict the plan", () => {
+  const plan = createRunpodStagingPlan(validInput);
+  const endpoint = {
+    id: "endpoint_staging",
+    name: "scribe-drop-staging",
+    templateId: "template_staging",
+    computeType: "GPU",
+    gpuIds: "AMPERE_24",
+    gpuCount: 1,
+    workersMax: 1,
+    locations: "AP-JP-1,EU-SE-1",
+    idleTimeout: 5,
+    executionTimeoutMs: 21_600_000,
+    minCudaVersion: "12.8",
+    scalerType: "REQUEST_COUNT",
+    scalerValue: 1,
+    flashBootType: "OFF",
+  };
+
+  assert.throws(
+    () =>
+      validateCreatedRunpodEndpoint({ ...endpoint, computeType: "CPU" }, plan, "template_staging"),
+    /does not match/u,
+  );
+  assert.throws(
+    () =>
+      validateCreatedRunpodEndpoint(
+        { ...endpoint, locations: "US-TX-1" },
+        plan,
+        "template_staging",
+      ),
+    /does not match/u,
+  );
 });
 
 test("rejects deployment responses that weaken isolation", () => {

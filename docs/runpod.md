@@ -106,9 +106,23 @@ pnpm run runpod:deploy:staging
 ```
 
 scriptは既存の同名resourceを先に検査し、固定planと一致する場合だけ再利用する。template
-作成直後にIDを`.runpod/deploy/staging-state.json`へ0600で保存するため、endpoint作成が
-失敗しても再実行でtemplateを重複作成しない。API応答、実ID、実originは標準出力へ出さない。
-削除や既存templateの更新は行わない。
+確定後かつendpoint作成前に、plan digest、template ID、未確定endpointを
+`.runpod/deploy/staging-state.json`へ0600で保存する。作成応答を失っても、同じpending
+state、名前、templateが一意に一致する場合だけ再利用する。stateのない既存endpointは
+自動採用しない。API応答、実ID、実originは標準出力へ出さない。削除や既存templateの
+更新は行わない。
+
+固定`runpodctl`の既知の取得境界と補償制御は
+[ADR 0012](./adr/0012-runpodctl-staging-verification-boundary.md)を正とする。2.7.2では
+providerがServerless templateへ既定の`8888/http`と`22/tcp`を追加し、CLIから空へ更新
+できない。発生時はRunPod Consoleでこの二つだけを削除し、ほかの設定を変更せず、同じ
+deploy commandを再実行して`template get`の厳格照合を通す。この手順はCLIが空portを
+扱えるversionへ更新するまでの一時的なdashboard例外である。
+
+同versionの`serverless get`はcompute type、GPU、data centerを省略することがある。
+scriptはplanから生成する作成引数全体をテストで固定し、取得できるendpoint invariantを
+厳格照合する。省略項目は同一pending stateとtemplateがある場合だけ回復を許可し、初回
+worker起動後にGPUとSecure Cloudを`runpodctl`で確認するまでproduction-readyとしない。
 
 digest付きimageから`--serverless` templateを新規作成する。Serverless templateは1 endpoint
 にだけ関連付けられ、persistent volumeをサポートしない。初期container diskは30 GiB、

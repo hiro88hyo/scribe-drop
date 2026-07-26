@@ -90,7 +90,9 @@ Phase 3 staging checkpointで完了した。手順6以降はPhase 4のRunPod構�
 6. `develop`の`Publish RunPod worker` workflowでRunPod Worker imageをbuildし、SBOM、
    scan、offline checkを通したGHCR digestからtemplateとstaging endpointを作成する。
 7. staging endpoint IDとRunPod API keyをOrchestrator secretへ登録する。
-8. `runpodctl`でSecure Cloud、Flex、active workers 0、max workers 1、GPU 1、Network Volumeなし、FlashBoot無効、timeout、TTLを確認する。
+8. [ADR 0012](./adr/0012-runpodctl-staging-verification-boundary.md)に従い、
+   `runpodctl`で取得できるactive workers 0、max workers 1、GPU 1、Network Volumeなし、
+   FlashBoot無効、timeoutを確認する。GPU配置とSecure Cloudは初回worker起動後に確認する。
 9. GPU benchmark、smoke test、重複配送、claim競合、cleanup、rollback手順を確認する。
 
 ## Phase 3 staging checkpoint
