@@ -49,8 +49,8 @@ manifest/artifact検証、原子的finalize、notification outbox、Discord再�
 artifact URL、cancel、新しいattemptによるretryを追加している。stagingへは
 `0005_reconciliation_completion.sql`をapplicationより先に適用し、OrchestratorとWebを
 deployしてからend-to-end smokeを行う。RunPod、Discord、R2の公開endpointへ送るglobal
-`fetch()`は[ADR 0015](./adr/0015-preserve-workers-fetch-context.md)に従い、
-request実行時にWorkersのplatform contextを保持して呼び出す。
+`fetch()`は[ADR 0016](./adr/0016-use-manual-redirects-in-workers.md)に従い、
+`manual` redirect modeで自動追従を拒否する。
 production environmentへのdeploymentは未実施である。
 
 `apps/orchestrator/wrangler.toml`と`apps/web/wrangler.toml`の全ゼロIDおよびoriginは

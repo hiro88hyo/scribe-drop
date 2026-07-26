@@ -1,6 +1,6 @@
 # ADR 0015: Workersの外部fetchは実行時のplatform contextを保持する
 
-- Status: Accepted
+- Status: Superseded by [ADR 0016](./0016-use-manual-redirects-in-workers.md)
 - Date: 2026-07-26
 
 ## Context

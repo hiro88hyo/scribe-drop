@@ -1,5 +1,3 @@
-import { resolvePlatformFetch } from "./platform-fetch.js";
-
 const DISCORD_TIMEOUT_MS = 10_000;
 
 export type DiscordDeliveryResult =
@@ -21,7 +19,7 @@ export interface DiscordClientOptions {
 }
 
 export function createDiscordClient(options: DiscordClientOptions): DiscordClient {
-  const fetchImplementation = resolvePlatformFetch(options.fetch);
+  const fetchImplementation = options.fetch ?? fetch;
   const timeoutMilliseconds = options.timeoutMilliseconds ?? DISCORD_TIMEOUT_MS;
 
   return {
@@ -38,7 +36,7 @@ export function createDiscordClient(options: DiscordClientOptions): DiscordClien
           }),
           headers: { "content-type": "application/json" },
           method: "POST",
-          redirect: "error",
+          redirect: "manual",
           signal: AbortSignal.timeout(timeoutMilliseconds),
         });
       } catch {

@@ -5,21 +5,6 @@ import { createDiscordClient } from "./discord-client.js";
 const WEBHOOK_URL = "https://discord.com/api/webhooks/123/test-token";
 
 describe("Discord client", () => {
-  it("resolves the Workers platform fetch when the request executes", async () => {
-    const client = createDiscordClient({ webhookUrl: WEBHOOK_URL });
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    try {
-      await expect(client.send("Meeting complete")).resolves.toEqual({
-        outcome: "sent",
-      });
-      expect(fetchMock).toHaveBeenCalledOnce();
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
   it("sends a bounded message with mentions disabled", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
     const client = createDiscordClient({
@@ -40,7 +25,7 @@ describe("Discord client", () => {
       }),
       headers: { "content-type": "application/json" },
       method: "POST",
-      redirect: "error",
+      redirect: "manual",
     });
   });
 
@@ -48,6 +33,7 @@ describe("Discord client", () => {
     [429, "rate_limited"],
     [500, "unavailable"],
     [400, "permanent_failure"],
+    [302, "permanent_failure"],
   ] as const)("classifies HTTP %s without reading provider details", async (status, outcome) => {
     const client = createDiscordClient({
       fetch: vi

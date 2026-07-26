@@ -6,8 +6,6 @@ import {
   type RunpodStatusResponse,
 } from "@scribe-drop/contracts";
 
-import { resolvePlatformFetch } from "./platform-fetch.js";
-
 const RUNPOD_API_ORIGIN = "https://api.runpod.ai";
 const RUNPOD_SUBMISSION_TIMEOUT_MS = 15_000;
 const RUNPOD_CONTROL_TIMEOUT_MS = 15_000;
@@ -119,7 +117,7 @@ async function readBoundedJson(response: Response): Promise<unknown> {
 }
 
 export function createRunpodClient(options: RunpodClientOptions): RunpodClient {
-  const fetchImplementation = resolvePlatformFetch(options.fetch);
+  const fetchImplementation = options.fetch ?? fetch;
   const timeoutMilliseconds = options.timeoutMilliseconds ?? RUNPOD_SUBMISSION_TIMEOUT_MS;
   const runUrl = `${RUNPOD_API_ORIGIN}/v2/${encodeURIComponent(options.endpointId)}/run`;
   const jobUrl = (runpodJobId: string, operation: "cancel" | "status"): string =>
@@ -139,7 +137,7 @@ export function createRunpodClient(options: RunpodClientOptions): RunpodClient {
         response = await fetchImplementation(jobUrl(runpodJobId, "cancel"), {
           headers,
           method: "POST",
-          redirect: "error",
+          redirect: "manual",
           signal: AbortSignal.timeout(options.timeoutMilliseconds ?? RUNPOD_CONTROL_TIMEOUT_MS),
         });
       } catch {
@@ -162,7 +160,7 @@ export function createRunpodClient(options: RunpodClientOptions): RunpodClient {
         response = await fetchImplementation(jobUrl(runpodJobId, "status"), {
           headers,
           method: "GET",
-          redirect: "error",
+          redirect: "manual",
           signal: AbortSignal.timeout(options.timeoutMilliseconds ?? RUNPOD_CONTROL_TIMEOUT_MS),
         });
       } catch {
@@ -192,7 +190,7 @@ export function createRunpodClient(options: RunpodClientOptions): RunpodClient {
             "content-type": "application/json",
           },
           method: "POST",
-          redirect: "error",
+          redirect: "manual",
           signal: AbortSignal.timeout(timeoutMilliseconds),
         });
       } catch {
