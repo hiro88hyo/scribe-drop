@@ -28,6 +28,15 @@ function requireText(contents, expected, location, description) {
   }
 }
 
+function requireTextCount(contents, expected, count, location, description) {
+  const actual = contents.split(expected).length - 1;
+  if (actual !== count) {
+    failures.push(
+      `${location}: expected fixed ${description} ${count} times, found ${actual} (${expected})`,
+    );
+  }
+}
+
 const workflowFiles = readdirSync(workflowsDirectory)
   .filter((filename) => filename.endsWith(".yml") || filename.endsWith(".yaml"))
   .sort();
@@ -104,6 +113,35 @@ requireText(
   "Dockerfile",
   "ca-certificates package",
 );
+for (const packageName of [
+  "dirmngr",
+  "gnupg",
+  "gnupg-utils",
+  "gnupg2",
+  "gpg",
+  "gpg-agent",
+  "gpgconf",
+  "gpgsm",
+  "gpgv",
+  "keyboxd",
+]) {
+  requireTextCount(
+    dockerfileContents,
+    `${packageName}=${image.gnupgPackage}`,
+    2,
+    "Dockerfile",
+    `${packageName} package`,
+  );
+}
+for (const packageName of ["libssl3t64", "openssl"]) {
+  requireTextCount(
+    dockerfileContents,
+    `${packageName}=${image.opensslPackage}`,
+    2,
+    "Dockerfile",
+    `${packageName} package`,
+  );
+}
 requireText(
   dockerfileContents,
   `python3.12=${image.pythonPackage}`,

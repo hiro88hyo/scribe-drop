@@ -20,6 +20,18 @@ RUN rm -f /etc/apt/sources.list.d/cuda.list \
     && apt-get update \
     && apt-get install --yes --no-install-recommends \
         ca-certificates=20260601~24.04.1 \
+        dirmngr=2.4.4-2ubuntu17.4 \
+        gnupg=2.4.4-2ubuntu17.4 \
+        gnupg-utils=2.4.4-2ubuntu17.4 \
+        gnupg2=2.4.4-2ubuntu17.4 \
+        gpg=2.4.4-2ubuntu17.4 \
+        gpg-agent=2.4.4-2ubuntu17.4 \
+        gpgconf=2.4.4-2ubuntu17.4 \
+        gpgsm=2.4.4-2ubuntu17.4 \
+        gpgv=2.4.4-2ubuntu17.4 \
+        keyboxd=2.4.4-2ubuntu17.4 \
+        libssl3t64=3.0.13-0ubuntu3.11 \
+        openssl=3.0.13-0ubuntu3.11 \
         python3.12=3.12.3-1ubuntu0.15 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -49,7 +61,19 @@ RUN rm -f /etc/apt/sources.list.d/cuda.list \
     && apt-get update \
     && apt-get install --yes --no-install-recommends \
         ca-certificates=20260601~24.04.1 \
+        dirmngr=2.4.4-2ubuntu17.4 \
         ffmpeg=7:6.1.1-3ubuntu5 \
+        gnupg=2.4.4-2ubuntu17.4 \
+        gnupg-utils=2.4.4-2ubuntu17.4 \
+        gnupg2=2.4.4-2ubuntu17.4 \
+        gpg=2.4.4-2ubuntu17.4 \
+        gpg-agent=2.4.4-2ubuntu17.4 \
+        gpgconf=2.4.4-2ubuntu17.4 \
+        gpgsm=2.4.4-2ubuntu17.4 \
+        gpgv=2.4.4-2ubuntu17.4 \
+        keyboxd=2.4.4-2ubuntu17.4 \
+        libssl3t64=3.0.13-0ubuntu3.11 \
+        openssl=3.0.13-0ubuntu3.11 \
         python3.12=3.12.3-1ubuntu0.15 \
     && rm -rf /var/lib/apt/lists/*
 

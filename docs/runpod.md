@@ -18,6 +18,8 @@ imageは`linux/amd64`専用のmulti-stage buildとする。選択値は
 | runtime base      | `nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04`のamd64 digest       |
 | Ubuntu snapshot   | `20260725T000000Z`                                                 |
 | CA certificates   | `20260601~24.04.1`                                                 |
+| GnuPG packages    | `2.4.4-2ubuntu17.4`                                                |
+| OpenSSL packages  | `3.0.13-0ubuntu3.11`                                               |
 | Python package    | `3.12.3-1ubuntu0.15`                                               |
 | FFmpeg package    | `7:6.1.1-3ubuntu5`                                                 |
 | model repository  | `dropbox-dash/faster-whisper-large-v3-turbo`                       |

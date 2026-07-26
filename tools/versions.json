@@ -18,6 +18,8 @@
     },
     "ubuntuSnapshot": "20260725T000000Z",
     "caCertificatesPackage": "20260601~24.04.1",
+    "gnupgPackage": "2.4.4-2ubuntu17.4",
+    "opensslPackage": "3.0.13-0ubuntu3.11",
     "pythonPackage": "3.12.3-1ubuntu0.15",
     "ffmpegPackage": "7:6.1.1-3ubuntu5",
     "model": {
