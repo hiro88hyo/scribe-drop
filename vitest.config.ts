@@ -13,6 +13,9 @@ export default defineConfig({
       "@scribe-drop/observability": fileURLToPath(
         new URL("./packages/observability/src/index.ts", import.meta.url),
       ),
+      "@scribe-drop/test-support": fileURLToPath(
+        new URL("./packages/test-support/src/index.ts", import.meta.url),
+      ),
     },
   },
   test: {

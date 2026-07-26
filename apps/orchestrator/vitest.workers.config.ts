@@ -41,6 +41,10 @@ export default defineConfig({
         projectDirectory,
         "../../packages/observability/src/index.ts",
       ),
+      "@scribe-drop/test-support": path.resolve(
+        projectDirectory,
+        "../../packages/test-support/src/index.ts",
+      ),
     },
   },
   root: projectDirectory,
