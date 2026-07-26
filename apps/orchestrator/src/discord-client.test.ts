@@ -25,7 +25,7 @@ describe("Discord client", () => {
       }),
       headers: { "content-type": "application/json" },
       method: "POST",
-      redirect: "error",
+      redirect: "manual",
     });
   });
 
@@ -33,6 +33,7 @@ describe("Discord client", () => {
     [429, "rate_limited"],
     [500, "unavailable"],
     [400, "permanent_failure"],
+    [302, "permanent_failure"],
   ] as const)("classifies HTTP %s without reading provider details", async (status, outcome) => {
     const client = createDiscordClient({
       fetch: vi

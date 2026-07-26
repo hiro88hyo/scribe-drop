@@ -21,7 +21,7 @@ image digestから作成し、初回workerがReadyになるまで起動した。
 GPU配置とSecure Cloudを確認し、最小jobがclaim期限切れを安全に拒否して終了することも
 確認した。実ID、image参照、originは追跡対象へ保存していない。これによりPhase 4の
 endpoint invariant確認を完了した。実音声の完了、artifact、通知を含むend-to-end
-smokeと処理時間の計測はPhase 5のstaging検証で行う。
+smokeと処理時間の計測は、後述するPhase 5のstaging検証で完了した。
 
 Phase 5では[ADR 0013](./adr/0013-reconciliation-and-fresh-attempt-retry.md)に従い、
 5分Cron、RunPod status観測、terminal状態の先行保存、manifest/artifact検証、
@@ -29,8 +29,16 @@ Phase 5では[ADR 0013](./adr/0013-reconciliation-and-fresh-attempt-retry.md)に
 cancelと新しいattemptによるretryを実装した。forward-only migration、unit test、
 Workers/D1/R2 integration、型検査、build、secret scan、dependency auditまでlocalで
 検証済みである。stagingではRunPod公開APIへのWorker subrequestを
-[ADR 0014](./adr/0014-runpod-api-uses-public-fetch-routing.md)のpublic routingへ固定する。
-次にPhase 4のstale job回収と実end-to-end smokeを完了する。
+[ADR 0016](./adr/0016-use-manual-redirects-in-workers.md)に従い、Workersが受理する
+`manual` redirect modeで自動追従を拒否する。RunPodの実media検証では
+[ADR 0017](./adr/0017-validate-pinned-ffprobe-output.md)に従い、固定FFmpeg 6.1.1が返す
+空の`programs` fieldをstrict schemaへ明示し、synthetic mediaのcontainer checkを行う。
+修正版imageのstaging smokeでは、実browser upload、RunPod submission、claim、
+heartbeat、production media probe、GPU推論、manifest-last、Markdown・JSON・SRTの
+artifact検証、terminal状態保存、原子的finalize、Discord outbox送信まで成功した。
+RunPod terminalまで約85秒、通知まで約87秒であり、次の5分Cronで回収した。active workerを
+0、max workerを1へ復元し、追跡外plan/stateとの厳格照合も通した。これによりPhase 5の
+staging checkpointを完了した。
 
 本計画は[spec.md](./spec.md)とRunPodの追加security要件である[additional-spec.md](./additional-spec.md)を正とし、Phase 1からPhase 7までを、各Phaseが単独でレビュー・検証できる単位に分けて実装する。両者が矛盾する場合は追加要件と[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)を優先する。
 
@@ -377,6 +385,9 @@ temporary credentialのexact-object multipart/abort成功とaction/object拒否�
 - RunPod statusを観測できなかったjobはmanifestだけでCOMPLETEDにならない。
 - Discord 障害は job 完了を取り消さず、outbox から再試行される。
 - artifact URL は所有者だけが取得でき、API 応答やログへ不要に保持されない。
+- stagingの実browser smokeでRunPod terminal、complete manifest、3形式のartifact、
+  `COMPLETED` job、所有者限定artifact GET、`SENT` outboxとDiscord受信を確認する。
+  実ID、origin、image参照、credential、録音内容、文字起こし本文は追跡対象へ残さない。
 
 ### コミット境界
 

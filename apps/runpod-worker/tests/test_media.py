@@ -24,6 +24,7 @@ def probe_output(
     """Return selected ffprobe fields only."""
     return json.dumps(
         {
+            "programs": [],
             "streams": [
                 {"index": index, "codec_name": codec_name, "codec_type": "audio"}
                 for index in range(stream_count)
@@ -66,6 +67,17 @@ def test_ffprobe_uses_fixed_argument_array_and_validates_media(
         (probe_output(format_name="unknown"), 0, "INVALID_MEDIA"),
         (probe_output(codec_name="unknown"), 0, "INVALID_MEDIA"),
         (probe_output(stream_count=33), 0, "INVALID_MEDIA"),
+        (
+            json.dumps(
+                {
+                    "programs": [{}],
+                    "streams": [{"index": 0, "codec_name": "mp3", "codec_type": "audio"}],
+                    "format": {"format_name": "mp3", "duration": "60.5"},
+                }
+            ).encode(),
+            0,
+            "INVALID_MEDIA",
+        ),
         (b"", 1, "INVALID_MEDIA"),
     ],
 )

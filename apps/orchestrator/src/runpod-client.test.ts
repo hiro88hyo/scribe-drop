@@ -43,6 +43,7 @@ describe("RunPod client", () => {
       authorization: "Bearer runpod-api-key-placeholder",
       "content-type": "application/json",
     });
+    expect(init?.redirect).toBe("manual");
     const serializedBody = init?.body;
     if (typeof serializedBody !== "string") {
       throw new Error("Expected a serialized JSON request");
@@ -60,6 +61,23 @@ describe("RunPod client", () => {
     });
 
     await expect(client.submit(REQUEST)).resolves.toEqual({ outcome: "rejected" });
+  });
+
+  it("does not follow a submission redirect", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        new Response(null, { headers: { location: "https://example.invalid" }, status: 302 }),
+      );
+    const client = createRunpodClient({
+      apiKey: "runpod-api-key-placeholder",
+      endpointId: "endpoint-id",
+      fetch: fetchMock,
+    });
+
+    await expect(client.submit(REQUEST)).resolves.toEqual({ outcome: "rejected" });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[1]?.redirect).toBe("manual");
   });
 
   it.each([
@@ -138,7 +156,7 @@ describe("RunPod client", () => {
         authorization: "Bearer runpod-api-key-placeholder",
       },
       method: "GET",
-      redirect: "error",
+      redirect: "manual",
     });
   });
 
@@ -169,6 +187,14 @@ describe("RunPod client", () => {
       "invalid_response",
     ],
     ["rate limited", new Response(null, { status: 429 }), "unavailable"],
+    [
+      "redirect response",
+      new Response(null, {
+        headers: { location: "https://example.invalid" },
+        status: 302,
+      }),
+      "unavailable",
+    ],
   ])("classifies a %s status response", async (_name, response, outcome) => {
     const client = createRunpodClient({
       apiKey: "runpod-api-key-placeholder",
@@ -211,7 +237,7 @@ describe("RunPod client", () => {
         authorization: "Bearer runpod-api-key-placeholder",
       },
       method: "POST",
-      redirect: "error",
+      redirect: "manual",
     });
   });
 });

@@ -137,7 +137,7 @@ export function createRunpodClient(options: RunpodClientOptions): RunpodClient {
         response = await fetchImplementation(jobUrl(runpodJobId, "cancel"), {
           headers,
           method: "POST",
-          redirect: "error",
+          redirect: "manual",
           signal: AbortSignal.timeout(options.timeoutMilliseconds ?? RUNPOD_CONTROL_TIMEOUT_MS),
         });
       } catch {
@@ -160,7 +160,7 @@ export function createRunpodClient(options: RunpodClientOptions): RunpodClient {
         response = await fetchImplementation(jobUrl(runpodJobId, "status"), {
           headers,
           method: "GET",
-          redirect: "error",
+          redirect: "manual",
           signal: AbortSignal.timeout(options.timeoutMilliseconds ?? RUNPOD_CONTROL_TIMEOUT_MS),
         });
       } catch {
@@ -190,7 +190,7 @@ export function createRunpodClient(options: RunpodClientOptions): RunpodClient {
             "content-type": "application/json",
           },
           method: "POST",
-          redirect: "error",
+          redirect: "manual",
           signal: AbortSignal.timeout(timeoutMilliseconds),
         });
       } catch {

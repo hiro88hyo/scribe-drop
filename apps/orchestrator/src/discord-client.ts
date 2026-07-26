@@ -36,7 +36,7 @@ export function createDiscordClient(options: DiscordClientOptions): DiscordClien
           }),
           headers: { "content-type": "application/json" },
           method: "POST",
-          redirect: "error",
+          redirect: "manual",
           signal: AbortSignal.timeout(timeoutMilliseconds),
         });
       } catch {

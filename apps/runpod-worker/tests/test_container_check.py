@@ -13,6 +13,7 @@ from scribe_drop_worker.container_check import (
     ContainerCheckPorts,
     check_container_runtime,
 )
+from scribe_drop_worker.media import MediaInfo
 from scribe_drop_worker.model_bundle import MODEL_FILE_SPECS, ModelBundleMetadata
 
 if TYPE_CHECKING:
@@ -38,6 +39,15 @@ def _bundle_verifier(_path: Path) -> ModelBundleMetadata:
     )
 
 
+def _media_info() -> MediaInfo:
+    return MediaInfo(
+        audio_codec="pcm_s16le",
+        duration_seconds=1.0,
+        format_name="wav",
+        stream_count=1,
+    )
+
+
 def test_container_check_accepts_fixed_non_root_offline_runtime() -> None:
     """The image check imports dependencies without loading the GPU model."""
     imported: list[str] = []
@@ -54,6 +64,7 @@ def test_container_check_accepts_fixed_non_root_offline_runtime() -> None:
             module_importer=import_module,
             bundle_verifier=_bundle_verifier,
             probe_version=lambda: "ffprobe version 6.1.1-3ubuntu5",
+            probe_media=_media_info,
         ),
     )
     assert imported == list(EXPECTED_MODULES)
@@ -110,5 +121,27 @@ def test_container_check_rejects_drift(
                 module_importer=lambda _name: object(),
                 bundle_verifier=_bundle_verifier,
                 probe_version=lambda: probe,
+                probe_media=_media_info,
+            ),
+        )
+
+
+def test_container_check_rejects_media_probe_drift() -> None:
+    """The pinned ffprobe must parse a deterministic synthetic media fixture."""
+    with pytest.raises(RuntimeError, match="media probe"):
+        check_container_runtime(
+            _environment(),
+            effective_uid=10_001,
+            ports=ContainerCheckPorts(
+                version_lookup=EXPECTED_PACKAGES.__getitem__,
+                module_importer=lambda _name: object(),
+                bundle_verifier=_bundle_verifier,
+                probe_version=lambda: "ffprobe version 6.1.1-3ubuntu5",
+                probe_media=lambda: MediaInfo(
+                    audio_codec="mp3",
+                    duration_seconds=1.0,
+                    format_name="mp3",
+                    stream_count=1,
+                ),
             ),
         )

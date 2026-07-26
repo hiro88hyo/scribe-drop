@@ -37,8 +37,10 @@ faster-whisperのclaim後遅延load、artifact integrity、manifest-last、`/tmp
 worker refreshまでlocal実装・テスト済みである。RunPod Workerはamd64 CUDA/cuDNN
 base digest、Ubuntu snapshot、Python/FFmpeg package、uv build image、model commitと
 5 fileの全hashを固定したmulti-stage imageを実build済みである。UID 10001、
-networkなし、read-only root filesystemでmodel/依存/native import/ffprobeを検査する
-offline checkも成功した。CIにはSPDX JSON SBOMとHigh/Criticalで失敗するTrivy scanを
+networkなし、read-only root filesystemでmodel/依存/native import/ffprobe versionと
+synthetic mediaのproduction probeを検査するoffline checkを使用する。実JSON schemaは
+[ADR 0017](./adr/0017-validate-pinned-ffprobe-output.md)に従う。CIにはSPDX JSON SBOMと
+High/Criticalで失敗するTrivy scanを
 追加済みである。staging専用endpointとtemplateを固定image digestから作成し、初回
 workerがReadyになるまで起動した。RTX 4090のGPU配置、Secure Cloud、0〜1 worker、
 volumeなし、FlashBoot無効のendpoint invariantと、期限切れclaimを拒否する最小jobを
@@ -48,9 +50,11 @@ Phase 5のlocal実装では、5分Cron、RunPod status poll、terminal状態のD
 manifest/artifact検証、原子的finalize、notification outbox、Discord再送、所有者限定
 artifact URL、cancel、新しいattemptによるretryを追加している。stagingへは
 `0005_reconciliation_completion.sql`をapplicationより先に適用し、OrchestratorとWebを
-deployしてからend-to-end smokeを行う。RunPod、Discord、R2の公開endpointへ送るglobal
-`fetch()`は[ADR 0014](./adr/0014-runpod-api-uses-public-fetch-routing.md)に従い
-`global_fetch_strictly_public`を固定し、同一zoneの内部通信には流用しない。
+deployした。実browserのend-to-end smokeではRunPod terminal、complete manifest、
+Markdown・JSON・SRT、原子的finalize、Discord送信まで成功した。RunPod、Discord、R2の
+公開endpointへ送るglobal `fetch()`は
+[ADR 0016](./adr/0016-use-manual-redirects-in-workers.md)に従い、
+`manual` redirect modeで自動追従を拒否する。
 production environmentへのdeploymentは未実施である。
 
 `apps/orchestrator/wrangler.toml`と`apps/web/wrangler.toml`の全ゼロIDおよびoriginは
@@ -145,6 +149,10 @@ source、D1 row、一時Workerを削除した。
 
 Phase 4のendpoint構築と初回worker確認は
 [2026-07-26 Phase 4 staging deployment record](./deployments/2026-07-26-phase-4-staging.md)
+に記録する。
+
+Phase 5の実media、artifact、finalize、通知とRunPod revision切替は
+[2026-07-26 Phase 5 staging deployment record](./deployments/2026-07-26-phase-5-staging.md)
 に記録する。
 
 ## 追跡外staging設定

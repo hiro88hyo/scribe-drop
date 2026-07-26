@@ -19,7 +19,9 @@ ffprobe、固定modelの遅延load、artifact/manifest生成までlocal実装・
 CI定義まで実装済みである。staging endpointを固定image digestから作成し、初回workerの
 RTX 4090配置、Secure Cloud、Readyと期限切れclaim拒否を確認した。Phase 5では
 RunPod terminal観測、manifest/artifact検証、原子的finalize、所有者限定artifact URL、
-cancel、新しいattemptによるretry、notification outboxを実装している。
+cancel、新しいattemptによるretry、notification outboxを実装している。stagingの実media
+smokeでproduction probe、GPU推論、complete manifest、3形式のartifact、terminal保存、
+原子的finalizeとDiscord送信を確認した。
 詳細な認証判断は
 [ADR 0003](./adr/0003-access-jwt-and-csrf-boundary.md)、受付制限は
 [ADR 0004](./adr/0004-d1-job-admission-control.md)、CSPとresponse headerは
@@ -126,8 +128,7 @@ RunPodのjob input、`job.id`、status、output、例外、DNS応答、HTTP応�
 この節は[additional-spec.md](./additional-spec.md)を反映する。Cloudflare制御面と
 RunPod Worker application runtime、固定imageのoffline check、High/Critical scan、
 staging endpointのGPU配置とSecure Cloudを検証済みである。実音声を使う
-artifact/finalizeのend-to-end経路はPhase 5のstaging smokeが完了するまで制御済みとは
-みなさない。
+artifact/finalize/notificationのend-to-end経路もPhase 5のstaging smokeで確認済みである。
 
 | 脅威                                      | 必須制御                                                                                                                                   | 必須検証                                                                                              |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
@@ -136,10 +137,12 @@ artifact/finalizeのend-to-end経路はPhase 5のstaging smokeが完了するま
 | loserによるdownload・GPU課金              | claim成功前はmodelをmemoryへloadせず、source URLも取得せず、download・ffprobe・GPU推論を始めない                                           | loser経路でmodel loader、HTTP client、subprocessが一度も呼ばれない                                    |
 | object capabilityの権限過大               | winner確定後だけ、特定bucket・object・HTTP method・短いexpiryへ限定したURLを発行。初期2時間とし更新方式を最大入力benchmarkで決める         | 別object、method変更、期限切れ、URL更新時のwinner/heartbeat/active attempt                            |
 | SSRF、redirect、DNS rebinding             | HTTPS、userinfoなし、固定host/port allowlist、解決後IP検証、private・loopback・link-local・metadata拒否、redirect無効、接続先IP再照合      | IPv4/IPv6、整数/短縮表現、CNAME、複数A/AAAA、redirect、解決前後のIP変化                               |
+| ffprobe出力driftと検証迂回                | bounded JSON、既知fieldのstrict schema、空`programs`だけを受理し、実mediaのproduction probeをcontainer checkで実行                         | unknown field、非空program、codec/container/duration不正、synthetic WAVのoffline image check          |
 | log・RunPod outputからのdata漏えい        | event名とfieldをallowlist化し、token、URL query、path、filename、本文、raw例外を禁止。handler最外層で例外をstable codeへ正規化             | stdout、stderr、status、成功output、全error分岐をsecret markerで走査                                  |
 | statusによる秘密・raw errorの再露出       | `/status`の既知input、raw error、worker IDをschema検証後にclient境界で破棄し、claim tokenやprovider detailをservice、D1、logへ渡さない     | input echoを受理でき、parse結果とlogにtoken、raw error、worker IDが残らない                           |
-| public fetch routingの意図しない拡大      | `global_fetch_strictly_public`を固定origin/host allowlist/redirect拒否と併用し、利用者入力からoutbound hostを作らない                      | RunPod・Discord・R2以外のhostがbundle/configに追加されず、raw exceptionやcredentialがlogに残らない    |
+| redirectによるcredential転送              | Workersが受理する`manual` modeで自動追従を拒否し、3xxをfail closedにする。`Location`とprovider bodyを読まない                              | Workerdでrequest構築、3xx submission/status/notification、raw exceptionとcredentialのlog不在          |
 | worker再利用やdiskへのdata残存            | task固有`/tmp`、`finally` cleanup、Network Volume/永続diskなし、FlashBoot無効、処理後worker refresh                                        | success、timeout、cancel、例外、kill相当試験とendpoint設定の確認                                      |
+| revision切替後の旧worker再利用            | 実job前にworkerのtemplate・image・registry credentialを固定planと照合し、terminal確認後にOutdated/Unhealthy workerだけをterminate          | 旧imageの処理拒否、新credential workerの起動、active 0/max 1への復元と標準verifier                    |
 | image・model supply chain侵害             | base image、FFmpeg、RunPod SDK、faster-whisper、CTranslate2、model revisionを固定しbuild時に内包。runtime download/install禁止、SBOMとscan | networkを切った起動、digest/revision検証、dependency/container vulnerability scan、SBOM生成           |
 | status/output偽装による誤完了             | terminal status、winner、active attempt、generation、complete manifest、全artifactのkey/sizeを照合。manifest単独では完了させない           | loser、stale attempt、不足artifact、size不一致、未知output、concurrent finalize、status未観測         |
 | RunPod result保持期限超過                 | 5分以内で`/status`をpollしterminal観測を即時D1保存。30分以内に一度も観測できなければmanifestがあってもfail closed                          | Cron遅延、RunPod障害、結果消失、再poll、復旧後reconciliation                                          |
