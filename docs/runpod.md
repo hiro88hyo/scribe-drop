@@ -77,7 +77,29 @@ templateへRunPod API key、R2長期credential、Discord webhookを渡さない�
 
 ## Deployment and rollback
 
-registryへpushしたimageはtagだけでなくregistry digestを記録し、RunPod templateは
-上書きせず新revisionとして作成する。stagingのoffline check、scan、SBOM、GPU benchmark、
-claim競合、artifact/manifest、cleanupを確認してからendpointを切り替える。rollbackは
-直前に検証済みのimage digestとtemplate revisionへ戻し、volumeやFlashBootを有効化しない。
+`develop`の`Publish RunPod worker` workflowを手動実行する。workflowはoffline check、
+SBOM、scanを通した同一imageをGHCRへpushし、`runpod-worker-image.txt`へdigest付き参照を
+保存する。初回packageはprivateのままである。
+
+private imageを使う場合、RunPodにはread-only registry credentialが必要になる。
+`runpodctl registry create`はpasswordをcommand line argumentとして受け取るため使用せず、
+RunPod consoleのsecret入力で登録してから`runpodctl registry list`で非secret IDと名前
+だけを確認する。publicへ変更する場合はregistry credentialが不要になるが、GitHub上で
+privateへ戻せない操作なので明示的に選択する。
+
+digest付きimageから`--serverless` templateを新規作成する。Serverless templateは1 endpoint
+にだけ関連付けられ、persistent volumeをサポートしない。初期container diskは30 GiB、
+port公開なし、secretなしとし、次の非secret環境変数だけを渡す。
+
+- `APP_ENV`
+- `ORCHESTRATOR_ORIGIN`
+- `ALLOWED_SOURCE_HOSTS`
+- `ALLOWED_RESULT_HOSTS`
+- `MAX_SOURCE_BYTES`
+- `MAX_DURATION_SECONDS`
+- `HEARTBEAT_INTERVAL_SECONDS`
+- `MODEL_PATH`
+
+templateは上書きせず新revisionとして作成する。stagingのGPU benchmark、claim競合、
+artifact/manifest、cleanupを確認してからendpointを切り替える。rollbackは直前に検証済みの
+image digestとtemplate revisionへ戻し、volumeやFlashBootを有効化しない。

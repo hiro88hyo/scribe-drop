@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(scriptDirectory, "..");
 const workflowsDirectory = path.join(repositoryRoot, ".github", "workflows");
+const publicationWorkflowPath = path.join(workflowsDirectory, "publish-runpod-worker.yml");
 const dockerfilePath = path.join(repositoryRoot, "apps", "runpod-worker", "Dockerfile");
 const modelBundlePath = path.join(
   repositoryRoot,
@@ -58,6 +59,7 @@ if (actionReferenceCount === 0) {
 const workflowContents = workflowFiles
   .map((filename) => readFileSync(path.join(workflowsDirectory, filename), "utf8"))
   .join("\n");
+const publicationWorkflowContents = readFileSync(publicationWorkflowPath, "utf8");
 const dockerfileContents = readFileSync(dockerfilePath, "utf8");
 const modelBundleContents = readFileSync(modelBundlePath, "utf8");
 const versions = JSON.parse(readFileSync(versionsPath, "utf8"));
@@ -143,6 +145,17 @@ requireText(
   "GitHub Actions workflows",
   "Trivy version",
 );
+
+for (const [description, value] of Object.entries({
+  "manual publication trigger": "workflow_dispatch:",
+  "develop-only publication guard": "refs/heads/develop",
+  "package write permission": "packages: write",
+  "commit-addressed image tag": "git-${GITHUB_SHA}",
+  "password-stdin registry login": "--password-stdin",
+  "immutable image reference evidence": "runpod-worker-image.txt",
+})) {
+  requireText(publicationWorkflowContents, value, "publish-runpod-worker.yml", description);
+}
 
 if (failures.length > 0) {
   console.error("CI workflow verification failed:");

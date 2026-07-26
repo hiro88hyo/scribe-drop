@@ -70,8 +70,8 @@ local testはfake transportを使い、実R2、CORS、Temporary Credentialsは�
 runpodctl は `.tools/bin/runpodctl` に導入される。
 
 ```bash
-pnpm run runpodctl -- version
-pnpm run runpodctl -- serverless list
+pnpm run runpodctl version
+pnpm run runpodctl serverless list
 ```
 
 RunPod API key は環境変数または CI secret から渡す。リポジトリ内の設定ファイルや script へ書かない。

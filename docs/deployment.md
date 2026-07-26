@@ -61,8 +61,8 @@ RunPod操作にはchecksum検証済みのproject-local `runpodctl`を使用す�
 
 ```bash
 pnpm run runpodctl:install
-pnpm run runpodctl -- doctor
-pnpm run runpodctl -- user
+pnpm run runpodctl doctor
+pnpm run runpodctl user
 ```
 
 `doctor`の対話入力を使う場合、API keyはユーザー領域へ保存され、リポジトリには保存されない。一時セッションやCIでは`RUNPOD_API_KEY`をsecret managerから環境変数として注入する。`runpodctl config --apiKey ...`のようにsecretをコマンドライン引数へ直接記載しない。
@@ -87,8 +87,8 @@ Phase 3 staging checkpointで完了した。手順6以降はPhase 4のRunPod構�
 3. R2 CORSと`incoming/`限定Event Notificationを設定する。
 4. D1 migrationを適用し、適用済みversionを記録する。
 5. OrchestratorとWebのsecretをCloudflare secret storeへ登録する。
-6. [runpod.md](./runpod.md)の固定値でRunPod Worker imageをbuildし、SBOM、scan、
-   offline checkを通したregistry digestからtemplateとstaging endpointを作成する。
+6. `develop`の`Publish RunPod worker` workflowでRunPod Worker imageをbuildし、SBOM、
+   scan、offline checkを通したGHCR digestからtemplateとstaging endpointを作成する。
 7. staging endpoint IDとRunPod API keyをOrchestrator secretへ登録する。
 8. `runpodctl`でSecure Cloud、Flex、active workers 0、max workers 1、GPU 1、Network Volumeなし、FlashBoot無効、timeout、TTLを確認する。
 9. GPU benchmark、smoke test、重複配送、claim競合、cleanup、rollback手順を確認する。

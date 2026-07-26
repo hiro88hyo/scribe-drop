@@ -44,6 +44,12 @@ pnpm container:check:runpod
 満たせない場合はscanを開始せず失敗する。localでは十分な空き容量を確認してからscanし、
 空き容量不足をscan成功として扱わない。
 
+`Publish RunPod worker` workflowは手動実行かつ`develop`限定とする。CIと同じoffline
+check、SBOM、High/Critical scanを通した同一imageを、GitHubの短期`GITHUB_TOKEN`で
+GHCRへpushする。tagはcommit SHA、RunPod templateへ渡す値はartifactに保存したregistry
+digestとし、mutable tagだけでdeployしない。初回packageはprivateで作成される。publicへ
+変更するとprivateへ戻せないため、visibilityは暗黙に変更しない。
+
 ## Branch protection
 
 GitHub repository 作成後、`main` と `develop` への直接 push を禁止し、少なくとも
