@@ -12,6 +12,7 @@ const identifiers = {
   accessTeamDomain: "https://scribe-drop-staging.cloudflareaccess.com",
   accountId: "a".repeat(32),
   d1DatabaseId: "12345678-1234-4abc-8def-1234567890ab",
+  orchestratorOrigin: "https://orchestrator-staging.example.invalid",
   webOrigin: "https://scribe-drop-staging.example.invalid",
 };
 
@@ -23,8 +24,12 @@ main = "src/index.ts"
 CLOUDFLARE_ACCOUNT_ID = "${"0".repeat(32)}"
 
 [env.staging]
+routes = [
+  { pattern = "replace-with-staging-orchestrator.example.invalid", custom_domain = true },
+]
 [env.staging.vars]
 CLOUDFLARE_ACCOUNT_ID = "${"0".repeat(32)}"
+RUNPOD_INTERNAL_BASE_URL = "https://replace-with-staging-orchestrator.example.invalid"
 database_id = "00000000-0000-0000-0000-000000000101"
 `;
 
@@ -37,6 +42,14 @@ database_id = "00000000-0000-0000-0000-000000000101"
     new RegExp(`\\[env\\.staging\\.vars\\]\\nCLOUDFLARE_ACCOUNT_ID = "${"a".repeat(32)}"`),
   );
   assert.match(rendered, /database_id = "12345678-1234-4abc-8def-1234567890ab"/u);
+  assert.match(
+    rendered,
+    /pattern = "orchestrator-staging\.example\.invalid", custom_domain = true/u,
+  );
+  assert.match(
+    rendered,
+    /RUNPOD_INTERNAL_BASE_URL = "https:\/\/orchestrator-staging\.example\.invalid"/u,
+  );
 });
 
 test("renders the web staging identifiers and ignored-config build path", () => {
@@ -112,5 +125,13 @@ database_id = "00000000-0000-0000-0000-000000000101"
         identifiers,
       ),
     /orchestrator staging D1 database ID placeholder was not found/u,
+  );
+  assert.throws(
+    () =>
+      renderOrchestratorStagingConfig(
+        `[env.staging]\nCLOUDFLARE_ACCOUNT_ID = "${"0".repeat(32)}"\n`,
+        { ...identifiers, orchestratorOrigin: "http://localhost:8787" },
+      ),
+    /SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN/u,
   );
 });

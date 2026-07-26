@@ -14,7 +14,12 @@ export default defineConfig({
         bindings: {
           APP_ENV: "local",
           CLOUDFLARE_ACCOUNT_ID: "0123456789abcdef0123456789abcdef",
+          R2_ACCESS_KEY_ID: "r2-access-key-placeholder",
           R2_BUCKET_NAME: "recording-transcriber-test",
+          R2_SECRET_ACCESS_KEY: "0000000000000000",
+          RUNPOD_API_KEY: "runpod-api-key-placeholder",
+          RUNPOD_ENDPOINT_ID: "endpoint-placeholder",
+          RUNPOD_INTERNAL_BASE_URL: "https://orchestrator.example.invalid",
           TEST_MIGRATIONS: await readD1Migrations(migrationsDirectory),
         },
         compatibilityDate: "2026-07-25",

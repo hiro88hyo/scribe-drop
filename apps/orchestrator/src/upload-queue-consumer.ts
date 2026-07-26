@@ -6,7 +6,13 @@ import { createUlid, type RandomBytes } from "@scribe-drop/domain";
 import { createStructuredLogger, type StructuredLogger } from "@scribe-drop/observability";
 import { z } from "zod";
 
-import { parseOrchestratorConfig, type OrchestratorConfigEnvironment } from "./config.js";
+import {
+  parseOrchestratorConfig,
+  parseRunpodConfig,
+  type OrchestratorConfigEnvironment,
+  type RunpodConfig,
+  type RunpodConfigEnvironment,
+} from "./config.js";
 import { parseSourceObjectKey } from "./source-object-key.js";
 import {
   createD1UploadIngestionRepository,
@@ -34,7 +40,8 @@ const r2HeadResultSchema = z.object({
     .max(5 * 1024 * 1024 * 1024 * 1024),
 });
 
-export interface UploadQueueEnvironment extends OrchestratorConfigEnvironment {
+export interface UploadQueueEnvironment
+  extends OrchestratorConfigEnvironment, RunpodConfigEnvironment {
   readonly RECORDINGS: R2Bucket;
   readonly SCRIBE_DROP_DB: D1Database;
 }
@@ -59,6 +66,12 @@ export interface UploadQueueDependencies {
   readonly now?: () => Date;
   readonly random?: () => number;
   readonly randomBytes?: RandomBytes;
+  readonly submitPendingJob?: (
+    jobId: string,
+    database: D1Database,
+    config: RunpodConfig,
+    logger: StructuredLogger,
+  ) => Promise<unknown>;
 }
 
 function defaultRandomBytes(length: number): Uint8Array {
@@ -287,6 +300,17 @@ async function processMessage(
     sizeBytes: headResult.data.size,
     status: "SUBMISSION_PENDING",
   });
+  if (dependencies.submitPendingJob !== undefined) {
+    const runpodConfig = parseRunpodConfig(environment);
+    if (runpodConfig === undefined) {
+      logger.error("upload_event_configuration_invalid", {
+        errorCode: "INTERNAL_ERROR",
+        jobId: job.id,
+      });
+      return "retry";
+    }
+    await dependencies.submitPendingJob(job.id, environment.SCRIBE_DROP_DB, runpodConfig, logger);
+  }
   return "ack";
 }
 

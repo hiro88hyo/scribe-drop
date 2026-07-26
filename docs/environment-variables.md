@@ -32,6 +32,8 @@ R2 CORSは`pnpm cloudflare:config:staging:r2-cors`、Web設定は
 `pnpm cloudflare:config:staging:web`で生成する。次の非secret値も環境から渡す。
 
 - `SCRIBE_DROP_STAGING_WEB_ORIGIN`: Accessで保護するstaging Webの単一exact HTTPS origin
+- `SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN`:
+  RunPodからclaim/heartbeatを受けるOrchestratorの単一exact HTTPS origin
 - `SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`:
   `https://<team>.cloudflareaccess.com`のexact origin
 - `SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`: staging Access applicationの単一AUD tag
@@ -103,6 +105,17 @@ Phase 3のQueue consumerは`APP_ENV`、`CLOUDFLARE_ACCOUNT_ID`、
 `R2_BUCKET_NAME`を起動境界で検証し、raw eventのaccount/bucketと一致しないmessageを
 恒久拒否する。`R2_BUCKET_NAME`は同じenvironmentの`RECORDINGS` bindingが参照する
 bucket名と一致させる。
+
+Phase 4では`RUNPOD_INTERNAL_BASE_URL`をuserinfo、path、query、fragment、明示portのない
+単一HTTPS originに限定する。localhost、IP literal、metadata host、`.local`は拒否する。
+stagingでは`SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN`からgit ignoredのWrangler設定へ
+Custom Domainと同じ値を生成する。このoriginはCloudflare Accessの対話loginでは保護せず、
+claim/heartbeatの256 bit tokenを認証境界とする。
+
+`RUNPOD_ENDPOINT_ID`、`RUNPOD_API_KEY`、`R2_ACCESS_KEY_ID`、
+`R2_SECRET_ACCESS_KEY`はOrchestrator Workerのenvironment別encrypted secretとして登録
+する。R2 keyは対象bucketのobject read/writeだけに限定し、Orchestratorがexact object・
+method・2時間のpresigned URLを発行する用途だけに使う。
 
 ## RunPod Worker
 
