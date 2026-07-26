@@ -1,7 +1,5 @@
 """ScribeDrop RunPod worker package."""
 
-from typing import Final
-
-SCHEMA_VERSION: Final = 1
+from .constants import SCHEMA_VERSION
 
 __all__ = ["SCHEMA_VERSION"]
