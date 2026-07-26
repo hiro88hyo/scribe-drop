@@ -37,6 +37,11 @@ R2 CORSは`pnpm cloudflare:config:staging:r2-cors`、Web設定は
 - `SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`:
   `https://<team>.cloudflareaccess.com`のexact origin
 - `SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`: staging Access applicationの単一AUD tag
+- `SCRIBE_DROP_STAGING_RUNPOD_IMAGE`: GHCRのdigest付きstaging image参照
+- `SCRIBE_DROP_STAGING_RUNPOD_IMAGE_VISIBILITY`: `private`または`public`
+- `SCRIBE_DROP_STAGING_RUNPOD_REGISTRY_AUTH_ID`: private image用のRunPod registry auth ID
+- `SCRIBE_DROP_STAGING_RUNPOD_GPU_ID`: staging benchmark対象のRunPod GPU ID
+- `SCRIBE_DROP_STAGING_RUNPOD_DATACENTER_IDS`: 許可するRunPod data center IDのリスト
 
 実originはCloudflareとgit ignoredの生成設定だけに保持し、追跡対象ファイルやdeployment
 記録へ保存しない。

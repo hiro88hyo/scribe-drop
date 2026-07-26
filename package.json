@@ -41,6 +41,8 @@
     "security:audit": "pnpm audit --audit-level high && uv audit --preview-features audit-command --project apps/runpod-worker --frozen",
     "runpodctl": "./.tools/bin/runpodctl",
     "runpodctl:install": "bash scripts/install-runpodctl.sh",
+    "runpod:config:staging": "node scripts/render-runpod-staging-config.mjs",
+    "runpod:deploy:staging": "node scripts/deploy-runpod-staging.mjs",
     "secrets:check": "pnpm secrets:check:git && pnpm secrets:check:worktree",
     "secrets:check:git": "./.tools/bin/gitleaks git --redact --no-banner --verbose",
     "secrets:check:worktree": "./.tools/bin/gitleaks dir . --redact --no-banner --verbose",

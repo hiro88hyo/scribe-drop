@@ -87,6 +87,27 @@ RunPod consoleのsecret入力で登録してから`runpodctl registry list`で�
 だけを確認する。publicへ変更する場合はregistry credentialが不要になるが、GitHub上で
 privateへ戻せない操作なので明示的に選択する。
 
+image visibility、digest、registry auth ID、GPU、data centerと既存のCloudflare staging値を
+credential storeから環境変数へ読み込み、追跡外planを生成する。
+
+```bash
+pnpm run runpod:config:staging
+```
+
+`.runpod/deploy/staging-plan.json`はdirectoryを0700、fileを0600で生成する。実account ID、
+実origin、registry image、resource IDを含むため、リポジトリへ追加しない。
+
+planを確認した後、API keyをcredential storeまたは一時環境変数から供給してdeployする。
+
+```bash
+pnpm run runpod:deploy:staging
+```
+
+scriptは既存の同名resourceを先に検査し、固定planと一致する場合だけ再利用する。template
+作成直後にIDを`.runpod/deploy/staging-state.json`へ0600で保存するため、endpoint作成が
+失敗しても再実行でtemplateを重複作成しない。API応答、実ID、実originは標準出力へ出さない。
+削除や既存templateの更新は行わない。
+
 digest付きimageから`--serverless` templateを新規作成する。Serverless templateは1 endpoint
 にだけ関連付けられ、persistent volumeをサポートしない。初期container diskは30 GiB、
 port公開なし、secretなしとし、次の非secret環境変数だけを渡す。

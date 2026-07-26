@@ -1,5 +1,6 @@
 .git
 .github
+.runpod
 .tools
 .wrangler
 **/.dev.vars
