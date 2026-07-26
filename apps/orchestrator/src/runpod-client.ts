@@ -126,7 +126,7 @@ export function createRunpodClient(options: RunpodClientOptions): RunpodClient {
     )}`;
   const headers = {
     accept: "application/json",
-    "accept-encoding": "identity",
+    "accept-encoding": "gzip",
     authorization: `Bearer ${options.apiKey}`,
   };
 

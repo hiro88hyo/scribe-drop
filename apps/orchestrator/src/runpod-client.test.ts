@@ -39,7 +39,7 @@ describe("RunPod client", () => {
     expect(url).toBe("https://api.runpod.ai/v2/endpoint-id/run");
     expect(init?.headers).toMatchObject({
       accept: "application/json",
-      "accept-encoding": "identity",
+      "accept-encoding": "gzip",
       authorization: "Bearer runpod-api-key-placeholder",
       "content-type": "application/json",
     });
@@ -134,7 +134,7 @@ describe("RunPod client", () => {
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
       headers: {
         accept: "application/json",
-        "accept-encoding": "identity",
+        "accept-encoding": "gzip",
         authorization: "Bearer runpod-api-key-placeholder",
       },
       method: "GET",
@@ -207,7 +207,7 @@ describe("RunPod client", () => {
     expect(acceptedFetch.mock.calls[0]?.[1]).toMatchObject({
       headers: {
         accept: "application/json",
-        "accept-encoding": "identity",
+        "accept-encoding": "gzip",
         authorization: "Bearer runpod-api-key-placeholder",
       },
       method: "POST",
