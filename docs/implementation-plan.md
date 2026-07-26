@@ -474,7 +474,13 @@ Orchestrator Cronは既知RunPod jobをcancelし、最後のR2 capability失効�
 source keyと全attempt prefixを冪等に削除してから、CAS付きでD1親rowを物理削除する。
 R2/D1/RunPod failureの分類、backoff、partial artifact、foreign owner、重複request、
 unrelated object保護をunit testとWorkers integration testで検証済みである。
-retention設定、PWA、accessibility、Playwright、staging smokeは未完了である。
+[ADR 0019](./adr/0019-layer-application-and-r2-retention.md)に従うretentionのlocal
+checkpointも完了した。4つの保持値をstrictに検証し、source、attempt result、監査情報を
+独立したcutoffでCron回収する。R2 lifecycle JSONは同じ値から生成し、`incoming/`の
+incomplete multipart abort/source expirationと`results/` expirationを最終防衛にする。
+forward-only migration、unit test、D1/R2 Workers integration、renderer drift testまで
+成功している。PWA、accessibility、Playwright、staging smokeと実lifecycle適用は未完了で
+ある。
 
 ### 保存期間と削除
 

@@ -925,6 +925,31 @@ describe("D1 job repository", () => {
     ).resolves.toEqual({ status: "invalid_state" });
   });
 
+  it("does not retry after source retention has removed the recording", async () => {
+    const seeded = await seedFailedJob();
+    await env.SCRIBE_DROP_DB.prepare("UPDATE jobs SET source_deleted_at = ?2 WHERE id = ?1")
+      .bind(seeded.jobId, NOW.toISOString())
+      .run();
+
+    const attemptId = nextId();
+    await expect(
+      retryFailedJob(env.SCRIBE_DROP_DB, {
+        attemptId,
+        eventId: nextId(),
+        jobId: seeded.jobId,
+        ownerSub: OWNER_A.sub,
+        resultPrefix: `results/0123456789abcdef0123456789abcdef/${seeded.jobId}/${attemptId}/`,
+        timestamp: NOW.toISOString(),
+      }),
+    ).resolves.toEqual({ status: "invalid_state" });
+    const attempts = await env.SCRIBE_DROP_DB.prepare(
+      "SELECT COUNT(*) AS count FROM job_attempts WHERE job_id = ?1",
+    )
+      .bind(seeded.jobId)
+      .first<{ count: number }>();
+    expect(attempts?.count).toBe(1);
+  });
+
   it("cancels a pending attempt immediately and requests running cancellation once", async () => {
     const pending = await seedActiveJob("SUBMISSION_PENDING");
     const pendingResult = await requestJobCancellation(env.SCRIBE_DROP_DB, {

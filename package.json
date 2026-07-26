@@ -21,6 +21,7 @@
     "cloudflare:config:staging": "node scripts/render-cloudflare-staging-config.mjs all",
     "cloudflare:config:staging:orchestrator": "node scripts/render-cloudflare-staging-config.mjs orchestrator",
     "cloudflare:config:staging:r2-cors": "node scripts/render-cloudflare-staging-config.mjs r2-cors",
+    "cloudflare:config:staging:r2-lifecycle": "node scripts/render-cloudflare-staging-config.mjs r2-lifecycle",
     "cloudflare:config:staging:web": "node scripts/render-cloudflare-staging-config.mjs web",
     "cloudflare:secrets:verify:staging": "node scripts/verify-cloudflare-pages-secrets.mjs",
     "container:build:runpod": "docker buildx build --load --tag scribe-drop-runpod-worker:local --file apps/runpod-worker/Dockerfile .",

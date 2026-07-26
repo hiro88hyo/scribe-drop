@@ -375,6 +375,7 @@ const INSERT_RETRY_ATTEMPT_SQL = `
     AND jobs.owner_sub = ?3
     AND jobs.status = 'FAILED'
     AND jobs.deleted_at IS NULL
+    AND jobs.source_deleted_at IS NULL
     AND active_attempt.job_id = jobs.id
     AND active_attempt.status = 'FAILED'
     AND NOT EXISTS (
@@ -408,6 +409,7 @@ const ACTIVATE_RETRY_ATTEMPT_SQL = `
     AND owner_sub = ?2
     AND status = 'FAILED'
     AND deleted_at IS NULL
+    AND source_deleted_at IS NULL
     AND EXISTS (
       SELECT 1
       FROM job_attempts

@@ -150,6 +150,7 @@ artifact/finalize/notificationのend-to-end経路もPhase 5のstaging smokeで�
 | RunPod result保持期限超過                 | 5分以内で`/status`をpollしterminal観測を即時D1保存。30分以内に一度も観測できなければmanifestがあってもfail closed                                                              | Cron遅延、RunPod障害、結果消失、再poll、復旧後reconciliation                                  |
 | provider追加による外部送信                | 初期releaseは`RunPodWhisperProvider`だけ。Gemini等の外部生成AI実装、credential、UI切替を置かない                                                                               | bundle、env schema、UI、network fakeに別providerや外部生成AI endpointが存在しない             |
 | 削除後の復元                              | owner/CSRF/CASで即時非表示、heartbeat失効、RunPod cancel、capability失効後にD1由来のexact sourceと全attempt prefixを冪等削除し、最後にD1をcascade削除。長期tombstoneは残さない | foreign/重複delete、partial artifact、R2失敗再試行、無関係object保護、IndexedDB削除、同時Cron |
+| 保持期限を超えたdata残存                  | strictな環境別cutoffでapplication cleanupし、同じ値のprefix限定R2 lifecycleを最終防衛にする。監査期限は安全なuser deletion pipelineへ収束                                      | source/result独立期限、Cron停止、lifecycle先行、不在object、設定drift、source削除後retry拒否  |
 
 ## Security invariant
 
@@ -188,4 +189,4 @@ stagingではAccess policyとapplication audienceを実値で構成した後に�
 
 - Phase 4: 本文のRunPod制御、claim、Worker sandbox、ffprobe、GPU abuse、SBOM
 - Phase 5: status polling、manifest finalize、Discord、artifact download
-- Phase 7: retention、R2 lifecycle、PWA cache、accessibilityとE2E
+- Phase 7: R2 lifecycleのstaging適用、PWA cache、accessibilityとE2E

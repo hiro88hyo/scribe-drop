@@ -13,13 +13,17 @@ export default defineConfig({
       miniflare: {
         bindings: {
           APP_ENV: "local",
+          AUDIT_RETENTION_DAYS: "180",
           CLOUDFLARE_ACCOUNT_ID: "0123456789abcdef0123456789abcdef",
+          MULTIPART_RETENTION_HOURS: "24",
           R2_ACCESS_KEY_ID: "r2-access-key-placeholder",
           R2_BUCKET_NAME: "recording-transcriber-test",
           R2_SECRET_ACCESS_KEY: "0000000000000000",
+          RESULT_RETENTION_DAYS: "90",
           RUNPOD_API_KEY: "runpod-api-key-placeholder",
           RUNPOD_ENDPOINT_ID: "endpoint-placeholder",
           RUNPOD_INTERNAL_BASE_URL: "https://orchestrator.example.invalid",
+          SOURCE_RETENTION_DAYS: "7",
           TEST_MIGRATIONS: await readD1Migrations(migrationsDirectory),
         },
         compatibilityDate: "2026-07-25",

@@ -123,6 +123,11 @@ application logはallowlistされた構造化eventだけを出す。最低限、
 - `job.deletion_deferred`
 - `job.deletion_retry`
 - `job.deletion_completed`
+- `job.source_retention_completed`
+- `job.result_retention_completed`
+- `job.audit_retention_scheduled`
+- `retention.configuration_invalid`
+- `retention.retry`
 - `runpod_status_unavailable`
 - `runpod_status_invalid`
 - `runpod_terminal_observed`
@@ -152,6 +157,8 @@ response bodyをlogへ追加しない。
 `job.deletion_retry`の継続または増加もalert対象とする。`errorCode`は
 `RUNPOD_CANCEL_FAILED`、`R2_DELETE_FAILED`、`D1_DELETE_FAILED`のいずれかだけであり、
 object key、prefix、利用者metadata、raw exceptionを追加しない。
+`retention.configuration_invalid`はdeploy停止条件、`retention.retry`の継続はalert対象と
+する。retention logにもobject key、prefix、title、filename、本文を追加しない。
 
 ## Reconciliationと手動回復
 
@@ -172,6 +179,9 @@ terminal status、artifact、cancel request、notification outboxを同じservic
   Cronは既知RunPod jobをcancelし、最後のR2 capabilityの2時間と5分graceが過ぎるまで
   sourceやresultを消さない。期限後はD1由来のexact source keyと全attempt prefixを
   繰り返しlist/deleteし、R2不存在を確認してからD1親rowを物理削除する。
+- retentionはterminal jobだけを対象に、source、attempt result、監査情報を7日、90日、
+  180日の独立したcutoffで回収する。値はenvironment変数で変更できるが、
+  `source <= result <= audit`を崩さない。監査期限はuser deletionと同じ物理削除へ渡す。
 - terminal statusをD1で観測していないjobは、manifestが存在しても`COMPLETED`にしない。
 - 手動修復が必要でもjob/attempt/outboxを直接SQLで更新しない。同じrepositoryとserviceを
   使う専用repair commandを先に実装し、dry-run、CAS、監査eventを必須とする。
@@ -196,4 +206,6 @@ terminal status、artifact、cancel request、notification outboxを同じservic
    unrelated objectが残ることを固定dummy dataだけで確認する。
 
 R2 lifecycleはapplication cleanupが長期間失敗した場合の最終防衛であり、利用者deleteの
-完了判定には使わない。lifecycle ruleの環境別設定とsmoke手順はPhase 7の残作業である。
+完了判定には使わない。incomplete multipartはWorkers bindingから列挙できないため、
+`incoming/`のlifecycle abortが唯一の自動回収経路である。設定照合ではrule ID、enabled、
+prefix、Age秒数を確認し、bucket全体のruleを無条件に上書きしない。

@@ -1,38 +1,18 @@
 import type { StructuredLogger } from "@scribe-drop/observability";
-import { z } from "zod";
 
 import {
   createD1DeletionRepository,
   type DeletionCandidate,
   type DeletionRepository,
 } from "./deletion-repository.js";
+import { R2CleanupError, deleteR2ObjectAndVerify, deleteR2Prefix } from "./r2-object-cleanup.js";
 import { createRunpodClient, type RunpodControlClient } from "./runpod-client.js";
 
 const DELETION_BATCH_SIZE = 25;
 const DATABASE_PAGE_SIZE = 100;
-const R2_DELETE_BATCH_SIZE = 1_000;
 const MAX_DATABASE_PAGES = 1_000;
-const MAX_R2_DELETE_BATCHES = 10_000;
 const RETRY_BASE_MILLISECONDS = 30_000;
 const RETRY_MAX_MILLISECONDS = 60 * 60 * 1_000;
-
-const r2ListResultSchema = z
-  .object({
-    objects: z.array(
-      z.looseObject({
-        key: z.string().min(1).max(1_024),
-      }),
-    ),
-    truncated: z.boolean(),
-  })
-  .loose();
-
-class R2DeletionError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "R2DeletionError";
-  }
-}
 
 export interface DeletionEnvironment {
   readonly RECORDINGS: R2Bucket;
@@ -163,67 +143,15 @@ async function cancelKnownRunpodJobs(
   return allConfirmed;
 }
 
-async function deleteR2Object(bucket: R2Bucket, key: string): Promise<void> {
-  try {
-    await bucket.delete(key);
-  } catch {
-    throw new R2DeletionError("R2 object deletion failed");
-  }
-}
-
-async function deleteR2Prefix(bucket: R2Bucket, prefix: string): Promise<void> {
-  for (let batchIndex = 0; batchIndex < MAX_R2_DELETE_BATCHES; batchIndex += 1) {
-    let untrustedPage: unknown;
-    try {
-      untrustedPage = await bucket.list({
-        limit: R2_DELETE_BATCH_SIZE,
-        prefix,
-      });
-    } catch {
-      throw new R2DeletionError("R2 object listing failed");
-    }
-    const page = r2ListResultSchema.parse(untrustedPage);
-    const keys = page.objects.map((object) => object.key);
-    if (keys.some((key) => !key.startsWith(prefix))) {
-      throw new Error("R2 returned an object outside the deletion prefix");
-    }
-    if (keys.length === 0) {
-      if (page.truncated) {
-        throw new Error("R2 returned an empty truncated deletion page");
-      }
-      return;
-    }
-    try {
-      await bucket.delete(keys);
-    } catch {
-      throw new R2DeletionError("R2 prefix deletion failed");
-    }
-  }
-  throw new Error("R2 prefix deletion exceeded the safety limit");
-}
-
-async function assertR2ObjectAbsent(bucket: R2Bucket, key: string): Promise<void> {
-  let object: unknown;
-  try {
-    object = await bucket.head(key);
-  } catch {
-    throw new R2DeletionError("R2 deletion verification failed");
-  }
-  if (object !== null) {
-    throw new R2DeletionError("R2 object remained after deletion");
-  }
-}
-
 async function deleteCandidateObjects(
   bucket: R2Bucket,
   candidate: DeletionCandidate,
   prefixes: readonly string[],
 ): Promise<void> {
-  await deleteR2Object(bucket, candidate.sourceKey);
+  await deleteR2ObjectAndVerify(bucket, candidate.sourceKey);
   for (const prefix of prefixes) {
     await deleteR2Prefix(bucket, prefix);
   }
-  await assertR2ObjectAbsent(bucket, candidate.sourceKey);
 }
 
 export async function processPendingDeletions(
@@ -310,7 +238,7 @@ export async function processPendingDeletions(
     try {
       await deleteCandidateObjects(environment.RECORDINGS, candidate, prefixes);
     } catch (error) {
-      if (!(error instanceof R2DeletionError)) {
+      if (!(error instanceof R2CleanupError)) {
         throw error;
       }
       const recorded = await recordRetry(

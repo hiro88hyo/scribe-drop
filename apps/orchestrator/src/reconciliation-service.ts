@@ -8,12 +8,14 @@ import {
   type RunpodConfig,
   type RunpodConfigEnvironment,
   type NotificationConfigEnvironment,
+  type RetentionConfigEnvironment,
 } from "./config.js";
 import {
   dispatchNextNotification,
   type NotificationDispatchResult,
 } from "./notification-service.js";
 import { processPendingDeletions, type DeletionSweepResult } from "./deletion-service.js";
+import { processRetention, type RetentionSweepResult } from "./retention-service.js";
 import {
   createD1MaintenanceRepository,
   type MaintenanceRepository,
@@ -30,7 +32,7 @@ import {
 const RECONCILIATION_BATCH_SIZE = 25;
 
 export interface ReconciliationEnvironment
-  extends RunpodConfigEnvironment, NotificationConfigEnvironment {
+  extends RunpodConfigEnvironment, NotificationConfigEnvironment, RetentionConfigEnvironment {
   readonly RECORDINGS: R2Bucket;
   readonly SCRIBE_DROP_DB: D1Database;
 }
@@ -50,6 +52,10 @@ export interface ReconciliationDependencies {
     environment: ReconciliationEnvironment,
     logger: StructuredLogger,
   ) => Promise<DeletionSweepResult>;
+  readonly processRetention?: (
+    environment: ReconciliationEnvironment,
+    logger: StructuredLogger,
+  ) => Promise<RetentionSweepResult>;
   readonly reconcileCompletions?: (
     environment: ReconciliationEnvironment,
     logger: StructuredLogger,
@@ -70,6 +76,7 @@ export interface ReconciliationResult {
   readonly expiredSubmissionCount: number;
   readonly expiredUploadCount: number;
   readonly notification: NotificationDispatchResult;
+  readonly retention: RetentionSweepResult;
 }
 
 function defaultRandomBytes(length: number): Uint8Array {
@@ -109,6 +116,16 @@ export async function reconcileJobs(
       ((deletionEnvironment: ReconciliationEnvironment, deletionLogger: StructuredLogger) =>
         processPendingDeletions(deletionEnvironment, deletionLogger, { now }));
     const deletion = await processDeletions(environment, logger);
+    const runRetention =
+      dependencies.processRetention ??
+      ((retentionEnvironment: ReconciliationEnvironment, retentionLogger: StructuredLogger) =>
+        processRetention(retentionEnvironment, retentionLogger, {
+          now,
+          ...(dependencies.randomBytes === undefined
+            ? {}
+            : { randomBytes: dependencies.randomBytes }),
+        }));
+    const retention = await runRetention(environment, logger);
     const expired = await repository.findExpiredUnknownSubmissions(
       timestamp,
       RECONCILIATION_BATCH_SIZE,
@@ -244,6 +261,7 @@ export async function reconcileJobs(
       expiredSubmissionCount,
       expiredUploadCount,
       notification,
+      retention,
     };
   } catch (error) {
     logger.error("reconciliation.dependency_failure", {

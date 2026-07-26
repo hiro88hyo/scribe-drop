@@ -72,6 +72,12 @@ capabilityと5分graceが失効した後に5分Cronが実行する。migration�
 D1/R2 integration testは成功している。stagingへのmigration、deploy、実dataを使わない
 delete/Cron smokeとR2 lifecycle設定は未実施であり、完了前にproductionへ進めない。
 
+retentionのlocal checkpointでは`0008_retention_cleanup.sql`を追加し、sourceとattempt
+resultの削除markerおよび候補indexを追加する。application cleanupとR2 lifecycleの責任は
+[ADR 0019](./adr/0019-layer-application-and-r2-retention.md)を正とする。`0008`を
+applicationより先に適用し、Orchestratorの4 retention変数と同じ値から生成したlifecycleを
+review後に適用する。staging適用とsmokeは未実施である。
+
 `apps/orchestrator/wrangler.toml`と`apps/web/wrangler.toml`の全ゼロIDおよびoriginは
 安全なplaceholderであり、remote操作には使用できない。実IDと実originは追跡対象へ
 書かず、対象accountを確認してから`pnpm cloudflare:config:staging`でgit ignoredの
@@ -179,16 +185,38 @@ Phase 5の実media、artifact、finalize、通知とRunPod revision切替は
 - `SCRIBE_DROP_STAGING_D1_DATABASE_ID`
 - `SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN`
 - `SCRIBE_DROP_STAGING_WEB_ORIGIN`
+- `MULTIPART_RETENTION_HOURS`（省略時24）
+- `SOURCE_RETENTION_DAYS`（省略時7）
+- `RESULT_RETENTION_DAYS`（省略時90）
+- `AUDIT_RETENTION_DAYS`（省略時180）
 
 ```bash
 pnpm cloudflare:config:staging:orchestrator
 git check-ignore .wrangler/deploy/orchestrator-staging.toml
 pnpm cloudflare:config:staging:r2-cors
 git check-ignore .wrangler/deploy/r2-cors-staging.json
+pnpm cloudflare:config:staging:r2-lifecycle
+git check-ignore .wrangler/deploy/r2-lifecycle-staging.json
 ```
 
-R2 CORSはcustom domainがactiveになってから追跡外設定を生成して適用する。Web設定には
-同じexact originと、Access application作成後の次の非secret値が必要である。
+R2 CORSはcustom domainがactiveになってから追跡外設定を生成して適用する。R2 lifecycle
+は既存ruleをread-onlyで確認し、生成JSONが管理対象ruleをすべて含むことをreviewしてから
+`set`する。`set`はbucketのlifecycle構成全体を置き換えるため、未管理ruleを暗黙に消さない。
+
+```bash
+pnpm exec wrangler r2 bucket lifecycle list recording-transcriber-staging \
+  --config .wrangler/deploy/orchestrator-staging.toml \
+  --env staging
+pnpm exec wrangler r2 bucket lifecycle set recording-transcriber-staging \
+  --file .wrangler/deploy/r2-lifecycle-staging.json \
+  --config .wrangler/deploy/orchestrator-staging.toml \
+  --env staging
+pnpm exec wrangler r2 bucket lifecycle list recording-transcriber-staging \
+  --config .wrangler/deploy/orchestrator-staging.toml \
+  --env staging
+```
+
+Web設定には同じexact originと、Access application作成後の次の非secret値が必要である。
 
 - `SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`
 - `SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`

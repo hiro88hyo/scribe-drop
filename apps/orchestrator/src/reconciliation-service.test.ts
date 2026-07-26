@@ -6,6 +6,7 @@ import type { MaintenanceRepository } from "./maintenance-repository.js";
 import type { RunpodControlRepository } from "./runpod-control-repository.js";
 import type { DeletionSweepResult } from "./deletion-service.js";
 import { reconcileJobs, type ReconciliationEnvironment } from "./reconciliation-service.js";
+import type { RetentionSweepResult } from "./retention-service.js";
 
 const NOW = new Date("2026-07-25T00:15:00.000Z");
 const JOB_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -18,13 +19,17 @@ function environment(
 ): ReconciliationEnvironment {
   return {
     APP_ENV: "local",
+    AUDIT_RETENTION_DAYS: "180",
     CLOUDFLARE_ACCOUNT_ID: "0".repeat(32),
+    MULTIPART_RETENTION_HOURS: "24",
     R2_ACCESS_KEY_ID: "r2-access-key-placeholder",
     R2_BUCKET_NAME: "scribe-drop-local",
     R2_SECRET_ACCESS_KEY: "0000000000000000",
+    RESULT_RETENTION_DAYS: "90",
     RUNPOD_API_KEY: "runpod-api-key-placeholder",
     RUNPOD_ENDPOINT_ID: "endpoint-placeholder",
     RUNPOD_INTERNAL_BASE_URL: "https://orchestrator.example.invalid",
+    SOURCE_RETENTION_DAYS: "7",
     RECORDINGS: {} as R2Bucket,
     SCRIBE_DROP_DB: {} as D1Database,
     ...overrides,
@@ -76,6 +81,15 @@ function emptyDeletionSweep(): Promise<DeletionSweepResult> {
   });
 }
 
+function emptyRetentionSweep(): Promise<RetentionSweepResult> {
+  return Promise.resolve({
+    auditScheduledCount: 0,
+    resultDeletedCount: 0,
+    retryCount: 0,
+    sourceDeletedCount: 0,
+  });
+}
+
 describe("reconciliation service", () => {
   it("expires stale unknown submissions before dispatching one pending job", async () => {
     const order: string[] = [];
@@ -122,6 +136,7 @@ describe("reconciliation service", () => {
         logger: testLogger(records),
         now: () => NOW,
         processDeletions: emptyDeletionSweep,
+        processRetention: emptyRetentionSweep,
         dispatchNotification: () => Promise.resolve("none"),
         reconcileCompletions: () =>
           Promise.resolve({
@@ -149,6 +164,12 @@ describe("reconciliation service", () => {
       expiredSubmissionCount: 1,
       expiredUploadCount: 0,
       notification: "none",
+      retention: {
+        auditScheduledCount: 0,
+        resultDeletedCount: 0,
+        retryCount: 0,
+        sourceDeletedCount: 0,
+      },
     });
 
     expect(order).toEqual(["expire", "dispatch"]);
@@ -172,6 +193,7 @@ describe("reconciliation service", () => {
         logger: testLogger(records),
         now: () => NOW,
         processDeletions: emptyDeletionSweep,
+        processRetention: emptyRetentionSweep,
       }),
     ).rejects.toThrow("Reconciliation configuration is invalid");
 
