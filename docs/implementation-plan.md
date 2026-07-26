@@ -483,8 +483,9 @@ forward-only migration、unit test、D1/R2 Workers integration、renderer drift 
 navigation response、Access redirectを保存しない。installable manifest、固定offline
 案内、online状態、keyboard/focus、mobile表示を実装した。mock API/R2を使うPlaywrightで
 通信失敗からのretry、multipart upload、poll、download、delete、PC drag-and-drop、
-Android相当file chooser、Cache Storage内容を検証済みである。staging smokeと実lifecycle
-適用は未完了である。
+Android相当file chooser、Cache Storage内容を検証済みである。staging D1 migration、
+Orchestrator/Web deploy、実R2 lifecycle適用、未認証Access smokeまで完了した。
+認証済みPWA、retention、delete、Cron recoveryのstaging smokeは未完了である。
 
 ### 保存期間と削除
 

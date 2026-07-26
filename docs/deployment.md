@@ -69,14 +69,15 @@ Phase 7のlocal checkpointでは`0007_user_deletion.sql`を追加し、user dele
 applicationをdeployする場合はこのmigrationをWebとOrchestratorより先に適用する。
 論理削除直後は通常APIから非表示になるが、R2の物理削除は最後に発行された2時間の
 capabilityと5分graceが失効した後に5分Cronが実行する。migrationとcleanupのlocal
-D1/R2 integration testは成功している。stagingへのmigration、deploy、実dataを使わない
-delete/Cron smokeとR2 lifecycle設定は未実施であり、完了前にproductionへ進めない。
+D1/R2 integration testは成功している。stagingへのmigration、Orchestrator/Web deploy、
+R2 lifecycle適用は完了した。実dataを使わないdelete/Cron smokeは未実施であり、完了前に
+productionへ進めない。
 
 retentionのlocal checkpointでは`0008_retention_cleanup.sql`を追加し、sourceとattempt
 resultの削除markerおよび候補indexを追加する。application cleanupとR2 lifecycleの責任は
 [ADR 0019](./adr/0019-layer-application-and-r2-retention.md)を正とする。`0008`を
 applicationより先に適用し、Orchestratorの4 retention変数と同じ値から生成したlifecycleを
-review後に適用する。staging適用とsmokeは未実施である。
+review後に適用する。staging適用は完了し、retention smokeは未実施である。
 
 `apps/orchestrator/wrangler.toml`と`apps/web/wrangler.toml`の全ゼロIDおよびoriginは
 安全なplaceholderであり、remote操作には使用できない。実IDと実originは追跡対象へ
@@ -174,6 +175,10 @@ Phase 4のendpoint構築と初回worker確認は
 
 Phase 5の実media、artifact、finalize、通知とRunPod revision切替は
 [2026-07-26 Phase 5 staging deployment record](./deployments/2026-07-26-phase-5-staging.md)
+に記録する。
+
+Phase 7のmigration、retention、PWA rolloutは
+[2026-07-26 Phase 7 staging deployment record](./deployments/2026-07-26-phase-7-staging.md)
 に記録する。
 
 ## 追跡外staging設定
