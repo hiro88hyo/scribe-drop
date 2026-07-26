@@ -30,7 +30,9 @@ cancelと新しいattemptによるretryを実装した。forward-only migration�
 Workers/D1/R2 integration、型検査、build、secret scan、dependency auditまでlocalで
 検証済みである。stagingではRunPod公開APIへのWorker subrequestを
 [ADR 0016](./adr/0016-use-manual-redirects-in-workers.md)に従い、Workersが受理する
-`manual` redirect modeで自動追従を拒否する。
+`manual` redirect modeで自動追従を拒否する。RunPodの実media検証では
+[ADR 0017](./adr/0017-validate-pinned-ffprobe-output.md)に従い、固定FFmpeg 6.1.1が返す
+空の`programs` fieldをstrict schemaへ明示し、synthetic mediaのcontainer checkを行う。
 次にPhase 4のstale job回収と実end-to-end smokeを完了する。
 
 本計画は[spec.md](./spec.md)とRunPodの追加security要件である[additional-spec.md](./additional-spec.md)を正とし、Phase 1からPhase 7までを、各Phaseが単独でレビュー・検証できる単位に分けて実装する。両者が矛盾する場合は追加要件と[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)を優先する。

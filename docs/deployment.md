@@ -37,8 +37,10 @@ faster-whisperのclaim後遅延load、artifact integrity、manifest-last、`/tmp
 worker refreshまでlocal実装・テスト済みである。RunPod Workerはamd64 CUDA/cuDNN
 base digest、Ubuntu snapshot、Python/FFmpeg package、uv build image、model commitと
 5 fileの全hashを固定したmulti-stage imageを実build済みである。UID 10001、
-networkなし、read-only root filesystemでmodel/依存/native import/ffprobeを検査する
-offline checkも成功した。CIにはSPDX JSON SBOMとHigh/Criticalで失敗するTrivy scanを
+networkなし、read-only root filesystemでmodel/依存/native import/ffprobe versionと
+synthetic mediaのproduction probeを検査するoffline checkを使用する。実JSON schemaは
+[ADR 0017](./adr/0017-validate-pinned-ffprobe-output.md)に従う。CIにはSPDX JSON SBOMと
+High/Criticalで失敗するTrivy scanを
 追加済みである。staging専用endpointとtemplateを固定image digestから作成し、初回
 workerがReadyになるまで起動した。RTX 4090のGPU配置、Secure Cloud、0〜1 worker、
 volumeなし、FlashBoot無効のendpoint invariantと、期限切れclaimを拒否する最小jobを

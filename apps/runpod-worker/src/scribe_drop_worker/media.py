@@ -72,6 +72,7 @@ class ProbeOutput(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
+    programs: tuple[()] = ()
     streams: tuple[ProbeStream, ...]
     format: ProbeFormat
 

@@ -7,12 +7,15 @@ import importlib.metadata
 import os
 import subprocess
 import sys
+import tempfile
+import wave
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
 from .constants import DEFAULT_MODEL_PATH
+from .media import FfprobeMediaProbe, MediaInfo
 from .model_bundle import ModelBundleMetadata, verify_model_bundle
 
 EXPECTED_PACKAGES: Final[dict[str, str]] = {
@@ -36,11 +39,14 @@ OFFLINE_FLAGS: Final = (
     "TRANSFORMERS_OFFLINE",
 )
 FFPROBE_VERSION_MARKER: Final = "ffprobe version 6.1.1"
+SYNTHETIC_DURATION_MIN_SECONDS: Final = 0.99
+SYNTHETIC_DURATION_MAX_SECONDS: Final = 1.01
 
 VersionLookup = Callable[[str], str]
 ModuleImporter = Callable[[str], object]
 BundleVerifier = Callable[[Path], ModelBundleMetadata]
 ProbeVersion = Callable[[], str]
+ProbeMedia = Callable[[], MediaInfo]
 
 
 def _read_ffprobe_version() -> str:
@@ -57,6 +63,20 @@ def _read_ffprobe_version() -> str:
     return process.stdout.splitlines()[0] if process.stdout else ""
 
 
+def _probe_synthetic_media() -> MediaInfo:
+    with tempfile.TemporaryDirectory(
+        prefix="scribe-drop-container-check-",
+        dir="/tmp",
+    ) as task_directory:
+        source = Path(task_directory) / "silence.wav"
+        with wave.open(str(source), "wb") as output:
+            output.setnchannels(1)
+            output.setsampwidth(2)
+            output.setframerate(16_000)
+            output.writeframes(bytes(32_000))
+        return FfprobeMediaProbe().probe(source, max_duration_seconds=2)
+
+
 @dataclass(frozen=True)
 class ContainerCheckPorts:
     """Replaceable read-only boundaries used by the image check."""
@@ -65,6 +85,7 @@ class ContainerCheckPorts:
     module_importer: ModuleImporter = importlib.import_module
     bundle_verifier: BundleVerifier = verify_model_bundle
     probe_version: ProbeVersion = _read_ffprobe_version
+    probe_media: ProbeMedia = _probe_synthetic_media
 
 
 DEFAULT_CHECK_PORTS: Final = ContainerCheckPorts()
@@ -97,6 +118,17 @@ def check_container_runtime(
         ports.module_importer(module_name)
     if FFPROBE_VERSION_MARKER not in ports.probe_version():
         msg = "worker image ffprobe version does not match"
+        raise RuntimeError(msg)
+    media = ports.probe_media()
+    if (
+        media.audio_codec != "pcm_s16le"
+        or media.format_name != "wav"
+        or media.stream_count != 1
+        or not SYNTHETIC_DURATION_MIN_SECONDS
+        <= media.duration_seconds
+        <= SYNTHETIC_DURATION_MAX_SECONDS
+    ):
+        msg = "worker image media probe does not match"
         raise RuntimeError(msg)
 
 

@@ -11,6 +11,11 @@ status poll、finalize、cancelとnotification outboxをlocal実装・検証済�
 production environmentへのdeploymentは未実施である。この文書の手順は
 staging/production運用の必須runbookであり、placeholder IDのままremote操作してはならない。
 
+RunPodが`INVALID_MEDIA`を返した場合、利用者dataを外部toolへ送らない。固定imageと同じ
+FFmpeg packageでcontainer、codec、duration、top-level JSON fieldを再現する。
+[ADR 0017](./adr/0017-validate-pinned-ffprobe-output.md)に従い、空の`programs`だけを明示的に
+受理し、未知fieldや非空programを許可するために`extra="forbid"`を緩めない。
+
 Queue、DLQ、D1、R2はenvironmentごとに分離する。操作前にGit branch、Wranglerの
 versionと認証先、Cloudflare account、environment、queue名を声出し確認する。
 
