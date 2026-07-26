@@ -1,4 +1,9 @@
 import { createStructuredLogger, type StructuredLogger } from "@scribe-drop/observability";
+import {
+  DeterministicFaultPlan,
+  InjectedFaultError,
+  inspectStructuredLogs,
+} from "@scribe-drop/test-support";
 import { describe, expect, it, vi } from "vitest";
 
 import type { PreparedSubmission, RunpodControlRepository } from "./runpod-control-repository.js";
@@ -144,6 +149,64 @@ describe("RunPod submission service", () => {
 
     expect(recordSubmissionUnknown).toHaveBeenCalledWith(ATTEMPT_ID, NOW.toISOString());
     expect(records.join("\n")).toContain('"errorCode":"RUNPOD_PERSISTENCE_CONFLICT"');
+  });
+
+  it("does not resubmit when RunPod accepted but the HTTP response was lost", async () => {
+    const records: string[] = [];
+    const faults = new DeterministicFaultPlan([
+      {
+        occurrences: [1],
+        point: "runpod.response",
+      },
+    ]);
+    const prepareSubmission = vi
+      .fn<RunpodControlRepository["prepareSubmission"]>()
+      .mockResolvedValueOnce(PREPARED)
+      .mockResolvedValue(undefined);
+    const recordSubmissionUnknown = vi.fn<RunpodControlRepository["recordSubmissionUnknown"]>(() =>
+      Promise.resolve(true),
+    );
+    let acceptedEffects = 0;
+    const submit = vi.fn<RunpodSubmissionClient["submit"]>(async () => {
+      try {
+        await faults.after("runpod.response", () => {
+          acceptedEffects += 1;
+          return Promise.resolve();
+        });
+        return { outcome: "accepted", runpodJobId: "runpod-job-id" };
+      } catch (error) {
+        if (!(error instanceof InjectedFaultError)) {
+          throw error;
+        }
+        return { outcome: "unknown", reason: "request_failed" };
+      }
+    });
+    const dependencies = {
+      createRepository: () => fakeRepository({ prepareSubmission, recordSubmissionUnknown }),
+      createRunpodClient: () => ({ submit }),
+      logger: testLogger(records),
+      now: () => NOW,
+      randomBytes: (length: number) => new Uint8Array(length),
+    } satisfies Parameters<typeof submitPendingRunpodJob>[2];
+
+    await expect(submitPendingRunpodJob(JOB_ID, environment(), dependencies)).resolves.toBe(
+      "unknown",
+    );
+    await expect(submitPendingRunpodJob(JOB_ID, environment(), dependencies)).resolves.toBe(
+      "deferred",
+    );
+
+    expect(acceptedEffects).toBe(1);
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(recordSubmissionUnknown).toHaveBeenCalledTimes(1);
+    expect(inspectStructuredLogs(records, ["claimToken", "fixture transcript"]).events).toEqual([
+      "job.submission_started",
+      "job.submission_unknown",
+      "job.submission_deferred",
+    ]);
+    expect(() => {
+      faults.assertExhausted();
+    }).not.toThrow();
   });
 
   it.each(["unknown", "rejected"] as const)("persists the distinct %s outcome", async (outcome) => {

@@ -359,6 +359,41 @@ def test_artifact_and_manifest_put_use_separate_error_codes() -> None:
     client.close()
 
 
+def test_r2_get_and_put_timeouts_are_normalized_without_capability_details(
+    tmp_path: Path,
+) -> None:
+    """Deterministic R2 timeouts expose only stable worker error codes."""
+    sensitive_detail = "X-Amz-Signature=must-not-escape"
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout(sensitive_detail, request=request)
+
+    client, transport = build_client(responder)
+    with pytest.raises(WorkerError) as download:
+        client.download(
+            "https://storage.example.invalid/bucket/source?X-Amz-Signature=redacted",
+            tmp_path / "source.bin",
+            expectation=SourceDownloadExpectation(
+                size_bytes=len(SOURCE_CONTENT),
+                etag="expected",
+                max_size_bytes=len(SOURCE_CONTENT),
+            ),
+        )
+    with pytest.raises(WorkerError) as upload:
+        client.put_artifact(
+            "https://storage.example.invalid/bucket/transcript.json?X-Amz-Signature=redacted",
+            b"{}",
+            "application/json",
+        )
+
+    assert download.value.code == "SOURCE_DOWNLOAD_FAILED"
+    assert upload.value.code == "ARTIFACT_UPLOAD_FAILED"
+    assert sensitive_detail not in str(download.value)
+    assert sensitive_detail not in str(upload.value)
+    assert [request.method for request in transport.requests] == ["GET", "PUT"]
+    client.close()
+
+
 def test_transport_rejects_missing_purpose_before_network() -> None:
     """Callers cannot bypass URL classification."""
     recording = RecordingTransport(lambda _request: httpx.Response(200))

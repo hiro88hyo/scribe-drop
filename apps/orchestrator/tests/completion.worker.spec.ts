@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createStructuredLogger, type StructuredLogger } from "@scribe-drop/observability";
+import { DeterministicFaultPlan, inspectStructuredLogs } from "@scribe-drop/test-support";
 
 import { createD1CompletionRepository } from "../src/completion-repository.js";
 import { reconcileRunpodCompletions } from "../src/completion-service.js";
@@ -13,7 +14,9 @@ const JOB_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const ATTEMPT_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAW";
 const EVENT_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAX";
 const NOTIFICATION_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAY";
+const RETRY_ATTEMPT_ID = "01ARZ3NDEKTSV4RRFFQ69G5FB0";
 const RUNPOD_JOB_ID = "runpod-job-id";
+const RETRY_RUNPOD_JOB_ID = "retry-runpod-job-id";
 const RESULT_PREFIX = `results/0123456789abcdef0123456789abcdef/${JOB_ID}/${ATTEMPT_ID}/`;
 
 beforeAll(async () => {
@@ -131,12 +134,14 @@ async function seedRunningJob(status: "CANCEL_REQUESTED" | "RUNNING" = "RUNNING"
   ]);
 }
 
-function logger(): StructuredLogger {
+function logger(records: string[] = []): StructuredLogger {
   return createStructuredLogger({
     environment: "local",
     now: () => NOW,
     service: "orchestrator",
-    sink: () => undefined,
+    sink: (record) => {
+      records.push(record);
+    },
   });
 }
 
@@ -301,6 +306,163 @@ describe("RunPod completion reconciliation", () => {
     ]);
   });
 
+  it("recovers deterministic R2 GET and HEAD failures on later Cron executions", async () => {
+    await seedRunningJob();
+    await putCompleteArtifacts();
+    const faults = new DeterministicFaultPlan([
+      {
+        occurrences: [1],
+        point: "r2.get",
+      },
+      {
+        occurrences: [1],
+        point: "r2.head",
+      },
+    ]);
+    const records: string[] = [];
+    const run = (): ReturnType<typeof reconcileRunpodCompletions> =>
+      reconcileRunpodCompletions(
+        {
+          RECORDINGS: env.RECORDINGS,
+          RUNPOD_API_KEY: "runpod-api-key-placeholder",
+          RUNPOD_ENDPOINT_ID: "endpoint-placeholder",
+          SCRIBE_DROP_DB: env.SCRIBE_DROP_DB,
+        },
+        logger(records),
+        {
+          createEventId: () => EVENT_ID,
+          createNotificationId: () => NOTIFICATION_ID,
+          createRunpodClient: () => completionClient(),
+          headArtifact: (bucket, key) => faults.before("r2.head", () => bucket.head(key)),
+          now: () => NOW,
+          readManifest: (bucket, key) =>
+            faults.before("r2.get", async () => {
+              const object = await bucket.get(key);
+              if (object === null) {
+                return null;
+              }
+              const parsed: unknown = JSON.parse(await object.text());
+              return parsed;
+            }),
+        },
+      );
+
+    await expect(run()).resolves.toEqual({
+      cancelledCount: 0,
+      completedCount: 0,
+      failedCount: 0,
+      terminalObservedCount: 1,
+    });
+    await expect(run()).resolves.toEqual({
+      cancelledCount: 0,
+      completedCount: 0,
+      failedCount: 0,
+      terminalObservedCount: 0,
+    });
+    await expect(run()).resolves.toEqual({
+      cancelledCount: 0,
+      completedCount: 1,
+      failedCount: 0,
+      terminalObservedCount: 0,
+    });
+
+    const state = await env.SCRIBE_DROP_DB.prepare(
+      `
+        SELECT
+          jobs.status AS job_status,
+          attempts.status AS attempt_status,
+          (SELECT COUNT(*) FROM job_artifacts WHERE attempt_id = attempts.id) AS artifacts,
+          (SELECT COUNT(*) FROM job_events WHERE attempt_id = attempts.id) AS events,
+          (SELECT COUNT(*) FROM notification_outbox WHERE job_id = jobs.id) AS outbox
+        FROM jobs
+        INNER JOIN job_attempts AS attempts ON attempts.id = jobs.active_attempt_id
+        WHERE jobs.id = ?1
+      `,
+    )
+      .bind(JOB_ID)
+      .first();
+    expect(state).toEqual({
+      artifacts: 3,
+      attempt_status: "COMPLETED",
+      events: 1,
+      job_status: "COMPLETED",
+      outbox: 1,
+    });
+    expect(
+      inspectStructuredLogs(records, [RESULT_PREFIX, "# Transcript", "fixture transcript"]).events,
+    ).toEqual([
+      "runpod_heartbeat_stale",
+      "runpod_terminal_observed",
+      "job.completion_deferred",
+      "job.completion_deferred",
+      "job.completed",
+    ]);
+    expect(() => {
+      faults.assertExhausted();
+    }).not.toThrow();
+  });
+
+  it("allows only one of two concurrent Cron executions to finalize", async () => {
+    await seedRunningJob();
+    await putCompleteArtifacts();
+    const repository = createD1CompletionRepository(env.SCRIBE_DROP_DB);
+    await expect(
+      repository.recordTerminalStatus({
+        attemptId: ATTEMPT_ID,
+        delayTime: 100,
+        executionTime: 200,
+        jobId: JOB_ID,
+        output: {
+          attemptId: ATTEMPT_ID,
+          detectedLanguage: "ja",
+          durationSeconds: 60,
+          jobId: JOB_ID,
+          manifestWritten: true,
+          schemaVersion: 1,
+          segmentCount: 3,
+          status: "completed",
+        },
+        runpodJobId: RUNPOD_JOB_ID,
+        status: "COMPLETED",
+        timestamp: NOW.toISOString(),
+      }),
+    ).resolves.toBe(true);
+    const run = (): ReturnType<typeof reconcileRunpodCompletions> =>
+      reconcileRunpodCompletions(
+        {
+          RECORDINGS: env.RECORDINGS,
+          RUNPOD_API_KEY: "runpod-api-key-placeholder",
+          RUNPOD_ENDPOINT_ID: "endpoint-placeholder",
+          SCRIBE_DROP_DB: env.SCRIBE_DROP_DB,
+        },
+        logger(),
+        {
+          createEventId: () => EVENT_ID,
+          createNotificationId: () => NOTIFICATION_ID,
+          createRunpodClient: () => completionClient(),
+          now: () => NOW,
+        },
+      );
+
+    const results = await Promise.all([run(), run()]);
+    expect(results.reduce((count, result) => count + result.completedCount, 0)).toBe(1);
+    const related = await env.SCRIBE_DROP_DB.prepare(
+      `
+        SELECT
+          (SELECT COUNT(*) FROM job_artifacts WHERE attempt_id = ?1) AS artifacts,
+          (SELECT COUNT(*) FROM job_events WHERE attempt_id = ?1) AS events,
+          (SELECT COUNT(*) FROM notification_outbox WHERE job_id = ?2) AS outbox
+      `,
+    )
+      .bind(ATTEMPT_ID, JOB_ID)
+      .first();
+    expect(related).toEqual({
+      artifacts: 3,
+      events: 1,
+      outbox: 1,
+    });
+  });
+
   it("does not complete when the manifest is missing or an artifact size differs", async () => {
     await seedRunningJob();
     const client = completionClient();
@@ -413,9 +575,23 @@ describe("RunPod completion reconciliation", () => {
     expect(outboxCount?.count).toBe(0);
   });
 
-  it("rejects a loser terminal result and persists terminal failures safely", async () => {
+  it("rejects a known loser observed before the winner terminal result", async () => {
     await seedRunningJob();
     const repository = createD1CompletionRepository(env.SCRIBE_DROP_DB);
+    await env.SCRIBE_DROP_DB.prepare(
+      `
+        INSERT INTO runpod_submissions (
+          runpod_job_id,
+          attempt_id,
+          is_winner,
+          source,
+          created_at,
+          updated_at
+        ) VALUES (?1, ?2, 0, 'worker_claim', ?3, ?3)
+      `,
+    )
+      .bind("loser-runpod-job", ATTEMPT_ID, NOW.toISOString())
+      .run();
     await expect(
       repository.recordTerminalStatus({
         attemptId: ATTEMPT_ID,
@@ -465,6 +641,162 @@ describe("RunPod completion reconciliation", () => {
     expect(job).toEqual({
       error_code: "PROCESSING_FAILED",
       status: "FAILED",
+    });
+    const submissions = await env.SCRIBE_DROP_DB.prepare(
+      "SELECT runpod_job_id, is_winner FROM runpod_submissions WHERE attempt_id = ?1 ORDER BY runpod_job_id",
+    )
+      .bind(ATTEMPT_ID)
+      .all();
+    expect(submissions.results).toEqual([
+      {
+        is_winner: 0,
+        runpod_job_id: "loser-runpod-job",
+      },
+      {
+        is_winner: 1,
+        runpod_job_id: RUNPOD_JOB_ID,
+      },
+    ]);
+  });
+
+  it("ignores an old generation terminal result after a fresh retry becomes active", async () => {
+    await seedRunningJob();
+    await env.SCRIBE_DROP_DB.batch([
+      env.SCRIBE_DROP_DB.prepare(
+        `
+          UPDATE job_attempts
+          SET status = 'FAILED', failed_at = ?2, updated_at = ?2
+          WHERE id = ?1
+        `,
+      ).bind(ATTEMPT_ID, NOW.toISOString()),
+      env.SCRIBE_DROP_DB.prepare(
+        `
+          INSERT INTO job_attempts (
+            id,
+            job_id,
+            generation,
+            status,
+            winning_runpod_job_id,
+            result_prefix,
+            submission_started_at,
+            submission_outcome,
+            submission_finished_at,
+            claimed_at,
+            created_at,
+            updated_at
+          ) VALUES (
+            ?1,
+            ?2,
+            2,
+            'RUNNING',
+            ?3,
+            ?4,
+            ?5,
+            'accepted',
+            ?5,
+            ?5,
+            ?5,
+            ?5
+          )
+        `,
+      ).bind(
+        RETRY_ATTEMPT_ID,
+        JOB_ID,
+        RETRY_RUNPOD_JOB_ID,
+        `results/0123456789abcdef0123456789abcdef/${JOB_ID}/${RETRY_ATTEMPT_ID}/`,
+        NOW.toISOString(),
+      ),
+      env.SCRIBE_DROP_DB.prepare(
+        `
+          INSERT INTO runpod_submissions (
+            runpod_job_id,
+            attempt_id,
+            is_winner,
+            source,
+            created_at,
+            updated_at
+          ) VALUES (?1, ?2, 1, 'submit_response', ?3, ?3)
+        `,
+      ).bind(RETRY_RUNPOD_JOB_ID, RETRY_ATTEMPT_ID, NOW.toISOString()),
+      env.SCRIBE_DROP_DB.prepare(
+        `
+          UPDATE jobs
+          SET active_attempt_id = ?2, status = 'RUNNING', error_code = NULL, failed_at = NULL
+          WHERE id = ?1
+        `,
+      ).bind(JOB_ID, RETRY_ATTEMPT_ID),
+    ]);
+
+    const repository = createD1CompletionRepository(env.SCRIBE_DROP_DB);
+    await expect(
+      repository.recordTerminalStatus({
+        attemptId: ATTEMPT_ID,
+        delayTime: 0,
+        executionTime: 10,
+        jobId: JOB_ID,
+        output: {
+          attemptId: ATTEMPT_ID,
+          detectedLanguage: "ja",
+          durationSeconds: 30,
+          jobId: JOB_ID,
+          manifestWritten: true,
+          schemaVersion: 1,
+          segmentCount: 1,
+          status: "completed",
+        },
+        runpodJobId: RUNPOD_JOB_ID,
+        status: "COMPLETED",
+        timestamp: NOW.toISOString(),
+      }),
+    ).resolves.toBe(false);
+
+    const job = await env.SCRIBE_DROP_DB.prepare(
+      "SELECT active_attempt_id, status FROM jobs WHERE id = ?1",
+    )
+      .bind(JOB_ID)
+      .first();
+    expect(job).toEqual({
+      active_attempt_id: RETRY_ATTEMPT_ID,
+      status: "RUNNING",
+    });
+    const attempts = await env.SCRIBE_DROP_DB.prepare(
+      `
+        SELECT id, generation, status, runpod_terminal_status
+        FROM job_attempts
+        WHERE job_id = ?1
+        ORDER BY generation
+      `,
+    )
+      .bind(JOB_ID)
+      .all();
+    expect(attempts.results).toEqual([
+      {
+        generation: 1,
+        id: ATTEMPT_ID,
+        runpod_terminal_status: null,
+        status: "FAILED",
+      },
+      {
+        generation: 2,
+        id: RETRY_ATTEMPT_ID,
+        runpod_terminal_status: null,
+        status: "RUNNING",
+      },
+    ]);
+    const related = await env.SCRIBE_DROP_DB.prepare(
+      `
+        SELECT
+          (SELECT COUNT(*) FROM job_artifacts WHERE job_id = ?1) AS artifacts,
+          (SELECT COUNT(*) FROM job_events WHERE job_id = ?1) AS events,
+          (SELECT COUNT(*) FROM notification_outbox WHERE job_id = ?1) AS outbox
+      `,
+    )
+      .bind(JOB_ID)
+      .first();
+    expect(related).toEqual({
+      artifacts: 0,
+      events: 0,
+      outbox: 0,
     });
   });
 
@@ -527,6 +859,34 @@ describe("RunPod completion reconciliation", () => {
 
   it("fails a job whose provider result is no longer observable after TTL and retention", async () => {
     await seedRunningJob();
+    const beforeRetention = new Date("2026-07-25T08:29:59.999Z");
+    await expect(
+      reconcileRunpodCompletions(
+        {
+          RECORDINGS: env.RECORDINGS,
+          RUNPOD_API_KEY: "runpod-api-key-placeholder",
+          RUNPOD_ENDPOINT_ID: "endpoint-placeholder",
+          SCRIBE_DROP_DB: env.SCRIBE_DROP_DB,
+        },
+        logger(),
+        {
+          createEventId: () => EVENT_ID,
+          createRunpodClient: () => ({
+            cancel: () => Promise.resolve({ outcome: "accepted" }),
+            getStatus: () => Promise.resolve({ outcome: "not_found" }),
+          }),
+          now: () => beforeRetention,
+        },
+      ),
+    ).resolves.toMatchObject({
+      failedCount: 0,
+      terminalObservedCount: 0,
+    });
+    const activeJob = await env.SCRIBE_DROP_DB.prepare("SELECT status FROM jobs WHERE id = ?1")
+      .bind(JOB_ID)
+      .first();
+    expect(activeJob).toEqual({ status: "RUNNING" });
+
     const expiredAt = new Date("2026-07-25T09:00:00.000Z");
     await expect(
       reconcileRunpodCompletions(

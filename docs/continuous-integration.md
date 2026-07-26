@@ -27,6 +27,17 @@ pnpm container:build:runpod
 pnpm container:check:runpod
 ```
 
+## Phase 6 deterministic failures
+
+Phase 6の障害試験は通常の`quality` jobに含める。実Cloudflare、RunPod、Discordへ接続せず、
+固定clock/ID、型付きfake、Miniflare D1/R2、実migration、Pythonの固定httpx transportを
+使う。`@scribe-drop/test-support`の予定障害が実行されなかった場合や、job、attempt、
+submission、event、outboxの件数が一致しない場合はtestを失敗させる。
+
+構造化logはJSON envelopeをparseし、scenario固有のtoken、署名query、object key、ETag、
+本文fixtureの断片がないことを自動検査する。詳細なscenario対応表と回復区分は
+[failure-injection.md](./failure-injection.md)を正とする。
+
 ## Supply chain
 
 - third-party Action は release tag だけでなく full commit SHA に固定し、隣のコメントに対応する tag を残す。

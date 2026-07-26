@@ -693,15 +693,21 @@ export async function handleUploadComplete(
     });
   }
 
+  const completedAt = dependencies.now?.() ?? new Date();
+  const createEventId =
+    dependencies.createEventId ??
+    ((timestampMilliseconds: number) =>
+      createUlid(timestampMilliseconds, dependencies.randomBytes));
   const result = await repository.completeUpload({
     expectedVersion: target.version,
+    eventId: createEventId(completedAt.getTime()),
     jobId: target.jobId,
     ownerSub: auth.sub,
     sizeBytes: headResult.data.size,
     sourceBucket: target.sourceBucket,
     sourceEtag: headResult.data.etag,
     sourceKey: target.sourceKey,
-    timestamp: (dependencies.now?.() ?? new Date()).toISOString(),
+    timestamp: completedAt.toISOString(),
   });
   if (result.status === "not_found") {
     return createApiErrorResponse({

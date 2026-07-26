@@ -60,6 +60,9 @@ importers:
       '@cloudflare/workers-types':
         specifier: 5.20260724.1
         version: 5.20260724.1
+      '@scribe-drop/test-support':
+        specifier: workspace:*
+        version: link:../../packages/test-support
       '@types/node':
         specifier: 26.1.1
         version: 26.1.1

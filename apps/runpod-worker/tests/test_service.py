@@ -39,6 +39,7 @@ PREFIX: Final = f"results/{OWNER_HASH}/{JOB_ID}/{ATTEMPT_ID}/"
 SOURCE_BYTES: Final = b"audio"
 MAX_TEST_DURATION_SECONDS: Final = 120
 ARTIFACT_UPLOAD_FAILED: Final = "ARTIFACT_UPLOAD_FAILED"
+FAILED_ARTIFACT_NUMBER: Final = 2
 
 
 def settings() -> WorkerSettings:
@@ -325,13 +326,18 @@ def test_cancelled_heartbeat_stops_before_download_and_model() -> None:
 
 
 def test_partial_artifact_failure_never_writes_manifest() -> None:
-    """A completion marker cannot exist after any artifact PUT failure."""
-    service, client, operations, _records = build_service(failed_artifact=2)
+    """A lost PUT response can leave partial artifacts but never a manifest."""
+    service, client, operations, records = build_service(failed_artifact=FAILED_ARTIFACT_NUMBER)
     result = service.run(envelope())
     assert result.status == "failed"
     assert result.error_code == "ARTIFACT_UPLOAD_FAILED"
+    assert client.artifact_count == FAILED_ARTIFACT_NUMBER
+    assert operations[-2:] == ["artifact:1", "artifact:2"]
     assert "manifest" not in operations
     assert client.manifest_written is False
+    combined = "\n".join(records)
+    assert "transcript text" not in combined
+    assert "signature=redacted" not in combined
 
 
 def test_unexpected_transcriber_exception_is_not_logged_or_returned() -> None:

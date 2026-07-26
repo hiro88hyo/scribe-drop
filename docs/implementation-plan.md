@@ -2,7 +2,7 @@
 
 ## 1. 現状
 
-2026-07-26時点でPhase 1からPhase 3までを`develop`へ統合済みである。Phase 2では
+2026-07-26時点でPhase 1からPhase 5までを`develop`へ統合済みである。Phase 2では
 React/Viteのapp
 shell、Pages Functionsのresponse security、Access JWT、CSRF、`GET /api/me`、
 D1の原子的job admission、所有権付きrepository、job作成・一覧・詳細API、
@@ -39,6 +39,13 @@ artifact検証、terminal状態保存、原子的finalize、Discord outbox送信
 RunPod terminalまで約85秒、通知まで約87秒であり、次の5分Cronで回収した。active workerを
 0、max workerを1へ復元し、追跡外plan/stateとの厳格照合も通した。これによりPhase 5の
 staging checkpointを完了した。
+
+Phase 6では[Phase 6 failure injection](./failure-injection.md)に従うtest専用の決定的
+fault planと構造化log検査を追加した。実migrationを適用したD1/R2 integrationで、
+RunPod応答喪失、D1更新失敗、Queue ack失敗、逆順winner/loser、古いgeneration、
+partial artifact、同時Cron、処理中source上書きを再現する。source上書きはjobだけでなく
+active attemptも同じD1 batchで失敗化し、一意な`source_mutated`監査eventを残す。
+`0006_phase6_failure_injection.sql`はこのeventをjobごとに一件へ制限する。
 
 本計画は[spec.md](./spec.md)とRunPodの追加security要件である[additional-spec.md](./additional-spec.md)を正とし、Phase 1からPhase 7までを、各Phaseが単独でレビュー・検証できる単位に分けて実装する。両者が矛盾する場合は追加要件と[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)を優先する。
 
@@ -395,6 +402,9 @@ temporary credentialのexact-object multipart/abort成功とaction/object拒否�
 
 ## 10. Phase 6: 障害試験
 
+Phase 6のscenario、状態・監査assertion、回復主体、DLQ判断は
+[failure-injection.md](./failure-injection.md)を正とする。
+
 ### 実装
 
 - 外部境界ごとに deterministic fault injection を追加する。
@@ -410,7 +420,7 @@ temporary credentialのexact-object multipart/abort成功とaction/object拒否�
 
 ### 必須シナリオ
 
-- `/run` 成功後に HTTP response が失われ、再投入される。
+- `/run` 成功後に HTTP response が失われても、同じattemptは再投入されない。
 - `/run` 成功後に D1 書込みが失敗する。
 - Queue の D1 更新後に ack が失敗する。
 - winnerとloserのstatusが逆順に観測される。
@@ -424,6 +434,12 @@ temporary credentialのexact-object multipart/abort成功とaction/object拒否�
 - 必須テスト一覧を CI 上で再現可能な自動テストにする。
 - 各障害後に job、attempt、submission、event、outbox の整合性を確認する。
 - replay や Cron により回復できる障害と、ユーザー retry が必要な障害が文書化されている。
+
+### 実装状況
+
+local checkpoint完了。`pnpm check`、Git履歴とworktreeのsecret scan、JavaScript/Python
+dependency audit、既存RunPod imageのnetworkなし・read-only container checkが成功した。
+実Cloudflare、RunPod、Discordへの障害注入とproduction deploymentは行わない。
 
 ### コミット境界
 

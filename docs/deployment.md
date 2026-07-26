@@ -2,7 +2,7 @@
 
 ## 現在の状態
 
-Phase 1からPhase 3までは`develop`へ統合済みである。Phase 2ではlocal app shell、Pages Functionsのresponse
+Phase 1からPhase 5までは`develop`へ統合済みである。Phase 2ではlocal app shell、Pages Functionsのresponse
 security、Access JWT、CSRF、`GET /api/me`、D1の原子的job admission、所有権付き
 repository、`POST/GET /api/jobs`、`GET /api/jobs/:id`とWorkers/D1 integration testを
 実装している。ホームの最近のjob、cursor方式の履歴、5秒pollingする詳細UIも実APIへ
@@ -56,6 +56,13 @@ Markdown・JSON・SRT、原子的finalize、Discord送信まで成功した。Ru
 [ADR 0016](./adr/0016-use-manual-redirects-in-workers.md)に従い、
 `manual` redirect modeで自動追従を拒否する。
 production environmentへのdeploymentは未実施である。
+
+Phase 6では外部serviceへ接続しないdeterministic fault injectionをlocal/CIへ追加した。
+RunPod応答喪失、D1/Queue/R2/Discord障害、stale generation、partial result、同時Cron、
+source上書きの状態・監査・logを検証する。`0006_phase6_failure_injection.sql`は
+`source_mutated`監査eventをjobごとに一件へ制限するforward-only migrationである。
+stagingへPhase 6 applicationをdeployする場合はこのmigrationを先に適用する。Phase 6の
+ためのproduction deploymentや実serviceへの障害注入は行わない。
 
 `apps/orchestrator/wrangler.toml`と`apps/web/wrangler.toml`の全ゼロIDおよびoriginは
 安全なplaceholderであり、remote操作には使用できない。実IDと実originは追跡対象へ
@@ -243,6 +250,10 @@ Phase 5の追跡外Orchestrator設定では、同じ生成処理が
 `0005_reconciliation_completion.sql`を先に適用し、`DISCORD_WEBHOOK_URL`を環境別
 encrypted secretへ登録してからOrchestratorをdeployする。Discord secretを欠いたまま
 通知outboxを作成してもjob完了は取り消さないが、通知は送信されず運用alert対象となる。
+
+Phase 6のapplicationをdeployする場合は`0006_phase6_failure_injection.sql`を先に適用し、
+新規DBへのmigration検証を通す。このmigrationは既存rowを書き換えず、旧applicationとも
+互換である。障害注入用のbinding、環境変数、公開endpointをstaging/productionへ追加しない。
 
 ## Migrationとrollback
 

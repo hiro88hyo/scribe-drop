@@ -538,6 +538,7 @@ describe("D1 job repository", () => {
     };
     const failingDatabase: JobDatabase = {
       withSession: () => ({
+        batch: () => Promise.reject(new Error("test-only D1 dependency failure")),
         prepare: () => failingStatement,
       }),
     };
@@ -623,6 +624,7 @@ describe("D1 job repository", () => {
 
     const completion = {
       expectedVersion: target.version,
+      eventId: nextId(),
       jobId: target.jobId,
       ownerSub: OWNER_A.sub,
       sizeBytes: target.expectedSizeBytes,
@@ -646,9 +648,20 @@ describe("D1 job repository", () => {
     expect(
       completedJobs.every((job) => job.actualSizeBytes === 1024 && job.status === "UPLOADED"),
     ).toBe(true);
+    const completedTarget = await repository.findUploadTargetByOwner(OWNER_A.sub, created.job.id);
+    if (completedTarget === undefined) {
+      throw new Error("Expected the completed upload target");
+    }
     await expect(
       repository.completeUpload({
         ...completion,
+        sourceEtag: "stale-replacement-etag",
+      }),
+    ).resolves.toEqual({ status: "invalid_state" });
+    await expect(
+      repository.completeUpload({
+        ...completion,
+        expectedVersion: completedTarget.version,
         sourceEtag: "replacement-etag",
       }),
     ).resolves.toMatchObject({
@@ -669,6 +682,84 @@ describe("D1 job repository", () => {
       source_etag: "original-etag",
       status: "SOURCE_MUTATED",
       version: 4,
+    });
+  });
+
+  it("fails the active attempt and records an audit event on a browser-observed mutation", async () => {
+    const active = await seedActiveJob("RUNNING");
+    await env.SCRIBE_DROP_DB.prepare(
+      `
+        UPDATE jobs
+        SET
+          actual_size_bytes = expected_size_bytes,
+          source_etag = 'original-etag',
+          uploaded_at = ?2
+        WHERE id = ?1
+      `,
+    )
+      .bind(active.jobId, NOW.toISOString())
+      .run();
+    const repository = createD1JobRepository(env.SCRIBE_DROP_DB);
+    const target = await repository.findUploadTargetByOwner(OWNER_A.sub, active.jobId);
+    if (target === undefined) {
+      throw new Error("Expected an owner-scoped upload target");
+    }
+    const eventId = nextId();
+
+    await expect(
+      repository.completeUpload({
+        eventId,
+        expectedVersion: target.version,
+        jobId: target.jobId,
+        ownerSub: OWNER_A.sub,
+        sizeBytes: target.expectedSizeBytes,
+        sourceBucket: target.sourceBucket,
+        sourceEtag: "replacement-etag",
+        sourceKey: target.sourceKey,
+        timestamp: NOW.toISOString(),
+      }),
+    ).resolves.toMatchObject({
+      job: {
+        errorCode: "SOURCE_ETAG_CHANGED",
+        status: "SOURCE_MUTATED",
+      },
+      status: "source_mutated",
+    });
+
+    const state = await env.SCRIBE_DROP_DB.prepare(
+      `
+        SELECT
+          jobs.status AS job_status,
+          jobs.error_code AS job_error_code,
+          attempts.status AS attempt_status,
+          attempts.error_code AS attempt_error_code,
+          (SELECT COUNT(*) FROM job_events WHERE job_id = jobs.id) AS events,
+          (SELECT COUNT(*) FROM notification_outbox WHERE job_id = jobs.id) AS outbox
+        FROM jobs
+        INNER JOIN job_attempts AS attempts ON attempts.id = jobs.active_attempt_id
+        WHERE jobs.id = ?1
+      `,
+    )
+      .bind(active.jobId)
+      .first();
+    expect(state).toEqual({
+      attempt_error_code: "SOURCE_ETAG_CHANGED",
+      attempt_status: "FAILED",
+      events: 1,
+      job_error_code: "SOURCE_ETAG_CHANGED",
+      job_status: "SOURCE_MUTATED",
+      outbox: 0,
+    });
+    const auditEvent = await env.SCRIBE_DROP_DB.prepare(
+      "SELECT id, actor, event_type, metadata_json FROM job_events WHERE job_id = ?1",
+    )
+      .bind(active.jobId)
+      .first();
+    expect(auditEvent).toEqual({
+      actor: "web",
+      event_type: "source_mutated",
+      id: eventId,
+      metadata_json: null,
     });
   });
 
@@ -699,6 +790,7 @@ describe("D1 job repository", () => {
     };
     const impossibleDatabase: JobDatabase = {
       withSession: () => ({
+        batch: () => Promise.resolve([]),
         prepare: () => impossibleStatement,
       }),
     };
