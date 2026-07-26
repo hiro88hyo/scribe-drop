@@ -19,6 +19,7 @@ const identifiers = {
 test("renders only the orchestrator staging identifiers", () => {
   const template = `name = "local"
 main = "src/index.ts"
+compatibility_flags = ["global_fetch_strictly_public"]
 
 [vars]
 CLOUDFLARE_ACCOUNT_ID = "${"0".repeat(32)}"
@@ -37,6 +38,7 @@ database_id = "00000000-0000-0000-0000-000000000101"
   const rendered = renderOrchestratorStagingConfig(template, identifiers);
 
   assert.match(rendered, /main = "\.\.\/\.\.\/apps\/orchestrator\/src\/index\.ts"/u);
+  assert.match(rendered, /compatibility_flags = \["global_fetch_strictly_public"\]/u);
   assert.match(rendered, new RegExp(`\\[vars\\]\\nCLOUDFLARE_ACCOUNT_ID = "${"0".repeat(32)}"`));
   assert.match(
     rendered,

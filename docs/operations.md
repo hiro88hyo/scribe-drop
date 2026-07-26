@@ -114,7 +114,10 @@ logや通知へobject key、ETag、token、URL queryを追加しない。
 `RUNPOD_RESPONSE_INVALID`、`RUNPOD_PERSISTENCE_CONFLICT`だけを使用する。RunPodの応答本文、
 header、API keyを追加で記録しない。RunPod JSON control APIへのsubrequestは
 `Accept-Encoding: gzip`を固定し、Workers runtimeが対応するencoding以外の圧縮済み
-passthrough bodyをapplication codeで解釈しない。
+passthrough bodyをapplication codeで解釈しない。公開APIへのroutingは
+[ADR 0014](./adr/0014-runpod-api-uses-public-fetch-routing.md)の
+`global_fetch_strictly_public`を使用する。同一zoneの内部通信が必要になってもこの経路へ
+載せず、Service Bindingを設計する。
 
 ## Reconciliationと手動回復
 
