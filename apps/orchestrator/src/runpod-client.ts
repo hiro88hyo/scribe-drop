@@ -25,6 +25,7 @@ export type RunpodSubmissionResult =
     }
   | {
       readonly outcome: "unknown";
+      readonly reason: "request_failed" | "response_invalid";
     };
 
 export interface RunpodSubmissionClient {
@@ -124,6 +125,8 @@ export function createRunpodClient(options: RunpodClientOptions): RunpodClient {
       runpodJobId,
     )}`;
   const headers = {
+    accept: "application/json",
+    "accept-encoding": "identity",
     authorization: `Bearer ${options.apiKey}`,
   };
 
@@ -191,7 +194,7 @@ export function createRunpodClient(options: RunpodClientOptions): RunpodClient {
           signal: AbortSignal.timeout(timeoutMilliseconds),
         });
       } catch {
-        return { outcome: "unknown" };
+        return { outcome: "unknown", reason: "request_failed" };
       }
 
       if (!response.ok) {
@@ -202,9 +205,9 @@ export function createRunpodClient(options: RunpodClientOptions): RunpodClient {
         const parsed = runpodRunResponseSchema.safeParse(await readBoundedJson(response));
         return parsed.success
           ? { outcome: "accepted", runpodJobId: parsed.data.id }
-          : { outcome: "unknown" };
+          : { outcome: "unknown", reason: "response_invalid" };
       } catch {
-        return { outcome: "unknown" };
+        return { outcome: "unknown", reason: "response_invalid" };
       }
     },
   };

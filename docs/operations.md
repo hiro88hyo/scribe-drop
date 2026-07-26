@@ -88,6 +88,7 @@ application logはallowlistされた構造化eventだけを出す。最低限、
 - `reconciliation.dependency_failure`
 - `reconciliation.state_conflict`
 - `job.submission_expired`
+- `job.submission_unknown`
 - `job.completion_deferred`
 - `job.completed`
 - `job.failed`
@@ -109,6 +110,11 @@ logや通知へobject key、ETag、token、URL queryを追加しない。
 `notification.rejected`もalert対象とする。Discord障害はjobの`COMPLETED`を取り消さない。
 未送信outboxはD1のstatus、attempt数、次回実行時刻だけをread-onlyで確認し、Webhook URLや
 本文を調査記録へ出さない。
+`job.submission_unknown`の`errorCode`は`RUNPOD_REQUEST_FAILED`、
+`RUNPOD_RESPONSE_INVALID`、`RUNPOD_PERSISTENCE_CONFLICT`だけを使用する。RunPodの応答本文、
+header、API keyを追加で記録しない。RunPod JSON control APIへのsubrequestは
+`Accept-Encoding: identity`を固定し、圧縮済みpassthrough bodyをapplication codeで
+解釈しない。
 
 ## Reconciliationと手動回復
 
