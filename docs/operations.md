@@ -113,8 +113,8 @@ logや通知へobject key、ETag、token、URL queryを追加しない。
 `job.submission_unknown`の`errorCode`は`RUNPOD_REQUEST_FAILED`、
 `RUNPOD_RESPONSE_INVALID`、`RUNPOD_PERSISTENCE_CONFLICT`だけを使用する。RunPodの応答本文、
 header、API keyを追加で記録しない。RunPod JSON control APIへのsubrequestは
-`Accept-Encoding: identity`を固定し、圧縮済みpassthrough bodyをapplication codeで
-解釈しない。
+`Accept-Encoding: gzip`を固定し、Workers runtimeが対応するencoding以外の圧縮済み
+passthrough bodyをapplication codeで解釈しない。
 
 ## Reconciliationと手動回復
 
