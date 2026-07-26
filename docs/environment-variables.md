@@ -142,7 +142,8 @@ reservedのaddressを含む場合は拒否する。接続時は検証済みIPへ
 SNIだけを元hostnameに保つ。proxyとredirectは使用しない。
 
 Python依存は`uv.lock`に固定し、RunPod SDK 1.11.0、faster-whisper 1.2.1、
-CTranslate2 4.8.1、Pydantic 2.13.4、httpx 0.28.1を使用する。Whisper model IDと
-revision、FFmpeg、CUDA、base imageはruntime環境変数で切り替えず、Phase 4の
-Dockerfile、lockfile、image metadataへ固定する。固定値を変更する場合はimageを
-再buildし、SBOM、offline起動試験、vulnerability scanを通す。
+CTranslate2 4.8.1、Pydantic 2.13.4、httpx 0.28.1、Hugging Face Hub 1.24.0を
+使用する。Whisper model repository/revision/hash、FFmpeg、Python package、Ubuntu
+snapshot、CUDA、base/uv imageはruntime環境変数やbuild argumentで切り替えず、
+[runpod.md](./runpod.md)、Dockerfile、lockfile、image metadataへ固定する。固定値を
+変更する場合はimageを再buildし、SBOM、offline起動試験、vulnerability scanを通す。

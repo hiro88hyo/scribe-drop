@@ -14,8 +14,17 @@ uv run --directory apps/runpod-worker pytest
 ```
 
 `MODEL_PATH`はlocal以外では`/opt/models/large-v3-turbo`に固定する。model directoryは
-image build時に作成し、少なくとも`model.bin`、`config.json`、`tokenizer.json`を含める。
-runtimeでHugging Faceから取得するfallbackは許可しない。
+image build時に固定commitから作成し、5つの構成fileすべてのbyte sizeとSHA-256を検証する。
+runtimeでHugging Faceから取得するfallbackは許可しない。実imageはrootからbuildする。
+
+```bash
+pnpm container:build:runpod
+pnpm container:check:runpod
+```
+
+後者はnetworkなし、read-only root filesystem、UID 10001で起動し、model bundle、
+Python package、native import、ffprobeを検証する。GPU modelのmemory loadや推論は
+この検査では行わない。
 
 handlerは成功、失敗、cancelのすべてでtask固有`/tmp`を削除し、RunPod SDKへ
 `refresh_worker=true`を返す。このfieldはRunPod SDKがjob outputから除去する。

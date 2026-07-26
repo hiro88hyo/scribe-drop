@@ -13,8 +13,11 @@ Phase 4では、最小`/run`、一回限りclaim、submission gate、winner CAS�
 exact-object R2 capabilityのCloudflare制御面に加え、RunPod WorkerのPydantic strict
 境界、DNS pinning、streaming download、ffprobe、固定pathからの遅延model load、
 artifact integrity、manifest-last、task固有`/tmp` cleanup、worker refreshまでlocal
-実装・テスト済みである。固定model入りcontainer、SBOM・scan、実endpoint、benchmark、
-staging smokeは未完了である。
+実装・テスト済みである。さらにdigest固定のCUDA/cuDNN base、固定Ubuntu snapshot、
+固定revisionと全file hashを検証するmodel、non-root runtimeを持つmulti-stage imageを
+実buildし、networkなし・read-onlyのcontainer checkまで完了した。CIのSBOM・
+High/Critical container scanも追加済みである。実endpoint、GPU benchmark、staging
+smokeは未完了である。
 
 本計画は[spec.md](./spec.md)とRunPodの追加security要件である[additional-spec.md](./additional-spec.md)を正とし、Phase 1からPhase 7までを、各Phaseが単独でレビュー・検証できる単位に分けて実装する。両者が矛盾する場合は追加要件と[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)を優先する。
 

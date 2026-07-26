@@ -2,6 +2,38 @@
   "volta": "2.0.2",
   "uv": "0.11.32",
   "python": "3.12",
+  "runpodWorkerImage": {
+    "platform": "linux/amd64",
+    "dockerfileFrontend": {
+      "version": "1.7",
+      "digest": "sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e"
+    },
+    "baseImage": {
+      "name": "nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04",
+      "digest": "sha256:9175fa92f96de35a8cfb9493f0dfcf9435c7a597e9d95ad41d2cae382a95e3f9"
+    },
+    "uvImage": {
+      "version": "0.11.32",
+      "digest": "sha256:0d127b3a7049b879a6e18a79c7f33fea59aa83c226464248f89cfb716a6b96f5"
+    },
+    "ubuntuSnapshot": "20260725T000000Z",
+    "caCertificatesPackage": "20260601~24.04.1",
+    "pythonPackage": "3.12.3-1ubuntu0.15",
+    "ffmpegPackage": "7:6.1.1-3ubuntu5",
+    "model": {
+      "repository": "dropbox-dash/faster-whisper-large-v3-turbo",
+      "revision": "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf",
+      "modelSha256": "e76620f83d5f5b69efd3d87e3dc180c1bd21df9fbebacfd4335e5e1efcc018da"
+    },
+    "syft": {
+      "version": "1.49.0",
+      "actionCommit": "e22c389904149dbc22b58101806040fa8d37a610"
+    },
+    "trivy": {
+      "version": "0.72.0",
+      "actionCommit": "ed142fd0673e97e23eac54620cfb913e5ce36c25"
+    }
+  },
   "gitleaks": {
     "version": "8.30.1",
     "artifacts": {

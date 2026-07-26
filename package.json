@@ -23,6 +23,8 @@
     "cloudflare:config:staging:r2-cors": "node scripts/render-cloudflare-staging-config.mjs r2-cors",
     "cloudflare:config:staging:web": "node scripts/render-cloudflare-staging-config.mjs web",
     "cloudflare:secrets:verify:staging": "node scripts/verify-cloudflare-pages-secrets.mjs",
+    "container:build:runpod": "docker buildx build --load --tag scribe-drop-runpod-worker:local --file apps/runpod-worker/Dockerfile .",
+    "container:check:runpod": "docker run --rm --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m --entrypoint python scribe-drop-runpod-worker:local -m scribe_drop_worker.container_check",
     "d1:migrate:local": "wrangler d1 migrations apply SCRIBE_DROP_DB --local --config apps/orchestrator/wrangler.toml",
     "d1:verify": "node scripts/verify-d1-migrations.mjs",
     "format": "pnpm format:ts && pnpm format:py",

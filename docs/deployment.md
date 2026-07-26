@@ -34,8 +34,12 @@ environment全体で1件のsubmission gate、`accepted`・`rejected`・`unknown`
 RunPod WorkerはPydantic strict入力、claim-first実行、exact hostとpublic DNS検証、
 検証済みIPへの接続固定、redirect拒否、streaming size/ETag照合、ffprobe、
 faster-whisperのclaim後遅延load、artifact integrity、manifest-last、`/tmp` cleanup、
-worker refreshまでlocal実装・テスト済みである。RunPod Worker image、固定model
-revision、endpoint、benchmark、staging smokeは未完了である。
+worker refreshまでlocal実装・テスト済みである。RunPod Workerはamd64 CUDA/cuDNN
+base digest、Ubuntu snapshot、Python/FFmpeg package、uv build image、model commitと
+5 fileの全hashを固定したmulti-stage imageを実build済みである。UID 10001、
+networkなし、read-only root filesystemでmodel/依存/native import/ffprobeを検査する
+offline checkも成功した。CIにはSPDX JSON SBOMとHigh/Criticalで失敗するTrivy scanを
+追加済みである。実endpoint、GPU benchmark、staging smokeは未完了である。
 
 `apps/orchestrator/wrangler.toml`と`apps/web/wrangler.toml`の全ゼロIDおよびoriginは
 安全なplaceholderであり、remote操作には使用できない。実IDと実originは追跡対象へ
@@ -83,10 +87,11 @@ Phase 3 staging checkpointで完了した。手順6以降はPhase 4のRunPod構�
 3. R2 CORSと`incoming/`限定Event Notificationを設定する。
 4. D1 migrationを適用し、適用済みversionを記録する。
 5. OrchestratorとWebのsecretをCloudflare secret storeへ登録する。
-6. 固定digestのRunPod Worker image、template、staging endpointを作成する。modelをimageへ内包し、runtime downloadを無効にする。
+6. [runpod.md](./runpod.md)の固定値でRunPod Worker imageをbuildし、SBOM、scan、
+   offline checkを通したregistry digestからtemplateとstaging endpointを作成する。
 7. staging endpoint IDとRunPod API keyをOrchestrator secretへ登録する。
 8. `runpodctl`でSecure Cloud、Flex、active workers 0、max workers 1、GPU 1、Network Volumeなし、FlashBoot無効、timeout、TTLを確認する。
-9. SBOM、container/dependency scan、offline起動、smoke test、重複配送、claim競合、cleanup、rollback手順を確認する。
+9. GPU benchmark、smoke test、重複配送、claim競合、cleanup、rollback手順を確認する。
 
 ## Phase 3 staging checkpoint
 

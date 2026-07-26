@@ -1469,6 +1469,7 @@ dependencies = [
     { name = "ctranslate2" },
     { name = "faster-whisper" },
     { name = "httpx" },
+    { name = "huggingface-hub" },
     { name = "pydantic" },
     { name = "runpod" },
 ]
@@ -1486,6 +1487,7 @@ requires-dist = [
     { name = "ctranslate2", specifier = "==4.8.1" },
     { name = "faster-whisper", specifier = "==1.2.1" },
     { name = "httpx", specifier = "==0.28.1" },
+    { name = "huggingface-hub", specifier = "==1.24.0" },
     { name = "pydantic", specifier = "==2.13.4" },
     { name = "runpod", specifier = "==1.11.0" },
 ]

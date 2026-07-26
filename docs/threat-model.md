@@ -15,7 +15,8 @@ upload-complete、strictなR2 event検証、R2 HEAD再確認、原子的なgener
 heartbeat、R2 capabilityのCloudflare制御面まで実装済みであり、RunPod Workerの
 claim-first application runtime、Pydantic境界、DNS pinning、streaming download、
 ffprobe、固定modelの遅延load、artifact/manifest生成までlocal実装・テスト済みである。
-固定model入りcontainer、supply-chain scan、実endpointとstaging検証は未完了である。
+固定model入りnon-root container、offline integrity check、SBOM、supply-chain scanの
+CI定義まで実装済みである。実endpointとGPU/staging検証は未完了である。
 詳細な認証判断は
 [ADR 0003](./adr/0003-access-jwt-and-csrf-boundary.md)、受付制限は
 [ADR 0004](./adr/0004-d1-job-admission-control.md)、CSPとresponse headerは
@@ -120,8 +121,9 @@ RunPodのjob input、`job.id`、status、output、例外、DNS応答、HTTP応�
 ## Phase 4以降のRunPod脅威と必須制御
 
 この節は[additional-spec.md](./additional-spec.md)を反映する。Cloudflare制御面と
-RunPod Worker application runtimeはlocal integration/unit test済みだが、container、
-offline test、実endpointの項目はPhase 4完了まで制御済みとはみなさない。
+RunPod Worker application runtimeと固定imageのoffline checkはlocal検証済みだが、
+High/Critical scanのCI実行、GPU、実endpointの項目はPhase 4完了まで制御済みとは
+みなさない。
 
 | 脅威                                      | 必須制御                                                                                                                                   | 必須検証                                                                                              |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
