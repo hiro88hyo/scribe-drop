@@ -120,7 +120,34 @@ describe("RunPod submission service", () => {
     expect(submit).not.toHaveBeenCalled();
   });
 
+  it("marks an accepted response unknown when its submission ID cannot be persisted", async () => {
+    const records: string[] = [];
+    const recordSubmissionUnknown = vi.fn<RunpodControlRepository["recordSubmissionUnknown"]>(() =>
+      Promise.resolve(true),
+    );
+
+    await expect(
+      submitPendingRunpodJob(JOB_ID, environment(), {
+        createRepository: () =>
+          fakeRepository({
+            recordSubmissionAccepted: () => Promise.resolve(false),
+            recordSubmissionUnknown,
+          }),
+        createRunpodClient: () => ({
+          submit: () => Promise.resolve({ outcome: "accepted", runpodJobId: "runpod-job-id" }),
+        }),
+        logger: testLogger(records),
+        now: () => NOW,
+        randomBytes: (length) => new Uint8Array(length),
+      }),
+    ).resolves.toBe("unknown");
+
+    expect(recordSubmissionUnknown).toHaveBeenCalledWith(ATTEMPT_ID, NOW.toISOString());
+    expect(records.join("\n")).toContain('"errorCode":"RUNPOD_PERSISTENCE_CONFLICT"');
+  });
+
   it.each(["unknown", "rejected"] as const)("persists the distinct %s outcome", async (outcome) => {
+    const records: string[] = [];
     const recordSubmissionUnknown = vi.fn<RunpodControlRepository["recordSubmissionUnknown"]>(() =>
       Promise.resolve(true),
     );
@@ -134,9 +161,12 @@ describe("RunPod submission service", () => {
         createRepository: () =>
           fakeRepository({ recordSubmissionRejected, recordSubmissionUnknown }),
         createRunpodClient: () => ({
-          submit: () => Promise.resolve({ outcome }),
+          submit: () =>
+            Promise.resolve(
+              outcome === "unknown" ? { outcome, reason: "response_invalid" } : { outcome },
+            ),
         }),
-        logger: testLogger([]),
+        logger: testLogger(records),
         now: () => NOW,
         randomBytes: (length) => new Uint8Array(length),
       }),
@@ -145,6 +175,7 @@ describe("RunPod submission service", () => {
     if (outcome === "unknown") {
       expect(recordSubmissionUnknown).toHaveBeenCalledWith(ATTEMPT_ID, NOW.toISOString());
       expect(recordSubmissionRejected).not.toHaveBeenCalled();
+      expect(records.join("\n")).toContain('"errorCode":"RUNPOD_RESPONSE_INVALID"');
     } else {
       expect(recordSubmissionRejected).toHaveBeenCalledWith({
         attemptId: ATTEMPT_ID,

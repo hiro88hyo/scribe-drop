@@ -116,7 +116,7 @@ export async function submitPendingRunpodJob(
     }
     dependencies.logger.warn("job.submission_unknown", {
       attemptId: prepared.attemptId,
-      errorCode: "INTERNAL_ERROR",
+      errorCode: "RUNPOD_PERSISTENCE_CONFLICT",
       jobId: prepared.jobId,
       status: "SUBMITTING",
     });
@@ -133,7 +133,8 @@ export async function submitPendingRunpodJob(
     }
     dependencies.logger.warn("job.submission_unknown", {
       attemptId: prepared.attemptId,
-      errorCode: "INTERNAL_ERROR",
+      errorCode:
+        result.reason === "request_failed" ? "RUNPOD_REQUEST_FAILED" : "RUNPOD_RESPONSE_INVALID",
       jobId: prepared.jobId,
       status: "SUBMITTING",
     });

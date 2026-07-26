@@ -37,6 +37,12 @@ describe("RunPod client", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     const [url, init] = fetchMock.mock.calls[0] ?? [];
     expect(url).toBe("https://api.runpod.ai/v2/endpoint-id/run");
+    expect(init?.headers).toMatchObject({
+      accept: "application/json",
+      "accept-encoding": "identity",
+      authorization: "Bearer runpod-api-key-placeholder",
+      "content-type": "application/json",
+    });
     const serializedBody = init?.body;
     if (typeof serializedBody !== "string") {
       throw new Error("Expected a serialized JSON request");
@@ -69,7 +75,10 @@ describe("RunPod client", () => {
       fetch: fetchMock,
     });
 
-    await expect(client.submit(REQUEST)).resolves.toEqual({ outcome: "unknown" });
+    await expect(client.submit(REQUEST)).resolves.toEqual({
+      outcome: "unknown",
+      reason: _name === "timeout or connection failure" ? "request_failed" : "response_invalid",
+    });
   });
 
   it("validates status responses and calls the exact endpoint", async () => {
@@ -123,7 +132,11 @@ describe("RunPod client", () => {
       "https://api.runpod.ai/v2/endpoint-id/status/runpod-job-id",
     );
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
-      headers: { authorization: "Bearer runpod-api-key-placeholder" },
+      headers: {
+        accept: "application/json",
+        "accept-encoding": "identity",
+        authorization: "Bearer runpod-api-key-placeholder",
+      },
       method: "GET",
       redirect: "error",
     });
@@ -191,5 +204,14 @@ describe("RunPod client", () => {
     expect(acceptedFetch.mock.calls[0]?.[0]).toBe(
       "https://api.runpod.ai/v2/endpoint-id/cancel/runpod-job-id",
     );
+    expect(acceptedFetch.mock.calls[0]?.[1]).toMatchObject({
+      headers: {
+        accept: "application/json",
+        "accept-encoding": "identity",
+        authorization: "Bearer runpod-api-key-placeholder",
+      },
+      method: "POST",
+      redirect: "error",
+    });
   });
 });
