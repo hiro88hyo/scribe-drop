@@ -1,4 +1,5 @@
 import {
+  artifactDownloadResponseSchema,
   createJobResponseSchema,
   createJobRequestSchema,
   jobActionResponseSchema,
@@ -14,16 +15,22 @@ import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  handleCancelJob,
   handleCreateJob,
   handleGetJob,
+  handleGetArtifact,
   handleListJobs,
+  handleRetryJob,
   handleUploadComplete,
 } from "../src/server/jobs/job-handlers.js";
 import {
   createD1JobRepository,
+  requestJobCancellation,
+  retryFailedJob,
   type JobDatabase,
   type JobPreparedStatement,
   type NewJobRecord,
+  type RetryFailedJobInput,
 } from "../src/server/jobs/job-repository.js";
 import { createUlid } from "../src/server/id/ulid.js";
 import type { WebRequestData } from "../src/server/web-context.js";
@@ -134,6 +141,157 @@ async function insertJob(options: InsertJobOptions): Promise<string> {
     )
     .run();
   return id;
+}
+
+async function seedFailedJob(owner = OWNER_A): Promise<{
+  readonly attemptId: string;
+  readonly jobId: string;
+}> {
+  const jobId = await insertJob({
+    createdAt: new Date(NOW.getTime() - 60_000),
+    owner,
+    status: "FAILED",
+  });
+  const attemptId = nextId(NOW.getTime() - 60_000);
+  await env.SCRIBE_DROP_DB.batch([
+    env.SCRIBE_DROP_DB.prepare(
+      `
+        INSERT INTO job_attempts (
+          id,
+          job_id,
+          generation,
+          status,
+          result_prefix,
+          failed_at,
+          error_code,
+          created_at,
+          updated_at
+        ) VALUES (?1, ?2, 1, 'FAILED', ?3, ?4, 'PROCESSING_FAILED', ?4, ?4)
+      `,
+    ).bind(
+      attemptId,
+      jobId,
+      `results/0123456789abcdef0123456789abcdef/${jobId}/${attemptId}/`,
+      new Date(NOW.getTime() - 60_000).toISOString(),
+    ),
+    env.SCRIBE_DROP_DB.prepare(
+      `
+        UPDATE jobs
+        SET
+          active_attempt_id = ?2,
+          error_code = 'PROCESSING_FAILED',
+          failed_at = ?3
+        WHERE id = ?1
+      `,
+    ).bind(jobId, attemptId, new Date(NOW.getTime() - 60_000).toISOString()),
+  ]);
+  return { attemptId, jobId };
+}
+
+async function seedActiveJob(
+  status: "RUNNING" | "SUBMISSION_PENDING" | "SUBMITTING",
+  owner = OWNER_A,
+): Promise<{
+  readonly attemptId: string;
+  readonly jobId: string;
+}> {
+  const jobId = await insertJob({
+    createdAt: new Date(NOW.getTime() - 60_000),
+    owner,
+    status,
+  });
+  const attemptId = nextId(NOW.getTime() - 60_000);
+  await env.SCRIBE_DROP_DB.batch([
+    env.SCRIBE_DROP_DB.prepare(
+      `
+        INSERT INTO job_attempts (
+          id,
+          job_id,
+          generation,
+          status,
+          result_prefix,
+          created_at,
+          updated_at
+        ) VALUES (?1, ?2, 1, ?3, ?4, ?5, ?5)
+      `,
+    ).bind(
+      attemptId,
+      jobId,
+      status,
+      `results/0123456789abcdef0123456789abcdef/${jobId}/${attemptId}/`,
+      new Date(NOW.getTime() - 60_000).toISOString(),
+    ),
+    env.SCRIBE_DROP_DB.prepare("UPDATE jobs SET active_attempt_id = ?2 WHERE id = ?1").bind(
+      jobId,
+      attemptId,
+    ),
+  ]);
+  return { attemptId, jobId };
+}
+
+async function seedCompletedJob(owner = OWNER_A): Promise<{
+  readonly attemptId: string;
+  readonly jobId: string;
+  readonly resultPrefix: string;
+}> {
+  const jobId = await insertJob({
+    createdAt: new Date(NOW.getTime() - 60_000),
+    owner,
+    status: "COMPLETED",
+  });
+  const attemptId = nextId(NOW.getTime() - 60_000);
+  const resultPrefix = `results/0123456789abcdef0123456789abcdef/${jobId}/${attemptId}/`;
+  await env.SCRIBE_DROP_DB.batch([
+    env.SCRIBE_DROP_DB.prepare(
+      `
+        INSERT INTO job_attempts (
+          id,
+          job_id,
+          generation,
+          status,
+          result_prefix,
+          completed_at,
+          created_at,
+          updated_at
+        ) VALUES (?1, ?2, 1, 'COMPLETED', ?3, ?4, ?4, ?4)
+      `,
+    ).bind(attemptId, jobId, resultPrefix, NOW.toISOString()),
+    env.SCRIBE_DROP_DB.prepare(
+      `
+        UPDATE jobs
+        SET
+          active_attempt_id = ?2,
+          completed_at = ?3,
+          duration_seconds = 60,
+          updated_at = ?3
+        WHERE id = ?1
+      `,
+    ).bind(jobId, attemptId, NOW.toISOString()),
+    ...(["markdown", "json", "srt"] as const).map((format, index) =>
+      env.SCRIBE_DROP_DB.prepare(
+        `
+          INSERT INTO job_artifacts (
+            job_id,
+            attempt_id,
+            format,
+            object_key,
+            size_bytes,
+            sha256,
+            created_at
+          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        `,
+      ).bind(
+        jobId,
+        attemptId,
+        format,
+        `${resultPrefix}transcript.${format === "markdown" ? "md" : format}`,
+        index + 10,
+        String(index + 1).repeat(64),
+        NOW.toISOString(),
+      ),
+    ),
+  ]);
+  return { attemptId, jobId, resultPrefix };
 }
 
 function handlerEnvironment(): {
@@ -550,6 +708,239 @@ describe("D1 job repository", () => {
     ).rejects.toThrow();
     expect(diagnosticCalls).toBe(0);
   });
+
+  it("retries a FAILED job once with a fresh generation and owner-scoped prefix", async () => {
+    const seeded = await seedFailedJob();
+    const firstAttemptId = nextId();
+    const secondAttemptId = nextId();
+    const firstEventId = nextId();
+    const secondEventId = nextId();
+    const makeInput = (attemptId: string, eventId: string): RetryFailedJobInput => ({
+      attemptId,
+      eventId,
+      jobId: seeded.jobId,
+      ownerSub: OWNER_A.sub,
+      resultPrefix: `results/0123456789abcdef0123456789abcdef/${seeded.jobId}/${attemptId}/`,
+      timestamp: NOW.toISOString(),
+    });
+
+    const results = await Promise.all([
+      retryFailedJob(env.SCRIBE_DROP_DB, makeInput(firstAttemptId, firstEventId)),
+      retryFailedJob(env.SCRIBE_DROP_DB, makeInput(secondAttemptId, secondEventId)),
+    ]);
+    expect(results.map((result) => result.status).sort()).toEqual(["invalid_state", "retried"]);
+    const retried = results.find((result) => result.status === "retried");
+    expect(retried).toMatchObject({
+      generation: 2,
+      job: {
+        errorCode: null,
+        id: seeded.jobId,
+        status: "SUBMISSION_PENDING",
+      },
+    });
+
+    const attempts = await env.SCRIBE_DROP_DB.prepare(
+      `
+        SELECT
+          id,
+          generation,
+          status,
+          claim_token_hash,
+          result_prefix
+        FROM job_attempts
+        WHERE job_id = ?1
+        ORDER BY generation
+      `,
+    )
+      .bind(seeded.jobId)
+      .all();
+    expect(attempts.results).toHaveLength(2);
+    expect(attempts.results[0]).toMatchObject({
+      generation: 1,
+      id: seeded.attemptId,
+      status: "FAILED",
+    });
+    expect(attempts.results[1]).toMatchObject({
+      claim_token_hash: null,
+      generation: 2,
+      status: "SUBMISSION_PENDING",
+    });
+    expect(attempts.results[1]?.["result_prefix"]).toMatch(
+      new RegExp(`^results/[0-9a-f]{32}/${seeded.jobId}/[0-9A-HJKMNP-TV-Z]{26}/$`, "u"),
+    );
+
+    const job = await env.SCRIBE_DROP_DB.prepare(
+      "SELECT active_attempt_id, status, error_code, failed_at, version FROM jobs WHERE id = ?1",
+    )
+      .bind(seeded.jobId)
+      .first();
+    expect(job).toMatchObject({
+      active_attempt_id: attempts.results[1]?.["id"],
+      error_code: null,
+      failed_at: null,
+      status: "SUBMISSION_PENDING",
+      version: 2,
+    });
+    const events = await env.SCRIBE_DROP_DB.prepare(
+      "SELECT event_type, actor, attempt_id FROM job_events WHERE job_id = ?1",
+    )
+      .bind(seeded.jobId)
+      .all();
+    expect(events.results).toEqual([
+      {
+        actor: "user",
+        attempt_id: attempts.results[1]?.["id"],
+        event_type: "job_retry_requested",
+      },
+    ]);
+  });
+
+  it("does not expose a foreign FAILED job or retry a non-FAILED job", async () => {
+    const seeded = await seedFailedJob();
+    const foreignAttemptId = nextId();
+    await expect(
+      retryFailedJob(env.SCRIBE_DROP_DB, {
+        attemptId: foreignAttemptId,
+        eventId: nextId(),
+        jobId: seeded.jobId,
+        ownerSub: OWNER_B.sub,
+        resultPrefix: `results/0123456789abcdef0123456789abcdef/${seeded.jobId}/${foreignAttemptId}/`,
+        timestamp: NOW.toISOString(),
+      }),
+    ).resolves.toEqual({ status: "not_found" });
+
+    const pendingJobId = await insertJob({
+      createdAt: NOW,
+      status: "SUBMISSION_PENDING",
+    });
+    const pendingAttemptId = nextId();
+    await expect(
+      retryFailedJob(env.SCRIBE_DROP_DB, {
+        attemptId: pendingAttemptId,
+        eventId: nextId(),
+        jobId: pendingJobId,
+        ownerSub: OWNER_A.sub,
+        resultPrefix: `results/0123456789abcdef0123456789abcdef/${pendingJobId}/${pendingAttemptId}/`,
+        timestamp: NOW.toISOString(),
+      }),
+    ).resolves.toEqual({ status: "invalid_state" });
+  });
+
+  it("cancels a pending attempt immediately and requests running cancellation once", async () => {
+    const pending = await seedActiveJob("SUBMISSION_PENDING");
+    const pendingResult = await requestJobCancellation(env.SCRIBE_DROP_DB, {
+      eventId: nextId(),
+      jobId: pending.jobId,
+      ownerSub: OWNER_A.sub,
+      timestamp: NOW.toISOString(),
+    });
+    expect(pendingResult).toMatchObject({
+      job: { status: "CANCELLED" },
+      status: "cancelled",
+    });
+    await expect(
+      requestJobCancellation(env.SCRIBE_DROP_DB, {
+        eventId: nextId(),
+        jobId: pending.jobId,
+        ownerSub: OWNER_A.sub,
+        timestamp: NOW.toISOString(),
+      }),
+    ).resolves.toMatchObject({
+      job: { status: "CANCELLED" },
+      status: "idempotent",
+    });
+
+    const running = await seedActiveJob("RUNNING");
+    await expect(
+      requestJobCancellation(env.SCRIBE_DROP_DB, {
+        eventId: nextId(),
+        jobId: running.jobId,
+        ownerSub: OWNER_A.sub,
+        timestamp: NOW.toISOString(),
+      }),
+    ).resolves.toMatchObject({
+      job: { status: "CANCEL_REQUESTED" },
+      status: "requested",
+    });
+    const attempts = await env.SCRIBE_DROP_DB.prepare(
+      "SELECT id, status FROM job_attempts WHERE id IN (?1, ?2) ORDER BY id",
+    )
+      .bind(pending.attemptId, running.attemptId)
+      .all();
+    expect(attempts.results).toContainEqual({
+      id: pending.attemptId,
+      status: "CANCELLED",
+    });
+    expect(attempts.results).toContainEqual({
+      id: running.attemptId,
+      status: "CANCEL_REQUESTED",
+    });
+    const events = await env.SCRIBE_DROP_DB.prepare(
+      "SELECT COUNT(*) AS count FROM job_events WHERE event_type = 'job_cancel_requested'",
+    ).first<{ count: number }>();
+    expect(events?.count).toBe(2);
+  });
+
+  it("persists one cancellation event across concurrent requests", async () => {
+    const running = await seedActiveJob("RUNNING");
+    const results = await Promise.all([
+      requestJobCancellation(env.SCRIBE_DROP_DB, {
+        eventId: nextId(),
+        jobId: running.jobId,
+        ownerSub: OWNER_A.sub,
+        timestamp: NOW.toISOString(),
+      }),
+      requestJobCancellation(env.SCRIBE_DROP_DB, {
+        eventId: nextId(),
+        jobId: running.jobId,
+        ownerSub: OWNER_A.sub,
+        timestamp: NOW.toISOString(),
+      }),
+    ]);
+
+    expect(results.some((result) => result.status === "requested")).toBe(true);
+    expect(
+      results.every((result) =>
+        ["idempotent", "invalid_state", "requested"].includes(result.status),
+      ),
+    ).toBe(true);
+    const job = await env.SCRIBE_DROP_DB.prepare("SELECT status FROM jobs WHERE id = ?1")
+      .bind(running.jobId)
+      .first();
+    expect(job).toEqual({ status: "CANCEL_REQUESTED" });
+    const events = await env.SCRIBE_DROP_DB.prepare(
+      `
+        SELECT COUNT(*) AS count
+        FROM job_events
+        WHERE job_id = ?1
+          AND event_type = 'job_cancel_requested'
+      `,
+    )
+      .bind(running.jobId)
+      .first<{ count: number }>();
+    expect(events?.count).toBe(1);
+  });
+
+  it("hides foreign cancellation targets and rejects terminal failures", async () => {
+    const active = await seedActiveJob("RUNNING");
+    await expect(
+      requestJobCancellation(env.SCRIBE_DROP_DB, {
+        eventId: nextId(),
+        jobId: active.jobId,
+        ownerSub: OWNER_B.sub,
+        timestamp: NOW.toISOString(),
+      }),
+    ).resolves.toEqual({ status: "not_found" });
+    const failed = await seedFailedJob();
+    await expect(
+      requestJobCancellation(env.SCRIBE_DROP_DB, {
+        eventId: nextId(),
+        jobId: failed.jobId,
+        ownerSub: OWNER_A.sub,
+        timestamp: NOW.toISOString(),
+      }),
+    ).resolves.toEqual({ status: "invalid_state" });
+  });
 });
 
 describe("job API handlers", () => {
@@ -787,6 +1178,167 @@ describe("job API handlers", () => {
     expect(stored).toEqual({
       status: "UPLOADED",
       version: 3,
+    });
+  });
+
+  it("accepts a strict retry request and hides foreign ownership", async () => {
+    const seeded = await seedFailedJob();
+    const attemptId = nextId();
+    const response = await handleRetryJob(
+      {
+        data: requestData(),
+        env: handlerEnvironment(),
+        params: { id: seeded.jobId },
+        request: new Request(`https://example.test/api/jobs/${seeded.jobId}/retry`, {
+          body: "{}",
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        }),
+      },
+      {
+        createAttemptId: () => attemptId,
+        createEventId: () => nextId(),
+        now: () => NOW,
+      },
+    );
+    expect(response.status).toBe(200);
+    expect(jobActionResponseSchema.parse(await response.json()).job).toMatchObject({
+      id: seeded.jobId,
+      status: "SUBMISSION_PENDING",
+    });
+
+    const stored = await env.SCRIBE_DROP_DB.prepare(
+      "SELECT result_prefix FROM job_attempts WHERE id = ?1",
+    )
+      .bind(attemptId)
+      .first<{ result_prefix: string }>();
+    expect(stored?.result_prefix).toMatch(
+      new RegExp(`^results/[0-9a-f]{32}/${seeded.jobId}/${attemptId}/$`, "u"),
+    );
+    expect(stored?.result_prefix).not.toContain(OWNER_A.sub);
+    expect(stored?.result_prefix).not.toContain(OWNER_A.email);
+
+    const foreignSeeded = await seedFailedJob(OWNER_B);
+    const hiddenResponse = await handleRetryJob({
+      data: requestData(),
+      env: handlerEnvironment(),
+      params: { id: foreignSeeded.jobId },
+      request: new Request(`https://example.test/api/jobs/${foreignSeeded.jobId}/retry`, {
+        body: "{}",
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      }),
+    });
+    expect(hiddenResponse.status).toBe(404);
+
+    const unknownFieldResponse = await handleRetryJob({
+      data: requestData(),
+      env: handlerEnvironment(),
+      params: { id: seeded.jobId },
+      request: new Request(`https://example.test/api/jobs/${seeded.jobId}/retry`, {
+        body: '{"force":true}',
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      }),
+    });
+    expect(unknownFieldResponse.status).toBe(400);
+  });
+
+  it("accepts a strict owner-scoped cancellation request", async () => {
+    const active = await seedActiveJob("RUNNING");
+    const response = await handleCancelJob(
+      {
+        data: requestData(),
+        env: handlerEnvironment(),
+        params: { id: active.jobId },
+        request: new Request(`https://example.test/api/jobs/${active.jobId}/cancel`, {
+          body: "{}",
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        }),
+      },
+      {
+        createEventId: () => nextId(),
+        now: () => NOW,
+      },
+    );
+    expect(response.status).toBe(200);
+    expect(jobActionResponseSchema.parse(await response.json()).job).toMatchObject({
+      id: active.jobId,
+      status: "CANCEL_REQUESTED",
+    });
+
+    const foreign = await seedActiveJob("RUNNING", OWNER_B);
+    const hiddenResponse = await handleCancelJob({
+      data: requestData(),
+      env: handlerEnvironment(),
+      params: { id: foreign.jobId },
+      request: new Request(`https://example.test/api/jobs/${foreign.jobId}/cancel`, {
+        body: "{}",
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      }),
+    });
+    expect(hiddenResponse.status).toBe(404);
+  });
+
+  it("returns owner-scoped artifact metadata and a five-minute download capability", async () => {
+    const completed = await seedCompletedJob();
+    const detail = await createD1JobRepository(env.SCRIBE_DROP_DB).findByOwner(
+      OWNER_A.sub,
+      completed.jobId,
+    );
+    expect(detail?.artifacts).toEqual([
+      { format: "json", sizeBytes: 11 },
+      { format: "markdown", sizeBytes: 10 },
+      { format: "srt", sizeBytes: 12 },
+    ]);
+
+    let signedKey: string | undefined;
+    const response = await handleGetArtifact(
+      {
+        data: requestData(),
+        env: handlerEnvironment(),
+        params: { format: "markdown", id: completed.jobId },
+        request: new Request(`https://example.test/api/jobs/${completed.jobId}/artifacts/markdown`),
+      },
+      {
+        createArtifactDownload: (input) => {
+          signedKey = input.key;
+          return Promise.resolve({
+            expiresAt: "2027-01-01T00:15:00.000Z",
+            url: "https://storage.example.test/download?signature=test-only",
+          });
+        },
+        now: () => NOW,
+      },
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(artifactDownloadResponseSchema.parse(await response.json())).toEqual({
+      expiresAt: "2027-01-01T00:15:00.000Z",
+      url: "https://storage.example.test/download?signature=test-only",
+    });
+    expect(signedKey).toBe(`${completed.resultPrefix}transcript.md`);
+
+    const hidden = await handleGetArtifact({
+      data: requestData(OWNER_B),
+      env: handlerEnvironment(),
+      params: { format: "markdown", id: completed.jobId },
+      request: new Request(`https://example.test/api/jobs/${completed.jobId}/artifacts/markdown`),
+    });
+    expect(hidden.status).toBe(404);
+
+    const active = await seedActiveJob("RUNNING");
+    const notReady = await handleGetArtifact({
+      data: requestData(),
+      env: handlerEnvironment(),
+      params: { format: "markdown", id: active.jobId },
+      request: new Request(`https://example.test/api/jobs/${active.jobId}/artifacts/markdown`),
+    });
+    expect(notReady.status).toBe(409);
+    await expect(notReady.json()).resolves.toMatchObject({
+      error: { code: "ARTIFACT_NOT_READY" },
     });
   });
 

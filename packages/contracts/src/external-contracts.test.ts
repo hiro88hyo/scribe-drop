@@ -210,6 +210,29 @@ describe("RunPod schemas", () => {
       }).success,
     ).toBe(true);
   });
+
+  it("validates and discards unneeded provider metadata echoed by RunPod status", () => {
+    const result = runpodStatusResponseSchema.safeParse({
+      delayTime: 1_000,
+      error: "provider detail that must not reach logs",
+      id: "runpod-job-id",
+      input: {
+        attemptId: ATTEMPT_ID,
+        claimToken: "A".repeat(43),
+        jobId: JOB_ID,
+        schemaVersion: 1,
+      },
+      status: "IN_PROGRESS",
+      workerId: "worker-id",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect("error" in result.data).toBe(false);
+      expect("input" in result.data).toBe(false);
+      expect("workerId" in result.data).toBe(false);
+    }
+  });
 });
 
 describe("resultManifestSchema", () => {

@@ -69,6 +69,8 @@ export const createJobResponseSchema = z
   .strict();
 
 export const uploadCompleteRequestSchema = z.object({}).strict();
+export const retryJobRequestSchema = z.object({}).strict();
+export const cancelJobRequestSchema = z.object({}).strict();
 
 export const artifactSummarySchema = z
   .object({
@@ -156,11 +158,14 @@ export type JobOptions = z.infer<typeof jobOptionsSchema>;
 export type CreateJobRequest = z.infer<typeof createJobRequestSchema>;
 export type CreateJobResponse = z.infer<typeof createJobResponseSchema>;
 export type UploadCompleteRequest = z.infer<typeof uploadCompleteRequestSchema>;
+export type RetryJobRequest = z.infer<typeof retryJobRequestSchema>;
+export type CancelJobRequest = z.infer<typeof cancelJobRequestSchema>;
 export type TemporaryUploadCredentials = z.infer<typeof temporaryUploadCredentialsSchema>;
 export type JobSummary = z.infer<typeof jobSummarySchema>;
 export type JobDetail = z.infer<typeof jobDetailSchema>;
 export type ListJobsQuery = z.infer<typeof listJobsQuerySchema>;
 export type ListJobsResponse = z.infer<typeof listJobsResponseSchema>;
 export type JobActionResponse = z.infer<typeof jobActionResponseSchema>;
+export type ArtifactDownloadResponse = z.infer<typeof artifactDownloadResponseSchema>;
 export type MeResponse = z.infer<typeof meResponseSchema>;
 export type ApiErrorResponse = z.infer<typeof apiErrorResponseSchema>;

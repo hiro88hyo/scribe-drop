@@ -1,15 +1,20 @@
 import {
   ALLOWED_MEDIA_TYPES,
   MAX_FILE_SIZE_BYTES,
+  artifactDownloadResponseSchema,
+  cancelJobRequestSchema,
   createJobRequestSchema,
   createJobResponseSchema,
   jobActionResponseSchema,
   listJobsQuerySchema,
   listJobsResponseSchema,
+  outputFormatSchema,
+  retryJobRequestSchema,
   ulidSchema,
   uploadCompleteRequestSchema,
   type AllowedMediaType,
   type CreateJobResponse,
+  type ArtifactDownloadResponse,
   type JobActionResponse,
   type ListJobsResponse,
   type TemporaryUploadCredentials,
@@ -23,9 +28,21 @@ import { createUlid } from "../id/ulid.js";
 import type { WebRequestData } from "../web-context.js";
 import { parseJobConfig, type JobEnvironment } from "./job-config.js";
 import { decodeJobCursor } from "./job-cursor.js";
-import { createD1JobRepository, type JobDatabase, type JobRepository } from "./job-repository.js";
-import { createSourceKey as createFinalSourceKey } from "./job-source-key.js";
+import {
+  createD1JobRepository,
+  findArtifactDownloadByOwner,
+  requestJobCancellation,
+  retryFailedJob,
+  type JobDatabase,
+  type JobRepository,
+  type RequestJobCancellationInput,
+  type RequestJobCancellationResult,
+  type RetryFailedJobInput,
+  type RetryFailedJobResult,
+} from "./job-repository.js";
+import { createOwnerHash, createSourceKey as createFinalSourceKey } from "./job-source-key.js";
 import { createR2TemporaryUploadCredentials } from "./r2-temporary-credentials.js";
+import { createArtifactDownload, type ArtifactDownloadInput } from "./r2-artifact-download.js";
 
 const MAX_CREATE_JOB_BODY_BYTES = 16 * 1024;
 const INVALID_REQUEST_MESSAGE = "入力内容を確認してください。";
@@ -38,6 +55,7 @@ const SOURCE_NOT_FOUND_MESSAGE = "アップロード済みファイルを確認�
 const SOURCE_SIZE_MISMATCH_MESSAGE = "アップロード済みファイルのサイズが一致しません。";
 const SOURCE_ETAG_CHANGED_MESSAGE = "アップロード済みファイルが変更されています。";
 const INVALID_STATE_MESSAGE = "現在の状態ではこの操作を実行できません。";
+const ARTIFACT_NOT_READY_MESSAGE = "成果物はまだダウンロードできません。";
 
 const r2HeadResultSchema = z.object({
   etag: z.string().min(1).max(512),
@@ -71,7 +89,35 @@ interface UploadCompleteHandlerContext {
   readonly request: Request;
 }
 
+interface RetryJobHandlerContext {
+  readonly data: WebRequestData;
+  readonly env: JobEnvironment & {
+    readonly SCRIBE_DROP_DB: D1Database;
+  };
+  readonly params: {
+    readonly id: string | string[];
+  };
+  readonly request: Request;
+}
+
+interface ArtifactHandlerContext {
+  readonly data: WebRequestData;
+  readonly env: JobEnvironment & {
+    readonly SCRIBE_DROP_DB: D1Database;
+  };
+  readonly params: {
+    readonly format: string | string[];
+    readonly id: string | string[];
+  };
+  readonly request: Request;
+}
+
 export interface JobHandlerDependencies {
+  readonly createArtifactDownload?: (
+    input: ArtifactDownloadInput,
+  ) => Promise<ArtifactDownloadResponse>;
+  readonly createAttemptId?: (timestampMilliseconds: number) => string;
+  readonly createEventId?: (timestampMilliseconds: number) => string;
   readonly createJobId?: (timestampMilliseconds: number) => string;
   readonly createRepository?: (database: JobDatabase) => JobRepository;
   readonly createSourceKey?: (
@@ -91,6 +137,14 @@ export interface JobHandlerDependencies {
   readonly headSourceObject?: (bucket: R2Bucket, key: string) => Promise<unknown>;
   readonly now?: () => Date;
   readonly randomBytes?: RandomBytes;
+  readonly requestJobCancellation?: (
+    database: D1Database,
+    input: RequestJobCancellationInput,
+  ) => Promise<RequestJobCancellationResult>;
+  readonly retryFailedJob?: (
+    database: D1Database,
+    input: RetryFailedJobInput,
+  ) => Promise<RetryFailedJobResult>;
 }
 
 type JsonBodyResult =
@@ -373,6 +427,202 @@ export async function handleGetJob(
   }
 
   return Response.json(job);
+}
+
+export async function handleGetArtifact(
+  context: ArtifactHandlerContext,
+  dependencies: JobHandlerDependencies = {},
+): Promise<Response> {
+  const id = Array.isArray(context.params.id) ? undefined : context.params.id;
+  const format = Array.isArray(context.params.format) ? undefined : context.params.format;
+  const idResult = ulidSchema.safeParse(id);
+  const formatResult = outputFormatSchema.safeParse(format);
+  if (!idResult.success || !formatResult.success) {
+    return createApiErrorResponse({
+      code: "NOT_FOUND",
+      message: NOT_FOUND_MESSAGE,
+      requestId: getRequestId(context.data),
+      status: 404,
+    });
+  }
+  const config = parseJobConfig(context.env);
+  if (config === undefined) {
+    throw new Error("Job configuration is invalid");
+  }
+  const auth = getVerifiedAuthContext(context.data);
+  const repositoryFactory = dependencies.createRepository ?? createD1JobRepository;
+  const job = await repositoryFactory(context.env.SCRIBE_DROP_DB).findByOwner(
+    auth.sub,
+    idResult.data,
+  );
+  if (job === undefined) {
+    return createApiErrorResponse({
+      code: "NOT_FOUND",
+      message: NOT_FOUND_MESSAGE,
+      requestId: getRequestId(context.data),
+      status: 404,
+    });
+  }
+  if (job.status !== "COMPLETED") {
+    return createApiErrorResponse({
+      code: "ARTIFACT_NOT_READY",
+      message: ARTIFACT_NOT_READY_MESSAGE,
+      requestId: getRequestId(context.data),
+      status: 409,
+    });
+  }
+  const artifact = await findArtifactDownloadByOwner(
+    context.env.SCRIBE_DROP_DB,
+    auth.sub,
+    idResult.data,
+    formatResult.data,
+  );
+  if (artifact === undefined) {
+    return createApiErrorResponse({
+      code: "ARTIFACT_NOT_READY",
+      message: ARTIFACT_NOT_READY_MESSAGE,
+      requestId: getRequestId(context.data),
+      status: 409,
+    });
+  }
+  const signArtifact = dependencies.createArtifactDownload ?? createArtifactDownload;
+  const responseBody = artifactDownloadResponseSchema.parse(
+    await signArtifact({
+      accountId: config.cloudflareAccountId,
+      bucket: config.r2BucketName,
+      key: artifact.key,
+      now: dependencies.now?.() ?? new Date(),
+      parentAccessKeyId: config.r2ParentAccessKeyId,
+      parentSecretAccessKey: config.r2ParentSecretAccessKey,
+    }),
+  ) satisfies ArtifactDownloadResponse;
+  const response = Response.json(responseBody);
+  response.headers.set("Cache-Control", "no-store");
+  return response;
+}
+
+export async function handleRetryJob(
+  context: RetryJobHandlerContext,
+  dependencies: JobHandlerDependencies = {},
+): Promise<Response> {
+  const id = Array.isArray(context.params.id) ? undefined : context.params.id;
+  const idResult = ulidSchema.safeParse(id);
+  if (!idResult.success) {
+    return createApiErrorResponse({
+      code: "NOT_FOUND",
+      message: NOT_FOUND_MESSAGE,
+      requestId: getRequestId(context.data),
+      status: 404,
+    });
+  }
+
+  const bodyResult = await readBoundedJsonBody(context.request);
+  if (!bodyResult.ok || !retryJobRequestSchema.safeParse(bodyResult.value).success) {
+    return invalidRequest(context.data);
+  }
+  const config = parseJobConfig(context.env);
+  if (config === undefined) {
+    throw new Error("Job configuration is invalid");
+  }
+
+  const auth = getVerifiedAuthContext(context.data);
+  const now = dependencies.now?.() ?? new Date();
+  const createAttemptId =
+    dependencies.createAttemptId ??
+    ((timestampMilliseconds: number) =>
+      createUlid(timestampMilliseconds, dependencies.randomBytes));
+  const createEventId =
+    dependencies.createEventId ??
+    ((timestampMilliseconds: number) =>
+      createUlid(timestampMilliseconds, dependencies.randomBytes));
+  const attemptId = createAttemptId(now.getTime());
+  const ownerHash = await createOwnerHash(auth.sub, config.ownerHashHmacSecret);
+  const resultPrefix = `results/${ownerHash}/${idResult.data}/${attemptId}/`;
+  const retry = dependencies.retryFailedJob ?? retryFailedJob;
+  const result = await retry(context.env.SCRIBE_DROP_DB, {
+    attemptId,
+    eventId: createEventId(now.getTime()),
+    jobId: idResult.data,
+    ownerSub: auth.sub,
+    resultPrefix,
+    timestamp: now.toISOString(),
+  });
+  if (result.status === "not_found") {
+    return createApiErrorResponse({
+      code: "NOT_FOUND",
+      message: NOT_FOUND_MESSAGE,
+      requestId: getRequestId(context.data),
+      status: 404,
+    });
+  }
+  if (result.status === "invalid_state") {
+    return createApiErrorResponse({
+      code: "INVALID_STATE",
+      message: INVALID_STATE_MESSAGE,
+      requestId: getRequestId(context.data),
+      status: 409,
+    });
+  }
+
+  const responseBody = jobActionResponseSchema.parse({
+    job: result.job,
+  }) satisfies JobActionResponse;
+  return Response.json(responseBody);
+}
+
+export async function handleCancelJob(
+  context: RetryJobHandlerContext,
+  dependencies: JobHandlerDependencies = {},
+): Promise<Response> {
+  const id = Array.isArray(context.params.id) ? undefined : context.params.id;
+  const idResult = ulidSchema.safeParse(id);
+  if (!idResult.success) {
+    return createApiErrorResponse({
+      code: "NOT_FOUND",
+      message: NOT_FOUND_MESSAGE,
+      requestId: getRequestId(context.data),
+      status: 404,
+    });
+  }
+  const bodyResult = await readBoundedJsonBody(context.request);
+  if (!bodyResult.ok || !cancelJobRequestSchema.safeParse(bodyResult.value).success) {
+    return invalidRequest(context.data);
+  }
+
+  const auth = getVerifiedAuthContext(context.data);
+  const now = dependencies.now?.() ?? new Date();
+  const createEventId =
+    dependencies.createEventId ??
+    ((timestampMilliseconds: number) =>
+      createUlid(timestampMilliseconds, dependencies.randomBytes));
+  const requestCancellation = dependencies.requestJobCancellation ?? requestJobCancellation;
+  const result = await requestCancellation(context.env.SCRIBE_DROP_DB, {
+    eventId: createEventId(now.getTime()),
+    jobId: idResult.data,
+    ownerSub: auth.sub,
+    timestamp: now.toISOString(),
+  });
+  if (result.status === "not_found") {
+    return createApiErrorResponse({
+      code: "NOT_FOUND",
+      message: NOT_FOUND_MESSAGE,
+      requestId: getRequestId(context.data),
+      status: 404,
+    });
+  }
+  if (result.status === "invalid_state") {
+    return createApiErrorResponse({
+      code: "INVALID_STATE",
+      message: INVALID_STATE_MESSAGE,
+      requestId: getRequestId(context.data),
+      status: 409,
+    });
+  }
+
+  const responseBody = jobActionResponseSchema.parse({
+    job: result.job,
+  }) satisfies JobActionResponse;
+  return Response.json(responseBody);
 }
 
 export async function handleUploadComplete(

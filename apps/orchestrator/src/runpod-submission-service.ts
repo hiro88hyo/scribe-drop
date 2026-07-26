@@ -11,7 +11,7 @@ import {
   createD1RunpodControlRepository,
   type RunpodControlRepository,
 } from "./runpod-control-repository.js";
-import { createRunpodClient, type RunpodClient } from "./runpod-client.js";
+import { createRunpodClient, type RunpodSubmissionClient } from "./runpod-client.js";
 
 export const CLAIM_TOKEN_TTL_MS = 15 * 60 * 1_000;
 
@@ -26,7 +26,9 @@ export interface RunpodSubmissionEnvironment {
 export interface RunpodSubmissionDependencies {
   readonly createEventId?: (timestampMilliseconds: number) => string;
   readonly createRepository?: (database: D1Database) => RunpodControlRepository;
-  readonly createRunpodClient?: (environment: RunpodSubmissionEnvironment) => RunpodClient;
+  readonly createRunpodClient?: (
+    environment: RunpodSubmissionEnvironment,
+  ) => RunpodSubmissionClient;
   readonly logger: StructuredLogger;
   readonly now?: () => Date;
   readonly randomBytes?: CapabilityRandomBytes & RandomBytes;

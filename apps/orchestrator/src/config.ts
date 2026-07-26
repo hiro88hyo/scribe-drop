@@ -58,6 +58,55 @@ const runpodConfigSchema = orchestratorConfigSchema
     path: ["runpodInternalBaseUrl"],
   });
 
+const notificationConfigSchema = z
+  .object({
+    discordWebhookUrl: z.url().max(2048),
+    webBaseUrl: z.url().max(2048),
+  })
+  .strict()
+  .refine(
+    ({ discordWebhookUrl }) => {
+      const url = new URL(discordWebhookUrl);
+      return (
+        url.protocol === "https:" &&
+        url.username === "" &&
+        url.password === "" &&
+        url.port === "" &&
+        url.search === "" &&
+        url.hash === "" &&
+        ["discord.com", "canary.discord.com", "ptb.discord.com"].includes(
+          url.hostname.toLowerCase(),
+        ) &&
+        /^\/api\/webhooks\/[0-9]+\/[A-Za-z0-9._-]+$/u.test(url.pathname)
+      );
+    },
+    {
+      message: "Discord webhook URL is not allowed",
+      path: ["discordWebhookUrl"],
+    },
+  );
+
+function isAllowedWebBaseUrl(value: string, environment: DeploymentEnvironment): boolean {
+  if (environment !== "local") {
+    return isAllowedInternalBaseUrl(value);
+  }
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return (
+    (url.protocol === "http:" || url.protocol === "https:") &&
+    url.hostname.toLowerCase() === "localhost" &&
+    url.username === "" &&
+    url.password === "" &&
+    url.search === "" &&
+    url.hash === "" &&
+    (url.pathname === "" || url.pathname === "/")
+  );
+}
+
 export interface OrchestratorConfigEnvironment {
   readonly APP_ENV: string;
   readonly CLOUDFLARE_ACCOUNT_ID: string;
@@ -72,6 +121,12 @@ export interface RunpodConfigEnvironment extends OrchestratorConfigEnvironment {
   readonly RUNPOD_INTERNAL_BASE_URL: string;
 }
 
+export interface NotificationConfigEnvironment {
+  readonly APP_ENV: string;
+  readonly DISCORD_WEBHOOK_URL?: string;
+  readonly WEB_BASE_URL?: string;
+}
+
 export interface OrchestratorConfig {
   readonly appEnvironment: DeploymentEnvironment;
   readonly cloudflareAccountId: string;
@@ -84,6 +139,11 @@ export interface RunpodConfig extends OrchestratorConfig {
   readonly runpodApiKey: string;
   readonly runpodEndpointId: string;
   readonly runpodInternalBaseUrl: string;
+}
+
+export interface NotificationConfig {
+  readonly discordWebhookUrl: string;
+  readonly webBaseUrl: string;
 }
 
 export function parseOrchestratorConfig(
@@ -109,4 +169,19 @@ export function parseRunpodConfig(environment: RunpodConfigEnvironment): RunpodC
     runpodInternalBaseUrl: environment.RUNPOD_INTERNAL_BASE_URL,
   });
   return result.success ? result.data : undefined;
+}
+
+export function parseNotificationConfig(
+  environment: NotificationConfigEnvironment,
+): NotificationConfig | undefined {
+  const environmentResult = z.enum(DEPLOYMENT_ENVIRONMENTS).safeParse(environment.APP_ENV);
+  const result = notificationConfigSchema.safeParse({
+    discordWebhookUrl: environment.DISCORD_WEBHOOK_URL,
+    webBaseUrl: environment.WEB_BASE_URL,
+  });
+  return result.success &&
+    environmentResult.success &&
+    isAllowedWebBaseUrl(result.data.webBaseUrl, environmentResult.data)
+    ? result.data
+    : undefined;
 }

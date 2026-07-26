@@ -77,6 +77,10 @@ export function renderOrchestratorStagingConfig(template, identifiers) {
     "SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN",
   );
   const orchestratorHostname = new URL(orchestratorOrigin).hostname;
+  const webOrigin = requireExactHttpsOrigin(
+    identifiers.webOrigin,
+    "SCRIBE_DROP_STAGING_WEB_ORIGIN",
+  );
   const stagingMarker = "[env.staging]";
   const stagingIndex = template.indexOf(stagingMarker);
   if (stagingIndex === -1) {
@@ -108,6 +112,12 @@ export function renderOrchestratorStagingConfig(template, identifiers) {
     `RUNPOD_INTERNAL_BASE_URL = "${stagingOrchestratorOriginPlaceholder}"`,
     `RUNPOD_INTERNAL_BASE_URL = "${orchestratorOrigin}"`,
     "orchestrator staging internal origin",
+  );
+  stagingConfig = replaceOnce(
+    stagingConfig,
+    `WEB_BASE_URL = "${webOriginPlaceholder}"`,
+    `WEB_BASE_URL = "${webOrigin}"`,
+    "orchestrator staging web origin",
   );
 
   return replaceOnce(

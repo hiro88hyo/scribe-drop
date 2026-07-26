@@ -2,7 +2,7 @@ import { createStructuredLogger, type StructuredLogger } from "@scribe-drop/obse
 import { describe, expect, it, vi } from "vitest";
 
 import type { PreparedSubmission, RunpodControlRepository } from "./runpod-control-repository.js";
-import type { RunpodClient } from "./runpod-client.js";
+import type { RunpodSubmissionClient } from "./runpod-client.js";
 import { CLAIM_TOKEN_TTL_MS, submitPendingRunpodJob } from "./runpod-submission-service.js";
 import type { RunpodSubmissionEnvironment } from "./runpod-submission-service.js";
 
@@ -18,8 +18,13 @@ const PREPARED: PreparedSubmission = {
 
 function fakeRepository(overrides: Partial<RunpodControlRepository> = {}): RunpodControlRepository {
   return {
+    cancelExpiredUnboundSubmission: () => Promise.resolve(false),
     claimWinner: () => Promise.resolve(false),
     findClaimContext: () => Promise.resolve(undefined),
+    findDispatchablePendingJobId: () => Promise.resolve(undefined),
+    findExpiredUnknownSubmissions: () => Promise.resolve([]),
+    findExpiredUnboundCancellations: () => Promise.resolve([]),
+    failExpiredUnknownSubmission: () => Promise.resolve(false),
     markHeartbeat: () => Promise.resolve(false),
     prepareSubmission: () => Promise.resolve(PREPARED),
     recordClaimSubmission: () => Promise.resolve(),
@@ -58,7 +63,7 @@ describe("RunPod submission service", () => {
     const recordSubmissionAccepted = vi.fn<RunpodControlRepository["recordSubmissionAccepted"]>(
       () => Promise.resolve(true),
     );
-    const submit = vi.fn<RunpodClient["submit"]>(() =>
+    const submit = vi.fn<RunpodSubmissionClient["submit"]>(() =>
       Promise.resolve({ outcome: "accepted", runpodJobId: "runpod-job-id" }),
     );
 
@@ -100,7 +105,7 @@ describe("RunPod submission service", () => {
   });
 
   it("does not call RunPod while another attempt owns the submission gate", async () => {
-    const submit = vi.fn<RunpodClient["submit"]>();
+    const submit = vi.fn<RunpodSubmissionClient["submit"]>();
 
     await expect(
       submitPendingRunpodJob(JOB_ID, environment(), {

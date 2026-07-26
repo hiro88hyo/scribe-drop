@@ -1,18 +1,22 @@
 import {
   apiErrorResponseSchema,
+  artifactDownloadResponseSchema,
   createJobRequestSchema,
   createJobResponseSchema,
   jobActionResponseSchema,
   jobDetailSchema,
   listJobsResponseSchema,
   meResponseSchema,
+  outputFormatSchema,
   ulidSchema,
+  type ArtifactDownloadResponse,
   type CreateJobRequest,
   type CreateJobResponse,
   type JobActionResponse,
   type JobDetail,
   type ListJobsResponse,
   type MeResponse,
+  type OutputFormat,
   type PublicErrorCode,
 } from "@scribe-drop/contracts";
 import type { ZodType } from "zod";
@@ -48,6 +52,7 @@ export class ApiClientError extends Error {
 }
 
 export interface ScribeDropApiClient {
+  cancelJob(jobId: string, csrfToken: string, signal?: AbortSignal): Promise<JobActionResponse>;
   completeUpload(
     jobId: string,
     csrfToken: string,
@@ -59,6 +64,11 @@ export interface ScribeDropApiClient {
     signal?: AbortSignal,
   ): Promise<CreateJobResponse>;
   getJob(jobId: string, signal?: AbortSignal): Promise<JobDetail>;
+  getArtifact(
+    jobId: string,
+    format: OutputFormat,
+    signal?: AbortSignal,
+  ): Promise<ArtifactDownloadResponse>;
   getMe(signal?: AbortSignal): Promise<MeResponse>;
   listJobs(
     input: {
@@ -67,6 +77,7 @@ export interface ScribeDropApiClient {
     },
     signal?: AbortSignal,
   ): Promise<ListJobsResponse>;
+  retryJob(jobId: string, csrfToken: string, signal?: AbortSignal): Promise<JobActionResponse>;
 }
 
 interface JsonRequestOptions {
@@ -185,6 +196,27 @@ async function requestJson<Output>(
 
 export function createApiClient(fetcher: ApiFetch = globalThis.fetch): ScribeDropApiClient {
   return {
+    async cancelJob(jobId, csrfToken, signal) {
+      const idResult = ulidSchema.safeParse(jobId);
+      if (!idResult.success || csrfToken.length < 32 || csrfToken.length > 4096) {
+        throw new ApiClientError({
+          kind: "invalid_request",
+          status: 400,
+        });
+      }
+      return await requestJson(
+        fetcher,
+        `/api/jobs/${encodeURIComponent(idResult.data)}/cancel`,
+        jobActionResponseSchema,
+        {
+          body: "{}",
+          csrfToken,
+          method: "POST",
+          ...(signal === undefined ? {} : { signal }),
+        },
+      );
+    },
+
     async completeUpload(jobId, csrfToken, signal) {
       const idResult = ulidSchema.safeParse(jobId);
       if (!idResult.success || csrfToken.length < 32 || csrfToken.length > 4096) {
@@ -241,6 +273,26 @@ export function createApiClient(fetcher: ApiFetch = globalThis.fetch): ScribeDro
       );
     },
 
+    getArtifact(jobId, format, signal) {
+      const idResult = ulidSchema.safeParse(jobId);
+      const formatResult = outputFormatSchema.safeParse(format);
+      if (!idResult.success || !formatResult.success) {
+        throw new ApiClientError({
+          kind: "invalid_request",
+          status: 404,
+        });
+      }
+      return requestJson(
+        fetcher,
+        `/api/jobs/${encodeURIComponent(idResult.data)}/artifacts/${formatResult.data}`,
+        artifactDownloadResponseSchema,
+        {
+          method: "GET",
+          ...(signal === undefined ? {} : { signal }),
+        },
+      );
+    },
+
     getMe(signal) {
       return requestJson(fetcher, "/api/me", meResponseSchema, {
         method: "GET",
@@ -259,6 +311,27 @@ export function createApiClient(fetcher: ApiFetch = globalThis.fetch): ScribeDro
         method: "GET",
         ...(signal === undefined ? {} : { signal }),
       });
+    },
+
+    async retryJob(jobId, csrfToken, signal) {
+      const idResult = ulidSchema.safeParse(jobId);
+      if (!idResult.success || csrfToken.length < 32 || csrfToken.length > 4096) {
+        throw new ApiClientError({
+          kind: "invalid_request",
+          status: 400,
+        });
+      }
+      return await requestJson(
+        fetcher,
+        `/api/jobs/${encodeURIComponent(idResult.data)}/retry`,
+        jobActionResponseSchema,
+        {
+          body: "{}",
+          csrfToken,
+          method: "POST",
+          ...(signal === undefined ? {} : { signal }),
+        },
+      );
     },
   };
 }

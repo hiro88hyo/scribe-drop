@@ -1,5 +1,6 @@
 import { handleUploadQueueBatch, type UploadQueueEnvironment } from "./upload-queue-consumer.js";
 import { handleRunpodHttpRequest, type RunpodHttpEnvironment } from "./runpod-http-handler.js";
+import { reconcileJobs, type ReconciliationEnvironment } from "./reconciliation-service.js";
 import { submitPendingRunpodJob } from "./runpod-submission-service.js";
 
 export const ORCHESTRATOR_APPLICATION_ID = "scribe-drop-orchestrator";
@@ -23,4 +24,10 @@ export default {
         ),
     });
   },
-} satisfies ExportedHandler<UploadQueueEnvironment & RunpodHttpEnvironment>;
+
+  async scheduled(_controller, environment): Promise<void> {
+    await reconcileJobs(environment);
+  },
+} satisfies ExportedHandler<
+  UploadQueueEnvironment & RunpodHttpEnvironment & ReconciliationEnvironment
+>;

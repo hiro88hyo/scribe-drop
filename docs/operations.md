@@ -5,6 +5,9 @@
 Phase 3ではR2 Event NotificationのQueue consumerとDLQ routingを実装し、stagingの
 D1、R2、Queue、DLQ、Event Notification、OrchestratorとAccess保護済みWebのdeployまで
 実施し、欠落R2 sourceのretryからDLQへの到達と限定ackもsmoke testで確認した。
+Phase 4ではstaging RunPod endpointを作成し、初回workerのRTX 4090配置、Secure Cloud、
+Ready、期限切れclaim拒否を確認した。Phase 5では5分Cronによるsubmission回収、
+status poll、finalize、cancelとnotification outboxをlocal実装・検証済みである。
 production environmentへのdeploymentは未実施である。この文書の手順は
 staging/production運用の必須runbookであり、placeholder IDのままremote操作してはならない。
 
@@ -80,7 +83,47 @@ application logはallowlistされた構造化eventだけを出す。最低限、
 - `upload_event_source_unavailable`
 - `upload_event_dependency_failure`
 - `upload_event_configuration_invalid`
+- `reconciliation.completed`
+- `reconciliation.configuration_invalid`
+- `reconciliation.dependency_failure`
+- `reconciliation.state_conflict`
+- `job.submission_expired`
+- `job.completion_deferred`
+- `job.completed`
+- `job.failed`
+- `job.cancelled`
+- `runpod_status_unavailable`
+- `runpod_status_invalid`
+- `runpod_terminal_observed`
+- `runpod_heartbeat_stale`
+- `upload_expired`
+- `notification.configuration_invalid`
+- `notification.sent`
+- `notification.deferred`
+- `notification.rejected`
 
 `dependency_failure`、`configuration_invalid`、DLQ増加はalert対象とする。
 `source_mutated`と`source_rejected`はjob単位のsecurity/quality signalとして追跡するが、
 logや通知へobject key、ETag、token、URL queryを追加しない。
+`reconciliation.dependency_failure`、`runpod_status_unavailable`の継続、
+`notification.rejected`もalert対象とする。Discord障害はjobの`COMPLETED`を取り消さない。
+未送信outboxはD1のstatus、attempt数、次回実行時刻だけをread-onlyで確認し、Webhook URLや
+本文を調査記録へ出さない。
+
+## Reconciliationと手動回復
+
+scheduled handlerは5分間隔で起動し、期限切れupload、結果不明submission、RunPod
+terminal status、artifact、cancel request、notification outboxを同じservice境界で
+回収する。Cronが重複しても期待status、active attempt、generation、winner、versionを
+含むCASで一度だけ状態を進める。
+
+- `SUBMITTING`でprovider応答が不明なattemptは、claim期限切れ、winnerなし、
+  submission記録なしを同時に満たす場合だけ`FAILED`へ収束させる。同じattemptを
+  `/run`へ再送しない。
+- 利用者のretryは`FAILED` jobに新しいgeneration、attempt、token、result prefixを作る。
+  RunPod Consoleのprovider-side retryは使わない。
+- cancelはWeb APIが`CANCEL_REQUESTED`を記録し、Cronがwinnerを再確認してRunPod
+  `/cancel`を呼ぶ。RunPod API keyをWebへ複製しない。
+- terminal statusをD1で観測していないjobは、manifestが存在しても`COMPLETED`にしない。
+- 手動修復が必要でもjob/attempt/outboxを直接SQLで更新しない。同じrepositoryとserviceを
+  使う専用repair commandを先に実装し、dry-run、CAS、監査eventを必須とする。

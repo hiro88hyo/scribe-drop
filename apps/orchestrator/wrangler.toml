@@ -3,11 +3,15 @@ main = "src/index.ts"
 compatibility_date = "2026-07-25"
 workers_dev = false
 
+[triggers]
+crons = ["*/5 * * * *"]
+
 [vars]
 APP_ENV = "local"
 CLOUDFLARE_ACCOUNT_ID = "00000000000000000000000000000000"
 R2_BUCKET_NAME = "scribe-drop-local"
 RUNPOD_INTERNAL_BASE_URL = "https://orchestrator.example.invalid"
+WEB_BASE_URL = "http://localhost:5173"
 
 [[d1_databases]]
 binding = "SCRIBE_DROP_DB"
@@ -33,11 +37,15 @@ routes = [
   { pattern = "replace-with-staging-orchestrator.example.invalid", custom_domain = true },
 ]
 
+[env.staging.triggers]
+crons = ["*/5 * * * *"]
+
 [env.staging.vars]
 APP_ENV = "staging"
 CLOUDFLARE_ACCOUNT_ID = "00000000000000000000000000000000"
 R2_BUCKET_NAME = "recording-transcriber-staging"
 RUNPOD_INTERNAL_BASE_URL = "https://replace-with-staging-orchestrator.example.invalid"
+WEB_BASE_URL = "https://replace-with-staging-web.example.invalid"
 
 [[env.staging.d1_databases]]
 binding = "SCRIBE_DROP_DB"

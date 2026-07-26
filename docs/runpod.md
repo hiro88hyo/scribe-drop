@@ -2,9 +2,13 @@
 
 ## 現在の checkpoint
 
-Phase 4ではCloudflare側のsubmission、claim、heartbeatと、RunPod Workerのlocal runtime、
-固定model入りimageまで実装している。実RunPod endpoint、GPU benchmark、timeout/TTL確定、
-staging smokeは未完了であり、productionへ投入しない。
+Phase 4ではCloudflare側のsubmission、claim、heartbeat、RunPod Workerのlocal runtime、
+固定model入りimageを実装した。staging専用endpointとtemplateを固定image digestから
+作成し、初回workerがReadyになるまで起動してRTX 4090のGPU配置とSecure Cloudを確認した。
+最小jobは期限切れclaimを安全に拒否して終了しており、endpoint invariantのcheckpointは
+完了した。実ID、image参照、originは追跡対象へ保存しない。実音声の処理時間、
+artifact/manifest、完了reconciliationを含むsmokeはPhase 5で行い、完了するまで
+productionへ投入しない。
 
 ## Image supply chain
 

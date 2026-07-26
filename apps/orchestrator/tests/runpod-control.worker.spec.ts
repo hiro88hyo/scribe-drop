@@ -140,6 +140,165 @@ describe("D1 RunPod control repository", () => {
     ]);
   });
 
+  it("fails only an expired unknown submission with no recorded RunPod job", async () => {
+    const repository = createD1RunpodControlRepository(env.SCRIBE_DROP_DB);
+    const claimHash = await hashCapabilityToken(CLAIM_TOKEN);
+    await repository.prepareSubmission({
+      claimExpiresAt: "2026-07-25T00:15:00.000Z",
+      claimTokenHash: claimHash,
+      jobId: JOB_ID,
+      timestamp: NOW,
+    });
+    await repository.recordSubmissionUnknown(ATTEMPT_ID, "2026-07-25T00:00:01.000Z");
+
+    await expect(
+      repository.findExpiredUnknownSubmissions("2026-07-25T00:14:59.999Z", 25),
+    ).resolves.toEqual([]);
+    await expect(
+      repository.findExpiredUnknownSubmissions("2026-07-25T00:15:00.000Z", 25),
+    ).resolves.toEqual([
+      {
+        attemptId: ATTEMPT_ID,
+        claimExpiresAt: "2026-07-25T00:15:00.000Z",
+        jobId: JOB_ID,
+      },
+    ]);
+
+    const outcomes = await Promise.all([
+      repository.failExpiredUnknownSubmission({
+        attemptId: ATTEMPT_ID,
+        eventId: FIRST_EVENT_ID,
+        jobId: JOB_ID,
+        timestamp: "2026-07-25T00:15:00.000Z",
+      }),
+      repository.failExpiredUnknownSubmission({
+        attemptId: ATTEMPT_ID,
+        eventId: SECOND_EVENT_ID,
+        jobId: JOB_ID,
+        timestamp: "2026-07-25T00:15:00.000Z",
+      }),
+    ]);
+    expect(outcomes.filter(Boolean)).toHaveLength(1);
+
+    const attempt = await env.SCRIBE_DROP_DB.prepare(
+      "SELECT status, submission_outcome, error_code, failed_at FROM job_attempts WHERE id = ?1",
+    )
+      .bind(ATTEMPT_ID)
+      .first();
+    expect(attempt).toEqual({
+      error_code: "PROCESSING_FAILED",
+      failed_at: "2026-07-25T00:15:00.000Z",
+      status: "FAILED",
+      submission_outcome: "unknown",
+    });
+    const job = await env.SCRIBE_DROP_DB.prepare(
+      "SELECT status, error_code, failed_at, version FROM jobs WHERE id = ?1",
+    )
+      .bind(JOB_ID)
+      .first();
+    expect(job).toEqual({
+      error_code: "PROCESSING_FAILED",
+      failed_at: "2026-07-25T00:15:00.000Z",
+      status: "FAILED",
+      version: 3,
+    });
+    const event = await env.SCRIBE_DROP_DB.prepare(
+      "SELECT event_type, actor, metadata_json FROM job_events WHERE job_id = ?1",
+    )
+      .bind(JOB_ID)
+      .first();
+    expect(event).toEqual({
+      actor: "orchestrator",
+      event_type: "runpod_submission_expired",
+      metadata_json: null,
+    });
+
+    await expect(
+      repository.claimWinner({
+        attemptId: ATTEMPT_ID,
+        claimTokenHash: claimHash,
+        eventId: FIRST_EVENT_ID,
+        heartbeatExpiresAt: "2026-07-25T08:00:00.000Z",
+        heartbeatTokenHash: await hashCapabilityToken("h".repeat(43)),
+        jobId: JOB_ID,
+        runpodJobId: "late-runpod-job",
+        timestamp: "2026-07-25T00:15:01.000Z",
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it("does not expire an unknown submission after any RunPod job ID is recorded", async () => {
+    const repository = createD1RunpodControlRepository(env.SCRIBE_DROP_DB);
+    await repository.prepareSubmission({
+      claimExpiresAt: "2026-07-25T00:15:00.000Z",
+      claimTokenHash: await hashCapabilityToken(CLAIM_TOKEN),
+      jobId: JOB_ID,
+      timestamp: NOW,
+    });
+    await repository.recordSubmissionUnknown(ATTEMPT_ID, "2026-07-25T00:00:01.000Z");
+    await repository.recordClaimSubmission({
+      attemptId: ATTEMPT_ID,
+      runpodJobId: "known-runpod-job",
+      timestamp: "2026-07-25T00:15:00.000Z",
+    });
+
+    await expect(
+      repository.findExpiredUnknownSubmissions("2026-07-25T01:00:00.000Z", 25),
+    ).resolves.toEqual([]);
+    await expect(
+      repository.failExpiredUnknownSubmission({
+        attemptId: ATTEMPT_ID,
+        eventId: FIRST_EVENT_ID,
+        jobId: JOB_ID,
+        timestamp: "2026-07-25T01:00:00.000Z",
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it("cancels an unbound unknown submission only after its claim expires", async () => {
+    const repository = createD1RunpodControlRepository(env.SCRIBE_DROP_DB);
+    await repository.prepareSubmission({
+      claimExpiresAt: "2026-07-25T00:15:00.000Z",
+      claimTokenHash: await hashCapabilityToken(CLAIM_TOKEN),
+      jobId: JOB_ID,
+      timestamp: NOW,
+    });
+    await repository.recordSubmissionUnknown(ATTEMPT_ID, "2026-07-25T00:00:01.000Z");
+    await env.SCRIBE_DROP_DB.batch([
+      env.SCRIBE_DROP_DB.prepare(
+        "UPDATE job_attempts SET status = 'CANCEL_REQUESTED' WHERE id = ?1",
+      ).bind(ATTEMPT_ID),
+      env.SCRIBE_DROP_DB.prepare("UPDATE jobs SET status = 'CANCEL_REQUESTED' WHERE id = ?1").bind(
+        JOB_ID,
+      ),
+    ]);
+
+    await expect(
+      repository.findExpiredUnboundCancellations("2026-07-25T00:14:59.999Z", 25),
+    ).resolves.toEqual([]);
+    await expect(
+      repository.findExpiredUnboundCancellations("2026-07-25T00:15:00.000Z", 25),
+    ).resolves.toHaveLength(1);
+    await expect(
+      repository.cancelExpiredUnboundSubmission({
+        attemptId: ATTEMPT_ID,
+        eventId: FIRST_EVENT_ID,
+        jobId: JOB_ID,
+        timestamp: "2026-07-25T00:15:00.000Z",
+      }),
+    ).resolves.toBe(true);
+
+    const job = await env.SCRIBE_DROP_DB.prepare(
+      "SELECT status, cancelled_at FROM jobs WHERE id = ?1",
+    )
+      .bind(JOB_ID)
+      .first();
+    expect(job).toEqual({
+      cancelled_at: "2026-07-25T00:15:00.000Z",
+      status: "CANCELLED",
+    });
+  });
+
   it("allows exactly one concurrent winner and records every RunPod job ID", async () => {
     const repository = createD1RunpodControlRepository(env.SCRIBE_DROP_DB);
     const claimHash = await hashCapabilityToken(CLAIM_TOKEN);
