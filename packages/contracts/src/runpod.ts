@@ -187,17 +187,27 @@ export const runpodInternalErrorResponseSchema = z
   })
   .strict();
 
-export const runpodStatusResponseSchema = z
+const runpodStatusWireResponseSchema = z
   .object({
     delayTime: z.number().int().nonnegative().optional(),
     error: z.string().min(1).max(2_000).optional(),
     executionTime: z.number().int().nonnegative().optional(),
     id: runpodJobIdSchema,
+    input: runpodWorkerInputSchema.optional(),
     output: runpodWorkerOutputSchema.optional(),
     status: runpodStatusValueSchema,
     workerId: z.string().min(1).max(200).optional(),
   })
   .strict();
+
+export const runpodStatusResponseSchema = runpodStatusWireResponseSchema.transform(
+  ({ error, input, workerId, ...response }) => {
+    void error;
+    void input;
+    void workerId;
+    return response;
+  },
+);
 
 export type RunpodWorkerInput = z.infer<typeof runpodWorkerInputSchema>;
 export type RunpodRunRequest = z.infer<typeof runpodRunRequestSchema>;

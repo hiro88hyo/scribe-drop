@@ -6,5 +6,5 @@
     "skipLibCheck": true,
     "types": ["@cloudflare/workers-types", "@cloudflare/vitest-pool-workers/types"]
   },
-  "include": ["tests/**/*.ts"]
+  "include": ["src/server/**/*.test.ts", "tests/**/*.ts"]
 }

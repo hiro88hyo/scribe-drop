@@ -4,10 +4,12 @@ import {
   MAX_ORIGINAL_FILENAME_LENGTH,
   MAX_RECORDING_DURATION_SECONDS,
   allowedMediaTypeSchema,
+  attemptStatusSchema,
   jobDetailSchema,
   jobOptionsSchema,
   jobStatusSchema,
   jobSummarySchema,
+  outputFormatSchema,
   publicErrorCodeSchema,
   ulidSchema,
   utcDateTimeSchema,
@@ -17,6 +19,7 @@ import {
   type JobStatus,
   type JobSummary,
   type ListJobsResponse,
+  type OutputFormat,
 } from "@scribe-drop/contracts";
 import {
   ACTIVE_JOB_STATUSES,
@@ -153,6 +156,36 @@ const FIND_JOB_SQL = `
   LIMIT 1
 `;
 
+const FIND_JOB_ARTIFACTS_SQL = `
+  SELECT
+    job_artifacts.format,
+    job_artifacts.size_bytes
+  FROM job_artifacts
+  INNER JOIN jobs ON jobs.id = job_artifacts.job_id
+  WHERE jobs.owner_sub = ?1
+    AND jobs.id = ?2
+    AND jobs.status = 'COMPLETED'
+    AND jobs.deleted_at IS NULL
+    AND jobs.active_attempt_id = job_artifacts.attempt_id
+  ORDER BY job_artifacts.format
+`;
+
+const FIND_ARTIFACT_DOWNLOAD_SQL = `
+  SELECT
+    job_artifacts.format,
+    job_artifacts.object_key,
+    job_artifacts.size_bytes
+  FROM job_artifacts
+  INNER JOIN jobs ON jobs.id = job_artifacts.job_id
+  WHERE jobs.owner_sub = ?1
+    AND jobs.id = ?2
+    AND jobs.status = 'COMPLETED'
+    AND jobs.deleted_at IS NULL
+    AND jobs.active_attempt_id = job_artifacts.attempt_id
+    AND job_artifacts.format = ?3
+  LIMIT 1
+`;
+
 const MARK_UPLOAD_READY_SQL = `
   UPDATE jobs
   SET
@@ -247,6 +280,243 @@ const MARK_SOURCE_MUTATED_SQL = `
   RETURNING ${JOB_SUMMARY_COLUMNS}
 `;
 
+const INSERT_RETRY_ATTEMPT_SQL = `
+  INSERT INTO job_attempts (
+    id,
+    job_id,
+    generation,
+    status,
+    result_prefix,
+    created_at,
+    updated_at
+  )
+  SELECT
+    ?1,
+    jobs.id,
+    active_attempt.generation + 1,
+    'SUBMISSION_PENDING',
+    ?4,
+    ?5,
+    ?5
+  FROM jobs
+  INNER JOIN job_attempts AS active_attempt ON active_attempt.id = jobs.active_attempt_id
+  WHERE jobs.id = ?2
+    AND jobs.owner_sub = ?3
+    AND jobs.status = 'FAILED'
+    AND jobs.deleted_at IS NULL
+    AND active_attempt.job_id = jobs.id
+    AND active_attempt.status = 'FAILED'
+    AND NOT EXISTS (
+      SELECT 1
+      FROM job_attempts
+      WHERE id = ?1
+        OR (
+          job_id = jobs.id
+          AND generation = active_attempt.generation + 1
+        )
+    )
+  RETURNING id, job_id, generation
+`;
+
+const ACTIVATE_RETRY_ATTEMPT_SQL = `
+  UPDATE jobs
+  SET
+    status = 'SUBMISSION_PENDING',
+    active_attempt_id = ?3,
+    error_code = NULL,
+    error_message = NULL,
+    duration_seconds = NULL,
+    processing_started_at = NULL,
+    completed_at = NULL,
+    failed_at = NULL,
+    cancelled_at = NULL,
+    notified_at = NULL,
+    updated_at = ?4,
+    version = version + 1
+  WHERE id = ?1
+    AND owner_sub = ?2
+    AND status = 'FAILED'
+    AND deleted_at IS NULL
+    AND EXISTS (
+      SELECT 1
+      FROM job_attempts
+      WHERE id = ?3
+        AND job_id = ?1
+        AND status = 'SUBMISSION_PENDING'
+        AND created_at = ?4
+    )
+  RETURNING ${JOB_SUMMARY_COLUMNS}
+`;
+
+const RECORD_RETRY_EVENT_SQL = `
+  INSERT INTO job_events (
+    id,
+    job_id,
+    attempt_id,
+    event_type,
+    actor,
+    metadata_json,
+    created_at
+  )
+  SELECT
+    ?1,
+    ?2,
+    ?3,
+    'job_retry_requested',
+    'user',
+    NULL,
+    ?4
+  FROM jobs
+  WHERE id = ?2
+    AND active_attempt_id = ?3
+    AND status = 'SUBMISSION_PENDING'
+    AND updated_at = ?4
+  RETURNING id
+`;
+
+const FIND_OWNER_JOB_STATUS_SQL = `
+  SELECT status
+  FROM jobs
+  WHERE owner_sub = ?1
+    AND id = ?2
+    AND deleted_at IS NULL
+  LIMIT 1
+`;
+
+const FIND_CANCELLATION_CONTEXT_SQL = `
+  SELECT
+    jobs.id,
+    jobs.title,
+    jobs.original_filename,
+    jobs.source_content_type,
+    jobs.expected_size_bytes,
+    jobs.actual_size_bytes,
+    jobs.status,
+    jobs.error_code,
+    jobs.duration_seconds,
+    jobs.created_at,
+    jobs.completed_at,
+    jobs.updated_at,
+    jobs.active_attempt_id,
+    jobs.version,
+    job_attempts.status AS attempt_status
+  FROM jobs
+  LEFT JOIN job_attempts ON job_attempts.id = jobs.active_attempt_id
+  WHERE jobs.owner_sub = ?1
+    AND jobs.id = ?2
+    AND jobs.deleted_at IS NULL
+  LIMIT 1
+`;
+
+const CANCEL_JOB_WITHOUT_ATTEMPT_SQL = `
+  UPDATE jobs
+  SET
+    status = 'CANCELLED',
+    error_code = NULL,
+    error_message = NULL,
+    cancelled_at = ?5,
+    updated_at = ?5,
+    version = version + 1
+  WHERE id = ?1
+    AND owner_sub = ?2
+    AND version = ?3
+    AND active_attempt_id IS NULL
+    AND status = ?4
+    AND status IN ('CREATED', 'UPLOADING', 'UPLOADED')
+    AND deleted_at IS NULL
+  RETURNING ${JOB_SUMMARY_COLUMNS}
+`;
+
+const REQUEST_ATTEMPT_CANCELLATION_SQL = `
+  UPDATE job_attempts
+  SET
+    status = CASE
+      WHEN status = 'SUBMISSION_PENDING' THEN 'CANCELLED'
+      ELSE 'CANCEL_REQUESTED'
+    END,
+    heartbeat_revoked_at = CASE
+      WHEN status = 'RUNNING' AND heartbeat_token_hash IS NOT NULL THEN ?4
+      ELSE heartbeat_revoked_at
+    END,
+    updated_at = ?4
+  WHERE id = ?1
+    AND job_id = ?2
+    AND status = ?3
+    AND status IN ('SUBMISSION_PENDING', 'SUBMITTING', 'RUNNING')
+    AND EXISTS (
+      SELECT 1
+      FROM jobs
+      WHERE id = ?2
+        AND active_attempt_id = ?1
+        AND status = ?3
+        AND deleted_at IS NULL
+    )
+  RETURNING id
+`;
+
+const REQUEST_JOB_CANCELLATION_SQL = `
+  UPDATE jobs
+  SET
+    status = CASE
+      WHEN ?5 = 'SUBMISSION_PENDING' THEN 'CANCELLED'
+      ELSE 'CANCEL_REQUESTED'
+    END,
+    error_code = NULL,
+    error_message = NULL,
+    cancelled_at = CASE
+      WHEN ?5 = 'SUBMISSION_PENDING' THEN ?6
+      ELSE cancelled_at
+    END,
+    updated_at = ?6,
+    version = version + 1
+  WHERE id = ?1
+    AND owner_sub = ?2
+    AND version = ?3
+    AND active_attempt_id = ?4
+    AND status = ?5
+    AND status IN ('SUBMISSION_PENDING', 'SUBMITTING', 'RUNNING')
+    AND deleted_at IS NULL
+    AND EXISTS (
+      SELECT 1
+      FROM job_attempts
+      WHERE id = ?4
+        AND job_id = ?1
+        AND status = CASE
+          WHEN ?5 = 'SUBMISSION_PENDING' THEN 'CANCELLED'
+          ELSE 'CANCEL_REQUESTED'
+        END
+        AND updated_at = ?6
+    )
+  RETURNING ${JOB_SUMMARY_COLUMNS}
+`;
+
+const RECORD_CANCELLATION_EVENT_SQL = `
+  INSERT INTO job_events (
+    id,
+    job_id,
+    attempt_id,
+    event_type,
+    actor,
+    metadata_json,
+    created_at
+  )
+  SELECT
+    ?1,
+    jobs.id,
+    jobs.active_attempt_id,
+    'job_cancel_requested',
+    'user',
+    NULL,
+    ?3
+  FROM jobs
+  WHERE jobs.id = ?2
+    AND jobs.updated_at = ?3
+    AND jobs.status IN ('CANCEL_REQUESTED', 'CANCELLED')
+    AND jobs.owner_sub = ?4
+  ON CONFLICT DO NOTHING
+  RETURNING id
+`;
+
 const databaseJobSummaryRowSchema = z
   .object({
     actual_size_bytes: z.number().int().positive().max(MAX_FILE_SIZE_BYTES).nullable(),
@@ -267,6 +537,17 @@ const databaseJobSummaryRowSchema = z
 const databaseJobDetailRowSchema = databaseJobSummaryRowSchema
   .extend({
     options_json: z.string().min(2).max(16_384),
+  })
+  .strict();
+const databaseArtifactSummaryRowSchema = z
+  .object({
+    format: outputFormatSchema,
+    size_bytes: z.number().int().min(0).max(2_147_483_648),
+  })
+  .strict();
+const databaseArtifactDownloadRowSchema = databaseArtifactSummaryRowSchema
+  .extend({
+    object_key: z.string().min(1).max(1024).startsWith("results/"),
   })
   .strict();
 
@@ -294,6 +575,26 @@ const databaseUploadTargetRowSchema = z
 const listLimitSchema = z.number().int().min(1).max(100);
 const updatedJobIdRowsSchema = z.array(z.object({ id: ulidSchema }).strict()).max(1);
 const updatedJobSummaryRowsSchema = z.array(databaseJobSummaryRowSchema).max(1);
+const insertedRetryAttemptRowsSchema = z
+  .array(
+    z
+      .object({
+        generation: z.number().int().min(2),
+        id: ulidSchema,
+        job_id: ulidSchema,
+      })
+      .strict(),
+  )
+  .max(1);
+const databaseJobStatusRowSchema = z.object({ status: jobStatusSchema }).strict();
+const cancellationContextRowSchema = databaseJobSummaryRowSchema
+  .extend({
+    active_attempt_id: ulidSchema.nullable(),
+    attempt_status: attemptStatusSchema.nullable(),
+    version: z.number().int().positive(),
+  })
+  .strict();
+const resultPrefixSchema = z.string().min(1).max(900).startsWith("results/").endsWith("/");
 
 type DatabaseJobSummaryRow = z.infer<typeof databaseJobSummaryRowSchema>;
 type DatabaseJobDetailRow = z.infer<typeof databaseJobDetailRowSchema>;
@@ -366,6 +667,12 @@ export interface UploadTarget {
   readonly version: number;
 }
 
+export interface ArtifactDownloadTarget {
+  readonly format: OutputFormat;
+  readonly key: string;
+  readonly sizeBytes: number;
+}
+
 export interface CompleteUploadInput {
   readonly expectedVersion: number;
   readonly jobId: string;
@@ -385,6 +692,47 @@ export type CompleteUploadResult =
   | {
       readonly job: JobSummary;
       readonly status: "source_mutated";
+    }
+  | {
+      readonly status: "invalid_state";
+    }
+  | {
+      readonly status: "not_found";
+    };
+
+export interface RetryFailedJobInput {
+  readonly attemptId: string;
+  readonly eventId: string;
+  readonly jobId: string;
+  readonly ownerSub: string;
+  readonly resultPrefix: string;
+  readonly timestamp: string;
+}
+
+export type RetryFailedJobResult =
+  | {
+      readonly generation: number;
+      readonly job: JobSummary;
+      readonly status: "retried";
+    }
+  | {
+      readonly status: "invalid_state";
+    }
+  | {
+      readonly status: "not_found";
+    };
+
+export interface RequestJobCancellationInput {
+  readonly eventId: string;
+  readonly jobId: string;
+  readonly ownerSub: string;
+  readonly timestamp: string;
+}
+
+export type RequestJobCancellationResult =
+  | {
+      readonly job: JobSummary;
+      readonly status: "cancelled" | "idempotent" | "requested";
     }
   | {
       readonly status: "invalid_state";
@@ -420,7 +768,10 @@ function mapSummary(row: DatabaseJobSummaryRow): JobSummary {
   });
 }
 
-function mapDetail(row: DatabaseJobDetailRow): JobDetail {
+function mapDetail(
+  row: DatabaseJobDetailRow,
+  artifacts: readonly z.infer<typeof databaseArtifactSummaryRowSchema>[],
+): JobDetail {
   let untrustedOptions: unknown;
   try {
     untrustedOptions = JSON.parse(row.options_json);
@@ -430,7 +781,10 @@ function mapDetail(row: DatabaseJobDetailRow): JobDetail {
 
   return jobDetailSchema.parse({
     ...mapSummary(row),
-    artifacts: [],
+    artifacts: artifacts.map((artifact) => ({
+      format: artifact.format,
+      sizeBytes: artifact.size_bytes,
+    })),
     options: jobOptionsSchema.parse(untrustedOptions),
   });
 }
@@ -462,6 +816,164 @@ function calculateRetryAfterSeconds(oldestCreatedAt: string | null, now: string)
   const retryAtMilliseconds =
     oldestMilliseconds + JOB_CREATION_WINDOW_SECONDS * 1000 - nowMilliseconds;
   return Math.max(1, Math.min(JOB_CREATION_WINDOW_SECONDS, Math.ceil(retryAtMilliseconds / 1000)));
+}
+
+export async function retryFailedJob(
+  database: D1Database,
+  input: RetryFailedJobInput,
+): Promise<RetryFailedJobResult> {
+  const attemptId = ulidSchema.parse(input.attemptId);
+  const eventId = ulidSchema.parse(input.eventId);
+  const jobId = ulidSchema.parse(input.jobId);
+  const ownerSub = z.string().min(1).max(512).parse(input.ownerSub);
+  const resultPrefix = resultPrefixSchema.parse(input.resultPrefix);
+  const resultPrefixParts = resultPrefix.split("/");
+  if (
+    resultPrefixParts.length !== 5 ||
+    resultPrefixParts[0] !== "results" ||
+    !/^[0-9a-f]{32}$/u.test(resultPrefixParts[1] ?? "") ||
+    resultPrefixParts[2] !== jobId ||
+    resultPrefixParts[3] !== attemptId ||
+    resultPrefixParts[4] !== ""
+  ) {
+    throw new Error("Retry result prefix does not match the job and attempt");
+  }
+  const timestamp = utcDateTimeSchema.parse(input.timestamp);
+  const results = await database.batch([
+    database
+      .prepare(INSERT_RETRY_ATTEMPT_SQL)
+      .bind(attemptId, jobId, ownerSub, resultPrefix, timestamp),
+    database.prepare(ACTIVATE_RETRY_ATTEMPT_SQL).bind(jobId, ownerSub, attemptId, timestamp),
+    database.prepare(RECORD_RETRY_EVENT_SQL).bind(eventId, jobId, attemptId, timestamp),
+  ]);
+  const insertedAttempt = insertedRetryAttemptRowsSchema.parse(results[0]?.results ?? [])[0];
+  const updatedJob = updatedJobSummaryRowsSchema.parse(results[1]?.results ?? [])[0];
+  const insertedEvent = updatedJobIdRowsSchema.parse(results[2]?.results ?? [])[0];
+  if (insertedAttempt !== undefined && updatedJob !== undefined && insertedEvent !== undefined) {
+    return {
+      generation: insertedAttempt.generation,
+      job: mapSummary(updatedJob),
+      status: "retried",
+    };
+  }
+  if (insertedAttempt !== undefined || updatedJob !== undefined || insertedEvent !== undefined) {
+    throw new Error("Retry transition was only partially persisted");
+  }
+
+  const untrustedCurrent = await database
+    .withSession("first-primary")
+    .prepare(FIND_OWNER_JOB_STATUS_SQL)
+    .bind(ownerSub, jobId)
+    .first();
+  if (untrustedCurrent === null) {
+    return { status: "not_found" };
+  }
+  databaseJobStatusRowSchema.parse(untrustedCurrent);
+  return { status: "invalid_state" };
+}
+
+export async function requestJobCancellation(
+  database: D1Database,
+  input: RequestJobCancellationInput,
+): Promise<RequestJobCancellationResult> {
+  const eventId = ulidSchema.parse(input.eventId);
+  const jobId = ulidSchema.parse(input.jobId);
+  const ownerSub = z.string().min(1).max(512).parse(input.ownerSub);
+  const timestamp = utcDateTimeSchema.parse(input.timestamp);
+  const untrustedContext = await database
+    .withSession("first-primary")
+    .prepare(FIND_CANCELLATION_CONTEXT_SQL)
+    .bind(ownerSub, jobId)
+    .first();
+  if (untrustedContext === null) {
+    return { status: "not_found" };
+  }
+  const context = cancellationContextRowSchema.parse(untrustedContext);
+  if (context.status === "CANCELLED" || context.status === "CANCEL_REQUESTED") {
+    return {
+      job: mapSummary(context),
+      status: "idempotent",
+    };
+  }
+
+  let statements: D1PreparedStatement[];
+  if (context.active_attempt_id === null) {
+    if (!["CREATED", "UPLOADING", "UPLOADED"].includes(context.status)) {
+      return { status: "invalid_state" };
+    }
+    statements = [
+      database
+        .prepare(CANCEL_JOB_WITHOUT_ATTEMPT_SQL)
+        .bind(jobId, ownerSub, context.version, context.status, timestamp),
+      database.prepare(RECORD_CANCELLATION_EVENT_SQL).bind(eventId, jobId, timestamp, ownerSub),
+    ];
+  } else {
+    if (
+      context.attempt_status === null ||
+      context.attempt_status !== context.status ||
+      !["SUBMISSION_PENDING", "SUBMITTING", "RUNNING"].includes(context.status)
+    ) {
+      return { status: "invalid_state" };
+    }
+    statements = [
+      database
+        .prepare(REQUEST_ATTEMPT_CANCELLATION_SQL)
+        .bind(context.active_attempt_id, jobId, context.status, timestamp),
+      database
+        .prepare(REQUEST_JOB_CANCELLATION_SQL)
+        .bind(
+          jobId,
+          ownerSub,
+          context.version,
+          context.active_attempt_id,
+          context.status,
+          timestamp,
+        ),
+      database.prepare(RECORD_CANCELLATION_EVENT_SQL).bind(eventId, jobId, timestamp, ownerSub),
+    ];
+  }
+
+  const results = await database.batch(statements);
+  const jobResultIndex = context.active_attempt_id === null ? 0 : 1;
+  const eventResultIndex = context.active_attempt_id === null ? 1 : 2;
+  const updatedJob = updatedJobSummaryRowsSchema.parse(results[jobResultIndex]?.results ?? [])[0];
+  const insertedEvent = updatedJobIdRowsSchema.parse(results[eventResultIndex]?.results ?? [])[0];
+  if (updatedJob !== undefined && insertedEvent !== undefined) {
+    return {
+      job: mapSummary(updatedJob),
+      status: updatedJob.status === "CANCELLED" ? "cancelled" : "requested",
+    };
+  }
+  if (updatedJob !== undefined || insertedEvent !== undefined) {
+    throw new Error("Cancellation transition was only partially persisted");
+  }
+  return { status: "invalid_state" };
+}
+
+export async function findArtifactDownloadByOwner(
+  database: D1Database,
+  ownerSub: string,
+  jobId: string,
+  format: OutputFormat,
+): Promise<ArtifactDownloadTarget | undefined> {
+  const untrusted = await database
+    .withSession("first-primary")
+    .prepare(FIND_ARTIFACT_DOWNLOAD_SQL)
+    .bind(
+      z.string().min(1).max(512).parse(ownerSub),
+      ulidSchema.parse(jobId),
+      outputFormatSchema.parse(format),
+    )
+    .first();
+  if (untrusted === null) {
+    return undefined;
+  }
+  const row = databaseArtifactDownloadRowSchema.parse(untrusted);
+  return {
+    format: row.format,
+    key: row.object_key,
+    sizeBytes: row.size_bytes,
+  };
 }
 
 export function createD1JobRepository(database: JobDatabase): JobRepository {
@@ -617,7 +1129,15 @@ export function createD1JobRepository(database: JobDatabase): JobRepository {
       if (untrustedRow === null) {
         return undefined;
       }
-      return mapDetail(databaseJobDetailRowSchema.parse(untrustedRow));
+      const artifactResult = await session
+        .prepare(FIND_JOB_ARTIFACTS_SQL)
+        .bind(ownerSub, jobId)
+        .all();
+      const artifacts = z
+        .array(databaseArtifactSummaryRowSchema)
+        .max(3)
+        .parse(artifactResult.results);
+      return mapDetail(databaseJobDetailRowSchema.parse(untrustedRow), artifacts);
     },
 
     async findUploadTargetByOwner(ownerSub, jobId) {

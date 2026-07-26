@@ -39,7 +39,17 @@ base digest、Ubuntu snapshot、Python/FFmpeg package、uv build image、model c
 5 fileの全hashを固定したmulti-stage imageを実build済みである。UID 10001、
 networkなし、read-only root filesystemでmodel/依存/native import/ffprobeを検査する
 offline checkも成功した。CIにはSPDX JSON SBOMとHigh/Criticalで失敗するTrivy scanを
-追加済みである。実endpoint、GPU benchmark、staging smokeは未完了である。
+追加済みである。staging専用endpointとtemplateを固定image digestから作成し、初回
+workerがReadyになるまで起動した。RTX 4090のGPU配置、Secure Cloud、0〜1 worker、
+volumeなし、FlashBoot無効のendpoint invariantと、期限切れclaimを拒否する最小jobを
+確認した。実ID、image参照、originは追跡対象へ保存していない。
+
+Phase 5のlocal実装では、5分Cron、RunPod status poll、terminal状態のD1保存、
+manifest/artifact検証、原子的finalize、notification outbox、Discord再送、所有者限定
+artifact URL、cancel、新しいattemptによるretryを追加している。stagingへは
+`0005_reconciliation_completion.sql`をapplicationより先に適用し、OrchestratorとWebを
+deployしてからend-to-end smokeを行う。production environmentへのdeploymentは未実施で
+ある。
 
 `apps/orchestrator/wrangler.toml`と`apps/web/wrangler.toml`の全ゼロIDおよびoriginは
 安全なplaceholderであり、remote操作には使用できない。実IDと実originは追跡対象へ
@@ -79,8 +89,9 @@ D1、R2、Queue、DLQ、RunPod endpoint、Access application、secretは環境�
 
 ## Staging構築時の順序
 
-手順1から5とtemporary credentialを使うbrowser multipart検証は2026-07-25の
-Phase 3 staging checkpointで完了した。手順6以降はPhase 4のRunPod構築で行う。
+手順1から8はPhase 3とPhase 4のstaging checkpointで完了した。Phase 5では手順4の
+forward-only migration、手順5の追加secret、application deployを行った後に手順9の
+end-to-end smokeを実施する。
 
 1. Wranglerとrunpodctlのversion、Git branch、対象accountを確認する。
 2. staging用D1、非公開R2、Queue、DLQを作成し、実IDを追跡外Wrangler設定へ反映する。
@@ -93,7 +104,8 @@ Phase 3 staging checkpointで完了した。手順6以降はPhase 4のRunPod構�
 8. [ADR 0012](./adr/0012-runpodctl-staging-verification-boundary.md)に従い、
    `runpodctl`で取得できるactive workers 0、max workers 1、GPU 1、Network Volumeなし、
    FlashBoot無効、timeoutを確認する。GPU配置とSecure Cloudは初回worker起動後に確認する。
-9. GPU benchmark、smoke test、重複配送、claim競合、cleanup、rollback手順を確認する。
+9. 実音声の処理時間、artifact/manifest、通知、重複配送、claim競合、cleanup、
+   reconciliationとrollback手順を確認する。
 
 ## Phase 3 staging checkpoint
 
@@ -127,6 +139,10 @@ source、D1 row、一時Workerを削除した。
 
 実施結果とrollback用versionは
 [2026-07-25 Phase 3 staging deployment record](./deployments/2026-07-25-phase-3-staging.md)
+に記録する。
+
+Phase 4のendpoint構築と初回worker確認は
+[2026-07-26 Phase 4 staging deployment record](./deployments/2026-07-26-phase-4-staging.md)
 に記録する。
 
 ## 追跡外staging設定
@@ -211,6 +227,12 @@ RunPodから到達するOrchestratorは専用Custom Domainを使う。追跡外s
 `RUNPOD_INTERNAL_BASE_URL`を同時生成する。対話loginを要求するAccess policyは付けず、
 未知path、query付きrequest、POST以外、JSON以外、4 KiB超過、schema不一致を拒否する。
 実origin、claim/heartbeat token、署名URLをdeployment記録やCLI出力へ残さない。
+
+Phase 5の追跡外Orchestrator設定では、同じ生成処理が
+`SCRIBE_DROP_STAGING_WEB_ORIGIN`から`WEB_BASE_URL`も設定する。D1 migration
+`0005_reconciliation_completion.sql`を先に適用し、`DISCORD_WEBHOOK_URL`を環境別
+encrypted secretへ登録してからOrchestratorをdeployする。Discord secretを欠いたまま
+通知outboxを作成してもjob完了は取り消さないが、通知は送信されず運用alert対象となる。
 
 ## Migrationとrollback
 

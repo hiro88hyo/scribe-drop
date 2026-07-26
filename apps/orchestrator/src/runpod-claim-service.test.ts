@@ -64,8 +64,13 @@ async function claimContext(overrides: Partial<ClaimContext> = {}): Promise<Clai
 
 function fakeRepository(overrides: Partial<RunpodControlRepository> = {}): RunpodControlRepository {
   return {
+    cancelExpiredUnboundSubmission: () => Promise.resolve(false),
     claimWinner: () => Promise.resolve(false),
     findClaimContext: () => Promise.resolve(undefined),
+    findDispatchablePendingJobId: () => Promise.resolve(undefined),
+    findExpiredUnknownSubmissions: () => Promise.resolve([]),
+    findExpiredUnboundCancellations: () => Promise.resolve([]),
+    failExpiredUnknownSubmission: () => Promise.resolve(false),
     markHeartbeat: () => Promise.resolve(false),
     prepareSubmission: () => Promise.resolve(undefined),
     recordClaimSubmission: () => Promise.resolve(),

@@ -2,8 +2,8 @@
 
 ## 1. 現状
 
-2026-07-25
-時点でPhase 1からPhase 3までを`develop`へ統合済みである。Phase 2ではReact/Viteのapp
+2026-07-26時点でPhase 1からPhase 3までを`develop`へ統合済みである。Phase 2では
+React/Viteのapp
 shell、Pages Functionsのresponse security、Access JWT、CSRF、`GET /api/me`、
 D1の原子的job admission、所有権付きrepository、job作成・一覧・詳細API、
 型検証付きbrowser API client、ホーム・履歴・詳細の実API接続、Workers/D1
@@ -16,8 +16,20 @@ artifact integrity、manifest-last、task固有`/tmp` cleanup、worker refresh�
 実装・テスト済みである。さらにdigest固定のCUDA/cuDNN base、固定Ubuntu snapshot、
 固定revisionと全file hashを検証するmodel、non-root runtimeを持つmulti-stage imageを
 実buildし、networkなし・read-onlyのcontainer checkまで完了した。CIのSBOM・
-High/Critical container scanも追加済みである。実endpoint、GPU benchmark、staging
-smokeは未完了である。
+High/Critical container scanも追加済みである。staging専用endpointとtemplateを固定
+image digestから作成し、初回workerがReadyになるまで起動した。ConsoleでRTX 4090の
+GPU配置とSecure Cloudを確認し、最小jobがclaim期限切れを安全に拒否して終了することも
+確認した。実ID、image参照、originは追跡対象へ保存していない。これによりPhase 4の
+endpoint invariant確認を完了した。実音声の完了、artifact、通知を含むend-to-end
+smokeと処理時間の計測はPhase 5のstaging検証で行う。
+
+Phase 5では[ADR 0013](./adr/0013-reconciliation-and-fresh-attempt-retry.md)に従い、
+5分Cron、RunPod status観測、terminal状態の先行保存、manifest/artifact検証、
+原子的finalize、notification outbox、Discord再送、所有者限定artifact URL、
+cancelと新しいattemptによるretryを実装した。forward-only migration、unit test、
+Workers/D1/R2 integration、型検査、build、secret scan、dependency auditまでlocalで
+検証済みである。次にstagingへ適用し、Phase 4のstale job回収と実end-to-end smokeを
+行う。
 
 本計画は[spec.md](./spec.md)とRunPodの追加security要件である[additional-spec.md](./additional-spec.md)を正とし、Phase 1からPhase 7までを、各Phaseが単独でレビュー・検証できる単位に分けて実装する。両者が矛盾する場合は追加要件と[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)を優先する。
 
@@ -87,17 +99,24 @@ smokeは未完了である。
 2. 一時認証情報による S3 multipart upload と abort の挙動、および `If-None-Match: *` 相当の create-only 条件が multipart で利用可能か。[ADR 0008](./adr/0008-r2-browser-upload-capability.md)で、local signingによりexact objectとmultipart actionだけへ限定し、multipart create-only条件は利用できない前提を決定済み。stagingでは実multipart complete/abort、exact object外とaction外の拒否を確認した。R2はJWTの`actions`と`scope`の併記を`400 InvalidArgument`で拒否したため、広いscopeを除きaction allowlistだけを発行する。
 3. R2 Event Notificationの実際のメッセージ形式、ETag表現、Queue retryとDLQの設定方法。公式の[R2 event notification format](https://developers.cloudflare.com/r2/buckets/event-notifications/)、[Queuesの個別ack/retry](https://developers.cloudflare.com/queues/configuration/batching-retries/)、[DLQ](https://developers.cloudflare.com/queues/configuration/dead-letter-queues/)を確認済みである。staging subscription、実`PutObject`通知の恒久拒否、実`CompleteMultipartUpload`通知の受理とETag/HEAD照合、欠落R2 sourceのretryとDLQ到達を確認した。
 4. Pages Functions での Access JWT 検証方法、JWKS キャッシュ、複数 audience、ローカルテスト方法。[ADR 0003](./adr/0003-access-jwt-and-csrf-boundary.md)で決定済み。
-5. RunPod `/run`、`/status`、`/cancel`、job ID、result保持期間、timeoutとTTLの単位・最大値。[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)で初期方針を決定済み。
-6. D1 で claim winner の確定、submission 記録、outbox 作成を競合に耐える形で実行する方法。
+5. RunPod `/run`、`/status`、`/cancel`、job ID、result保持期間、timeoutとTTLの単位・最大値。[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)で初期方針を決定し、staging endpointへの実投入と[ADR 0013](./adr/0013-reconciliation-and-fresh-attempt-retry.md)のstatus/finalize境界で確認済みである。`/status`がechoするinputは検証後に破棄する。
+6. D1でclaim winner、submission、terminal観測、artifact、outboxを競合に耐える形で確定する方法。[ADR 0013](./adr/0013-reconciliation-and-fresh-attempt-retry.md)でCASと新しいattemptによる回復方針を決定済みである。
 
 設計書だけでは確定できない次の項目は、該当 Phase の開始前に ADR で決定する。
 
-- `DELETE /api/jobs/:id` は論理削除を要求するが、提示された `jobs` スキーマには `deleted_at` がない。列追加と一覧からの除外規則を決める。
-- UI と Discord 通知は音声時間を表示するが、完了後の duration を保存する列がない。D1 に保存する実行メタデータを決める。
-- [ADR 0010](./adr/0010-separate-attempt-and-capability-issuance.md)に従い、Phase 3のforward-only migrationでclaim/heartbeatの発行状態を表すnullable列を追加済みである。Phase 4ではclaim/heartbeatの実token発行CASを実装し、初期migrationの未使用webhook token列をtable rebuildで除去する。
-- claim tokenの初期expiry、max workers 1でのqueue制御、投入をOrchestrator側で保留する条件をPhase 4開始時のbenchmarkに基づくADRで決める。決定前にproductionへ投入しない。
-- 「申告サイズと大きく異ならない」の許容差が未定義である。原則は完全一致とし、例外が必要なら根拠と上限を決める。
-- multipart ETag は内容ハッシュではないため、source の同一性判定にのみ使い、整合性検証を別途必要とするか決める。
+- `deleted_at`と一覧・詳細の除外規則は初期migrationと所有者付きrepositoryへ実装済みである。R2を含む非同期削除はPhase 7で実装する。
+- jobの`duration_seconds`に検証済み音声時間を保存し、Phase 5の
+  `media_duration_seconds`とRunPod execution timeをactive attemptへ保存する。
+- [ADR 0010](./adr/0010-separate-attempt-and-capability-issuance.md)に従うnullable
+  capability lifecycleと、Phase 4の実token発行CAS、未使用webhook token列の除去を
+  forward-only migrationで実装済みである。
+- claim tokenは15分、environment全体のactive RunPod attemptは最大1件とし、staging
+  endpointもmax workers 1で確認した。R2 capabilityは初期2時間とし、実音声の処理時間を
+  Phase 5で計測してproduction前に不足がないことを確認する。
+- 申告size、browser完了時のR2 HEAD、Queue event、Worker streaming countは完全一致を
+  要求する。許容差は設けない。
+- multipart ETagはsource同一性と上書き検出にだけ使用する。byte sizeの再検証、ffprobe、
+  artifact key/sizeとmanifestの照合を別の境界で行う。
 
 ## 5. Phase 1: 基盤
 

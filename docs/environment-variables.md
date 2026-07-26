@@ -92,7 +92,7 @@ localでは`apps/orchestrator/.dev.vars.example`を`apps/orchestrator/.dev.vars`
 | Variable                    | Secret | Purpose                           |
 | --------------------------- | :----: | --------------------------------- |
 | `APP_ENV`                   |   no   | 実行環境                          |
-| `PUBLIC_WEB_BASE_URL`       |   no   | Access保護済みジョブ詳細URLのbase |
+| `WEB_BASE_URL`              |   no   | Access保護済みジョブ詳細URLのbase |
 | `RUNPOD_INTERNAL_BASE_URL`  |   no   | claim、heartbeat内部APIの固定base |
 | `RUNPOD_ENDPOINT_ID`        |  yes   | 環境別RunPod Serverless endpoint  |
 | `RUNPOD_API_KEY`            |  yes   | RunPod API認証                    |
@@ -121,6 +121,14 @@ claim/heartbeatの256 bit tokenを認証境界とする。
 `R2_SECRET_ACCESS_KEY`はOrchestrator Workerのenvironment別encrypted secretとして登録
 する。R2 keyは対象bucketのobject read/writeだけに限定し、Orchestratorがexact object・
 method・2時間のpresigned URLを発行する用途だけに使う。
+
+Phase 5では`WEB_BASE_URL`をuserinfo、query、fragmentのない単一originに限定する。
+stagingとproductionはHTTPSを必須とし、stagingでは`SCRIBE_DROP_STAGING_WEB_ORIGIN`から
+追跡外Wrangler設定へ生成する。`APP_ENV=local`だけはローカル開発用の
+`http://localhost:<port>`を許可し、実environmentでは拒否する。
+`DISCORD_WEBHOOK_URL`はDiscord公式webhookのHTTPS URLだけを受け入れ、environment別
+encrypted secretへ登録する。値やqueryはlog、deployment記録、追跡対象設定へ出さない。
+Orchestratorのscheduled handlerはWrangler設定の5分Cronから起動する。
 
 ## RunPod Worker
 

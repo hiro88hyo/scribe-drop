@@ -3,6 +3,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2023"],
+    "skipLibCheck": true,
     "types": ["@cloudflare/workers-types"]
   },
   "include": ["functions/**/*.ts", "src/server/**/*.ts"],

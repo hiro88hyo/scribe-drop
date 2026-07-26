@@ -348,6 +348,182 @@ const HEARTBEAT_SQL = `
   RETURNING id
 `;
 
+const FIND_EXPIRED_UNKNOWN_SUBMISSIONS_SQL = `
+  SELECT
+    attempts.id AS attempt_id,
+    attempts.job_id,
+    attempts.claim_expires_at
+  FROM job_attempts AS attempts
+  INNER JOIN jobs ON jobs.id = attempts.job_id
+  WHERE attempts.status = 'SUBMITTING'
+    AND attempts.submission_outcome = 'unknown'
+    AND attempts.claim_expires_at <= ?1
+    AND attempts.winning_runpod_job_id IS NULL
+    AND jobs.active_attempt_id = attempts.id
+    AND jobs.status = 'SUBMITTING'
+    AND jobs.deleted_at IS NULL
+    AND NOT EXISTS (
+      SELECT 1
+      FROM runpod_submissions
+      WHERE attempt_id = attempts.id
+    )
+  ORDER BY attempts.claim_expires_at, attempts.id
+  LIMIT ?2
+`;
+
+const FAIL_EXPIRED_UNKNOWN_ATTEMPT_SQL = `
+  UPDATE job_attempts
+  SET
+    status = 'FAILED',
+    failed_at = ?3,
+    error_code = 'PROCESSING_FAILED',
+    error_message = NULL,
+    updated_at = ?3
+  WHERE id = ?1
+    AND job_id = ?2
+    AND status = 'SUBMITTING'
+    AND submission_outcome = 'unknown'
+    AND claim_expires_at <= ?3
+    AND winning_runpod_job_id IS NULL
+    AND NOT EXISTS (
+      SELECT 1
+      FROM runpod_submissions
+      WHERE attempt_id = ?1
+    )
+    AND EXISTS (
+      SELECT 1
+      FROM jobs
+      WHERE id = ?2
+        AND active_attempt_id = ?1
+        AND status = 'SUBMITTING'
+        AND deleted_at IS NULL
+    )
+  RETURNING id
+`;
+
+const FAIL_EXPIRED_UNKNOWN_JOB_SQL = `
+  UPDATE jobs
+  SET
+    status = 'FAILED',
+    error_code = 'PROCESSING_FAILED',
+    error_message = NULL,
+    failed_at = ?3,
+    updated_at = ?3,
+    version = version + 1
+  WHERE id = ?1
+    AND active_attempt_id = ?2
+    AND status = 'SUBMITTING'
+    AND deleted_at IS NULL
+    AND EXISTS (
+      SELECT 1
+      FROM job_attempts
+      WHERE id = ?2
+        AND job_id = ?1
+        AND status = 'FAILED'
+        AND submission_outcome = 'unknown'
+        AND failed_at = ?3
+        AND winning_runpod_job_id IS NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM runpod_submissions
+          WHERE attempt_id = ?2
+        )
+    )
+  RETURNING id
+`;
+
+const FIND_DISPATCHABLE_PENDING_JOB_SQL = `
+  SELECT jobs.id
+  FROM jobs
+  INNER JOIN job_attempts ON job_attempts.id = jobs.active_attempt_id
+  WHERE jobs.status = 'SUBMISSION_PENDING'
+    AND jobs.deleted_at IS NULL
+    AND job_attempts.job_id = jobs.id
+    AND job_attempts.status = 'SUBMISSION_PENDING'
+    AND NOT EXISTS (
+      SELECT 1
+      FROM job_attempts AS active_attempt
+      WHERE active_attempt.status IN ('SUBMITTING', 'RUNNING', 'CANCEL_REQUESTED')
+    )
+  ORDER BY jobs.updated_at, jobs.id
+  LIMIT 1
+`;
+
+const FIND_EXPIRED_UNBOUND_CANCELLATIONS_SQL = `
+  SELECT
+    attempts.id AS attempt_id,
+    attempts.job_id,
+    attempts.claim_expires_at
+  FROM job_attempts AS attempts
+  INNER JOIN jobs ON jobs.id = attempts.job_id
+  WHERE attempts.status = 'CANCEL_REQUESTED'
+    AND attempts.claim_expires_at <= ?1
+    AND attempts.winning_runpod_job_id IS NULL
+    AND jobs.active_attempt_id = attempts.id
+    AND jobs.status = 'CANCEL_REQUESTED'
+    AND jobs.deleted_at IS NULL
+    AND NOT EXISTS (
+      SELECT 1
+      FROM runpod_submissions
+      WHERE attempt_id = attempts.id
+    )
+  ORDER BY attempts.claim_expires_at, attempts.id
+  LIMIT ?2
+`;
+
+const CANCEL_EXPIRED_UNBOUND_ATTEMPT_SQL = `
+  UPDATE job_attempts
+  SET
+    status = 'CANCELLED',
+    error_code = NULL,
+    error_message = NULL,
+    updated_at = ?3
+  WHERE id = ?1
+    AND job_id = ?2
+    AND status = 'CANCEL_REQUESTED'
+    AND claim_expires_at <= ?3
+    AND winning_runpod_job_id IS NULL
+    AND NOT EXISTS (
+      SELECT 1
+      FROM runpod_submissions
+      WHERE attempt_id = ?1
+    )
+    AND EXISTS (
+      SELECT 1
+      FROM jobs
+      WHERE id = ?2
+        AND active_attempt_id = ?1
+        AND status = 'CANCEL_REQUESTED'
+        AND deleted_at IS NULL
+    )
+  RETURNING id
+`;
+
+const CANCEL_EXPIRED_UNBOUND_JOB_SQL = `
+  UPDATE jobs
+  SET
+    status = 'CANCELLED',
+    error_code = NULL,
+    error_message = NULL,
+    cancelled_at = ?3,
+    updated_at = ?3,
+    version = version + 1
+  WHERE id = ?1
+    AND active_attempt_id = ?2
+    AND status = 'CANCEL_REQUESTED'
+    AND deleted_at IS NULL
+    AND EXISTS (
+      SELECT 1
+      FROM job_attempts
+      WHERE id = ?2
+        AND job_id = ?1
+        AND status = 'CANCELLED'
+        AND updated_at = ?3
+        AND winning_runpod_job_id IS NULL
+    )
+  RETURNING id
+`;
+
 const claimContextRowSchema = z
   .object({
     active_attempt_id: ulidSchema,
@@ -372,6 +548,16 @@ const claimContextRowSchema = z
     winning_runpod_job_id: runpodJobIdSchema.nullable(),
   })
   .strict();
+
+const expiredUnknownSubmissionRowSchema = z
+  .object({
+    attempt_id: ulidSchema,
+    claim_expires_at: utcDateTimeSchema,
+    job_id: ulidSchema,
+  })
+  .strict();
+const pendingJobRowSchema = z.object({ id: ulidSchema }).strict();
+const reconciliationLimitSchema = z.number().int().min(1).max(100);
 
 export interface PreparedSubmission {
   readonly attemptId: string;
@@ -402,7 +588,19 @@ export interface ClaimContext {
   readonly winningRunpodJobId: string | null;
 }
 
+export interface ExpiredUnknownSubmission {
+  readonly attemptId: string;
+  readonly claimExpiresAt: string;
+  readonly jobId: string;
+}
+
 export interface RunpodControlRepository {
+  cancelExpiredUnboundSubmission(input: {
+    readonly attemptId: string;
+    readonly eventId: string;
+    readonly jobId: string;
+    readonly timestamp: string;
+  }): Promise<boolean>;
   claimWinner(input: {
     readonly attemptId: string;
     readonly claimTokenHash: string;
@@ -414,6 +612,21 @@ export interface RunpodControlRepository {
     readonly timestamp: string;
   }): Promise<boolean>;
   findClaimContext(attemptId: string, jobId: string): Promise<ClaimContext | undefined>;
+  findDispatchablePendingJobId(): Promise<string | undefined>;
+  findExpiredUnknownSubmissions(
+    timestamp: string,
+    limit: number,
+  ): Promise<readonly ExpiredUnknownSubmission[]>;
+  findExpiredUnboundCancellations(
+    timestamp: string,
+    limit: number,
+  ): Promise<readonly ExpiredUnknownSubmission[]>;
+  failExpiredUnknownSubmission(input: {
+    readonly attemptId: string;
+    readonly eventId: string;
+    readonly jobId: string;
+    readonly timestamp: string;
+  }): Promise<boolean>;
   markHeartbeat(input: {
     readonly attemptId: string;
     readonly heartbeatTokenHash: string;
@@ -473,6 +686,30 @@ function mapClaimContext(row: z.infer<typeof claimContextRowSchema>): ClaimConte
 
 export function createD1RunpodControlRepository(database: D1Database): RunpodControlRepository {
   return {
+    async cancelExpiredUnboundSubmission(input) {
+      const timestamp = utcDateTimeSchema.parse(input.timestamp);
+      const results = await database.batch([
+        database
+          .prepare(CANCEL_EXPIRED_UNBOUND_ATTEMPT_SQL)
+          .bind(ulidSchema.parse(input.attemptId), ulidSchema.parse(input.jobId), timestamp),
+        database
+          .prepare(CANCEL_EXPIRED_UNBOUND_JOB_SQL)
+          .bind(input.jobId, input.attemptId, timestamp),
+        database
+          .prepare(RECORD_EVENT_SQL)
+          .bind(
+            ulidSchema.parse(input.eventId),
+            input.jobId,
+            input.attemptId,
+            "job_cancelled_unbound",
+            timestamp,
+          ),
+      ]);
+      const updatedAttempt = updatedIdRowsSchema.parse(results[0]?.results ?? [])[0];
+      const updatedJob = updatedIdRowsSchema.parse(results[1]?.results ?? [])[0];
+      return updatedAttempt !== undefined && updatedJob !== undefined;
+    },
+
     async claimWinner(input) {
       const timestamp = utcDateTimeSchema.parse(input.timestamp);
       const results = await database.batch([
@@ -521,6 +758,72 @@ export function createD1RunpodControlRepository(database: D1Database): RunpodCon
       return untrusted === null
         ? undefined
         : mapClaimContext(claimContextRowSchema.parse(untrusted));
+    },
+
+    async findDispatchablePendingJobId() {
+      const untrusted = await database
+        .withSession("first-primary")
+        .prepare(FIND_DISPATCHABLE_PENDING_JOB_SQL)
+        .first();
+      return untrusted === null ? undefined : pendingJobRowSchema.parse(untrusted).id;
+    },
+
+    async findExpiredUnknownSubmissions(timestamp, limit) {
+      const results = await database
+        .withSession("first-primary")
+        .prepare(FIND_EXPIRED_UNKNOWN_SUBMISSIONS_SQL)
+        .bind(utcDateTimeSchema.parse(timestamp), reconciliationLimitSchema.parse(limit))
+        .all();
+      return z
+        .array(expiredUnknownSubmissionRowSchema)
+        .max(limit)
+        .parse(results.results)
+        .map((row) => ({
+          attemptId: row.attempt_id,
+          claimExpiresAt: row.claim_expires_at,
+          jobId: row.job_id,
+        }));
+    },
+
+    async findExpiredUnboundCancellations(timestamp, limit) {
+      const results = await database
+        .withSession("first-primary")
+        .prepare(FIND_EXPIRED_UNBOUND_CANCELLATIONS_SQL)
+        .bind(utcDateTimeSchema.parse(timestamp), reconciliationLimitSchema.parse(limit))
+        .all();
+      return z
+        .array(expiredUnknownSubmissionRowSchema)
+        .max(limit)
+        .parse(results.results)
+        .map((row) => ({
+          attemptId: row.attempt_id,
+          claimExpiresAt: row.claim_expires_at,
+          jobId: row.job_id,
+        }));
+    },
+
+    async failExpiredUnknownSubmission(input) {
+      const timestamp = utcDateTimeSchema.parse(input.timestamp);
+      const results = await database.batch([
+        database
+          .prepare(FAIL_EXPIRED_UNKNOWN_ATTEMPT_SQL)
+          .bind(ulidSchema.parse(input.attemptId), ulidSchema.parse(input.jobId), timestamp),
+        database
+          .prepare(FAIL_EXPIRED_UNKNOWN_JOB_SQL)
+          .bind(input.jobId, input.attemptId, timestamp),
+        database
+          .prepare(RECORD_EVENT_SQL)
+          .bind(
+            ulidSchema.parse(input.eventId),
+            input.jobId,
+            input.attemptId,
+            "runpod_submission_expired",
+            timestamp,
+          ),
+      ]);
+      const updatedAttempt = updatedIdRowsSchema.parse(results[0]?.results ?? [])[0];
+      const updatedJob = updatedIdRowsSchema.parse(results[1]?.results ?? [])[0];
+      return updatedAttempt !== undefined && updatedJob !== undefined;
     },
 
     async markHeartbeat(input) {

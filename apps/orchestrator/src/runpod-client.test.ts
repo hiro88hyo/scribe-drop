@@ -71,4 +71,125 @@ describe("RunPod client", () => {
 
     await expect(client.submit(REQUEST)).resolves.toEqual({ outcome: "unknown" });
   });
+
+  it("validates status responses and calls the exact endpoint", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({
+        delayTime: 100,
+        error: "provider detail that must not reach the completion service",
+        executionTime: 200,
+        id: "runpod-job-id",
+        input: REQUEST.input,
+        output: {
+          attemptId: REQUEST.input.attemptId,
+          detectedLanguage: "ja",
+          durationSeconds: 60,
+          jobId: REQUEST.input.jobId,
+          manifestWritten: true,
+          schemaVersion: 1,
+          segmentCount: 3,
+          status: "completed",
+        },
+        status: "COMPLETED",
+        workerId: "worker-id",
+      }),
+    );
+    const client = createRunpodClient({
+      apiKey: "runpod-api-key-placeholder",
+      endpointId: "endpoint-id",
+      fetch: fetchMock,
+    });
+
+    await expect(client.getStatus("runpod-job-id")).resolves.toEqual({
+      outcome: "found",
+      response: {
+        delayTime: 100,
+        executionTime: 200,
+        id: "runpod-job-id",
+        output: {
+          attemptId: REQUEST.input.attemptId,
+          detectedLanguage: "ja",
+          durationSeconds: 60,
+          jobId: REQUEST.input.jobId,
+          manifestWritten: true,
+          schemaVersion: 1,
+          segmentCount: 3,
+          status: "completed",
+        },
+        status: "COMPLETED",
+      },
+    });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.runpod.ai/v2/endpoint-id/status/runpod-job-id",
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      headers: { authorization: "Bearer runpod-api-key-placeholder" },
+      method: "GET",
+      redirect: "error",
+    });
+  });
+
+  it.each([
+    ["not found", new Response(null, { status: 404 }), "not_found"],
+    [
+      "unknown status",
+      Response.json({ id: "runpod-job-id", status: "UNREVIEWED" }),
+      "invalid_response",
+    ],
+    [
+      "oversized response",
+      new Response("{}", {
+        headers: { "content-length": String(33 * 1024) },
+        status: 200,
+      }),
+      "invalid_response",
+    ],
+    [
+      "undeclared oversized response",
+      new Response(
+        JSON.stringify({
+          id: "runpod-job-id",
+          padding: "x".repeat(33 * 1024),
+          status: "IN_PROGRESS",
+        }),
+      ),
+      "invalid_response",
+    ],
+    ["rate limited", new Response(null, { status: 429 }), "unavailable"],
+  ])("classifies a %s status response", async (_name, response, outcome) => {
+    const client = createRunpodClient({
+      apiKey: "runpod-api-key-placeholder",
+      endpointId: "endpoint-id",
+      fetch: vi.fn<typeof fetch>().mockResolvedValue(response),
+    });
+
+    await expect(client.getStatus("runpod-job-id")).resolves.toEqual({ outcome });
+  });
+
+  it("classifies cancel responses without reading provider error bodies", async () => {
+    const acceptedFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response(null, { status: 200 }));
+    const rejectedFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response("provider-secret-detail", { status: 403 }));
+
+    await expect(
+      createRunpodClient({
+        apiKey: "runpod-api-key-placeholder",
+        endpointId: "endpoint-id",
+        fetch: acceptedFetch,
+      }).cancel("runpod-job-id"),
+    ).resolves.toEqual({ outcome: "accepted" });
+    await expect(
+      createRunpodClient({
+        apiKey: "runpod-api-key-placeholder",
+        endpointId: "endpoint-id",
+        fetch: rejectedFetch,
+      }).cancel("runpod-job-id"),
+    ).resolves.toEqual({ outcome: "rejected" });
+    expect(acceptedFetch.mock.calls[0]?.[0]).toBe(
+      "https://api.runpod.ai/v2/endpoint-id/cancel/runpod-job-id",
+    );
+  });
 });

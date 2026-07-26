@@ -30,6 +30,7 @@ routes = [
 [env.staging.vars]
 CLOUDFLARE_ACCOUNT_ID = "${"0".repeat(32)}"
 RUNPOD_INTERNAL_BASE_URL = "https://replace-with-staging-orchestrator.example.invalid"
+WEB_BASE_URL = "https://replace-with-staging-web.example.invalid"
 database_id = "00000000-0000-0000-0000-000000000101"
 `;
 
@@ -50,6 +51,7 @@ database_id = "00000000-0000-0000-0000-000000000101"
     rendered,
     /RUNPOD_INTERNAL_BASE_URL = "https:\/\/orchestrator-staging\.example\.invalid"/u,
   );
+  assert.match(rendered, /WEB_BASE_URL = "https:\/\/scribe-drop-staging\.example\.invalid"/u);
 });
 
 test("renders the web staging identifiers and ignored-config build path", () => {

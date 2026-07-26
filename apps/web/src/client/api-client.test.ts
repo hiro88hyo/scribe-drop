@@ -168,6 +168,119 @@ describe("browser API client", () => {
     });
   });
 
+  it("requests a fresh retry with an empty strict body and CSRF token", async () => {
+    let capturedInput: RequestInfo | URL | undefined;
+    let capturedInit: RequestInit | undefined;
+    const fetcher: ApiFetch = (input, init) => {
+      capturedInput = input;
+      capturedInit = init;
+      return Promise.resolve(
+        jsonResponse({
+          job: {
+            actualSizeBytes: 1024,
+            completedAt: null,
+            createdAt: JOB_DETAIL.createdAt,
+            durationSeconds: null,
+            errorCode: null,
+            expectedSizeBytes: JOB_DETAIL.expectedSizeBytes,
+            id: JOB_DETAIL.id,
+            originalFilename: JOB_DETAIL.originalFilename,
+            sourceContentType: JOB_DETAIL.sourceContentType,
+            status: "SUBMISSION_PENDING",
+            title: JOB_DETAIL.title,
+            updatedAt: JOB_DETAIL.updatedAt,
+          },
+        }),
+      );
+    };
+
+    const result = await createApiClient(fetcher).retryJob(JOB_ID, CSRF_TOKEN);
+
+    expect(result.job).toMatchObject({
+      errorCode: null,
+      id: JOB_ID,
+      status: "SUBMISSION_PENDING",
+    });
+    expect(capturedInput).toBe(`/api/jobs/${JOB_ID}/retry`);
+    expect(capturedInit).toMatchObject({
+      body: "{}",
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "X-CSRF-Token": CSRF_TOKEN,
+      },
+      method: "POST",
+    });
+  });
+
+  it("requests cancellation with an empty strict body and CSRF token", async () => {
+    let capturedInput: RequestInfo | URL | undefined;
+    let capturedInit: RequestInit | undefined;
+    const fetcher: ApiFetch = (input, init) => {
+      capturedInput = input;
+      capturedInit = init;
+      return Promise.resolve(
+        jsonResponse({
+          job: {
+            actualSizeBytes: 1024,
+            completedAt: null,
+            createdAt: JOB_DETAIL.createdAt,
+            durationSeconds: null,
+            errorCode: null,
+            expectedSizeBytes: JOB_DETAIL.expectedSizeBytes,
+            id: JOB_DETAIL.id,
+            originalFilename: JOB_DETAIL.originalFilename,
+            sourceContentType: JOB_DETAIL.sourceContentType,
+            status: "CANCEL_REQUESTED",
+            title: JOB_DETAIL.title,
+            updatedAt: JOB_DETAIL.updatedAt,
+          },
+        }),
+      );
+    };
+
+    const result = await createApiClient(fetcher).cancelJob(JOB_ID, CSRF_TOKEN);
+
+    expect(result.job.status).toBe("CANCEL_REQUESTED");
+    expect(capturedInput).toBe(`/api/jobs/${JOB_ID}/cancel`);
+    expect(capturedInit).toMatchObject({
+      body: "{}",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": CSRF_TOKEN,
+      },
+      method: "POST",
+    });
+  });
+
+  it("requests an allowlisted artifact format without caching", async () => {
+    let capturedInput: RequestInfo | URL | undefined;
+    let capturedInit: RequestInit | undefined;
+    const fetcher: ApiFetch = (input, init) => {
+      capturedInput = input;
+      capturedInit = init;
+      return Promise.resolve(
+        jsonResponse({
+          expiresAt: "2027-01-01T00:05:00.000Z",
+          url: "https://storage.example.test/download?signature=test-only",
+        }),
+      );
+    };
+    const client = createApiClient(fetcher);
+
+    await expect(client.getArtifact(JOB_ID, "markdown")).resolves.toMatchObject({
+      expiresAt: "2027-01-01T00:05:00.000Z",
+    });
+    expect(capturedInput).toBe(`/api/jobs/${JOB_ID}/artifacts/markdown`);
+    expect(capturedInit).toMatchObject({
+      cache: "no-store",
+      credentials: "same-origin",
+      method: "GET",
+    });
+  });
+
   it("rejects invalid create input and CSRF before issuing a request", async () => {
     let fetchCalls = 0;
     const client = createApiClient(() => {
