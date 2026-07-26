@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .constants import DEFAULT_MODEL_PATH, MAX_DURATION_SECONDS, MAX_SOURCE_BYTES
 
@@ -28,6 +28,14 @@ class WorkerSettings(BaseModel):
     max_duration_seconds: float = Field(gt=0, le=MAX_DURATION_SECONDS)
     heartbeat_interval_seconds: float = Field(ge=30, le=120)
     model_path: str
+
+    @model_validator(mode="after")
+    def validate_production_model_path(self) -> WorkerSettings:
+        """Prevent staging and production from selecting a runtime model location."""
+        if self.app_environment != "local" and self.model_path != DEFAULT_MODEL_PATH:
+            msg = "MODEL_PATH is fixed outside local development"
+            raise ValueError(msg)
+        return self
 
     @field_validator("orchestrator_origin")
     @classmethod

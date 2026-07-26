@@ -31,15 +31,13 @@ class ValidatedUrl:
 
     value: str
     parsed: SplitResult
+    canonical_hostname: str
     addresses: tuple[ipaddress.IPv4Address | ipaddress.IPv6Address, ...]
 
     @property
     def hostname(self) -> str:
         """Return the canonical DNS hostname."""
-        hostname = self.parsed.hostname
-        if hostname is None:  # pragma: no cover - guarded by validation
-            raise AssertionError
-        return hostname
+        return self.canonical_hostname
 
 
 def resolve_addresses(hostname: str, port: int) -> tuple[str, ...]:
@@ -71,7 +69,12 @@ class UrlPolicy:
         """Reject unsafe syntax, unexpected hosts, and non-public DNS answers."""
         parsed, canonical_host = self._validate_syntax(value, purpose)
         addresses = self._resolve_public_addresses(canonical_host)
-        return ValidatedUrl(value=value, parsed=parsed, addresses=addresses)
+        return ValidatedUrl(
+            value=value,
+            parsed=parsed,
+            canonical_hostname=canonical_host,
+            addresses=addresses,
+        )
 
     def _validate_syntax(self, value: str, purpose: UrlPurpose) -> tuple[SplitResult, str]:
         if len(value) > MAX_URL_LENGTH:

@@ -49,6 +49,15 @@ def test_settings_reject_ambiguous_network_and_model_configuration(name: str, va
         load_settings(environment)
 
 
+def test_non_local_settings_require_the_fixed_image_model_path() -> None:
+    """A deployment cannot select or download another model at runtime."""
+    environment = valid_environment()
+    environment["APP_ENV"] = "staging"
+    environment["MODEL_PATH"] = "/opt/models/other-model"
+    with pytest.raises(ValidationError, match="fixed"):
+        load_settings(environment)
+
+
 @pytest.mark.parametrize(
     ("name", "value"),
     [

@@ -31,7 +31,11 @@ Phase 4のCloudflare制御面では、最小`/run` payload、15分の一回限�
 environment全体で1件のsubmission gate、`accepted`・`rejected`・`unknown`の区別、
 単一winner CAS、loser記録、同一winner replay拒否、2時間のexact-object R2 URL、
 8時間のheartbeat認証を実装し、Miniflareの並行claimを含むlocal検証を通している。
-RunPod Worker image、endpoint、benchmark、staging smokeは未完了である。
+RunPod WorkerはPydantic strict入力、claim-first実行、exact hostとpublic DNS検証、
+検証済みIPへの接続固定、redirect拒否、streaming size/ETag照合、ffprobe、
+faster-whisperのclaim後遅延load、artifact integrity、manifest-last、`/tmp` cleanup、
+worker refreshまでlocal実装・テスト済みである。RunPod Worker image、固定model
+revision、endpoint、benchmark、staging smokeは未完了である。
 
 `apps/orchestrator/wrangler.toml`と`apps/web/wrangler.toml`の全ゼロIDおよびoriginは
 安全なplaceholderであり、remote操作には使用できない。実IDと実originは追跡対象へ

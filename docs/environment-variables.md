@@ -121,16 +121,28 @@ method・2時間のpresigned URLを発行する用途だけに使う。
 
 localでは`apps/runpod-worker/.env.example`を未追跡の`.env`へコピーする。本番値はRunPod templateのsecret/environment設定から渡す。
 
-| Variable                     | Secret | Purpose                             |
-| ---------------------------- | :----: | ----------------------------------- |
-| `APP_ENV`                    |   no   | 実行環境                            |
-| `ALLOWED_SOURCE_HOSTS`       |   no   | source GET URLのhost allowlist      |
-| `ALLOWED_RESULT_HOSTS`       |   no   | artifact PUT URLのhost allowlist    |
-| `ALLOWED_ORCHESTRATOR_HOSTS` |   no   | claim/heartbeat URLのhost allowlist |
-| `MAX_SOURCE_BYTES`           |   no   | streaming download上限、2 GiB       |
-| `MAX_DURATION_SECONDS`       |   no   | ffprobe duration上限、8時間         |
-| `HEARTBEAT_INTERVAL_SECONDS` |   no   | heartbeat間隔、初期値120秒          |
+| Variable                     | Secret | Purpose                                      |
+| ---------------------------- | :----: | -------------------------------------------- |
+| `APP_ENV`                    |   no   | `local`、`staging`、`production`             |
+| `ORCHESTRATOR_ORIGIN`        |   no   | claim/heartbeatの単一exact HTTPS origin      |
+| `ALLOWED_SOURCE_HOSTS`       |   no   | source GET URLのexact host allowlist         |
+| `ALLOWED_RESULT_HOSTS`       |   no   | artifact PUT URLのexact host allowlist       |
+| `MAX_SOURCE_BYTES`           |   no   | streaming download上限、最大2 GiB            |
+| `MAX_DURATION_SECONDS`       |   no   | ffprobe duration上限、最大8時間              |
+| `HEARTBEAT_INTERVAL_SECONDS` |   no   | heartbeat間隔、30〜120秒、初期値120秒        |
+| `MODEL_PATH`                 |   no   | image内の固定model path、local以外は変更不可 |
 
 `claimToken`だけを最小化したRunPod `/run` inputから受け取る。heartbeat tokenとpresigned URLはwinner claim成功responseからだけ受け取り、環境変数、RunPod template、永続volumeへ保存しない。per-job webhook tokenは発行しない。
 
-Whisper model IDとrevision、FFmpeg、faster-whisper、CTranslate2、CUDA、base imageはruntime環境変数で切り替えず、Phase 4でDockerfile、lockfile、image metadataへ固定する。固定値を変更する場合はimageを再buildし、SBOM、offline起動試験、vulnerability scanを通す。
+`ORCHESTRATOR_ORIGIN`はuserinfo、query、fragment、path、443以外のportを許可しない。
+originと2種のhost allowlistはwildcardやsuffix一致ではなくexact hostnameだけを
+受け付ける。
+requestごとに全A/AAAAを検査し、一つでもprivate、loopback、link-local、metadata相当、
+reservedのaddressを含む場合は拒否する。接続時は検証済みIPへ固定し、HTTP `Host`とTLS
+SNIだけを元hostnameに保つ。proxyとredirectは使用しない。
+
+Python依存は`uv.lock`に固定し、RunPod SDK 1.11.0、faster-whisper 1.2.1、
+CTranslate2 4.8.1、Pydantic 2.13.4、httpx 0.28.1を使用する。Whisper model IDと
+revision、FFmpeg、CUDA、base imageはruntime環境変数で切り替えず、Phase 4の
+Dockerfile、lockfile、image metadataへ固定する。固定値を変更する場合はimageを
+再buildし、SBOM、offline起動試験、vulnerability scanを通す。
