@@ -78,6 +78,11 @@ RunPod API key は環境変数または CI secret から渡す。リポジトリ
 
 Gitleaks は `.tools/bin/gitleaks` に導入される。commit 済みの Git 履歴と現在の作業ツリーを一括検査する。
 
+`.gitleaks.toml`はdefault rulesを継承する。追跡外RunPod staging planの
+`registryAuthId`は非secret resource IDであるため、`generic-api-key` ruleに限り、
+exact pathとfield行のAND条件で除外する。plan全体は除外せず、credentialやtokenが
+混入した場合は引き続き失敗させる。
+
 ```bash
 pnpm run secrets:check
 ```

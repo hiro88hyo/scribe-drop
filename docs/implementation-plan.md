@@ -314,7 +314,10 @@ temporary credentialのexact-object multipart/abort成功とaction/object拒否�
 - 正常、失敗、cancelのすべてで一時ファイルが削除され、worker refreshが要求される。
 - RunPod request、status、output、stdout、stderrにtoken、署名付きURL、元filename、本文、FFmpeg pathが含まれない。
 - modelはimage内の固定revisionだけからloadされ、networkを切ったcontainer testでも起動できる。
-- endpoint設定を`runpodctl`で取得し、Secure Cloud、0〜1 worker、volumeなし、FlashBoot無効、timeout/TTLが期待値と一致することをstagingで確認する。
+- endpoint設定は[ADR 0012](./adr/0012-runpodctl-staging-verification-boundary.md)に従い、
+  固定plan、完全一致の作成引数、pending state、`runpodctl`取得応答を組み合わせて確認する。
+  0〜1 worker、volumeなし、FlashBoot無効、timeoutを作成直後に照合し、GPU配置と
+  Secure Cloudは初回worker起動後にstagingで確認する。
 
 ### コミット境界
 

@@ -272,17 +272,27 @@ export function validateCreatedRunpodEndpoint(untrustedEndpoint, untrustedPlan, 
   const networkVolumeIds = endpoint.networkVolumeIds ?? [];
   const modelReferences = endpoint.modelReferences ?? [];
   const flashBootDisabled = endpoint.flashBootType === "OFF" || endpoint.flashboot === false;
+  // runpodctl 2.7.2 omits these fields from REST read responses even though it
+  // accepts and sends them during create. Validate them whenever the provider
+  // reports them; the exact create arguments are covered separately.
+  const computeTypeMatches =
+    endpoint.computeType === undefined || endpoint.computeType === plan.endpoint.computeType;
+  const gpuIdsMatch =
+    endpoint.gpuIds === undefined ||
+    (typeof endpoint.gpuIds === "string" && endpoint.gpuIds.length > 0);
+  const locationsMatch =
+    endpoint.locations === undefined ||
+    endpoint.locations === plan.endpoint.dataCenterIds.join(",");
   if (
     !resourceIdPattern.test(String(endpoint.id ?? "")) ||
     endpoint.name !== plan.endpoint.name ||
     endpoint.templateId !== templateId ||
-    endpoint.computeType !== plan.endpoint.computeType ||
-    typeof endpoint.gpuIds !== "string" ||
-    endpoint.gpuIds.length === 0 ||
+    !computeTypeMatches ||
+    !gpuIdsMatch ||
     endpoint.gpuCount !== plan.endpoint.gpuCount ||
     (endpoint.workersMin ?? 0) !== plan.endpoint.workersMin ||
     endpoint.workersMax !== plan.endpoint.workersMax ||
-    endpoint.locations !== plan.endpoint.dataCenterIds.join(",") ||
+    !locationsMatch ||
     endpoint.idleTimeout !== plan.endpoint.idleTimeoutSeconds ||
     endpoint.executionTimeoutMs !== plan.endpoint.executionTimeoutSeconds * 1_000 ||
     endpoint.minCudaVersion !== plan.endpoint.minCudaVersion ||

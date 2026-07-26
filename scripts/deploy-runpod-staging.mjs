@@ -147,6 +147,9 @@ function getOrCreateEndpoint(plan, templateId, state) {
     throw new Error("multiple RunPod endpoints match the staging name");
   }
   if (matches.length === 1) {
+    if (state === null) {
+      throw new Error("existing RunPod endpoint has no matching pending deployment state");
+    }
     const summary = requireRecord(matches[0], "RunPod endpoint response");
     if (!resourceIdPattern.test(String(summary.id ?? ""))) {
       throw new Error("RunPod endpoint response is missing an ID");
@@ -165,39 +168,6 @@ function getOrCreateEndpoint(plan, templateId, state) {
   return validateCreatedRunpodEndpoint(created, plan, templateId);
 }
 
-function recoverUntrackedEndpoint(plan, planDigest) {
-  const endpoints = requireArray(runCli(["serverless", "list"]), "runpodctl serverless list");
-  const matches = matchingNamedResources(endpoints, plan.endpoint.name);
-  if (matches.length === 0) {
-    return false;
-  }
-  if (matches.length > 1) {
-    throw new Error("multiple RunPod endpoints match the staging name");
-  }
-  const summary = requireRecord(matches[0], "RunPod endpoint response");
-  if (!resourceIdPattern.test(String(summary.id ?? ""))) {
-    throw new Error("RunPod endpoint response is missing an ID");
-  }
-  const endpoint = requireRecord(
-    runCli(["serverless", "get", summary.id, "--include-template", "--include-workers"]),
-    "RunPod endpoint response",
-  );
-  if (!resourceIdPattern.test(String(endpoint.templateId ?? ""))) {
-    throw new Error("RunPod endpoint response is missing a template ID");
-  }
-  const template = runCli(["template", "get", endpoint.templateId]);
-  const templateId = validateCreatedRunpodTemplate(template, plan);
-  const endpointId = validateCreatedRunpodEndpoint(endpoint, plan, templateId);
-  writeState({
-    schemaVersion: 1,
-    environment: "staging",
-    planSha256: planDigest,
-    templateId,
-    endpointId,
-  });
-  return true;
-}
-
 function main() {
   if (process.argv.length !== 2) {
     throw new Error("runpod staging deployment takes no command-line arguments");
@@ -210,12 +180,6 @@ function main() {
   const state = loadState(planDigest);
 
   runCli(["user"]);
-  if (state === null && recoverUntrackedEndpoint(plan, planDigest)) {
-    console.log(
-      "Recovered and verified existing RunPod staging resources; IDs are stored only in ignored state.",
-    );
-    return;
-  }
   const templateId = getOrCreateTemplate(plan, state);
   if (state === null) {
     writeState({
