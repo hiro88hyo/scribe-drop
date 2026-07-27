@@ -179,6 +179,11 @@ function main() {
   if (process.argv.length !== 3) {
     throw new Error("RunPod deployment takes exactly one environment argument");
   }
+  if (environment === "production") {
+    throw new Error(
+      "Production RunPod deployment is blocked until the ADR 0023 promotion gate is implemented",
+    );
+  }
   if (!existsSync(runpodctl)) {
     throw new Error("runpodctl is not installed; run pnpm run runpodctl:install");
   }

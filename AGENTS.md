@@ -55,6 +55,19 @@
 - staging と production を明示的に区別し、更新・削除・deploy 前に account、resource ID、environment を確認する。
 - application runtime から Wrangler や `runpodctl` を subprocess として呼ばない。実行時の RunPod 連携は型付き HTTP client を使う。
 
+### Staging promotion gate
+
+- runtime、依存、deployment設定、migration、外部service連携へ影響する変更は、同じrelease candidateがstaging acceptanceを通過するまでproductionへdeployしない。
+- release candidateは`release/<version>`の単一commitから一度だけbuildし、production用に再buildしない。
+- stagingとproductionはresourceとsecretを分離するが、application artifact、RunPod image digest、migration集合は同一candidateを使用する。
+- production deployは任意のbranch、commit、image、local buildを入力に取らず、成功したstaging evidenceに紐付くcandidateだけを昇格する。
+- code、dependency、migration、deployment設定を変更した時点で既存のstaging evidenceを無効とし、candidateのbuildとstaging acceptanceをやり直す。
+- mock E2Eやunit testは実service staging acceptanceの代替にしない。変更経路を固定dummy dataで実R2、Queue、RunPod、成果物downloadまで検証する。
+- OSやbrowser固有のfile picker、PWA、offline動作を変更した場合は、対象実機のstaging smokeも必須とする。
+- deploy前後に実resourceをread-backし、許可したenvironment固有値以外の構成差分を拒否する。
+- promotion workflowとparity verifierが未実装または失敗している間はproduction deployを行わない。
+- 緊急時のgate省略は[ADR 0023](docs/adr/0023-promote-only-staging-verified-artifacts.md)のbreak-glass条件に限定し、明示承認と監査記録なしに実行しない。
+
 ## 3. Git-flow
 
 ### 長期ブランチ
@@ -196,6 +209,7 @@ CI では最低限、次を実行する。
 - 正常系だけでなく、認可、重複、競合、timeout、partial failure を検証している。
 - lint、型検査、test、build が成功している。
 - migration、contract、実装、文書が同期している。
+- production対象の変更では、同一candidateのstaging acceptance evidenceとartifact digest照合が成功している。
 - ログと成果物に機密情報が含まれないことを確認している。
 - 未解決事項、手動設定、運用上の注意を明示している。
 - 設計との差異が ADR に記録されている。

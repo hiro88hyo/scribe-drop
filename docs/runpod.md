@@ -71,8 +71,10 @@ buildとscanを開始する。High/Critical findingはfixed/unfixedを問わずj
 
 ## Endpoint invariant
 
-stagingとproductionは別endpoint/template/image digestを使用する。設定は次から緩めず、
-満たせない場合はdeployを停止する。
+stagingとproductionは別endpoint、別template、別credentialを使用する。release candidateを
+昇格する場合、両templateは[ADR 0023](./adr/0023-promote-only-staging-verified-artifacts.md)
+に従って同じ検証済みimage digestを参照する。設定は次から緩めず、満たせない場合はdeployを
+停止する。
 
 - Secure Cloud
 - Flex
@@ -89,11 +91,16 @@ templateへRunPod API key、R2長期credential、Discord webhookを渡さない�
 
 ## Deployment and rollback
 
-`Publish RunPod worker` workflowを手動実行する。stagingは`develop`とtarget
-`staging`、productionはversion一致する`release/<version>`とtarget `production`に
-限定する。workflowはoffline check、SBOM、scanを通した同一imageをGHCRへpushし、
-environment別publication artifactの`runpod-worker-image.txt`へdigest付き参照を保存する。
-初回packageはprivateのままである。
+RunPod imageは`release/<version>`の単一commitから一度だけbuildする。offline check、
+SBOM、scanを通したimageをGHCRへpushし、candidate manifestへdigest付き参照を保存する。
+staging acceptanceはこのdigestを使用し、productionは成功したevidenceが参照する同じ
+digestだけを昇格する。production用の再buildと任意image入力を禁止する。
+
+`Publish RunPod release candidate` workflowはenvironment選択を持たず、
+`release/<version>`からcandidate imageを一度だけ発行する。このworkflowはproduction
+credentialとdeploy jobを持たない。candidateとstaging evidenceを照合するpromotion
+workflowが完成するまでproduction deployはfail-closedとする。package visibilityは暗黙に
+変更しない。
 
 private imageを使う場合、RunPodにはread-only registry credentialが必要になる。
 `runpodctl registry create`はpasswordをcommand line argumentとして受け取るため使用せず、
@@ -101,14 +108,16 @@ RunPod consoleのsecret入力で登録してから`runpodctl registry list`で�
 だけを確認する。publicへ変更する場合はregistry credentialが不要になるが、GitHub上で
 privateへ戻せない操作なので明示的に選択する。
 
-image visibility、digest、registry auth ID、GPU、data centerと同じenvironmentの
-Cloudflare値をcredential storeから環境変数へ読み込み、追跡外planを生成する。
+image visibility、candidateの共通digest、environment別registry auth ID、GPU、data centerと
+同じenvironmentのCloudflare値をcredential storeまたはCI evidenceから読み込み、追跡外planを
+生成する。
 
 ```bash
 pnpm run runpod:config:staging
 ```
 
-productionではproduction専用の同項目を読み込み、次を使用する。
+productionではstaging evidenceが参照する同じimage digestと、production専用のほかの項目を
+読み込み、次を使用する。
 
 ```bash
 pnpm run runpod:config:production
@@ -117,6 +126,8 @@ pnpm run runpod:config:production
 `.runpod/deploy/<environment>-plan.json`はdirectoryを0700、fileを0600で生成する。
 実account ID、実origin、registry image、resource IDを含むため、リポジトリへ追加しない。
 production planはstaging markerを持つoriginとregistry auth IDを拒否する。
+promotion workflowでは、さらにstaging evidenceのcandidate digestと一致しないimageを
+拒否する。現在はこの照合が未実装であるためproduction deploy自体を拒否する。
 
 planを確認した後、API keyをcredential storeまたは一時環境変数から供給してdeployする。
 
@@ -124,7 +135,8 @@ planを確認した後、API keyをcredential storeまたは一時環境変数�
 pnpm run runpod:deploy:staging
 ```
 
-production resource作成checkpointでは次を使用する。
+production commandは現在fail-closedで終了する。promotion workflow実装後もlocalから
+直接実行せず、candidate照合済みのproduction jobだけが内部で使用する。
 
 ```bash
 pnpm run runpod:deploy:production

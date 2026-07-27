@@ -7,6 +7,11 @@ const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(scriptDirectory, "..");
 const workflowsDirectory = path.join(repositoryRoot, ".github", "workflows");
 const publicationWorkflowPath = path.join(workflowsDirectory, "publish-runpod-worker.yml");
+const runpodDeploymentScriptPath = path.join(
+  repositoryRoot,
+  "scripts",
+  "deploy-runpod-environment.mjs",
+);
 const dockerfilePath = path.join(repositoryRoot, "apps", "runpod-worker", "Dockerfile");
 const modelBundlePath = path.join(
   repositoryRoot,
@@ -34,6 +39,12 @@ function requireTextCount(contents, expected, count, location, description) {
     failures.push(
       `${location}: expected fixed ${description} ${count} times, found ${actual} (${expected})`,
     );
+  }
+}
+
+function forbidText(contents, forbidden, location, description) {
+  if (contents.includes(forbidden)) {
+    failures.push(`${location}: contains forbidden ${description} (${forbidden})`);
   }
 }
 
@@ -69,6 +80,7 @@ const workflowContents = workflowFiles
   .map((filename) => readFileSync(path.join(workflowsDirectory, filename), "utf8"))
   .join("\n");
 const publicationWorkflowContents = readFileSync(publicationWorkflowPath, "utf8");
+const runpodDeploymentScriptContents = readFileSync(runpodDeploymentScriptPath, "utf8");
 const dockerfileContents = readFileSync(dockerfilePath, "utf8");
 const modelBundleContents = readFileSync(modelBundlePath, "utf8");
 const versions = JSON.parse(readFileSync(versionsPath, "utf8"));
@@ -186,17 +198,39 @@ requireText(
 
 for (const [description, value] of Object.entries({
   "manual publication trigger": "workflow_dispatch:",
-  "publication environment input": "inputs.target_environment",
-  "staging publication guard": "refs/heads/develop",
-  "production release guard": "refs/heads/release/",
-  "release version comparison": "Production branch and package version must match",
+  "release candidate workflow name": "name: Publish RunPod release candidate",
+  "release candidate branch guard": "refs/heads/release/",
+  "release version comparison": "Release branch and package version must match",
   "package write permission": "packages: write",
   "commit-addressed image tag": "git-${GITHUB_SHA}",
   "password-stdin registry login": "--password-stdin",
   "immutable image reference evidence": "runpod-worker-image.txt",
+  "environment-neutral candidate evidence": "runpod-worker-candidate-publication",
 })) {
   requireText(publicationWorkflowContents, value, "publish-runpod-worker.yml", description);
 }
+
+for (const [description, value] of Object.entries({
+  "environment-specific publication input": "target_environment",
+  "develop-only candidate publication": "refs/heads/develop",
+})) {
+  forbidText(publicationWorkflowContents, value, "publish-runpod-worker.yml", description);
+}
+
+for (const [description, value] of Object.entries({
+  "production Environment before promotion verification": "environment: production",
+  "production RunPod deployment before promotion verification": "runpod:deploy:production",
+  "direct production Wrangler environment before promotion verification": "--env production",
+})) {
+  forbidText(workflowContents, value, "GitHub Actions workflows", description);
+}
+
+requireText(
+  runpodDeploymentScriptContents,
+  "Production RunPod deployment is blocked until the ADR 0023 promotion gate is implemented",
+  "deploy-runpod-environment.mjs",
+  "fail-closed production promotion guard",
+);
 
 if (failures.length > 0) {
   console.error("CI workflow verification failed:");

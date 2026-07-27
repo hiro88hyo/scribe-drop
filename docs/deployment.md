@@ -130,14 +130,16 @@ end-to-end smokeを実施する。
 3. R2 CORSと`incoming/`限定Event Notificationを設定する。
 4. D1 migrationを適用し、適用済みversionを記録する。
 5. OrchestratorとWebのsecretをCloudflare secret storeへ登録する。
-6. `develop`の`Publish RunPod worker` workflowでRunPod Worker imageをbuildし、SBOM、
-   scan、offline checkを通したGHCR digestからtemplateとstaging endpointを作成する。
+6. `release/<version>`の`Publish RunPod release candidate` workflowでRunPod Worker
+   imageを一度だけbuildし、SBOM、scan、offline checkを通したcandidate digestから
+   templateとstaging endpointを作成する。
 7. staging endpoint IDとRunPod API keyをOrchestrator secretへ登録する。
 8. [ADR 0012](./adr/0012-runpodctl-staging-verification-boundary.md)に従い、
    `runpodctl`で取得できるactive workers 0、max workers 1、GPU 1、Network Volumeなし、
    FlashBoot無効、timeoutを確認する。GPU配置とSecure Cloudは初回worker起動後に確認する。
-9. 実音声の処理時間、artifact/manifest、通知、重複配送、claim競合、cleanup、
-   reconciliationとrollback手順を確認する。
+9. 固定dummy mediaの処理時間、artifact/manifest、通知、重複配送、claim競合、cleanup、
+   reconciliationとrollback手順を確認する。変更が対象実機に依存する場合は追加の
+   staging device smokeを行う。
 
 ## Phase 3 staging checkpoint
 
@@ -268,6 +270,25 @@ pnpm exec wrangler pages deploy \
 
 resourceの作成・変更・削除とdeployの直前には、CLIの認証先、environment、resource名、IDを再確認する。dashboardだけで行った変更は残さず、Wrangler設定、migration、deployment記録へ反映する。
 
+## Production promotion gate
+
+productionへ影響する変更は
+[ADR 0023](./adr/0023-promote-only-staging-verified-artifacts.md)のcandidateとstaging
+acceptanceを必須とする。`release/<version>`の単一commitから一度だけbuildし、stagingと
+productionで同じapplication artifact、RunPod image digest、migration集合を使用する。
+production用に再buildしない。
+
+production deployは成功したstaging evidenceが参照するcandidateだけを入力とする。
+commitまたはartifact digestが異なる場合、acceptance後にcode、dependency、migration、
+deployment設定が変更された場合、実resource parity checkが失敗した場合は停止する。
+mock E2Eやlocal testは実service staging acceptanceの代替にしない。
+
+RunPod publication workflowはrelease candidateを一度だけbuildし、environment別buildと
+production deploy jobを持たない。promotion workflow、candidate manifest、実resource
+parity verifier、GitHub production Environmentのreview条件が実装されるまで、追加の
+production deployを行わない。追跡外production configの生成とread-only検査は実装準備として
+実行できるが、remote mutationの許可にはならない。
+
 ## 追跡外production設定
 
 初回production bootstrapは
@@ -306,8 +327,9 @@ pnpm cloudflare:secrets:verify:production
 pnpm cloudflare:access:verify:production
 ```
 
-RunPod resource作成はrelease commitのpublication evidenceとproduction planをreviewした後、
-別checkpointでだけ実行する。
+RunPod production deployは現在fail-closedであり、次のcommandは非0で終了する。
+ADR 0023のpromotion workflow実装後もlocalから直接実行せず、candidateとstaging evidenceを
+照合したproduction jobだけが内部で使用する。
 
 ```bash
 pnpm runpod:deploy:production

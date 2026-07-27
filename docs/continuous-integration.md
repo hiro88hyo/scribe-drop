@@ -64,14 +64,38 @@ submission、event、outboxの件数が一致しない場合はtestを失敗さ�
 満たせない場合はscanを開始せず失敗する。localでは十分な空き容量を確認してからscanし、
 空き容量不足をscan成功として扱わない。
 
-`Publish RunPod worker` workflowは手動実行とし、target environmentを必須choiceで
-stagingまたはproductionに限定する。stagingは`develop`だけ、productionは
-`release/<version>`かつbranch suffixとroot package versionが一致する場合だけ発行する。
-CIと同じoffline check、SBOM、High/Critical scanを通した同一imageを、GitHubの短期
-`GITHUB_TOKEN`でGHCRへpushする。tagはcommit SHA、RunPod templateへ渡す値はartifactに
-保存したregistry digestとし、mutable tagだけでdeployしない。artifact名にもenvironmentを
-含める。初回packageはprivateで作成される。publicへ変更するとprivateへ戻せないため、
-visibilityは暗黙に変更しない。
+`Publish RunPod release candidate` workflowは`release/<version>`の単一commitからRunPod
+imageを一度だけbuildする。environment選択とproduction用再buildは持たない。RunPod imageは
+CIと同じoffline check、SBOM、High/Critical scanを通し、GitHubの短期`GITHUB_TOKEN`で
+GHCRへpushする。mutable tagをpromotion入力にせずregistry digestをcandidate evidenceへ
+保存する。package visibilityを暗黙に変更しない。
+
+このworkflowはcandidate publicationだけを行い、production deploy権限を持たない。
+Web、Pages Functions、Orchestrator、migrationを含むcandidate manifestとstaging acceptance、
+production promotion workflowが実装されるまでproduction deployはfail-closedとする。
+
+## Staging promotion gate
+
+candidate manifestにはcommit SHA、RunPod image digest、Web、Pages Functions、
+Orchestrator bundle、migration集合のSHA-256とconfig policy versionを含める。secret、
+実origin、resource ID、署名URL、利用者dataは含めない。
+
+staging workflowはcandidateだけを入力に取り、deploy後に実resourceをread-backしてから、
+固定dummy mediaを実R2、Queue、RunPodへ通すE2Eを実行する。変更がOSやbrowser固有の
+file picker、PWA、offline動作へ及ぶ場合は、対象実機smokeの承認もcandidateへ結び付ける。
+
+production workflowはGitHubのproduction Environmentだけにcredentialを持ち、次をすべて
+満たす場合に限り同じcandidateをdeployする。
+
+- staging acceptanceが成功し、取消しまたは期限切れでない
+- commitと全artifact digestがcandidate manifestに一致する
+- acceptance後にcode、dependency、migration、deployment設定が変更されていない
+- 正規化したstaging/production構成の差分がenvironment固有allowlist内だけである
+- protected branchとrequired reviewerの条件を満たす
+
+production workflowはbuild stepと任意image引数を持たない。通常のlocal環境とstaging
+workflowへproduction credentialを渡さない。break-glassはADR 0023の記録と明示承認を
+満たす別経路とし、通常workflowの条件を一時的に緩めない。
 
 ## Branch protection
 
@@ -79,3 +103,7 @@ GitHub repository 作成後、`main` と `develop` への直接 push を禁止�
 `Quality gate`、`Secret scan`、`Dependency audit`、`RunPod container supply chain`を
 required status checkに設定する。これはrepository側の設定であり、ローカル基盤作成では
 変更しない。
+
+production Environmentにはrequired reviewerとrelease branch制限を設定する。
+candidate publication、staging acceptance、production promotionを別のGitHub Deployment
+として記録し、production jobは対応するstaging成功statusをAPIで照合する。

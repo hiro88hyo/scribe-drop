@@ -544,13 +544,26 @@ Android Share Target は設計書どおり別 PR とする。
 
 環境は local、staging、production を分離し、D1、R2、Queue、DLQ、RunPod endpoint、Access audience、Discord webhook を共有しない。
 
+productionへ影響する変更は[ADR 0023](./adr/0023-promote-only-staging-verified-artifacts.md)
+に従い、`release/<version>`の単一commitからrelease candidateを一度だけbuildする。
+stagingとproductionはresourceとsecretを分離するが、application artifact、RunPod image
+digest、migration集合は同じcandidateを使用し、production用に再buildしない。
+
 既存environmentの後方互換なリリース順序は次のとおりとする。
 
-1. migration の後方互換性を確認して適用する。
-2. orchestrator を deploy する。
-3. Pages Functions と Web asset を deploy する。
-4. RunPod image digest と endpoint 設定を更新する。
-5. staging smoke test 後に production へ進める。
+1. candidate manifestへcommit、artifact digest、migration digest、config policy versionを
+   記録する。
+2. migrationの後方互換性を確認し、stagingへmigration、Orchestrator、Pages Functionsと
+   Web asset、RunPod revisionの順でcandidateをdeployする。
+3. stagingの実binding、R2 notification、Queue、DLQ、RunPod invariantをread-backする。
+4. 変更経路を通る実service E2Eと、必要な対象実機smokeをstagingで完了する。
+5. staging evidenceとcandidate manifestの同一性をCIで検証する。
+6. 同じcandidateをproductionへ同じ順序でdeployし、deploy後のread-backとsmokeを行う。
+
+candidate作成後にcode、dependency、migration、deployment設定を変更した場合は既存の
+staging evidenceを無効とし、buildとstaging acceptanceをやり直す。mock E2Eやunit testだけ
+で実service staging acceptanceを代替しない。promotion workflowとparity verifierが
+未実装または失敗している間はproductionへdeployしない。
 
 初回production bootstrapではOrchestratorの必須secretであるRunPod endpoint IDを先に
 確定する必要があるため、
