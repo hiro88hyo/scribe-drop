@@ -28,6 +28,11 @@ workerが追跡外plan/stateと同じtemplate、image、registry credentialを�
 Unhealthy workerが残る場合がある。全jobがterminalであることをD1で確認してから対象
 workerだけをConsoleでterminateし、新workerの3項目一致を確認する。
 
+`runpodctl serverless get --include-workers`はConsoleに実workerがない場合でも終了済み
+recordを返すことがある。[ADR 0026](./adr/0026-classify-runpod-terminal-worker-records.md)に
+従い、`desiredStatus`が`EXITED`または`TERMINATED`のrecordだけを非稼働として扱う。
+`RUNNING`、未知値、欠落値はpromotionを停止し、配列の長さだけでactive数を判断しない。
+
 staging smokeのためにactive workerを1へ上げた場合、完了後は0へ戻す。固定
 `runpodctl` 2.7.2は`--workers-min 0`を成功扱いにしても値を更新しないため、
 [ADR 0012](./adr/0012-runpodctl-staging-verification-boundary.md)のdashboard補償を使う。

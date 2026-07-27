@@ -28,13 +28,23 @@ function requireArray(value, name) {
   return value;
 }
 
+function validateNoActiveWorkers(untrustedWorkers) {
+  const terminalStatuses = new Set(["EXITED", "TERMINATED"]);
+  const workers = requireArray(untrustedWorkers, "RunPod endpoint workers");
+  if (
+    workers.some((untrustedWorker) => {
+      const worker = requireRecord(untrustedWorker, "RunPod endpoint worker");
+      return !terminalStatuses.has(worker.desiredStatus);
+    })
+  ) {
+    throw new Error("RunPod endpoint has active or unrecognized workers and cannot be promoted");
+  }
+}
+
 function validateIdleEndpoint(untrustedEndpoint, plan, effectiveTemplateId) {
   const endpoint = requireRecord(untrustedEndpoint, "RunPod endpoint response");
   const currentTemplateId = requireResourceId(endpoint.templateId, "RunPod current template ID");
-  const workers = requireArray(endpoint.workers, "RunPod endpoint workers");
-  if (workers.length !== 0) {
-    throw new Error("RunPod endpoint has workers and cannot be promoted");
-  }
+  validateNoActiveWorkers(endpoint.workers);
   validateCreatedRunpodEndpoint(
     { ...endpoint, templateId: effectiveTemplateId },
     plan,

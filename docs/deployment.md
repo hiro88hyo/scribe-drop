@@ -140,6 +140,9 @@ end-to-end smokeを実施する。
 8. [ADR 0012](./adr/0012-runpodctl-staging-verification-boundary.md)に従い、
    `runpodctl`で取得できるactive workers 0、max workers 1、GPU 1、Network Volumeなし、
    FlashBoot無効、timeoutを確認する。GPU配置とSecure Cloudは初回worker起動後に確認する。
+   APIが保持する終了済みworker recordは
+   [ADR 0026](./adr/0026-classify-runpod-terminal-worker-records.md)に従って分類し、
+   `RUNNING`または未認識recordが0件であることを確認する。
 9. 固定dummy mediaの処理時間、artifact/manifest、通知、重複配送、claim競合、cleanup、
    reconciliationとrollback手順を確認する。変更が対象実機に依存する場合は追加の
    staging device smokeを行う。

@@ -105,7 +105,35 @@ test("does not mutate an endpoint that already uses the candidate template", () 
   assert.equal(result.changed, false);
 });
 
-test("refuses promotion while any worker exists", () => {
+test("allows provider-retained terminal worker records", () => {
+  let currentTemplateId = "template_old";
+  const terminalWorkers = [{ desiredStatus: "EXITED" }, { desiredStatus: "TERMINATED" }];
+  const result = promoteRunpodCandidate({
+    endpointId: "endpoint_staging",
+    environment: "staging",
+    plan,
+    runCli(arguments_) {
+      if (arguments_[0] === "user") return { id: "user" };
+      if (arguments_[0] === "template" && arguments_[1] === "list") {
+        return [{ id: "template_new", name: plan.template.name }];
+      }
+      if (arguments_[0] === "template") return template("template_new");
+      if (arguments_[0] === "serverless" && arguments_[1] === "get") {
+        return endpoint(currentTemplateId, terminalWorkers);
+      }
+      if (arguments_[0] === "serverless" && arguments_[1] === "update") {
+        currentTemplateId = arguments_[4];
+        return endpoint(currentTemplateId, terminalWorkers);
+      }
+      throw new Error("Unexpected fake CLI call");
+    },
+  });
+
+  assert.equal(result.changed, true);
+  assert.equal(currentTemplateId, "template_new");
+});
+
+test("refuses promotion while a running worker exists", () => {
   assert.throws(
     () =>
       promoteRunpodCandidate({
@@ -119,12 +147,35 @@ test("refuses promotion while any worker exists", () => {
           }
           if (arguments_[0] === "template") return template("template_new");
           if (arguments_[0] === "serverless") {
-            return endpoint("template_old", [{ status: "IDLE" }]);
+            return endpoint("template_old", [{ desiredStatus: "RUNNING" }]);
           }
           throw new Error("Unexpected fake CLI call");
         },
       }),
-    /has workers/u,
+    /active or unrecognized workers/u,
+  );
+});
+
+test("refuses promotion when a worker lifecycle status is missing", () => {
+  assert.throws(
+    () =>
+      promoteRunpodCandidate({
+        endpointId: "endpoint_staging",
+        environment: "staging",
+        plan,
+        runCli(arguments_) {
+          if (arguments_[0] === "user") return { id: "user" };
+          if (arguments_[0] === "template" && arguments_[1] === "list") {
+            return [{ id: "template_new", name: plan.template.name }];
+          }
+          if (arguments_[0] === "template") return template("template_new");
+          if (arguments_[0] === "serverless") {
+            return endpoint("template_old", [{}]);
+          }
+          throw new Error("Unexpected fake CLI call");
+        },
+      }),
+    /active or unrecognized workers/u,
   );
 });
 

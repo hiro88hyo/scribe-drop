@@ -2,6 +2,8 @@
 
 - Status: Accepted
 - Date: 2026-07-26
+- Worker lifecycle recordのactive判定は
+  [ADR 0026](./0026-classify-runpod-terminal-worker-records.md)で補足する。
 
 ## Context
 
