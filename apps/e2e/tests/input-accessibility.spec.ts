@@ -41,11 +41,12 @@ test.describe("Android-equivalent viewport", () => {
     const chooser = await chooserPromise;
     await chooser.setFiles({
       buffer: Buffer.from("dummy mobile audio"),
-      mimeType: "audio/mpeg",
-      name: "android-choice.mp3",
+      mimeType: "audio/mp4a-latm",
+      name: "android-choice.m4a",
     });
 
-    await expect(page.getByText(/android-choice\.mp3/u)).toBeVisible();
+    await expect(page.getByText(/android-choice\.m4a/u)).toBeVisible();
+    await expect(page.getByRole("button", { name: "アップロードを開始" })).toBeEnabled();
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,

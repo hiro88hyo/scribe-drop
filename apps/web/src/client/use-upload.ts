@@ -183,6 +183,7 @@ export function useUpload(): {
       wakeLock = await requestWakeLock();
 
       await uploadFileMultipart({
+        contentType: input.request.contentType,
         credentials: created.upload,
         file: input.file,
         onProgress: (progress) => {
