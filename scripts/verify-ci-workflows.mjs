@@ -384,6 +384,8 @@ for (const [description, value] of Object.entries({
   "redirect boundary before credential reuse": "maxRedirects: 0",
   "service-token cookie identity check": "serviceTokenCookieMatchesExpectedIdentity(",
   "authenticated session preflight": 'fetch("/api/me"',
+  "bounded Pages data-plane convergence":
+    "Expected the authenticated staging data plane to converge",
 })) {
   requireText(stagingE2eContents, value, "release-candidate.spec.ts", description);
 }
@@ -392,6 +394,13 @@ forbidText(
   "extraHTTPHeaders:",
   "release-candidate.spec.ts",
   "context-wide Access service credentials",
+);
+requireTextOrder(
+  stagingE2eContents,
+  "Expected the authenticated staging data plane to converge",
+  ".setInputFiles",
+  "release-candidate.spec.ts",
+  "data-plane readiness before media mutation",
 );
 
 for (const [description, value] of Object.entries({

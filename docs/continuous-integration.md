@@ -110,6 +110,9 @@ Pagesは[ADR 0029](./adr/0029-discover-pages-config-from-app-root.md)に従い�
 read-only deployment listを取得し、config discoveryまたは認証に失敗した場合は停止する。
 staging browser credentialのorigin制限は
 [ADR 0030](./adr/0030-scope-access-service-credentials-to-app-origin.md)を正とする。
+[ADR 0033](./adr/0033-wait-for-pages-data-plane-convergence.md)に従い、control-plane
+read-back後は認証済み`/api/me`の上限付きpollでcustom domainのdata-plane収束を確認し、
+固定E2E identityへ一致してからmedia uploadを開始する。
 RunPod promotionは[ADR 0031](./adr/0031-retry-only-runpod-read-commands.md)に従い、
 read-only CLIだけを上限付きで再試行し、結果不明のmutationを自動再送しない。
 stagingとproductionの両workflowは最初のremote mutationより前にRunPod preflightも

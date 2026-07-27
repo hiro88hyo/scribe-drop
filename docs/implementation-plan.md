@@ -577,6 +577,9 @@ rootから検出し、同じtargetへのread-only preflightを最初のremote mu
 [ADR 0030](./adr/0030-scope-access-service-credentials-to-app-origin.md)に従い、staging
 service credentialは正規Web originへだけ継続送信する。Pages config hash、Access
 service-token claim、認証済み`/api/me`をmedia uploadより前に検証する。
+[ADR 0033](./adr/0033-wait-for-pages-data-plane-convergence.md)に従い、Pagesの
+control-plane read-back後は認証済み`/api/me`を上限付きでpollし、custom domainの
+data-planeと固定E2E identityが収束してからmedia uploadを開始する。
 [ADR 0031](./adr/0031-retry-only-runpod-read-commands.md)に従い、RunPod promotionの
 read-only CLI一時障害だけを上限付きで再試行し、mutationは再試行しない。
 [ADR 0032](./adr/0032-automate-runpod-default-port-normalization.md)に従い、providerが

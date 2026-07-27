@@ -94,37 +94,46 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
     ).toBe(true);
 
     await page.goto(baseURL, { waitUntil: "networkidle" });
-    const authenticatedSession = await page.evaluate(async () => {
-      try {
-        const response = await fetch("/api/me", {
-          cache: "no-store",
-          credentials: "same-origin",
-          headers: { Accept: "application/json" },
-        });
-        if (!response.ok) {
-          return { email: null, ok: false, status: response.status };
-        }
-        const body = (await response.json()) as unknown;
-        const email =
-          typeof body === "object" &&
-          body !== null &&
-          "user" in body &&
-          typeof body.user === "object" &&
-          body.user !== null &&
-          "email" in body.user &&
-          typeof body.user.email === "string"
-            ? body.user.email
-            : null;
-        return { email, ok: true, status: response.status };
-      } catch {
-        return { email: null, ok: false, status: 0 };
-      }
-    });
-    expect(authenticatedSession).toEqual({
-      email: "staging-e2e@example.invalid",
-      ok: true,
-      status: 200,
-    });
+    await expect
+      .poll(
+        async () =>
+          page.evaluate(async () => {
+            try {
+              const response = await fetch("/api/me", {
+                cache: "no-store",
+                credentials: "same-origin",
+                headers: { Accept: "application/json" },
+              });
+              if (!response.ok) {
+                return { email: null, ok: false, status: response.status };
+              }
+              const body = (await response.json()) as unknown;
+              const email =
+                typeof body === "object" &&
+                body !== null &&
+                "user" in body &&
+                typeof body.user === "object" &&
+                body.user !== null &&
+                "email" in body.user &&
+                typeof body.user.email === "string"
+                  ? body.user.email
+                  : null;
+              return { email, ok: true, status: response.status };
+            } catch {
+              return { email: null, ok: false, status: 0 };
+            }
+          }),
+        {
+          intervals: [1_000, 2_000, 5_000, 10_000],
+          message: "Expected the authenticated staging data plane to converge",
+          timeout: 2 * 60 * 1_000,
+        },
+      )
+      .toEqual({
+        email: "staging-e2e@example.invalid",
+        ok: true,
+        status: 200,
+      });
     await expect(page.getByText("staging-e2e@example.invalid")).toBeVisible();
 
     await page.getByLabel("文字起こしする音声・動画ファイル").setInputFiles({
