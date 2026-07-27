@@ -43,6 +43,46 @@ jobs:
               ;;
           esac
 
+  application:
+    name: Assemble candidate application artifacts
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Volta
+        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
+        with:
+          volta-version: 2.0.2
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and validate immutable application artifacts
+        run: |
+          pnpm run build
+          mkdir -p candidate-build/orchestrator
+          pnpm exec wrangler deploy \
+            --dry-run \
+            --minify \
+            --config apps/orchestrator/wrangler.toml \
+            --env staging \
+            --outdir "${GITHUB_WORKSPACE}/candidate-build/orchestrator"
+          pnpm run candidate:application:create \
+            candidate-application \
+            candidate-build/orchestrator
+          pnpm run candidate:application:verify candidate-application
+
+      - name: Upload verified candidate application artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scribe-drop-candidate-application-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: candidate-application
+          if-no-files-found: error
+          retention-days: 1
+
   quality:
     name: Candidate quality gate
     needs: preflight
@@ -140,6 +180,7 @@ jobs:
   publish:
     name: Publish immutable release candidate
     needs:
+      - application
       - browser-e2e
       - preflight
       - quality
@@ -158,8 +199,14 @@ jobs:
         with:
           volta-version: 2.0.2
 
-      - name: Install JavaScript dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Download verified candidate application artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: scribe-drop-candidate-application-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: candidate-application
+
+      - name: Reverify candidate application artifacts before expensive work
+        run: pnpm run candidate:application:verify candidate-application
 
       - name: Reclaim unused ephemeral runner toolchains
         run: |
@@ -270,17 +317,6 @@ jobs:
           printf '%s@%s\n' "${image}" "${digest}" >runpod-worker-image.txt
           printf 'Published immutable image: %s@%s\n' "${image}" "${digest}"
 
-      - name: Build immutable Web and Worker artifacts
-        run: |
-          pnpm run build
-          mkdir -p candidate-build/orchestrator
-          pnpm exec wrangler deploy \
-            --dry-run \
-            --minify \
-            --config apps/orchestrator/wrangler.toml \
-            --env staging \
-            --outdir candidate-build/orchestrator
-
       - name: Create and verify candidate manifest
         env:
           EXPECTED_COMMIT_SHA: ${{ github.sha }}
@@ -290,7 +326,7 @@ jobs:
           install -m 0644 runpod-worker-trivy.txt candidate-supply-chain/
           pnpm run candidate:create \
             release-candidate \
-            candidate-build/orchestrator \
+            candidate-application \
             runpod-worker-image.txt \
             candidate-fixtures \
             candidate-supply-chain

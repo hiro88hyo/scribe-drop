@@ -5,9 +5,11 @@ import path from "node:path";
 import { afterEach, test } from "node:test";
 
 import {
+  createCandidateApplicationArtifact,
   createReleaseCandidate,
   hashArtifactDirectory,
   validateReleaseCandidateManifest,
+  verifyCandidateApplicationArtifact,
   verifyReleaseCandidate,
 } from "./release-candidate.mjs";
 
@@ -52,8 +54,15 @@ function candidateInputs() {
     "runpod-worker-image.txt",
     `ghcr.io/example/scribe-drop-runpod-worker@sha256:${imageDigest}\n`,
   );
+  const applicationArtifactDirectory = path.join(repositoryRoot, "candidate-application");
+  createCandidateApplicationArtifact({
+    orchestratorBundleDirectory,
+    outputDirectory: applicationArtifactDirectory,
+    repositoryRoot,
+  });
   return {
     acceptanceFixtureDirectory,
+    applicationArtifactDirectory,
     commitSha,
     orchestratorBundleDirectory,
     outputDirectory: path.join(repositoryRoot, "candidate"),
@@ -107,27 +116,41 @@ test("rejects a multipart upload body as the Orchestrator module", () => {
   ].join("\n");
   writeFixture(inputs.repositoryRoot, "orchestrator-build/index.js", multipartBody);
   assert.throws(
-    () => createReleaseCandidate(inputs),
-    /Orchestrator artifact must be a raw JavaScript module/u,
+    () =>
+      createCandidateApplicationArtifact({
+        orchestratorBundleDirectory: inputs.orchestratorBundleDirectory,
+        outputDirectory: path.join(inputs.repositoryRoot, "invalid-candidate-application"),
+        repositoryRoot: inputs.repositoryRoot,
+      }),
+    /raw JavaScript module \(multipart upload envelope\)/u,
   );
 
-  const validInputs = candidateInputs();
-  createReleaseCandidate(validInputs);
-  writeFixture(validInputs.outputDirectory, "orchestrator/index.js", multipartBody);
+  writeFixture(inputs.applicationArtifactDirectory, "orchestrator/index.js", multipartBody);
   assert.throws(
-    () => verifyReleaseCandidate({ candidateDirectory: validInputs.outputDirectory }),
-    /Orchestrator artifact must be a raw JavaScript module/u,
+    () => createReleaseCandidate(inputs),
+    /raw JavaScript module \(multipart upload envelope\)/u,
   );
 });
 
 test("accepts Wrangler's minified named default export", () => {
   const inputs = candidateInputs();
   writeFixture(
-    inputs.repositoryRoot,
-    "orchestrator-build/index.js",
+    inputs.applicationArtifactDirectory,
+    "orchestrator/index.js",
     "var worker={fetch(){return new Response()}};export{worker as default};",
   );
-  assert.doesNotThrow(() => createReleaseCandidate(inputs));
+  assert.doesNotThrow(() =>
+    verifyCandidateApplicationArtifact(inputs.applicationArtifactDirectory),
+  );
+});
+
+test("rejects unexpected candidate application files", () => {
+  const inputs = candidateInputs();
+  writeFixture(inputs.applicationArtifactDirectory, "orchestrator/index.js.map", "{}");
+  assert.throws(
+    () => verifyCandidateApplicationArtifact(inputs.applicationArtifactDirectory),
+    /Orchestrator layout is invalid/u,
+  );
 });
 
 test("rejects a candidate for another commit", () => {

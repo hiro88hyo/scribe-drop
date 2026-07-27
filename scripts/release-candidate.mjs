@@ -28,6 +28,7 @@ const candidateDirectories = [
   "supply-chain",
   "web-assets",
 ];
+const candidateApplicationDirectories = ["orchestrator", "pages-functions", "web-assets"];
 
 function requireRecord(value, name) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -61,7 +62,7 @@ function requireSafeInteger(value, name) {
 }
 
 function listRegularFiles(root) {
-  if (!existsSync(root) || !statSync(root).isDirectory()) {
+  if (!existsSync(root) || lstatSync(root).isSymbolicLink() || !statSync(root).isDirectory()) {
     throw new Error("Candidate artifact directory is missing");
   }
 
@@ -111,6 +112,20 @@ function verifyCandidateLayout(root) {
   const manifestPath = path.join(root, "candidate-manifest.json");
   if (lstatSync(manifestPath).isSymbolicLink() || !statSync(manifestPath).isFile()) {
     throw new Error("Release candidate manifest is invalid");
+  }
+}
+
+function requireExactDirectoryEntries(root, expectedEntries, errorMessage) {
+  if (!existsSync(root) || lstatSync(root).isSymbolicLink() || !statSync(root).isDirectory()) {
+    throw new Error(errorMessage);
+  }
+  const actualEntries = readdirSync(root).sort();
+  const expected = [...expectedEntries].sort();
+  if (
+    actualEntries.length !== expected.length ||
+    actualEntries.some((entry, index) => entry !== expected[index])
+  ) {
+    throw new Error(errorMessage);
   }
 }
 
@@ -302,13 +317,17 @@ function readRunpodImageReference(pathname) {
   };
 }
 
+function invalidOrchestratorModule(reason) {
+  return new Error(`Orchestrator artifact must be a raw JavaScript module (${reason})`);
+}
+
 function validateOrchestratorModule(pathname) {
   if (
     !existsSync(pathname) ||
     lstatSync(pathname).isSymbolicLink() ||
     !statSync(pathname).isFile()
   ) {
-    throw new Error("Orchestrator artifact must be a raw JavaScript module");
+    throw invalidOrchestratorModule("missing or not a regular file");
   }
 
   const bytes = readFileSync(pathname);
@@ -316,7 +335,7 @@ function validateOrchestratorModule(pathname) {
   try {
     source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
-    throw new Error("Orchestrator artifact must be a raw JavaScript module");
+    throw invalidOrchestratorModule("invalid UTF-8");
   }
 
   const trimmed = source.trim();
@@ -324,19 +343,37 @@ function validateOrchestratorModule(pathname) {
   const hasDefaultExport =
     /\bexport\s*default\b/u.test(source) ||
     /\bexport\s*\{[^{}]*\bas\s+default\b[^{}]*\}/u.test(source);
+  if (trimmed.length === 0) {
+    throw invalidOrchestratorModule("empty file");
+  }
+  if (bytes.includes(0)) {
+    throw invalidOrchestratorModule("NUL byte");
+  }
+  if (/^--[^\r\n]+\r?\n/u.test(trimmed) || hasMultipartHeaders) {
+    throw invalidOrchestratorModule("multipart upload envelope");
+  }
+  if (!hasDefaultExport) {
+    throw invalidOrchestratorModule("missing default export");
+  }
+}
+
+function validatePagesFunctionsModule(pathname) {
   if (
-    trimmed.length === 0 ||
-    bytes.includes(0) ||
-    /^--[^\r\n]+\r?\n/u.test(trimmed) ||
-    hasMultipartHeaders ||
-    !hasDefaultExport
+    !existsSync(pathname) ||
+    lstatSync(pathname).isSymbolicLink() ||
+    !statSync(pathname).isFile() ||
+    statSync(pathname).size === 0
   ) {
-    throw new Error("Orchestrator artifact must be a raw JavaScript module");
+    throw new Error("Pages Functions artifact is missing or invalid");
   }
 }
 
 function copyDirectory(source, destination) {
-  if (!existsSync(source) || !statSync(source).isDirectory()) {
+  if (
+    !existsSync(source) ||
+    lstatSync(source).isSymbolicLink() ||
+    !statSync(source).isDirectory()
+  ) {
     throw new Error("Candidate build input directory is missing");
   }
   cpSync(source, destination, {
@@ -344,6 +381,65 @@ function copyDirectory(source, destination) {
     errorOnExist: true,
     recursive: true,
   });
+}
+
+export function validateCandidateApplicationBuild(input) {
+  hashArtifactDirectory(path.join(input.repositoryRoot, "apps", "web", "dist"));
+  validatePagesFunctionsModule(
+    path.join(input.repositoryRoot, "apps", "web", ".wrangler", "functions-build", "index.js"),
+  );
+  validateOrchestratorModule(path.join(input.orchestratorBundleDirectory, "index.js"));
+}
+
+export function verifyCandidateApplicationArtifact(root) {
+  requireExactDirectoryEntries(
+    root,
+    candidateApplicationDirectories,
+    "Candidate application artifact layout is invalid",
+  );
+  for (const directory of candidateApplicationDirectories) {
+    const pathname = path.join(root, directory);
+    if (lstatSync(pathname).isSymbolicLink() || !statSync(pathname).isDirectory()) {
+      throw new Error("Candidate application artifact layout is invalid");
+    }
+  }
+  requireExactDirectoryEntries(
+    path.join(root, "orchestrator"),
+    ["index.js"],
+    "Candidate application Orchestrator layout is invalid",
+  );
+  requireExactDirectoryEntries(
+    path.join(root, "pages-functions"),
+    ["_worker.js"],
+    "Candidate application Pages Functions layout is invalid",
+  );
+  hashArtifactDirectory(path.join(root, "web-assets"));
+  validatePagesFunctionsModule(path.join(root, "pages-functions", "_worker.js"));
+  validateOrchestratorModule(path.join(root, "orchestrator", "index.js"));
+}
+
+export function createCandidateApplicationArtifact(input) {
+  if (existsSync(input.outputDirectory)) {
+    throw new Error("Candidate application output directory already exists");
+  }
+  validateCandidateApplicationBuild(input);
+
+  mkdirSync(input.outputDirectory, { recursive: false, mode: 0o755 });
+  copyDirectory(
+    path.join(input.repositoryRoot, "apps", "web", "dist"),
+    path.join(input.outputDirectory, "web-assets"),
+  );
+  mkdirSync(path.join(input.outputDirectory, "pages-functions"));
+  copyFileSync(
+    path.join(input.repositoryRoot, "apps", "web", ".wrangler", "functions-build", "index.js"),
+    path.join(input.outputDirectory, "pages-functions", "_worker.js"),
+  );
+  mkdirSync(path.join(input.outputDirectory, "orchestrator"));
+  copyFileSync(
+    path.join(input.orchestratorBundleDirectory, "index.js"),
+    path.join(input.outputDirectory, "orchestrator", "index.js"),
+  );
+  verifyCandidateApplicationArtifact(input.outputDirectory);
 }
 
 export function createReleaseCandidate(input) {
@@ -360,24 +456,15 @@ export function createReleaseCandidate(input) {
     "Root package version",
   );
   const commitSha = requirePattern(input.commitSha, commitShaPattern, "Release candidate commit");
-  const orchestratorModulePath = path.join(input.orchestratorBundleDirectory, "index.js");
-  validateOrchestratorModule(orchestratorModulePath);
+  verifyCandidateApplicationArtifact(input.applicationArtifactDirectory);
 
   mkdirSync(input.outputDirectory, { recursive: false, mode: 0o755 });
-  copyDirectory(
-    path.join(input.repositoryRoot, "apps", "web", "dist"),
-    path.join(input.outputDirectory, "web-assets"),
-  );
-  mkdirSync(path.join(input.outputDirectory, "pages-functions"));
-  copyFileSync(
-    path.join(input.repositoryRoot, "apps", "web", ".wrangler", "functions-build", "index.js"),
-    path.join(input.outputDirectory, "pages-functions", "_worker.js"),
-  );
-  mkdirSync(path.join(input.outputDirectory, "orchestrator"));
-  copyFileSync(
-    orchestratorModulePath,
-    path.join(input.outputDirectory, "orchestrator", "index.js"),
-  );
+  for (const directory of candidateApplicationDirectories) {
+    copyDirectory(
+      path.join(input.applicationArtifactDirectory, directory),
+      path.join(input.outputDirectory, directory),
+    );
+  }
   copyDirectory(
     path.join(input.repositoryRoot, "migrations"),
     path.join(input.outputDirectory, "migrations"),

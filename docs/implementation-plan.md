@@ -569,6 +569,9 @@ read-back verifierが欠落・失敗している間はproductionへdeployしな�
 Orchestrator artifactは
 [ADR 0027](./adr/0027-store-raw-orchestrator-module.md)のraw ES module条件をcandidate作成時と
 検証時に満たし、multipart upload bodyを同一artifactとして扱わない。
+[ADR 0028](./adr/0028-fail-fast-before-runpod-image-build.md)に従い、application artifactを
+高コストなRunPod image buildより前に一度だけ生成・検証し、後段で再buildせずcandidateへ
+合成する。
 
 初回production bootstrapではOrchestratorの必須secretであるRunPod endpoint IDを先に
 確定する必要があるため、

@@ -76,8 +76,15 @@ GHCRへpushする。mutable tagをpromotion入力にせずregistry digestをcand
 migration、RunPod image、acceptance用synthetic M4A、supply-chain reportを含み、
 manifestが各directoryのpath、byte数、file数、SHA-256を固定する。
 compiled Orchestratorは[ADR 0027](./adr/0027-store-raw-orchestrator-module.md)に従い、
-固定Wranglerの`--outdir`が生成するraw ES moduleだけを含める。candidate作成時と検証時に
-multipart upload bodyを拒否し、stagingとproductionは同じmoduleを再buildせずdeployする。
+固定Wranglerのworkspace基準の絶対`--outdir`が生成するraw ES moduleだけを含める。
+candidate作成時と検証時にmultipart upload bodyを拒否し、stagingとproductionは同じ
+moduleを再buildせずdeployする。
+
+[ADR 0028](./adr/0028-fail-fast-before-runpod-image-build.md)に従い、Web assets、Pages
+Functions、Orchestratorは独立した`application` jobで一度だけbuildする。厳密なlayoutと
+raw module条件を検証した短期artifactをrun/attempt固有名で保存し、`publish` jobはdownload
+後に再検証してからRunPod imageのbuildとscanを開始する。`publish` jobではapplicationを
+再buildしないため、決定的なpackaging不良は高コストcontainer処理より前に停止する。
 
 ## Staging promotion gate
 

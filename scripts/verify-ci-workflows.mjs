@@ -241,13 +241,21 @@ for (const [description, value] of Object.entries({
     "candidate-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
   "password-stdin registry login": "--password-stdin",
   "immutable image reference evidence": "runpod-worker-image.txt",
-  "raw Orchestrator module output": "--outdir candidate-build/orchestrator",
+  "workspace-anchored raw Orchestrator module output":
+    '--outdir "${GITHUB_WORKSPACE}/candidate-build/orchestrator"',
   "environment-neutral candidate evidence": "scribe-drop-release-candidate-${{ github.sha }}",
   "candidate manifest creation": "pnpm run candidate:create",
   "candidate manifest verification": "pnpm run candidate:verify",
+  "candidate application artifact creation": "pnpm run candidate:application:create",
+  "candidate application artifact verification": "pnpm run candidate:application:verify",
+  "run-scoped candidate application artifact":
+    "scribe-drop-candidate-application-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}",
   "candidate preflight dependency": "- preflight",
+  "preflight before application assembly":
+    "application:\n    name: Assemble candidate application artifacts\n    needs: preflight",
   "preflight before quality work":
     "quality:\n    name: Candidate quality gate\n    needs: preflight",
+  "candidate application dependency": "- application",
   "candidate quality dependency": "- quality",
   "candidate browser E2E dependency": "- browser-e2e",
   "candidate security dependency": "- security",
@@ -255,12 +263,42 @@ for (const [description, value] of Object.entries({
   requireText(publicationWorkflowContents, value, "publish-runpod-worker.yml", description);
 }
 
+requireTextCount(
+  publicationWorkflowContents,
+  "pnpm run build",
+  1,
+  "publish-runpod-worker.yml",
+  "single candidate application build",
+);
+requireTextCount(
+  publicationWorkflowContents,
+  "pnpm run candidate:application:verify candidate-application",
+  2,
+  "publish-runpod-worker.yml",
+  "candidate application verification before and after artifact transfer",
+);
+requireTextOrder(
+  publicationWorkflowContents,
+  "Reverify candidate application artifacts before expensive work",
+  "Reclaim unused ephemeral runner toolchains",
+  "publish-runpod-worker.yml",
+  "application verification before expensive container work",
+);
+requireTextOrder(
+  publicationWorkflowContents,
+  "Reverify candidate application artifacts before expensive work",
+  "Build fixed RunPod Worker image",
+  "publish-runpod-worker.yml",
+  "application verification before RunPod image build",
+);
+
 for (const [description, value] of Object.entries({
   "environment-specific publication input": "target_environment",
   "develop-only candidate publication": "refs/heads/develop",
   "staging deployment in build workflow": "environment: staging",
   "production deployment in build workflow": "environment: production",
   "multipart Orchestrator upload body output": "--outfile candidate-build/orchestrator/index.js",
+  "config-relative Orchestrator output": "--outdir candidate-build/orchestrator",
 })) {
   forbidText(publicationWorkflowContents, value, "publish-runpod-worker.yml", description);
 }

@@ -297,10 +297,13 @@ acceptanceが成功し、GitHub production Environmentのreview・branch・crede
 read-only検査は実行できるが、remote mutationの許可にはならない。
 
 Orchestrator artifactは
-[ADR 0027](./adr/0027-store-raw-orchestrator-module.md)に従い、固定Wranglerの`--outdir`が
-生成するraw `index.js`だけをcandidateへ保存する。`--outfile`が生成するmultipart upload
-bodyや補助fileをpromotion入力にせず、candidate作成時と各promotion前の検証でraw ES
-module条件を確認する。
+[ADR 0027](./adr/0027-store-raw-orchestrator-module.md)に従い、固定Wranglerのworkspace
+基準の絶対`--outdir`が生成するraw `index.js`だけをcandidateへ保存する。`--outfile`が
+生成するmultipart upload body、config基準になり得る相対`--outdir`、補助fileをpromotion
+入力にせず、candidate作成時と各promotion前の検証でraw ES module条件を確認する。
+[ADR 0028](./adr/0028-fail-fast-before-runpod-image-build.md)に従い、Web、Pages Functions、
+Orchestratorの検証済みapplication artifactを先に一度だけbuildし、同じartifactをRunPod
+imageと合成する。applicationの生成・再検証に失敗した場合はcontainer buildを開始しない。
 
 通常の実行順序は次のとおりとする。
 

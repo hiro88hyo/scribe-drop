@@ -40,12 +40,12 @@ function writeFixture(root, relativePath, contents) {
 function createCandidate() {
   const repositoryRoot = temporaryDirectory();
   writeFixture(repositoryRoot, "package.json", '{"version":"0.1.0"}\n');
-  writeFixture(repositoryRoot, "apps/web/dist/index.html", "web");
-  writeFixture(repositoryRoot, "apps/web/.wrangler/functions-build/index.js", "export default {};");
   writeFixture(repositoryRoot, "migrations/0001.sql", "SELECT 1;\n");
   writeFixture(repositoryRoot, "acceptance-fixtures/android.m4a", "synthetic-media");
   writeFixture(repositoryRoot, "supply-chain/report.txt", "clean\n");
-  writeFixture(repositoryRoot, "orchestrator/index.js", "export default {};");
+  writeFixture(repositoryRoot, "application/web-assets/index.html", "web");
+  writeFixture(repositoryRoot, "application/pages-functions/_worker.js", "export default {};");
+  writeFixture(repositoryRoot, "application/orchestrator/index.js", "export default {};");
   writeFixture(
     repositoryRoot,
     "runpod-image.txt",
@@ -54,8 +54,8 @@ function createCandidate() {
   const candidateDirectory = path.join(repositoryRoot, "candidate");
   createReleaseCandidate({
     acceptanceFixtureDirectory: path.join(repositoryRoot, "acceptance-fixtures"),
+    applicationArtifactDirectory: path.join(repositoryRoot, "application"),
     commitSha,
-    orchestratorBundleDirectory: path.join(repositoryRoot, "orchestrator"),
     outputDirectory: candidateDirectory,
     repositoryRoot,
     runpodImageReferencePath: path.join(repositoryRoot, "runpod-image.txt"),

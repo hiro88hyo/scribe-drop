@@ -14,6 +14,8 @@
   },
   "scripts": {
     "build": "pnpm --recursive --filter '@scribe-drop/*' run build",
+    "candidate:application:create": "node scripts/create-candidate-application.mjs",
+    "candidate:application:verify": "node scripts/verify-candidate-application.mjs",
     "candidate:create": "node scripts/create-release-candidate.mjs",
     "candidate:pages": "node scripts/prepare-pages-candidate.mjs",
     "candidate:verify": "node scripts/verify-release-candidate.mjs",

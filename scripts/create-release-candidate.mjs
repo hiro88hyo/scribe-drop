@@ -5,7 +5,7 @@ import { createReleaseCandidate } from "./release-candidate.mjs";
 
 const [
   outputDirectory,
-  orchestratorBundleDirectory,
+  applicationArtifactDirectory,
   runpodImageReferencePath,
   acceptanceFixtureDirectory,
   supplyChainDirectory,
@@ -15,20 +15,20 @@ const commitSha = process.env["GITHUB_SHA"];
 try {
   if (
     outputDirectory === undefined ||
-    orchestratorBundleDirectory === undefined ||
+    applicationArtifactDirectory === undefined ||
     runpodImageReferencePath === undefined ||
     acceptanceFixtureDirectory === undefined ||
     supplyChainDirectory === undefined ||
     process.argv.length !== 7
   ) {
     throw new Error(
-      "Usage: create-release-candidate <output-directory> <orchestrator-bundle-directory> <runpod-image-reference> <acceptance-fixture-directory> <supply-chain-directory>",
+      "Usage: create-release-candidate <output-directory> <application-artifact-directory> <runpod-image-reference> <acceptance-fixture-directory> <supply-chain-directory>",
     );
   }
   const manifest = createReleaseCandidate({
     acceptanceFixtureDirectory: path.resolve(acceptanceFixtureDirectory),
+    applicationArtifactDirectory: path.resolve(applicationArtifactDirectory),
     commitSha,
-    orchestratorBundleDirectory: path.resolve(orchestratorBundleDirectory),
     outputDirectory: path.resolve(outputDirectory),
     repositoryRoot: path.resolve(import.meta.dirname, ".."),
     runpodImageReferencePath: path.resolve(runpodImageReferencePath),
