@@ -5,6 +5,18 @@ export const requiredPagesSecrets = Object.freeze([
   "R2_PARENT_SECRET_ACCESS_KEY",
 ]);
 
+export function requirePagesProjectName(environment, configuredName) {
+  if (environment !== "staging" && environment !== "production") {
+    throw new Error("Pages environment must be staging or production");
+  }
+  const expected = `scribe-drop-web-${environment}`;
+  const candidate = configuredName ?? expected;
+  if (candidate !== expected) {
+    throw new Error(`Pages project must be ${expected} for ${environment}`);
+  }
+  return expected;
+}
+
 export function parseEncryptedPagesSecretNames(output) {
   if (typeof output !== "string") {
     throw new TypeError("Pages secret list output must be a string");

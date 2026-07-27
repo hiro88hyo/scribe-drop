@@ -53,9 +53,28 @@ function requireExactHttpsOrigin(value, name) {
   return value;
 }
 
-function requireDataCenterIds(value) {
+function requireEnvironment(value) {
+  if (value !== "staging" && value !== "production") {
+    throw new Error("RunPod environment must be staging or production");
+  }
+  return value;
+}
+
+function environmentVariablePrefix(environment) {
+  return `SCRIBE_DROP_${environment.toUpperCase()}_RUNPOD`;
+}
+
+function rejectMixedEnvironment(value, environment, name) {
+  const forbidden = environment === "production" ? "staging" : "production";
+  if (value.toLowerCase().includes(forbidden)) {
+    throw new Error(`${name} must not contain a ${forbidden} environment marker`);
+  }
+}
+
+function requireDataCenterIds(value, environment) {
+  const name = `${environmentVariablePrefix(environment)}_DATACENTER_IDS`;
   if (typeof value !== "string") {
-    throw new Error("SCRIBE_DROP_STAGING_RUNPOD_DATACENTER_IDS is missing or invalid");
+    throw new Error(`${name} is missing or invalid`);
   }
   const values = value.split(",").map((candidate) => candidate.trim());
   if (
@@ -63,22 +82,25 @@ function requireDataCenterIds(value) {
     values.some((candidate) => !dataCenterIdPattern.test(candidate)) ||
     new Set(values).size !== values.length
   ) {
-    throw new Error("SCRIBE_DROP_STAGING_RUNPOD_DATACENTER_IDS is missing or invalid");
+    throw new Error(`${name} is missing or invalid`);
   }
   return values;
 }
 
-function requireRegistryConfiguration(input) {
+function requireRegistryConfiguration(input, environment) {
+  const prefix = environmentVariablePrefix(environment);
   if (input.imageVisibility !== "private" && input.imageVisibility !== "public") {
-    throw new Error("SCRIBE_DROP_STAGING_RUNPOD_IMAGE_VISIBILITY must be private or public");
+    throw new Error(`${prefix}_IMAGE_VISIBILITY must be private or public`);
   }
 
   if (input.imageVisibility === "private") {
-    return requirePattern(
+    const registryAuthId = requirePattern(
       input.registryAuthId,
       registryAuthIdPattern,
-      "SCRIBE_DROP_STAGING_RUNPOD_REGISTRY_AUTH_ID",
+      `${prefix}_REGISTRY_AUTH_ID`,
     );
+    rejectMixedEnvironment(registryAuthId, environment, `${prefix}_REGISTRY_AUTH_ID`);
+    return registryAuthId;
   }
   if (input.registryAuthId !== undefined && input.registryAuthId !== "") {
     throw new Error("public RunPod image must not use registry authentication");
@@ -86,23 +108,30 @@ function requireRegistryConfiguration(input) {
   return null;
 }
 
-export function createRunpodStagingPlan(input) {
+export function createRunpodPlan(input, untrustedEnvironment) {
+  const environment = requireEnvironment(untrustedEnvironment);
+  const prefix = environmentVariablePrefix(environment);
   const accountId = requirePattern(input.accountId, accountIdPattern, "CLOUDFLARE_ACCOUNT_ID");
-  const image = requirePattern(input.image, imagePattern, "SCRIBE_DROP_STAGING_RUNPOD_IMAGE");
+  const image = requirePattern(input.image, imagePattern, `${prefix}_IMAGE`);
   const imageDigest = image.slice(image.indexOf("sha256:") + "sha256:".length);
   const orchestratorOrigin = requireExactHttpsOrigin(
     input.orchestratorOrigin,
-    "SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN",
+    `SCRIBE_DROP_${environment.toUpperCase()}_ORCHESTRATOR_ORIGIN`,
   );
-  const registryAuthId = requireRegistryConfiguration(input);
+  rejectMixedEnvironment(
+    orchestratorOrigin,
+    environment,
+    `SCRIBE_DROP_${environment.toUpperCase()}_ORCHESTRATOR_ORIGIN`,
+  );
+  const registryAuthId = requireRegistryConfiguration(input, environment);
   const r2Host = `${accountId}.r2.cloudflarestorage.com`;
 
   return {
     schemaVersion: 1,
-    environment: "staging",
+    environment,
     imageVisibility: input.imageVisibility,
     template: {
-      name: `scribe-drop-worker-staging-${imageDigest.slice(0, 12)}`,
+      name: `scribe-drop-worker-${environment}-${imageDigest.slice(0, 12)}`,
       image,
       registryAuthId,
       serverless: true,
@@ -110,7 +139,7 @@ export function createRunpodStagingPlan(input) {
       ports: [],
       volumeInGb: 0,
       environment: {
-        APP_ENV: "staging",
+        APP_ENV: environment,
         ORCHESTRATOR_ORIGIN: orchestratorOrigin,
         ALLOWED_SOURCE_HOSTS: r2Host,
         ALLOWED_RESULT_HOSTS: r2Host,
@@ -121,11 +150,11 @@ export function createRunpodStagingPlan(input) {
       },
     },
     endpoint: {
-      name: "scribe-drop-staging",
+      name: `scribe-drop-${environment}`,
       computeType: "GPU",
-      gpuId: requirePattern(input.gpuId, gpuIdPattern, "SCRIBE_DROP_STAGING_RUNPOD_GPU_ID"),
+      gpuId: requirePattern(input.gpuId, gpuIdPattern, `${prefix}_GPU_ID`),
       gpuCount: 1,
-      dataCenterIds: requireDataCenterIds(input.dataCenterIds),
+      dataCenterIds: requireDataCenterIds(input.dataCenterIds, environment),
       workersMin: 0,
       workersMax: 1,
       idleTimeoutSeconds,
@@ -139,42 +168,71 @@ export function createRunpodStagingPlan(input) {
   };
 }
 
-export function validateRunpodStagingPlan(untrustedPlan) {
-  const plan = requireRecord(untrustedPlan, "RunPod staging plan");
-  const template = requireRecord(plan.template, "RunPod staging template");
-  const environment = requireRecord(template.environment, "RunPod staging template environment");
-  const endpoint = requireRecord(plan.endpoint, "RunPod staging endpoint");
+export function createRunpodStagingPlan(input) {
+  return createRunpodPlan(input, "staging");
+}
+
+export function createRunpodProductionPlan(input) {
+  return createRunpodPlan(input, "production");
+}
+
+export function validateRunpodPlan(untrustedPlan, expectedEnvironment) {
+  const plan = requireRecord(untrustedPlan, "RunPod plan");
+  const planEnvironment = requireEnvironment(plan.environment);
+  if (
+    expectedEnvironment !== undefined &&
+    planEnvironment !== requireEnvironment(expectedEnvironment)
+  ) {
+    throw new Error(`RunPod plan environment must be ${expectedEnvironment}`);
+  }
+  const template = requireRecord(plan.template, `RunPod ${planEnvironment} template`);
+  const environment = requireRecord(
+    template.environment,
+    `RunPod ${planEnvironment} template environment`,
+  );
+  const endpoint = requireRecord(plan.endpoint, `RunPod ${planEnvironment} endpoint`);
   const sourceHostMatch =
     typeof environment.ALLOWED_SOURCE_HOSTS === "string"
       ? r2HostPattern.exec(environment.ALLOWED_SOURCE_HOSTS)
       : null;
   if (sourceHostMatch?.[1] === undefined) {
-    throw new Error("RunPod staging plan contains an invalid R2 host");
+    throw new Error(`RunPod ${planEnvironment} plan contains an invalid R2 host`);
   }
   if (
     !Array.isArray(endpoint.dataCenterIds) ||
     endpoint.dataCenterIds.some((value) => typeof value !== "string")
   ) {
-    throw new Error("RunPod staging plan contains invalid data center IDs");
+    throw new Error(`RunPod ${planEnvironment} plan contains invalid data center IDs`);
   }
 
-  const expected = createRunpodStagingPlan({
-    accountId: sourceHostMatch[1],
-    dataCenterIds: endpoint.dataCenterIds.join(","),
-    gpuId: endpoint.gpuId,
-    image: template.image,
-    imageVisibility: plan.imageVisibility,
-    orchestratorOrigin: environment.ORCHESTRATOR_ORIGIN,
-    registryAuthId: template.registryAuthId === null ? undefined : template.registryAuthId,
-  });
+  const expected = createRunpodPlan(
+    {
+      accountId: sourceHostMatch[1],
+      dataCenterIds: endpoint.dataCenterIds.join(","),
+      gpuId: endpoint.gpuId,
+      image: template.image,
+      imageVisibility: plan.imageVisibility,
+      orchestratorOrigin: environment.ORCHESTRATOR_ORIGIN,
+      registryAuthId: template.registryAuthId === null ? undefined : template.registryAuthId,
+    },
+    planEnvironment,
+  );
   if (!isDeepStrictEqual(plan, expected)) {
-    throw new Error("RunPod staging plan does not match the fixed policy");
+    throw new Error(`RunPod ${planEnvironment} plan does not match the fixed policy`);
   }
   return expected;
 }
 
+export function validateRunpodStagingPlan(untrustedPlan) {
+  return validateRunpodPlan(untrustedPlan, "staging");
+}
+
+export function validateRunpodProductionPlan(untrustedPlan) {
+  return validateRunpodPlan(untrustedPlan, "production");
+}
+
 export function createRunpodTemplateArguments(untrustedPlan) {
-  const plan = validateRunpodStagingPlan(untrustedPlan);
+  const plan = validateRunpodPlan(untrustedPlan);
   const arguments_ = [
     "template",
     "create",
@@ -195,7 +253,7 @@ export function createRunpodTemplateArguments(untrustedPlan) {
 }
 
 export function createRunpodEndpointArguments(untrustedPlan, templateId) {
-  const plan = validateRunpodStagingPlan(untrustedPlan);
+  const plan = validateRunpodPlan(untrustedPlan);
   requirePattern(templateId, resourceIdPattern, "RunPod template ID");
   return [
     "serverless",
@@ -239,7 +297,7 @@ function requireStringRecord(value, name) {
 }
 
 export function validateCreatedRunpodTemplate(untrustedTemplate, untrustedPlan) {
-  const plan = validateRunpodStagingPlan(untrustedPlan);
+  const plan = validateRunpodPlan(untrustedPlan);
   const template = requireRecord(untrustedTemplate, "RunPod template response");
   const registryAuthId = template.containerRegistryAuthId ?? "";
   const expectedRegistryAuthId = plan.template.registryAuthId ?? "";
@@ -266,7 +324,7 @@ export function validateCreatedRunpodTemplate(untrustedTemplate, untrustedPlan) 
 }
 
 export function validateCreatedRunpodEndpoint(untrustedEndpoint, untrustedPlan, templateId) {
-  const plan = validateRunpodStagingPlan(untrustedPlan);
+  const plan = validateRunpodPlan(untrustedPlan);
   requirePattern(templateId, resourceIdPattern, "RunPod template ID");
   const endpoint = requireRecord(untrustedEndpoint, "RunPod endpoint response");
   const networkVolumeIds = endpoint.networkVolumeIds ?? [];

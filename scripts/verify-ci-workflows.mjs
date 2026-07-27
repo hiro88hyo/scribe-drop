@@ -186,7 +186,10 @@ requireText(
 
 for (const [description, value] of Object.entries({
   "manual publication trigger": "workflow_dispatch:",
-  "develop-only publication guard": "refs/heads/develop",
+  "publication environment input": "inputs.target_environment",
+  "staging publication guard": "refs/heads/develop",
+  "production release guard": "refs/heads/release/",
+  "release version comparison": "Production branch and package version must match",
   "package write permission": "packages: write",
   "commit-addressed image tag": "git-${GITHUB_SHA}",
   "password-stdin registry login": "--password-stdin",

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { verifyStagingAccess } from "./staging-access-verifier.mjs";
+import { verifyProductionAccess, verifyStagingAccess } from "./access-verifier.mjs";
 
 const teamDomain = "https://scribe-drop-staging.cloudflareaccess.com";
 const webOrigin = "https://scribe-drop-staging.example.invalid";
@@ -74,4 +74,32 @@ test("rejects invalid Web origins before making requests", async () => {
     /must be an exact HTTPS origin/u,
   );
   assert.equal(requests, 0);
+});
+
+test("accepts production Access redirects and rejects staging markers", async () => {
+  const productionTeamDomain = "https://scribe-drop-production.cloudflareaccess.com";
+  const productionWebOrigin = "https://scribe-drop-production.example.invalid";
+  const productionRedirectFetch = (input) => {
+    const url = new URL(input);
+    return Promise.resolve(
+      new Response(null, {
+        headers: {
+          location: `${productionTeamDomain}/cdn-cgi/access/login/${url.hostname}${url.pathname}`,
+        },
+        status: 302,
+      }),
+    );
+  };
+
+  await assert.doesNotReject(() =>
+    verifyProductionAccess(productionRedirectFetch, productionWebOrigin, productionTeamDomain),
+  );
+  await assert.rejects(
+    () => verifyProductionAccess(productionRedirectFetch, webOrigin, productionTeamDomain),
+    /mixed environment markers/u,
+  );
+  await assert.rejects(
+    () => verifyProductionAccess(productionRedirectFetch, productionWebOrigin, teamDomain),
+    /staging environment marker/u,
+  );
 });

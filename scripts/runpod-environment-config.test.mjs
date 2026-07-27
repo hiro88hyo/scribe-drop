@@ -3,12 +3,14 @@ import { test } from "node:test";
 
 import {
   createRunpodEndpointArguments,
+  createRunpodProductionPlan,
   createRunpodStagingPlan,
   createRunpodTemplateArguments,
   validateCreatedRunpodEndpoint,
   validateCreatedRunpodTemplate,
+  validateRunpodProductionPlan,
   validateRunpodStagingPlan,
-} from "./runpod-staging-config.mjs";
+} from "./runpod-environment-config.mjs";
 
 const validInput = {
   accountId: "a".repeat(32),
@@ -282,5 +284,40 @@ test("rejects ambiguous registry and placement configuration", () => {
         dataCenterIds: "AP-JP-1,AP-JP-1",
       }),
     /SCRIBE_DROP_STAGING_RUNPOD_DATACENTER_IDS/u,
+  );
+});
+
+test("creates and validates an isolated production plan", () => {
+  const productionInput = {
+    ...validInput,
+    orchestratorOrigin: "https://orchestrator-production.example.invalid",
+    registryAuthId: "registry_auth_production",
+  };
+  const plan = createRunpodProductionPlan(productionInput);
+
+  assert.equal(plan.environment, "production");
+  assert.equal(plan.template.name, `scribe-drop-worker-production-${"b".repeat(12)}`);
+  assert.equal(plan.template.environment.APP_ENV, "production");
+  assert.equal(plan.endpoint.name, "scribe-drop-production");
+  assert.deepEqual(validateRunpodProductionPlan(plan), plan);
+  assert.throws(() => validateRunpodStagingPlan(plan), /environment must be staging/u);
+});
+
+test("rejects staging markers in production RunPod inputs", () => {
+  assert.throws(
+    () =>
+      createRunpodProductionPlan({
+        ...validInput,
+        registryAuthId: "registry_auth_production",
+      }),
+    /staging environment marker/u,
+  );
+  assert.throws(
+    () =>
+      createRunpodProductionPlan({
+        ...validInput,
+        orchestratorOrigin: "https://orchestrator-production.example.invalid",
+      }),
+    /staging environment marker/u,
   );
 });

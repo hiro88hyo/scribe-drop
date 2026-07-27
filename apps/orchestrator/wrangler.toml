@@ -72,3 +72,41 @@ max_batch_timeout = 5
 max_retries = 5
 retry_delay = 60
 dead_letter_queue = "recording-uploaded-dlq-staging"
+
+[env.production]
+name = "scribe-drop-orchestrator-production"
+routes = [
+  { pattern = "replace-with-production-orchestrator.example.invalid", custom_domain = true },
+]
+
+[env.production.triggers]
+crons = ["*/5 * * * *"]
+
+[env.production.vars]
+APP_ENV = "production"
+AUDIT_RETENTION_DAYS = "180"
+CLOUDFLARE_ACCOUNT_ID = "00000000000000000000000000000000"
+MULTIPART_RETENTION_HOURS = "24"
+R2_BUCKET_NAME = "recording-transcriber-production"
+RESULT_RETENTION_DAYS = "90"
+RUNPOD_INTERNAL_BASE_URL = "https://replace-with-production-orchestrator.example.invalid"
+SOURCE_RETENTION_DAYS = "7"
+WEB_BASE_URL = "https://replace-with-production-web.example.invalid"
+
+[[env.production.d1_databases]]
+binding = "SCRIBE_DROP_DB"
+database_name = "scribe-drop-production"
+database_id = "00000000-0000-0000-0000-000000000201"
+migrations_dir = "../../migrations"
+
+[[env.production.r2_buckets]]
+binding = "RECORDINGS"
+bucket_name = "recording-transcriber-production"
+
+[[env.production.queues.consumers]]
+queue = "recording-uploaded-production"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 5
+retry_delay = 60
+dead_letter_queue = "recording-uploaded-dlq-production"

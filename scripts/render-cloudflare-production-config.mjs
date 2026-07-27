@@ -12,19 +12,20 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import {
-  renderR2CorsStagingConfig,
-  renderR2LifecycleStagingConfig,
-  renderOrchestratorStagingConfig,
-  renderWebStagingConfig,
+  renderOrchestratorProductionConfig,
+  renderR2CorsProductionConfig,
+  renderR2LifecycleProductionConfig,
+  renderWebProductionConfig,
 } from "./cloudflare-environment-config.mjs";
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(scriptDirectory, "..");
 const orchestratorOutputDirectory = path.join(repositoryRoot, ".wrangler", "deploy");
-const r2CorsOutput = path.join(orchestratorOutputDirectory, "r2-cors-staging.json");
-const r2LifecycleOutput = path.join(orchestratorOutputDirectory, "r2-lifecycle-staging.json");
+const r2CorsOutput = path.join(orchestratorOutputDirectory, "r2-cors-production.json");
+const r2LifecycleOutput = path.join(orchestratorOutputDirectory, "r2-lifecycle-production.json");
 const webOutputDirectory = path.join(repositoryRoot, "apps", "web", ".wrangler", "deploy");
 const webConfigRedirect = path.join(webOutputDirectory, "config.json");
+const webConfigFilename = "wrangler-production.toml";
 const webFunctionsLink = path.join(webOutputDirectory, "functions");
 const webFunctionsTarget = "../../functions";
 const target = process.argv[2];
@@ -33,42 +34,42 @@ if (target === undefined || !allowedTargets.has(target)) {
   throw new Error("Expected config target: all, orchestrator, r2-cors, r2-lifecycle, or web");
 }
 const identifiers = {
-  accessAudience: process.env.SCRIBE_DROP_STAGING_ACCESS_AUDIENCE,
-  accessTeamDomain: process.env.SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN,
+  accessAudience: process.env.SCRIBE_DROP_PRODUCTION_ACCESS_AUDIENCE,
+  accessTeamDomain: process.env.SCRIBE_DROP_PRODUCTION_ACCESS_TEAM_DOMAIN,
   accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
-  d1DatabaseId: process.env.SCRIBE_DROP_STAGING_D1_DATABASE_ID,
   auditRetentionDays: process.env.AUDIT_RETENTION_DAYS,
+  d1DatabaseId: process.env.SCRIBE_DROP_PRODUCTION_D1_DATABASE_ID,
   multipartRetentionHours: process.env.MULTIPART_RETENTION_HOURS,
-  orchestratorOrigin: process.env.SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN,
+  orchestratorOrigin: process.env.SCRIBE_DROP_PRODUCTION_ORCHESTRATOR_ORIGIN,
   resultRetentionDays: process.env.RESULT_RETENTION_DAYS,
   sourceRetentionDays: process.env.SOURCE_RETENTION_DAYS,
-  webOrigin: process.env.SCRIBE_DROP_STAGING_WEB_ORIGIN,
+  webOrigin: process.env.SCRIBE_DROP_PRODUCTION_WEB_ORIGIN,
 };
 
 const configs = [
   {
-    output: path.join(orchestratorOutputDirectory, "orchestrator-staging.toml"),
-    render: renderOrchestratorStagingConfig,
+    output: path.join(orchestratorOutputDirectory, "orchestrator-production.toml"),
+    render: renderOrchestratorProductionConfig,
     target: "orchestrator",
     template: path.join(repositoryRoot, "apps", "orchestrator", "wrangler.toml"),
   },
   {
     output: r2LifecycleOutput,
-    render: renderR2LifecycleStagingConfig,
+    render: renderR2LifecycleProductionConfig,
     target: "r2-lifecycle",
-    template: path.join(repositoryRoot, "infra", "cloudflare", "r2-lifecycle.staging.json"),
+    template: path.join(repositoryRoot, "infra", "cloudflare", "r2-lifecycle.production.json"),
   },
   {
     output: r2CorsOutput,
-    render: renderR2CorsStagingConfig,
+    render: renderR2CorsProductionConfig,
     target: "r2-cors",
-    template: path.join(repositoryRoot, "infra", "cloudflare", "r2-cors.staging.json"),
+    template: path.join(repositoryRoot, "infra", "cloudflare", "r2-cors.production.json"),
   },
   {
-    output: path.join(webOutputDirectory, "wrangler.toml"),
-    render: renderWebStagingConfig,
+    output: path.join(webOutputDirectory, webConfigFilename),
+    render: renderWebProductionConfig,
     target: "web",
-    template: path.join(repositoryRoot, "apps", "web", "wrangler.toml"),
+    template: path.join(repositoryRoot, "apps", "web", "wrangler.production.toml"),
   },
 ];
 
@@ -89,7 +90,7 @@ try {
   if (target === "all" || target === "web") {
     writeFileSync(
       webConfigRedirect,
-      `${JSON.stringify({ configPath: "wrangler.toml" }, null, 2)}\n`,
+      `${JSON.stringify({ configPath: webConfigFilename }, null, 2)}\n`,
       { encoding: "utf8", mode: 0o600 },
     );
     chmodSync(webConfigRedirect, 0o600);
@@ -97,7 +98,7 @@ try {
     try {
       const linkStats = lstatSync(webFunctionsLink);
       if (!linkStats.isSymbolicLink() || readlinkSync(webFunctionsLink) !== webFunctionsTarget) {
-        throw new Error("web staging functions link exists with an unexpected target");
+        throw new Error("web production functions link exists with an unexpected target");
       }
       unlinkSync(webFunctionsLink);
     } catch (error) {
@@ -107,8 +108,8 @@ try {
     }
   }
 
-  console.log(`Generated ignored Cloudflare staging config: ${target}`);
+  console.log(`Generated ignored Cloudflare production config: ${target}`);
 } catch (error) {
-  console.error(error instanceof Error ? error.message : "Failed to render staging configs");
+  console.error(error instanceof Error ? error.message : "Failed to render production configs");
   process.exitCode = 1;
 }

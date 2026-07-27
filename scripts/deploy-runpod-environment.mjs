@@ -10,16 +10,20 @@ import {
   createRunpodTemplateArguments,
   validateCreatedRunpodEndpoint,
   validateCreatedRunpodTemplate,
-  validateRunpodStagingPlan,
-} from "./runpod-staging-config.mjs";
+  validateRunpodPlan,
+} from "./runpod-environment-config.mjs";
 
 const resourceIdPattern = /^[A-Za-z0-9_-]{3,128}$/u;
+const environment = process.argv[2];
+if (environment !== "staging" && environment !== "production") {
+  throw new Error("Expected RunPod environment: staging or production");
+}
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(scriptDirectory, "..");
 const runpodctl = path.join(repositoryRoot, ".tools", "bin", "runpodctl");
 const deploymentDirectory = path.join(repositoryRoot, ".runpod", "deploy");
-const planPath = path.join(deploymentDirectory, "staging-plan.json");
-const statePath = path.join(deploymentDirectory, "staging-state.json");
+const planPath = path.join(deploymentDirectory, `${environment}-plan.json`);
+const statePath = path.join(deploymentDirectory, `${environment}-state.json`);
 
 function requireRecord(value, name) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -54,15 +58,18 @@ function loadState(expectedPlanSha256) {
   if (!existsSync(statePath)) {
     return null;
   }
-  const state = requireRecord(readJson(statePath, "RunPod staging state"), "RunPod staging state");
+  const state = requireRecord(
+    readJson(statePath, `RunPod ${environment} state`),
+    `RunPod ${environment} state`,
+  );
   if (
     state.schemaVersion !== 1 ||
-    state.environment !== "staging" ||
+    state.environment !== environment ||
     state.planSha256 !== expectedPlanSha256 ||
     !resourceIdPattern.test(String(state.templateId ?? "")) ||
     (state.endpointId !== null && !resourceIdPattern.test(String(state.endpointId ?? "")))
   ) {
-    throw new Error("RunPod staging state does not match the current plan");
+    throw new Error(`RunPod ${environment} state does not match the current plan`);
   }
   return state;
 }
@@ -144,7 +151,7 @@ function getOrCreateEndpoint(plan, templateId, state) {
   const endpoints = requireArray(runCli(["serverless", "list"]), "runpodctl serverless list");
   const matches = matchingNamedResources(endpoints, plan.endpoint.name);
   if (matches.length > 1) {
-    throw new Error("multiple RunPod endpoints match the staging name");
+    throw new Error(`multiple RunPod endpoints match the ${environment} name`);
   }
   if (matches.length === 1) {
     if (state === null) {
@@ -169,13 +176,13 @@ function getOrCreateEndpoint(plan, templateId, state) {
 }
 
 function main() {
-  if (process.argv.length !== 2) {
-    throw new Error("runpod staging deployment takes no command-line arguments");
+  if (process.argv.length !== 3) {
+    throw new Error("RunPod deployment takes exactly one environment argument");
   }
   if (!existsSync(runpodctl)) {
     throw new Error("runpodctl is not installed; run pnpm run runpodctl:install");
   }
-  const plan = validateRunpodStagingPlan(readJson(planPath, "RunPod staging plan"));
+  const plan = validateRunpodPlan(readJson(planPath, `RunPod ${environment} plan`), environment);
   const planDigest = planSha256(plan);
   const state = loadState(planDigest);
 
@@ -184,7 +191,7 @@ function main() {
   if (state === null) {
     writeState({
       schemaVersion: 1,
-      environment: "staging",
+      environment,
       planSha256: planDigest,
       templateId,
       endpointId: null,
@@ -202,19 +209,19 @@ function main() {
   validateCreatedRunpodEndpoint(endpoint, plan, templateId);
   writeState({
     schemaVersion: 1,
-    environment: "staging",
+    environment,
     planSha256: planDigest,
     templateId,
     endpointId,
   });
   console.log(
-    "Verified RunPod staging template and endpoint; IDs are stored only in ignored state.",
+    `Verified RunPod ${environment} template and endpoint; IDs are stored only in ignored state.`,
   );
 }
 
 try {
   main();
 } catch (error) {
-  console.error(error instanceof Error ? error.message : "RunPod staging deployment failed");
+  console.error(error instanceof Error ? error.message : `RunPod ${environment} deployment failed`);
   process.exitCode = 1;
 }

@@ -12,6 +12,12 @@ const stagingOrchestratorHostnamePlaceholder = "replace-with-staging-orchestrato
 const stagingOrchestratorOriginPlaceholder =
   "https://replace-with-staging-orchestrator.example.invalid";
 const webOriginPlaceholder = "https://replace-with-staging-web.example.invalid";
+const productionD1DatabaseIdPlaceholder = "00000000-0000-0000-0000-000000000201";
+const productionOrchestratorHostnamePlaceholder =
+  "replace-with-production-orchestrator.example.invalid";
+const productionOrchestratorOriginPlaceholder =
+  "https://replace-with-production-orchestrator.example.invalid";
+const productionWebOriginPlaceholder = "https://replace-with-production-web.example.invalid";
 const retentionDefaults = {
   auditRetentionDays: 180,
   multipartRetentionHours: 24,
@@ -62,6 +68,13 @@ function requireExactHttpsOrigin(value, name) {
     throw new Error(`${name} is missing or invalid`);
   }
 
+  return value;
+}
+
+function rejectEnvironmentMarker(value, marker, name) {
+  if (value.toLowerCase().includes(marker)) {
+    throw new Error(`${name} must not contain a ${marker} environment marker`);
+  }
   return value;
 }
 
@@ -141,9 +154,13 @@ export function renderOrchestratorStagingConfig(template, identifiers) {
   if (stagingIndex === -1) {
     throw new Error("orchestrator staging environment was not found");
   }
+  const productionIndex = template.indexOf("[env.production]", stagingIndex);
 
   const baseConfig = template.slice(0, stagingIndex);
-  let stagingConfig = template.slice(stagingIndex);
+  let stagingConfig =
+    productionIndex === -1
+      ? template.slice(stagingIndex)
+      : template.slice(stagingIndex, productionIndex);
   stagingConfig = replaceOnce(
     stagingConfig,
     `CLOUDFLARE_ACCOUNT_ID = "${accountIdPlaceholder}"`,
@@ -288,6 +305,214 @@ export function renderR2LifecycleStagingConfig(template, identifiers) {
     (rule) => rule?.id === "scribe-drop-incoming-retention-staging",
   );
   const results = parsed.rules.find((rule) => rule?.id === "scribe-drop-results-retention-staging");
+  if (
+    incoming?.conditions?.prefix !== "incoming/" ||
+    incoming?.deleteObjectsTransition?.condition?.maxAge !==
+      retentionDefaults.sourceRetentionDays * 86400 ||
+    incoming?.abortMultipartUploadsTransition?.condition?.maxAge !==
+      retentionDefaults.multipartRetentionHours * 3600 ||
+    results?.conditions?.prefix !== "results/" ||
+    results?.deleteObjectsTransition?.condition?.maxAge !==
+      retentionDefaults.resultRetentionDays * 86400
+  ) {
+    throw new Error("R2 lifecycle template has drifted from the reviewed defaults");
+  }
+  incoming.deleteObjectsTransition.condition.maxAge = retention.sourceRetentionDays * 86400;
+  incoming.abortMultipartUploadsTransition.condition.maxAge =
+    retention.multipartRetentionHours * 3600;
+  results.deleteObjectsTransition.condition.maxAge = retention.resultRetentionDays * 86400;
+  return `${JSON.stringify(parsed, null, 2)}\n`;
+}
+
+function validatedProductionResourceIdentifiers(identifiers) {
+  return {
+    accountId: requireIdentifier(identifiers.accountId, accountIdPattern, "CLOUDFLARE_ACCOUNT_ID"),
+    d1DatabaseId: requireIdentifier(
+      identifiers.d1DatabaseId,
+      d1DatabaseIdPattern,
+      "SCRIBE_DROP_PRODUCTION_D1_DATABASE_ID",
+    ),
+  };
+}
+
+export function renderOrchestratorProductionConfig(template, identifiers) {
+  const { accountId, d1DatabaseId } = validatedProductionResourceIdentifiers(identifiers);
+  const retention = validatedRetentionIdentifiers(identifiers);
+  const orchestratorOrigin = requireExactHttpsOrigin(
+    identifiers.orchestratorOrigin,
+    "SCRIBE_DROP_PRODUCTION_ORCHESTRATOR_ORIGIN",
+  );
+  rejectEnvironmentMarker(
+    orchestratorOrigin,
+    "staging",
+    "SCRIBE_DROP_PRODUCTION_ORCHESTRATOR_ORIGIN",
+  );
+  const orchestratorHostname = new URL(orchestratorOrigin).hostname;
+  const webOrigin = requireExactHttpsOrigin(
+    identifiers.webOrigin,
+    "SCRIBE_DROP_PRODUCTION_WEB_ORIGIN",
+  );
+  rejectEnvironmentMarker(webOrigin, "staging", "SCRIBE_DROP_PRODUCTION_WEB_ORIGIN");
+  const productionMarker = "[env.production]";
+  const productionIndex = template.indexOf(productionMarker);
+  if (productionIndex === -1) {
+    throw new Error("orchestrator production environment was not found");
+  }
+
+  const precedingConfig = template.slice(0, productionIndex);
+  const stagingIndex = precedingConfig.indexOf("[env.staging");
+  const baseConfig = stagingIndex === -1 ? precedingConfig : precedingConfig.slice(0, stagingIndex);
+  let productionConfig = template.slice(productionIndex);
+  productionConfig = replaceOnce(
+    productionConfig,
+    `CLOUDFLARE_ACCOUNT_ID = "${accountIdPlaceholder}"`,
+    `CLOUDFLARE_ACCOUNT_ID = "${accountId}"`,
+    "orchestrator production account ID",
+  );
+  productionConfig = replaceOnce(
+    productionConfig,
+    `database_id = "${productionD1DatabaseIdPlaceholder}"`,
+    `database_id = "${d1DatabaseId}"`,
+    "orchestrator production D1 database ID",
+  );
+  productionConfig = replaceOnce(
+    productionConfig,
+    `pattern = "${productionOrchestratorHostnamePlaceholder}"`,
+    `pattern = "${orchestratorHostname}"`,
+    "orchestrator production custom domain",
+  );
+  productionConfig = replaceOnce(
+    productionConfig,
+    `RUNPOD_INTERNAL_BASE_URL = "${productionOrchestratorOriginPlaceholder}"`,
+    `RUNPOD_INTERNAL_BASE_URL = "${orchestratorOrigin}"`,
+    "orchestrator production internal origin",
+  );
+  productionConfig = replaceOnce(
+    productionConfig,
+    `WEB_BASE_URL = "${productionWebOriginPlaceholder}"`,
+    `WEB_BASE_URL = "${webOrigin}"`,
+    "orchestrator production web origin",
+  );
+  for (const [name, defaultValue, renderedValue] of [
+    ["AUDIT_RETENTION_DAYS", retentionDefaults.auditRetentionDays, retention.auditRetentionDays],
+    [
+      "MULTIPART_RETENTION_HOURS",
+      retentionDefaults.multipartRetentionHours,
+      retention.multipartRetentionHours,
+    ],
+    ["RESULT_RETENTION_DAYS", retentionDefaults.resultRetentionDays, retention.resultRetentionDays],
+    ["SOURCE_RETENTION_DAYS", retentionDefaults.sourceRetentionDays, retention.sourceRetentionDays],
+  ]) {
+    productionConfig = replaceOnce(
+      productionConfig,
+      `${name} = "${String(defaultValue)}"`,
+      `${name} = "${String(renderedValue)}"`,
+      `orchestrator production ${name}`,
+    );
+  }
+
+  return replaceOnce(
+    `${baseConfig}${productionConfig}`,
+    'main = "src/index.ts"',
+    'main = "../../apps/orchestrator/src/index.ts"',
+    "orchestrator entrypoint",
+  );
+}
+
+export function renderWebProductionConfig(template, identifiers) {
+  const { accountId, d1DatabaseId } = validatedProductionResourceIdentifiers(identifiers);
+  const accessAudience = requireIdentifier(
+    identifiers.accessAudience,
+    accessAudiencePattern,
+    "SCRIBE_DROP_PRODUCTION_ACCESS_AUDIENCE",
+  );
+  rejectEnvironmentMarker(accessAudience, "staging", "SCRIBE_DROP_PRODUCTION_ACCESS_AUDIENCE");
+  const accessTeamDomain = requireIdentifier(
+    identifiers.accessTeamDomain,
+    accessTeamDomainPattern,
+    "SCRIBE_DROP_PRODUCTION_ACCESS_TEAM_DOMAIN",
+  );
+  rejectEnvironmentMarker(accessTeamDomain, "staging", "SCRIBE_DROP_PRODUCTION_ACCESS_TEAM_DOMAIN");
+  const webOrigin = requireExactHttpsOrigin(
+    identifiers.webOrigin,
+    "SCRIBE_DROP_PRODUCTION_WEB_ORIGIN",
+  );
+  rejectEnvironmentMarker(webOrigin, "staging", "SCRIBE_DROP_PRODUCTION_WEB_ORIGIN");
+  let rendered = replaceOnce(
+    template,
+    `CLOUDFLARE_ACCOUNT_ID = "${accountIdPlaceholder}"`,
+    `CLOUDFLARE_ACCOUNT_ID = "${accountId}"`,
+    "web production account ID",
+  );
+  rendered = replaceOnce(
+    rendered,
+    `database_id = "${productionD1DatabaseIdPlaceholder}"`,
+    `database_id = "${d1DatabaseId}"`,
+    "web production D1 database ID",
+  );
+  rendered = replaceOnce(
+    rendered,
+    `ACCESS_TEAM_DOMAIN = "${accessTeamDomainPlaceholder}"`,
+    `ACCESS_TEAM_DOMAIN = "${accessTeamDomain}"`,
+    "web production Access team domain",
+  );
+  rendered = replaceOnce(
+    rendered,
+    `ACCESS_AUDIENCES = ${JSON.stringify(JSON.stringify([accessAudiencePlaceholder]))}`,
+    `ACCESS_AUDIENCES = ${JSON.stringify(JSON.stringify([accessAudience]))}`,
+    "web production Access audience",
+  );
+  rendered = replaceOnce(
+    rendered,
+    `ALLOWED_ORIGIN = "${productionWebOriginPlaceholder}"`,
+    `ALLOWED_ORIGIN = "${webOrigin}"`,
+    "web production origin",
+  );
+
+  return replaceOnce(
+    rendered,
+    'pages_build_output_dir = "./dist"',
+    'pages_build_output_dir = "../../dist"',
+    "web build output directory",
+  );
+}
+
+export function renderR2CorsProductionConfig(template, identifiers) {
+  const webOrigin = requireExactHttpsOrigin(
+    identifiers.webOrigin,
+    "SCRIBE_DROP_PRODUCTION_WEB_ORIGIN",
+  );
+  rejectEnvironmentMarker(webOrigin, "staging", "SCRIBE_DROP_PRODUCTION_WEB_ORIGIN");
+  return replaceOnce(
+    template,
+    `"origins": ["${productionWebOriginPlaceholder}"]`,
+    `"origins": ["${webOrigin}"]`,
+    "R2 CORS production origin",
+  );
+}
+
+export function renderR2LifecycleProductionConfig(template, identifiers) {
+  const retention = validatedRetentionIdentifiers(identifiers);
+  let parsed;
+  try {
+    parsed = JSON.parse(template);
+  } catch {
+    throw new Error("R2 lifecycle template is not valid JSON");
+  }
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    !Array.isArray(parsed.rules) ||
+    parsed.rules.length !== 2
+  ) {
+    throw new Error("R2 lifecycle template has an unexpected shape");
+  }
+  const incoming = parsed.rules.find(
+    (rule) => rule?.id === "scribe-drop-incoming-retention-production",
+  );
+  const results = parsed.rules.find(
+    (rule) => rule?.id === "scribe-drop-results-retention-production",
+  );
   if (
     incoming?.conditions?.prefix !== "incoming/" ||
     incoming?.deleteObjectsTransition?.condition?.maxAge !==

@@ -1,12 +1,12 @@
 import { spawnSync } from "node:child_process";
 import process from "node:process";
 
-import { verifyRequiredPagesSecrets } from "./cloudflare-pages-secret-verifier.mjs";
+import {
+  requirePagesProjectName,
+  verifyRequiredPagesSecrets,
+} from "./cloudflare-pages-secret-verifier.mjs";
 
-const projectName = process.env.SCRIBE_DROP_PAGES_PROJECT ?? "scribe-drop-web-staging";
-if (!/^[a-z0-9-]+$/u.test(projectName)) {
-  throw new Error("SCRIBE_DROP_PAGES_PROJECT is invalid");
-}
+const projectName = requirePagesProjectName("staging", process.env.SCRIBE_DROP_PAGES_PROJECT);
 
 const result = spawnSync(
   "pnpm",

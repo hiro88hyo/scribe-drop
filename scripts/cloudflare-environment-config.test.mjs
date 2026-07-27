@@ -2,11 +2,15 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  renderOrchestratorProductionConfig,
   renderOrchestratorStagingConfig,
+  renderR2CorsProductionConfig,
   renderR2CorsStagingConfig,
+  renderR2LifecycleProductionConfig,
   renderR2LifecycleStagingConfig,
+  renderWebProductionConfig,
   renderWebStagingConfig,
-} from "./cloudflare-staging-config.mjs";
+} from "./cloudflare-environment-config.mjs";
 
 const identifiers = {
   accessAudience: "staging-access-audience",
@@ -15,6 +19,15 @@ const identifiers = {
   d1DatabaseId: "12345678-1234-4abc-8def-1234567890ab",
   orchestratorOrigin: "https://orchestrator-staging.example.invalid",
   webOrigin: "https://scribe-drop-staging.example.invalid",
+};
+
+const productionIdentifiers = {
+  accessAudience: "production-access-audience",
+  accessTeamDomain: "https://scribe-drop-production.cloudflareaccess.com",
+  accountId: "b".repeat(32),
+  d1DatabaseId: "abcdef12-1234-4abc-8def-1234567890ab",
+  orchestratorOrigin: "https://orchestrator-production.example.invalid",
+  webOrigin: "https://scribe-drop-production.example.invalid",
 };
 
 test("renders only the orchestrator staging identifiers", () => {
@@ -190,5 +203,130 @@ database_id = "00000000-0000-0000-0000-000000000101"
         sourceRetentionDays: "7",
       }),
     /source <= result <= audit/u,
+  );
+});
+
+test("renders only the orchestrator production identifiers", () => {
+  const template = `name = "local"
+main = "src/index.ts"
+
+[env.staging.vars]
+CLOUDFLARE_ACCOUNT_ID = "${"0".repeat(32)}"
+database_id = "00000000-0000-0000-0000-000000000101"
+
+[env.production]
+routes = [
+  { pattern = "replace-with-production-orchestrator.example.invalid", custom_domain = true },
+]
+[env.production.vars]
+AUDIT_RETENTION_DAYS = "180"
+CLOUDFLARE_ACCOUNT_ID = "${"0".repeat(32)}"
+MULTIPART_RETENTION_HOURS = "24"
+RESULT_RETENTION_DAYS = "90"
+RUNPOD_INTERNAL_BASE_URL = "https://replace-with-production-orchestrator.example.invalid"
+SOURCE_RETENTION_DAYS = "7"
+WEB_BASE_URL = "https://replace-with-production-web.example.invalid"
+database_id = "00000000-0000-0000-0000-000000000201"
+`;
+
+  const rendered = renderOrchestratorProductionConfig(template, productionIdentifiers);
+
+  assert.match(rendered, /main = "\.\.\/\.\.\/apps\/orchestrator\/src\/index\.ts"/u);
+  assert.doesNotMatch(rendered, /\[env\.staging/u);
+  assert.match(
+    rendered,
+    new RegExp(`\\[env\\.production\\.vars\\][\\s\\S]*CLOUDFLARE_ACCOUNT_ID = "${"b".repeat(32)}"`),
+  );
+  assert.match(rendered, /database_id = "abcdef12-1234-4abc-8def-1234567890ab"/u);
+  assert.match(
+    rendered,
+    /pattern = "orchestrator-production\.example\.invalid", custom_domain = true/u,
+  );
+  assert.match(
+    rendered,
+    /RUNPOD_INTERNAL_BASE_URL = "https:\/\/orchestrator-production\.example\.invalid"/u,
+  );
+  assert.match(rendered, /WEB_BASE_URL = "https:\/\/scribe-drop-production\.example\.invalid"/u);
+});
+
+test("renders production Web, CORS, and lifecycle without staging values", () => {
+  const webTemplate = `pages_build_output_dir = "./dist"
+ACCESS_AUDIENCES = "[\\"replace-with-access-audience\\"]"
+ACCESS_TEAM_DOMAIN = "https://replace-with-team.cloudflareaccess.com"
+ALLOWED_ORIGIN = "https://replace-with-production-web.example.invalid"
+CLOUDFLARE_ACCOUNT_ID = "${"0".repeat(32)}"
+database_id = "00000000-0000-0000-0000-000000000201"
+`;
+  const corsTemplate =
+    '{"rules":[{"allowed":{"origins": ["https://replace-with-production-web.example.invalid"]}}]}';
+  const lifecycleTemplate = `{
+  "rules": [
+    {
+      "id": "scribe-drop-incoming-retention-production",
+      "enabled": true,
+      "conditions": { "prefix": "incoming/" },
+      "deleteObjectsTransition": {
+        "condition": { "type": "Age", "maxAge": 604800 }
+      },
+      "abortMultipartUploadsTransition": {
+        "condition": { "type": "Age", "maxAge": 86400 }
+      }
+    },
+    {
+      "id": "scribe-drop-results-retention-production",
+      "enabled": true,
+      "conditions": { "prefix": "results/" },
+      "deleteObjectsTransition": {
+        "condition": { "type": "Age", "maxAge": 7776000 }
+      }
+    }
+  ]
+}`;
+
+  const web = renderWebProductionConfig(webTemplate, productionIdentifiers);
+  const cors = renderR2CorsProductionConfig(corsTemplate, productionIdentifiers);
+  const lifecycle = renderR2LifecycleProductionConfig(lifecycleTemplate, {
+    ...productionIdentifiers,
+    auditRetentionDays: "365",
+    multipartRetentionHours: "48",
+    resultRetentionDays: "120",
+    sourceRetentionDays: "14",
+  });
+
+  assert.match(web, /ACCESS_AUDIENCES = "\[\\"production-access-audience\\"\]"/u);
+  assert.match(web, /ALLOWED_ORIGIN = "https:\/\/scribe-drop-production\.example\.invalid"/u);
+  assert.doesNotMatch(web, /staging/u);
+  assert.match(cors, /https:\/\/scribe-drop-production\.example\.invalid/u);
+  assert.doesNotMatch(cors, /staging/u);
+  const parsedLifecycle = JSON.parse(lifecycle);
+  assert.equal(parsedLifecycle.rules[0].deleteObjectsTransition.condition.maxAge, 14 * 86400);
+  assert.equal(
+    parsedLifecycle.rules[0].abortMultipartUploadsTransition.condition.maxAge,
+    48 * 3600,
+  );
+  assert.equal(parsedLifecycle.rules[1].deleteObjectsTransition.condition.maxAge, 120 * 86400);
+});
+
+test("rejects staging placeholders and identifiers in production rendering", () => {
+  assert.throws(
+    () =>
+      renderWebProductionConfig(
+        `CLOUDFLARE_ACCOUNT_ID = "${"0".repeat(32)}"
+database_id = "00000000-0000-0000-0000-000000000101"
+`,
+        productionIdentifiers,
+      ),
+    /web production D1 database ID placeholder was not found/u,
+  );
+  assert.throws(
+    () =>
+      renderR2CorsProductionConfig(
+        '"origins": ["https://replace-with-production-web.example.invalid"]',
+        {
+          ...productionIdentifiers,
+          webOrigin: identifiers.webOrigin,
+        },
+      ),
+    /staging environment marker/u,
   );
 });

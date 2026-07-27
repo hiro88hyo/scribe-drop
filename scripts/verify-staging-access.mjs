@@ -1,6 +1,6 @@
 import process from "node:process";
 
-import { verifyStagingAccess } from "./staging-access-verifier.mjs";
+import { verifyStagingAccess } from "./access-verifier.mjs";
 
 try {
   const results = await verifyStagingAccess(
