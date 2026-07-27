@@ -15,6 +15,11 @@ const orchestratorConfigSchema = z
 
 const runpodEndpointIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,200}$/u);
 const secretValueSchema = z.string().min(16).max(512);
+const retentionIntegerSchema = z
+  .string()
+  .regex(/^[1-9][0-9]*$/u)
+  .transform(Number)
+  .pipe(z.number().int().positive().max(3_650));
 
 function isAllowedInternalBaseUrl(value: string): boolean {
   let url: URL;
@@ -86,6 +91,22 @@ const notificationConfigSchema = z
     },
   );
 
+const retentionConfigSchema = z
+  .object({
+    auditRetentionDays: retentionIntegerSchema,
+    multipartRetentionHours: retentionIntegerSchema.refine((value) => value <= 24 * 30),
+    resultRetentionDays: retentionIntegerSchema,
+    sourceRetentionDays: retentionIntegerSchema,
+  })
+  .strict()
+  .refine(
+    ({ auditRetentionDays, resultRetentionDays, sourceRetentionDays }) =>
+      sourceRetentionDays <= resultRetentionDays && resultRetentionDays <= auditRetentionDays,
+    {
+      message: "Retention must satisfy source <= result <= audit",
+    },
+  );
+
 function isAllowedWebBaseUrl(value: string, environment: DeploymentEnvironment): boolean {
   if (environment !== "local") {
     return isAllowedInternalBaseUrl(value);
@@ -127,6 +148,13 @@ export interface NotificationConfigEnvironment {
   readonly WEB_BASE_URL?: string;
 }
 
+export interface RetentionConfigEnvironment {
+  readonly AUDIT_RETENTION_DAYS: string;
+  readonly MULTIPART_RETENTION_HOURS: string;
+  readonly RESULT_RETENTION_DAYS: string;
+  readonly SOURCE_RETENTION_DAYS: string;
+}
+
 export interface OrchestratorConfig {
   readonly appEnvironment: DeploymentEnvironment;
   readonly cloudflareAccountId: string;
@@ -144,6 +172,13 @@ export interface RunpodConfig extends OrchestratorConfig {
 export interface NotificationConfig {
   readonly discordWebhookUrl: string;
   readonly webBaseUrl: string;
+}
+
+export interface RetentionConfig {
+  readonly auditRetentionDays: number;
+  readonly multipartRetentionHours: number;
+  readonly resultRetentionDays: number;
+  readonly sourceRetentionDays: number;
 }
 
 export function parseOrchestratorConfig(
@@ -184,4 +219,16 @@ export function parseNotificationConfig(
     isAllowedWebBaseUrl(result.data.webBaseUrl, environmentResult.data)
     ? result.data
     : undefined;
+}
+
+export function parseRetentionConfig(
+  environment: RetentionConfigEnvironment,
+): RetentionConfig | undefined {
+  const result = retentionConfigSchema.safeParse({
+    auditRetentionDays: environment.AUDIT_RETENTION_DAYS,
+    multipartRetentionHours: environment.MULTIPART_RETENTION_HOURS,
+    resultRetentionDays: environment.RESULT_RETENTION_DAYS,
+    sourceRetentionDays: environment.SOURCE_RETENTION_DAYS,
+  });
+  return result.success ? result.data : undefined;
 }

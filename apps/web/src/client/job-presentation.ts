@@ -19,6 +19,11 @@ export interface UiError {
   readonly requestId?: string;
 }
 
+export interface JobActionAvailability {
+  readonly canCancel: boolean;
+  readonly canRetry: boolean;
+}
+
 const statusPresentations = {
   CANCELLED: { label: "キャンセル済み", tone: "cancelled" },
   CANCEL_REQUESTED: { label: "キャンセル中", tone: "progress" },
@@ -49,6 +54,20 @@ const publicErrorMessages: Partial<Readonly<Record<PublicErrorCode, string>>> = 
 
 export function getStatusPresentation(status: JobStatus): StatusPresentation {
   return statusPresentations[status];
+}
+
+export function getJobActionAvailability(status: JobStatus): JobActionAvailability {
+  return {
+    canCancel: [
+      "CREATED",
+      "UPLOADING",
+      "UPLOADED",
+      "SUBMISSION_PENDING",
+      "SUBMITTING",
+      "RUNNING",
+    ].includes(status),
+    canRetry: status === "FAILED",
+  };
 }
 
 export function formatByteSize(bytes: number): string {

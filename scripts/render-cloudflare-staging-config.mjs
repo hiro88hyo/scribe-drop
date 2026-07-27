@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   renderR2CorsStagingConfig,
+  renderR2LifecycleStagingConfig,
   renderOrchestratorStagingConfig,
   renderWebStagingConfig,
 } from "./cloudflare-staging-config.mjs";
@@ -21,21 +22,26 @@ const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(scriptDirectory, "..");
 const orchestratorOutputDirectory = path.join(repositoryRoot, ".wrangler", "deploy");
 const r2CorsOutput = path.join(orchestratorOutputDirectory, "r2-cors-staging.json");
+const r2LifecycleOutput = path.join(orchestratorOutputDirectory, "r2-lifecycle-staging.json");
 const webOutputDirectory = path.join(repositoryRoot, "apps", "web", ".wrangler", "deploy");
 const webConfigRedirect = path.join(webOutputDirectory, "config.json");
 const webFunctionsLink = path.join(webOutputDirectory, "functions");
 const webFunctionsTarget = "../../functions";
 const target = process.argv[2];
-const allowedTargets = new Set(["all", "orchestrator", "r2-cors", "web"]);
+const allowedTargets = new Set(["all", "orchestrator", "r2-cors", "r2-lifecycle", "web"]);
 if (target === undefined || !allowedTargets.has(target)) {
-  throw new Error("Expected config target: all, orchestrator, r2-cors, or web");
+  throw new Error("Expected config target: all, orchestrator, r2-cors, r2-lifecycle, or web");
 }
 const identifiers = {
   accessAudience: process.env.SCRIBE_DROP_STAGING_ACCESS_AUDIENCE,
   accessTeamDomain: process.env.SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN,
   accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
   d1DatabaseId: process.env.SCRIBE_DROP_STAGING_D1_DATABASE_ID,
+  auditRetentionDays: process.env.AUDIT_RETENTION_DAYS,
+  multipartRetentionHours: process.env.MULTIPART_RETENTION_HOURS,
   orchestratorOrigin: process.env.SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN,
+  resultRetentionDays: process.env.RESULT_RETENTION_DAYS,
+  sourceRetentionDays: process.env.SOURCE_RETENTION_DAYS,
   webOrigin: process.env.SCRIBE_DROP_STAGING_WEB_ORIGIN,
 };
 
@@ -45,6 +51,12 @@ const configs = [
     render: renderOrchestratorStagingConfig,
     target: "orchestrator",
     template: path.join(repositoryRoot, "apps", "orchestrator", "wrangler.toml"),
+  },
+  {
+    output: r2LifecycleOutput,
+    render: renderR2LifecycleStagingConfig,
+    target: "r2-lifecycle",
+    template: path.join(repositoryRoot, "infra", "cloudflare", "r2-lifecycle.staging.json"),
   },
   {
     output: r2CorsOutput,

@@ -458,6 +458,42 @@ dependency audit、既存RunPod imageのnetworkなし・read-only container chec
 - service worker は app shell と静的 asset だけを cache し、`/api/*`、artifact、認証済み応答は cache しない。
 - installable manifest と offline 時の安全な案内を追加する。
 
+### 実装状況
+
+成果物downloadのlocal checkpointを完了した。詳細画面はowner検証済みAPIから操作時にだけ
+5分のexact-object GET capabilityを取得し、URLをReact state、log、browser storageへ
+保持せずdownloadを開始する。R2 responseは署名済み`Content-Disposition: attachment`で
+navigationではなくdownloadとして扱う。通信・schema・API障害は安全なmessageと
+問い合わせIDだけを表示し、同じ形式を再試行できる。
+
+retry、cancel、deleteのlocal checkpointも完了した。利用者のretryはFAILEDから新しい
+generationを作り、cancelは状態別に即時停止または`CANCEL_REQUESTED`へ進める。deleteは
+owner、CSRF、Origin、JSON content typeを確認した後で即時に通常APIから隠し、
+[ADR 0018](./adr/0018-asynchronous-user-deletion.md)に従ってheartbeatを失効させる。
+Orchestrator Cronは既知RunPod jobをcancelし、最後のR2 capability失効後にD1所有の
+source keyと全attempt prefixを冪等に削除してから、CAS付きでD1親rowを物理削除する。
+R2/D1/RunPod failureの分類、backoff、partial artifact、foreign owner、重複request、
+unrelated object保護をunit testとWorkers integration testで検証済みである。
+[ADR 0019](./adr/0019-layer-application-and-r2-retention.md)に従うretentionのlocal
+checkpointも完了した。4つの保持値をstrictに検証し、source、attempt result、監査情報を
+独立したcutoffでCron回収する。R2 lifecycle JSONは同じ値から生成し、`incoming/`の
+incomplete multipart abort/source expirationと`results/` expirationを最終防衛にする。
+forward-only migration、unit test、D1/R2 Workers integration、renderer drift testまで
+成功している。PWAはsame-originのreview済みstatic assetだけをcacheし、API、artifact、
+navigation response、Access redirectを保存しない。installable manifest、固定offline
+案内、online状態、keyboard/focus、mobile表示を実装した。mock API/R2を使うPlaywrightで
+通信失敗からのretry、multipart upload、poll、download、delete、PC drag-and-drop、
+Android相当file chooser、Cache Storage内容を検証済みである。staging D1 migration、
+Orchestrator/Web deploy、実R2 lifecycle適用、未認証Access smokeまで完了した。
+認証済みbrowserではservice workerのoffline fallbackを確認した。固定dummy dataだけを
+使うstaging smokeでは、明示削除のexact R2/D1 cleanup、7日source・90日result・180日
+監査情報の独立期限、監査期限の次回Cron物理削除、capability安全期限までの削除延期、
+重複Cronの冪等性を確認した。検証後はdummy D1 rowとR2 objectを全件清掃した。
+live tailでも正常な`reconciliation.completed`とallowlist fieldだけを確認し、
+Phase 7のstaging checkpointを完了した。upload pageを閉じ、新しいpageの履歴・詳細から
+処理状態を復元するPlaywrightも追加した。[acceptance checklist](./acceptance-checklist.md)で
+仕様の必須受け入れ条件を証跡へ全件対応付けた。production deploymentは未実施である。
+
 ### 保存期間と削除
 
 - 未完了 multipart、source、results、監査情報の retention を環境変数化する。

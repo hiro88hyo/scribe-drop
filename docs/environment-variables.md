@@ -28,7 +28,8 @@ Orchestrator用
 `apps/web/.wrangler/deploy/wrangler.toml`を使う。生成物はgit ignoredであり、値を
 logへ出さない。
 
-R2 CORSは`pnpm cloudflare:config:staging:r2-cors`、Web設定は
+R2 CORSは`pnpm cloudflare:config:staging:r2-cors`、R2 lifecycleは
+`pnpm cloudflare:config:staging:r2-lifecycle`、Web設定は
 `pnpm cloudflare:config:staging:web`で生成する。次の非secret値も環境から渡す。
 
 - `SCRIBE_DROP_STAGING_WEB_ORIGIN`: Accessで保護するstaging Webの単一exact HTTPS origin
@@ -129,6 +130,13 @@ stagingとproductionはHTTPSを必須とし、stagingでは`SCRIBE_DROP_STAGING_
 `DISCORD_WEBHOOK_URL`はDiscord公式webhookのHTTPS URLだけを受け入れ、environment別
 encrypted secretへ登録する。値やqueryはlog、deployment記録、追跡対象設定へ出さない。
 Orchestratorのscheduled handlerはWrangler設定の5分Cronから起動する。
+
+retention値は正の整数とし、`SOURCE_RETENTION_DAYS <= RESULT_RETENTION_DAYS <=
+AUDIT_RETENTION_DAYS`を必須にする。[ADR 0019](./adr/0019-layer-application-and-r2-retention.md)
+に従い、同じ4変数からOrchestrator設定とR2 lifecycle JSONを生成する。R2 lifecycleは
+`incoming/`のsource expirationとincomplete multipart abort、`results/`のresult
+expirationだけを持つ。application cleanupはD1 markerとartifact metadataを収束させ、
+lifecycleは長期障害時の最終防衛とする。
 
 ## RunPod Worker
 

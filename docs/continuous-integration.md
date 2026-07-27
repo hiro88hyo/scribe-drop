@@ -13,12 +13,15 @@
 | `quality`          | lockfile固定install、toolchain、format、lint、型検査、Vitest、pytest、build、local D1 migration、Web/OrchestratorのWorkers/D1/R2 integration |
 | `secrets`          | Gitleaks による完全な Git 履歴と現在の checkout の検査                                                                                       |
 | `dependency-audit` | `pnpm audit` と `uv audit` による直接・推移依存の既知脆弱性検査                                                                              |
+| `browser-e2e`      | 固定Playwright/Chromiumとmock API/R2によるupload、poll、download、delete、mobile、PWA cache検査                                              |
 | `runpod-container` | 固定digest/snapshotからの実image build、非root・networkなし・read-only起動、model全hash、SPDX JSON SBOM、High/Critical vulnerability scan    |
 
 `pnpm audit` と `uv audit` は脆弱性データサービスへ接続するため、通常の `pnpm check` とは分離する。ローカルで CI 相当を確認するときは次を実行する。
 
 ```bash
 pnpm check
+pnpm playwright:install
+pnpm test:e2e
 pnpm ci:verify
 pnpm secrets:check
 pnpm audit --audit-level high
@@ -26,6 +29,12 @@ uv audit --preview-features audit-command --project apps/runpod-worker --frozen
 pnpm container:build:runpod
 pnpm container:check:runpod
 ```
+
+PlaywrightのOS共有libraryは公式の`playwright install --with-deps chromium`で準備する。
+`sudo`を利用できないmanaged hostでは管理者に依頼し、CIはephemeral runnerへだけ導入する。
+E2EのAPI、R2 multipart、artifact downloadは予約済みdummy値のbrowser routeで置換し、
+Cloudflare、RunPod、Discordや実録音へ接続しない。traceは失敗時だけlocal/CI一時領域へ
+残し、追跡対象や長期artifactへ保存しない。
 
 ## Phase 6 deterministic failures
 

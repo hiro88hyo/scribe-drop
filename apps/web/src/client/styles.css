@@ -17,6 +17,32 @@
   box-sizing: border-box;
 }
 
+.skip-link {
+  position: fixed;
+  z-index: 10;
+  top: 0.5rem;
+  left: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.45rem;
+  background: #fffdf7;
+  color: #14231f;
+  font-weight: 800;
+  transform: translateY(-150%);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+.offline-banner {
+  padding: 0.65rem 1rem;
+  color: #fffdf7;
+  background: #7d3d19;
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-align: center;
+}
+
 body {
   margin: 0;
   min-width: 320px;
@@ -36,6 +62,16 @@ a {
 
 button {
   font: inherit;
+}
+
+:where(a, button, input, select):focus-visible,
+[tabindex="-1"]:focus-visible {
+  outline: 3px solid #bd7f43;
+  outline-offset: 3px;
+}
+
+.upload-card :where(button, input, select):focus-visible {
+  outline-color: #e2c174;
 }
 
 .app-shell {
@@ -259,6 +295,19 @@ h3 {
   border: 0;
 }
 
+.visually-hidden:focus-visible {
+  position: fixed;
+  z-index: 10;
+  top: 0.5rem;
+  left: 0.5rem;
+  width: auto;
+  height: auto;
+  padding: 0.75rem;
+  overflow: visible;
+  clip: auto;
+  white-space: normal;
+}
+
 .upload-glyph {
   display: grid;
   width: 4rem;
@@ -325,13 +374,6 @@ h3 {
   background: #20322d;
   color: #fff;
   font: inherit;
-}
-
-.upload-form input:focus-visible,
-.upload-form select:focus-visible,
-.upload-card button:focus-visible {
-  outline: 3px solid rgb(226 193 116 / 45%);
-  outline-offset: 2px;
 }
 
 .selected-file {
@@ -416,6 +458,7 @@ h3 {
 }
 
 .danger-button {
+  min-height: 2.75rem;
   padding: 0.55rem 0.75rem;
   border: 1px solid rgb(255 190 174 / 35%);
   border-radius: 0.45rem;
@@ -564,8 +607,8 @@ h3 {
 
 .row-link {
   display: grid;
-  width: 2.5rem;
-  height: 2.5rem;
+  width: 2.75rem;
+  height: 2.75rem;
   flex: 0 0 auto;
   place-items: center;
   border: 1px solid rgb(20 35 31 / 18%);
@@ -648,7 +691,7 @@ h3 {
 }
 
 .secondary-button {
-  min-height: 2.6rem;
+  min-height: 2.75rem;
   padding: 0.65rem 0.9rem;
   border: 1px solid rgb(20 35 31 / 22%);
   border-radius: 0.5rem;
@@ -741,6 +784,62 @@ h3 {
   border-left: 2px solid #bd7f43;
 }
 
+.job-actions {
+  display: grid;
+  gap: 1rem;
+  margin-top: 3rem;
+  padding: 1.25rem;
+  border: 1px solid rgb(20 35 31 / 14%);
+  border-radius: 0.8rem;
+  background: rgb(255 255 255 / 36%);
+}
+
+.job-actions h2 {
+  margin: 0;
+  font-size: 1.8rem;
+}
+
+.job-action-buttons,
+.confirmation-panel > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.action-note,
+.confirmation-panel p {
+  margin: 0;
+  color: #69736e;
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+.light-danger-button {
+  border-color: rgb(135 59 53 / 38%);
+  background: rgb(135 59 53 / 10%);
+  color: #873b35;
+}
+
+.light-danger-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.confirmation-panel {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid rgb(135 59 53 / 24%);
+  border-radius: 0.65rem;
+  background: rgb(241 221 221 / 54%);
+}
+
+.confirmation-panel h3 {
+  margin: 0;
+  font-family: inherit;
+  font-size: 1rem;
+}
+
 .artifact-section {
   margin-top: 3rem;
 }
@@ -767,10 +866,40 @@ h3 {
 }
 
 .artifact-list li {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem 1rem;
+  align-items: center;
   padding: 1rem 0;
   border-bottom: 1px solid rgb(20 35 31 / 16%);
+}
+
+.artifact-list li > div:first-child {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.artifact-list li strong {
+  font-size: 0.9rem;
+}
+
+.artifact-list li span {
+  color: #69736e;
+  font-size: 0.78rem;
+}
+
+.artifact-download-button {
+  min-width: 8.5rem;
+}
+
+.artifact-download-error {
+  grid-column: 1 / -1;
+  color: #873b35;
+  font-size: 0.8rem;
+}
+
+.artifact-download-error p {
+  margin: 0;
 }
 
 .empty-state {
@@ -855,6 +984,14 @@ h3 {
 
   .detail-grid div {
     grid-template-columns: 1fr;
+  }
+
+  .artifact-list li {
+    grid-template-columns: 1fr;
+  }
+
+  .artifact-download-button {
+    justify-self: start;
   }
 }
 

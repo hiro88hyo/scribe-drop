@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   renderOrchestratorStagingConfig,
   renderR2CorsStagingConfig,
+  renderR2LifecycleStagingConfig,
   renderWebStagingConfig,
 } from "./cloudflare-staging-config.mjs";
 
@@ -28,8 +29,12 @@ routes = [
   { pattern = "replace-with-staging-orchestrator.example.invalid", custom_domain = true },
 ]
 [env.staging.vars]
+AUDIT_RETENTION_DAYS = "180"
 CLOUDFLARE_ACCOUNT_ID = "${"0".repeat(32)}"
+MULTIPART_RETENTION_HOURS = "24"
+RESULT_RETENTION_DAYS = "90"
 RUNPOD_INTERNAL_BASE_URL = "https://replace-with-staging-orchestrator.example.invalid"
+SOURCE_RETENTION_DAYS = "7"
 WEB_BASE_URL = "https://replace-with-staging-web.example.invalid"
 database_id = "00000000-0000-0000-0000-000000000101"
 `;
@@ -40,7 +45,7 @@ database_id = "00000000-0000-0000-0000-000000000101"
   assert.match(rendered, new RegExp(`\\[vars\\]\\nCLOUDFLARE_ACCOUNT_ID = "${"0".repeat(32)}"`));
   assert.match(
     rendered,
-    new RegExp(`\\[env\\.staging\\.vars\\]\\nCLOUDFLARE_ACCOUNT_ID = "${"a".repeat(32)}"`),
+    new RegExp(`\\[env\\.staging\\.vars\\][\\s\\S]*CLOUDFLARE_ACCOUNT_ID = "${"a".repeat(32)}"`),
   );
   assert.match(rendered, /database_id = "12345678-1234-4abc-8def-1234567890ab"/u);
   assert.match(
@@ -93,6 +98,47 @@ test("renders the R2 CORS staging origin", () => {
   assert.match(rendered, /"origins": \["https:\/\/scribe-drop-staging\.example\.invalid"\]/u);
 });
 
+test("renders matching R2 lifecycle ages from reviewed retention values", () => {
+  const template = `{
+  "rules": [
+    {
+      "id": "scribe-drop-incoming-retention-staging",
+      "enabled": true,
+      "conditions": { "prefix": "incoming/" },
+      "deleteObjectsTransition": {
+        "condition": { "type": "Age", "maxAge": 604800 }
+      },
+      "abortMultipartUploadsTransition": {
+        "condition": { "type": "Age", "maxAge": 86400 }
+      }
+    },
+    {
+      "id": "scribe-drop-results-retention-staging",
+      "enabled": true,
+      "conditions": { "prefix": "results/" },
+      "deleteObjectsTransition": {
+        "condition": { "type": "Age", "maxAge": 7776000 }
+      }
+    }
+  ]
+}
+`;
+
+  const rendered = JSON.parse(
+    renderR2LifecycleStagingConfig(template, {
+      ...identifiers,
+      auditRetentionDays: "365",
+      multipartRetentionHours: "48",
+      resultRetentionDays: "120",
+      sourceRetentionDays: "14",
+    }),
+  );
+
+  assert.equal(rendered.rules[0].abortMultipartUploadsTransition.condition.maxAge, 48 * 3600);
+  assert.equal(rendered.rules[0].deleteObjectsTransition.condition.maxAge, 14 * 86400);
+  assert.equal(rendered.rules[1].deleteObjectsTransition.condition.maxAge, 120 * 86400);
+});
+
 test("rejects missing identifiers and template drift", () => {
   assert.throws(
     () => renderWebStagingConfig("", { accountId: "invalid", d1DatabaseId: "invalid" }),
@@ -135,5 +181,14 @@ database_id = "00000000-0000-0000-0000-000000000101"
         { ...identifiers, orchestratorOrigin: "http://localhost:8787" },
       ),
     /SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN/u,
+  );
+  assert.throws(
+    () =>
+      renderR2LifecycleStagingConfig('{"rules":[]}', {
+        ...identifiers,
+        resultRetentionDays: "6",
+        sourceRetentionDays: "7",
+      }),
+    /source <= result <= audit/u,
   );
 });

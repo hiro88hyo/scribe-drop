@@ -10,6 +10,7 @@
     "build:functions:test": "WRANGLER_WRITE_LOGS=0 wrangler pages functions build functions --outdir .wrangler/functions-test --project-directory . --build-output-directory dist",
     "dev": "vite",
     "preview": "vite preview",
+    "preview:e2e": "vite preview --host 127.0.0.1 --port 4173 --strictPort",
     "test:workers": "pnpm --filter '@scribe-drop/web^...' run build && pnpm run build:client && pnpm run build:functions:test && vitest run --config vitest.workers.config.ts",
     "typecheck": "tsc --project tsconfig.client.json --noEmit && tsc --project tsconfig.functions.json --noEmit && tsc --project tsconfig.config.json --noEmit && tsc --project tsconfig.test.json --noEmit"
   },

@@ -12,6 +12,12 @@ const stagingOrchestratorHostnamePlaceholder = "replace-with-staging-orchestrato
 const stagingOrchestratorOriginPlaceholder =
   "https://replace-with-staging-orchestrator.example.invalid";
 const webOriginPlaceholder = "https://replace-with-staging-web.example.invalid";
+const retentionDefaults = {
+  auditRetentionDays: 180,
+  multipartRetentionHours: 24,
+  resultRetentionDays: 90,
+  sourceRetentionDays: 7,
+};
 
 function requireIdentifier(value, pattern, name) {
   if (typeof value !== "string" || !pattern.test(value)) {
@@ -70,8 +76,57 @@ function validatedResourceIdentifiers(identifiers) {
   };
 }
 
+function optionalPositiveInteger(value, fallback, name, maximum) {
+  const candidate = value === undefined ? String(fallback) : value;
+  if (
+    typeof candidate !== "string" ||
+    !/^[1-9][0-9]*$/u.test(candidate) ||
+    Number(candidate) > maximum
+  ) {
+    throw new Error(`${name} is missing or has an invalid format`);
+  }
+  return Number(candidate);
+}
+
+function validatedRetentionIdentifiers(identifiers) {
+  const values = {
+    auditRetentionDays: optionalPositiveInteger(
+      identifiers.auditRetentionDays,
+      retentionDefaults.auditRetentionDays,
+      "AUDIT_RETENTION_DAYS",
+      3650,
+    ),
+    multipartRetentionHours: optionalPositiveInteger(
+      identifiers.multipartRetentionHours,
+      retentionDefaults.multipartRetentionHours,
+      "MULTIPART_RETENTION_HOURS",
+      24 * 30,
+    ),
+    resultRetentionDays: optionalPositiveInteger(
+      identifiers.resultRetentionDays,
+      retentionDefaults.resultRetentionDays,
+      "RESULT_RETENTION_DAYS",
+      3650,
+    ),
+    sourceRetentionDays: optionalPositiveInteger(
+      identifiers.sourceRetentionDays,
+      retentionDefaults.sourceRetentionDays,
+      "SOURCE_RETENTION_DAYS",
+      3650,
+    ),
+  };
+  if (
+    values.sourceRetentionDays > values.resultRetentionDays ||
+    values.resultRetentionDays > values.auditRetentionDays
+  ) {
+    throw new Error("Retention must satisfy source <= result <= audit");
+  }
+  return values;
+}
+
 export function renderOrchestratorStagingConfig(template, identifiers) {
   const { accountId, d1DatabaseId } = validatedResourceIdentifiers(identifiers);
+  const retention = validatedRetentionIdentifiers(identifiers);
   const orchestratorOrigin = requireExactHttpsOrigin(
     identifiers.orchestratorOrigin,
     "SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN",
@@ -119,6 +174,23 @@ export function renderOrchestratorStagingConfig(template, identifiers) {
     `WEB_BASE_URL = "${webOrigin}"`,
     "orchestrator staging web origin",
   );
+  for (const [name, defaultValue, renderedValue] of [
+    ["AUDIT_RETENTION_DAYS", retentionDefaults.auditRetentionDays, retention.auditRetentionDays],
+    [
+      "MULTIPART_RETENTION_HOURS",
+      retentionDefaults.multipartRetentionHours,
+      retention.multipartRetentionHours,
+    ],
+    ["RESULT_RETENTION_DAYS", retentionDefaults.resultRetentionDays, retention.resultRetentionDays],
+    ["SOURCE_RETENTION_DAYS", retentionDefaults.sourceRetentionDays, retention.sourceRetentionDays],
+  ]) {
+    stagingConfig = replaceOnce(
+      stagingConfig,
+      `${name} = "${String(defaultValue)}"`,
+      `${name} = "${String(renderedValue)}"`,
+      `orchestrator staging ${name}`,
+    );
+  }
 
   return replaceOnce(
     `${baseConfig}${stagingConfig}`,
@@ -194,4 +266,43 @@ export function renderR2CorsStagingConfig(template, identifiers) {
     `"origins": ["${webOrigin}"]`,
     "R2 CORS staging origin",
   );
+}
+
+export function renderR2LifecycleStagingConfig(template, identifiers) {
+  const retention = validatedRetentionIdentifiers(identifiers);
+  let parsed;
+  try {
+    parsed = JSON.parse(template);
+  } catch {
+    throw new Error("R2 lifecycle template is not valid JSON");
+  }
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    !Array.isArray(parsed.rules) ||
+    parsed.rules.length !== 2
+  ) {
+    throw new Error("R2 lifecycle template has an unexpected shape");
+  }
+  const incoming = parsed.rules.find(
+    (rule) => rule?.id === "scribe-drop-incoming-retention-staging",
+  );
+  const results = parsed.rules.find((rule) => rule?.id === "scribe-drop-results-retention-staging");
+  if (
+    incoming?.conditions?.prefix !== "incoming/" ||
+    incoming?.deleteObjectsTransition?.condition?.maxAge !==
+      retentionDefaults.sourceRetentionDays * 86400 ||
+    incoming?.abortMultipartUploadsTransition?.condition?.maxAge !==
+      retentionDefaults.multipartRetentionHours * 3600 ||
+    results?.conditions?.prefix !== "results/" ||
+    results?.deleteObjectsTransition?.condition?.maxAge !==
+      retentionDefaults.resultRetentionDays * 86400
+  ) {
+    throw new Error("R2 lifecycle template has drifted from the reviewed defaults");
+  }
+  incoming.deleteObjectsTransition.condition.maxAge = retention.sourceRetentionDays * 86400;
+  incoming.abortMultipartUploadsTransition.condition.maxAge =
+    retention.multipartRetentionHours * 3600;
+  results.deleteObjectsTransition.condition.maxAge = retention.resultRetentionDays * 86400;
+  return `${JSON.stringify(parsed, null, 2)}\n`;
 }

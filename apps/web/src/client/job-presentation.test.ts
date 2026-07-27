@@ -8,6 +8,7 @@ import {
   formatDuration,
   formatLanguage,
   formatOutputFormats,
+  getJobActionAvailability,
   getStatusPresentation,
   toUiError,
 } from "./job-presentation.js";
@@ -19,6 +20,23 @@ describe("job presentation", () => {
       expect(presentation.label.length).toBeGreaterThan(0);
       expect(["cancelled", "complete", "error", "progress", "waiting"]).toContain(
         presentation.tone,
+      );
+    }
+  });
+
+  it("exposes only valid retry and cancellation actions for every status", () => {
+    for (const status of JOB_STATUSES) {
+      const availability = getJobActionAvailability(status);
+      expect(availability.canRetry).toBe(status === "FAILED");
+      expect(availability.canCancel).toBe(
+        [
+          "CREATED",
+          "UPLOADING",
+          "UPLOADED",
+          "SUBMISSION_PENDING",
+          "SUBMITTING",
+          "RUNNING",
+        ].includes(status),
       );
     }
   });

@@ -151,6 +151,8 @@ R2 CORS設定とWeb設定の生成には、Accessで保護する単一exact orig
 ```bash
 pnpm cloudflare:config:staging:r2-cors
 git check-ignore .wrangler/deploy/r2-cors-staging.json
+pnpm cloudflare:config:staging:r2-lifecycle
+git check-ignore .wrangler/deploy/r2-lifecycle-staging.json
 pnpm cloudflare:config:staging:web
 git check-ignore apps/web/.wrangler/deploy/wrangler.toml
 git check-ignore apps/web/.wrangler/deploy/config.json
@@ -161,12 +163,26 @@ git check-ignore apps/web/.wrangler/deploy/config.json
 `SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`を使う。値はcredential storeまたはCI secretから
 環境へ渡し、shell scriptや追跡ファイルへ埋め込まない。
 
+retentionを初期値から変更する場合は`MULTIPART_RETENTION_HOURS`、
+`SOURCE_RETENTION_DAYS`、`RESULT_RETENTION_DAYS`、`AUDIT_RETENTION_DAYS`を同じshell
+environmentからOrchestratorとR2 lifecycleの両方へ生成する。片方だけを生成・適用しない。
+
 ## Web
 
 Viteのclient開発serverは次で起動する。
 
 ```bash
 pnpm --filter @scribe-drop/web run dev
+```
+
+Phase 7のbrowser E2Eは固定Playwright/Chromiumを使う。初回だけbrowserを導入し、
+OS共有libraryはPlaywright公式の`install --with-deps chromium`で準備する。managed
+serverで`sudo`を使えない場合は管理者へ依頼する。testはproduction build/previewを
+自動起動し、外部serviceをdummy routeへ置換する。
+
+```bash
+pnpm playwright:install
+pnpm test:e2e
 ```
 
 このserverはReact UIの開発用であり、Pages Functionsや`public/_headers`の適用を再現しない。Functionsを含むproduction buildは次で検証する。

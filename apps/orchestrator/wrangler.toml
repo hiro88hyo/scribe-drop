@@ -8,9 +8,13 @@ crons = ["*/5 * * * *"]
 
 [vars]
 APP_ENV = "local"
+AUDIT_RETENTION_DAYS = "180"
 CLOUDFLARE_ACCOUNT_ID = "00000000000000000000000000000000"
+MULTIPART_RETENTION_HOURS = "24"
 R2_BUCKET_NAME = "scribe-drop-local"
+RESULT_RETENTION_DAYS = "90"
 RUNPOD_INTERNAL_BASE_URL = "https://orchestrator.example.invalid"
+SOURCE_RETENTION_DAYS = "7"
 WEB_BASE_URL = "http://localhost:5173"
 
 [[d1_databases]]
@@ -42,9 +46,13 @@ crons = ["*/5 * * * *"]
 
 [env.staging.vars]
 APP_ENV = "staging"
+AUDIT_RETENTION_DAYS = "180"
 CLOUDFLARE_ACCOUNT_ID = "00000000000000000000000000000000"
+MULTIPART_RETENTION_HOURS = "24"
 R2_BUCKET_NAME = "recording-transcriber-staging"
+RESULT_RETENTION_DAYS = "90"
 RUNPOD_INTERNAL_BASE_URL = "https://replace-with-staging-orchestrator.example.invalid"
+SOURCE_RETENTION_DAYS = "7"
 WEB_BASE_URL = "https://replace-with-staging-web.example.invalid"
 
 [[env.staging.d1_databases]]
