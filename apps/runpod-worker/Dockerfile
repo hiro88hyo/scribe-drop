@@ -4,25 +4,62 @@
 FROM --platform=linux/amd64 ghcr.io/astral-sh/uv@sha256:0d127b3a7049b879a6e18a79c7f33fea59aa83c226464248f89cfb716a6b96f5 AS uv
 
 # nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04, linux/amd64 manifest
-FROM --platform=linux/amd64 nvidia/cuda@sha256:9175fa92f96de35a8cfb9493f0dfcf9435c7a597e9d95ad41d2cae382a95e3f9 AS system-base
+FROM --platform=linux/amd64 nvidia/cuda@sha256:9175fa92f96de35a8cfb9493f0dfcf9435c7a597e9d95ad41d2cae382a95e3f9 AS builder
+
+SHELL ["/bin/bash", "-euxo", "pipefail", "-c"]
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never
+
+RUN rm -f /etc/apt/sources.list.d/cuda.list \
+    && sed -i \
+        's|http://archive.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/20260725T000000Z/|; s|http://security.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/20260725T000000Z/|' \
+        /etc/apt/sources.list.d/ubuntu.sources \
+    && apt-get update \
+    && apt-get install --yes --no-install-recommends \
+        ca-certificates=20260601~24.04.1 \
+        dirmngr=2.4.4-2ubuntu17.4 \
+        gnupg=2.4.4-2ubuntu17.4 \
+        gnupg-utils=2.4.4-2ubuntu17.4 \
+        gnupg2=2.4.4-2ubuntu17.4 \
+        gpg=2.4.4-2ubuntu17.4 \
+        gpg-agent=2.4.4-2ubuntu17.4 \
+        gpgconf=2.4.4-2ubuntu17.4 \
+        gpgsm=2.4.4-2ubuntu17.4 \
+        gpgv=2.4.4-2ubuntu17.4 \
+        keyboxd=2.4.4-2ubuntu17.4 \
+        libssl3t64=3.0.13-0ubuntu3.11 \
+        openssl=3.0.13-0ubuntu3.11 \
+        python3.12=3.12.3-1ubuntu0.15 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=uv /uv /usr/local/bin/uv
+WORKDIR /app
+
+COPY apps/runpod-worker/pyproject.toml apps/runpod-worker/uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project --python /usr/bin/python3.12
+
+COPY apps/runpod-worker/src ./src
+ENV HF_HUB_DISABLE_PROGRESS_BARS=1 \
+    PYTHONPATH=/app/src
+RUN /app/.venv/bin/python -m scribe_drop_worker.model_bundle /opt/models/large-v3-turbo \
+    && chmod -R a-w /opt/models/large-v3-turbo
+
+# nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04, linux/amd64 manifest
+FROM --platform=linux/amd64 nvidia/cuda@sha256:9175fa92f96de35a8cfb9493f0dfcf9435c7a597e9d95ad41d2cae382a95e3f9 AS runtime
 
 SHELL ["/bin/bash", "-euxo", "pipefail", "-c"]
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install the fixed OS packages once so parallel build stages do not duplicate snapshot requests.
 RUN rm -f /etc/apt/sources.list.d/cuda.list \
     && sed -i \
         's|http://archive.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/20260725T000000Z/|; s|http://security.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/20260725T000000Z/|' \
         /etc/apt/sources.list.d/ubuntu.sources \
-    && apt-get \
-        -o Acquire::Retries=8 \
-        -o Acquire::https::Timeout=30 \
-        update \
-    && apt-get \
-        -o Acquire::Retries=8 \
-        -o Acquire::https::Timeout=30 \
-        install --yes --no-install-recommends \
+    && apt-get update \
+    && apt-get install --yes --no-install-recommends \
         ca-certificates=20260601~24.04.1 \
         dirmngr=2.4.4-2ubuntu17.4 \
         ffmpeg=7:6.1.1-3ubuntu5 \
@@ -39,26 +76,6 @@ RUN rm -f /etc/apt/sources.list.d/cuda.list \
         openssl=3.0.13-0ubuntu3.11 \
         python3.12=3.12.3-1ubuntu0.15 \
     && rm -rf /var/lib/apt/lists/*
-
-FROM system-base AS builder
-
-ENV UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy \
-    UV_PYTHON_DOWNLOADS=never
-
-COPY --from=uv /uv /usr/local/bin/uv
-WORKDIR /app
-
-COPY apps/runpod-worker/pyproject.toml apps/runpod-worker/uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project --python /usr/bin/python3.12
-
-COPY apps/runpod-worker/src ./src
-ENV HF_HUB_DISABLE_PROGRESS_BARS=1 \
-    PYTHONPATH=/app/src
-RUN /app/.venv/bin/python -m scribe_drop_worker.model_bundle /opt/models/large-v3-turbo \
-    && chmod -R a-w /opt/models/large-v3-turbo
-
-FROM system-base AS runtime
 
 WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
