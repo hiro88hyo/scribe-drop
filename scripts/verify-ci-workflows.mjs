@@ -309,6 +309,7 @@ for (const [description, value] of Object.entries({
   "trusted candidate run verification": ".github/workflows/publish-runpod-worker.yml",
   "candidate artifact download": "scribe-drop-release-candidate-${GITHUB_SHA}",
   "verified Pages assembly": "pnpm run candidate:pages",
+  "read-only Pages deploy preflight": "wrangler pages deployment list",
   "candidate migration directory":
     "SCRIBE_DROP_CANDIDATE_MIGRATIONS_DIR: ../../release-candidate/migrations",
   "candidate-only RunPod promotion": "pnpm run runpod:promote:staging",
@@ -326,10 +327,26 @@ for (const [description, value] of Object.entries({
   requireText(stagingWorkflowContents, value, "deploy-staging-candidate.yml", description);
 }
 
+requireTextCount(
+  stagingWorkflowContents,
+  "--cwd apps/web",
+  2,
+  "deploy-staging-candidate.yml",
+  "Pages app-root config discovery",
+);
+requireTextOrder(
+  stagingWorkflowContents,
+  "Verify Pages deploy configuration and target",
+  "Apply candidate D1 migrations",
+  "deploy-staging-candidate.yml",
+  "Pages preflight before staging mutation",
+);
+
 for (const [description, value] of Object.entries({
   "staging container rebuild": "docker build",
   "staging application rebuild": "pnpm run build",
   "direct legacy staging RunPod deploy": "runpod:deploy:staging",
+  "deploy-config directory as staging Pages cwd": "--cwd apps/web/.wrangler/deploy",
 })) {
   forbidText(stagingWorkflowContents, value, "deploy-staging-candidate.yml", description);
 }
@@ -342,6 +359,7 @@ for (const [description, value] of Object.entries({
   "trusted candidate run verification": ".github/workflows/publish-runpod-worker.yml",
   "staging acceptance verification": "pnpm run staging:acceptance:verify",
   "candidate verification": "pnpm run candidate:verify",
+  "read-only Pages deploy preflight": "wrangler pages deployment list",
   "candidate migration directory":
     "SCRIBE_DROP_CANDIDATE_MIGRATIONS_DIR: ../../release-candidate/migrations",
   "candidate-only production RunPod promotion": "pnpm run runpod:promote:production",
@@ -354,6 +372,20 @@ for (const [description, value] of Object.entries({
   requireText(productionWorkflowContents, value, "deploy-production-candidate.yml", description);
 }
 
+requireTextCount(
+  productionWorkflowContents,
+  "--cwd apps/web",
+  2,
+  "deploy-production-candidate.yml",
+  "Pages app-root config discovery",
+);
+requireTextOrder(
+  productionWorkflowContents,
+  "Verify Pages deploy configuration and target",
+  "Apply candidate D1 migrations",
+  "deploy-production-candidate.yml",
+  "Pages preflight before production mutation",
+);
 requireTextOrder(
   productionWorkflowContents,
   "Reject staging and production policy drift",
@@ -376,6 +408,7 @@ for (const [description, value] of Object.entries({
   "staging Access client ID in production": "CF_ACCESS_CLIENT_ID",
   "staging Access client secret in production": "CF_ACCESS_CLIENT_SECRET",
   "staging E2E identity in production": "STAGING_E2E_SERVICE_TOKEN_COMMON_NAME",
+  "deploy-config directory as production Pages cwd": "--cwd apps/web/.wrangler/deploy",
 })) {
   forbidText(productionWorkflowContents, value, "deploy-production-candidate.yml", description);
 }

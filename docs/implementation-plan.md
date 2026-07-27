@@ -572,6 +572,8 @@ Orchestrator artifactは
 [ADR 0028](./adr/0028-fail-fast-before-runpod-image-build.md)に従い、application artifactを
 高コストなRunPod image buildより前に一度だけ生成・検証し、後段で再buildせずcandidateへ
 合成する。
+[ADR 0029](./adr/0029-discover-pages-config-from-app-root.md)に従い、Pages configはapp
+rootから検出し、同じtargetへのread-only preflightを最初のremote mutation前に完了する。
 
 初回production bootstrapではOrchestratorの必須secretであるRunPod endpoint IDを先に
 確定する必要があるため、

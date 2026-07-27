@@ -256,6 +256,10 @@ pnpm exec wrangler deploy \
 Pages commandは`--config`をサポートしないため、生成処理は
 `apps/web/.wrangler/deploy/config.json`から追跡外Wrangler設定への公式config redirectを
 作成する。commandはapp rootを`--cwd`に指定し、実`functions/`と`dist/`を利用する。
+[ADR 0029](./adr/0029-discover-pages-config-from-app-root.md)に従い、deploy config
+directory自体を`--cwd`にしない。migration、R2、RunPod、Orchestratorを変更する前に、
+同じapp rootとprojectを指定した`pages deployment list --json`を実行し、出力はrunner
+一時fileへだけ保存する。
 Accessとsecretの設定後に、[cloudflare-access.md](./cloudflare-access.md)の
 未認証preflightを通し、commit SHAを明示してdeployする。
 PagesのWeb Analyticsは有効化しない。外部beaconの自動注入は

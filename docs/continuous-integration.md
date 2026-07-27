@@ -103,6 +103,9 @@ binding、RunPod endpointをread-backし、実M4A、manifest-last、3成果物do
 成功した後だけ24時間有効なacceptance artifactを発行する。
 acceptanceには実IDやoriginを含めず、retention、R2 policy、RunPod GPU・配置・runtime
 invariantをenvironment markerで正規化したpolicy hashを含める。
+Pagesは[ADR 0029](./adr/0029-discover-pages-config-from-app-root.md)に従い、app rootから
+追跡外config redirectを検出する。最初のremote mutationより前に同じ`--cwd`とprojectで
+read-only deployment listを取得し、config discoveryまたは認証に失敗した場合は停止する。
 
 production workflowはGitHubのproduction Environmentだけにcredentialを持ち、次をすべて
 満たす場合に限り同じcandidateをdeployする。
