@@ -241,7 +241,7 @@ for (const [description, value] of Object.entries({
     "candidate-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
   "password-stdin registry login": "--password-stdin",
   "immutable image reference evidence": "runpod-worker-image.txt",
-  "deterministic Orchestrator candidate output": "--outfile candidate-build/orchestrator/index.js",
+  "raw Orchestrator module output": "--outdir candidate-build/orchestrator",
   "environment-neutral candidate evidence": "scribe-drop-release-candidate-${{ github.sha }}",
   "candidate manifest creation": "pnpm run candidate:create",
   "candidate manifest verification": "pnpm run candidate:verify",
@@ -260,6 +260,7 @@ for (const [description, value] of Object.entries({
   "develop-only candidate publication": "refs/heads/develop",
   "staging deployment in build workflow": "environment: staging",
   "production deployment in build workflow": "environment: production",
+  "multipart Orchestrator upload body output": "--outfile candidate-build/orchestrator/index.js",
 })) {
   forbidText(publicationWorkflowContents, value, "publish-runpod-worker.yml", description);
 }

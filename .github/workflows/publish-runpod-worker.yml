@@ -279,7 +279,7 @@ jobs:
             --minify \
             --config apps/orchestrator/wrangler.toml \
             --env staging \
-            --outfile candidate-build/orchestrator/index.js
+            --outdir candidate-build/orchestrator
 
       - name: Create and verify candidate manifest
         env:

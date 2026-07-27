@@ -566,6 +566,9 @@ candidate作成後にcode、dependency、migration、deployment設定を変更�
 staging evidenceを無効とし、buildとstaging acceptanceをやり直す。mock E2Eやunit testだけ
 で実service staging acceptanceを代替しない。promotion workflowまたは実resource
 read-back verifierが欠落・失敗している間はproductionへdeployしない。
+Orchestrator artifactは
+[ADR 0027](./adr/0027-store-raw-orchestrator-module.md)のraw ES module条件をcandidate作成時と
+検証時に満たし、multipart upload bodyを同一artifactとして扱わない。
 
 初回production bootstrapではOrchestratorの必須secretであるRunPod endpoint IDを先に
 確定する必要があるため、

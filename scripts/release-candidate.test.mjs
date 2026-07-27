@@ -96,6 +96,40 @@ test("rejects modified candidate artifacts", () => {
   );
 });
 
+test("rejects a multipart upload body as the Orchestrator module", () => {
+  const inputs = candidateInputs();
+  const multipartBody = [
+    "------formdata-undici-test",
+    'Content-Disposition: form-data; name="metadata"',
+    "",
+    '{"main_module":"index.js"}',
+    "------formdata-undici-test--",
+  ].join("\n");
+  writeFixture(inputs.repositoryRoot, "orchestrator-build/index.js", multipartBody);
+  assert.throws(
+    () => createReleaseCandidate(inputs),
+    /Orchestrator artifact must be a raw JavaScript module/u,
+  );
+
+  const validInputs = candidateInputs();
+  createReleaseCandidate(validInputs);
+  writeFixture(validInputs.outputDirectory, "orchestrator/index.js", multipartBody);
+  assert.throws(
+    () => verifyReleaseCandidate({ candidateDirectory: validInputs.outputDirectory }),
+    /Orchestrator artifact must be a raw JavaScript module/u,
+  );
+});
+
+test("accepts Wrangler's minified named default export", () => {
+  const inputs = candidateInputs();
+  writeFixture(
+    inputs.repositoryRoot,
+    "orchestrator-build/index.js",
+    "var worker={fetch(){return new Response()}};export{worker as default};",
+  );
+  assert.doesNotThrow(() => createReleaseCandidate(inputs));
+});
+
 test("rejects a candidate for another commit", () => {
   const inputs = candidateInputs();
   createReleaseCandidate(inputs);

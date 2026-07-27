@@ -75,6 +75,9 @@ GHCRへpushする。mutable tagをpromotion入力にせずregistry digestをcand
 権限を持たない。candidateはWeb asset、compiled Pages Functions、compiled Orchestrator、
 migration、RunPod image、acceptance用synthetic M4A、supply-chain reportを含み、
 manifestが各directoryのpath、byte数、file数、SHA-256を固定する。
+compiled Orchestratorは[ADR 0027](./adr/0027-store-raw-orchestrator-module.md)に従い、
+固定Wranglerの`--outdir`が生成するraw ES moduleだけを含める。candidate作成時と検証時に
+multipart upload bodyを拒否し、stagingとproductionは同じmoduleを再buildせずdeployする。
 
 ## Staging promotion gate
 

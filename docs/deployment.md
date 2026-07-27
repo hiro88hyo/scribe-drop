@@ -296,6 +296,12 @@ acceptanceが成功し、GitHub production Environmentのreview・branch・crede
 確認するまで、追加のproduction deployを行わない。追跡外production configの生成と
 read-only検査は実行できるが、remote mutationの許可にはならない。
 
+Orchestrator artifactは
+[ADR 0027](./adr/0027-store-raw-orchestrator-module.md)に従い、固定Wranglerの`--outdir`が
+生成するraw `index.js`だけをcandidateへ保存する。`--outfile`が生成するmultipart upload
+bodyや補助fileをpromotion入力にせず、candidate作成時と各promotion前の検証でraw ES
+module条件を確認する。
+
 通常の実行順序は次のとおりとする。
 
 1. `Publish RunPod release candidate`を`release/<version>`で実行する。

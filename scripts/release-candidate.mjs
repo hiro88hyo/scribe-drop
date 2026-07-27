@@ -302,6 +302,39 @@ function readRunpodImageReference(pathname) {
   };
 }
 
+function validateOrchestratorModule(pathname) {
+  if (
+    !existsSync(pathname) ||
+    lstatSync(pathname).isSymbolicLink() ||
+    !statSync(pathname).isFile()
+  ) {
+    throw new Error("Orchestrator artifact must be a raw JavaScript module");
+  }
+
+  const bytes = readFileSync(pathname);
+  let source;
+  try {
+    source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new Error("Orchestrator artifact must be a raw JavaScript module");
+  }
+
+  const trimmed = source.trim();
+  const hasMultipartHeaders = /(?:^|\r?\n)Content-Disposition:\s*form-data;/iu.test(source);
+  const hasDefaultExport =
+    /\bexport\s*default\b/u.test(source) ||
+    /\bexport\s*\{[^{}]*\bas\s+default\b[^{}]*\}/u.test(source);
+  if (
+    trimmed.length === 0 ||
+    bytes.includes(0) ||
+    /^--[^\r\n]+\r?\n/u.test(trimmed) ||
+    hasMultipartHeaders ||
+    !hasDefaultExport
+  ) {
+    throw new Error("Orchestrator artifact must be a raw JavaScript module");
+  }
+}
+
 function copyDirectory(source, destination) {
   if (!existsSync(source) || !statSync(source).isDirectory()) {
     throw new Error("Candidate build input directory is missing");
@@ -327,6 +360,8 @@ export function createReleaseCandidate(input) {
     "Root package version",
   );
   const commitSha = requirePattern(input.commitSha, commitShaPattern, "Release candidate commit");
+  const orchestratorModulePath = path.join(input.orchestratorBundleDirectory, "index.js");
+  validateOrchestratorModule(orchestratorModulePath);
 
   mkdirSync(input.outputDirectory, { recursive: false, mode: 0o755 });
   copyDirectory(
@@ -340,7 +375,7 @@ export function createReleaseCandidate(input) {
   );
   mkdirSync(path.join(input.outputDirectory, "orchestrator"));
   copyFileSync(
-    path.join(input.orchestratorBundleDirectory, "index.js"),
+    orchestratorModulePath,
     path.join(input.outputDirectory, "orchestrator", "index.js"),
   );
   copyDirectory(
@@ -385,6 +420,7 @@ export function createReleaseCandidate(input) {
 
 export function verifyReleaseCandidate(input) {
   verifyCandidateLayout(input.candidateDirectory);
+  validateOrchestratorModule(path.join(input.candidateDirectory, "orchestrator", "index.js"));
   const manifest = validateReleaseCandidateManifest(
     JSON.parse(
       readFileSync(path.join(input.candidateDirectory, "candidate-manifest.json"), "utf8"),
