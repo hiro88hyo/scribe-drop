@@ -89,9 +89,11 @@ templateへRunPod API key、R2長期credential、Discord webhookを渡さない�
 
 ## Deployment and rollback
 
-`develop`の`Publish RunPod worker` workflowを手動実行する。workflowはoffline check、
-SBOM、scanを通した同一imageをGHCRへpushし、`runpod-worker-image.txt`へdigest付き参照を
-保存する。初回packageはprivateのままである。
+`Publish RunPod worker` workflowを手動実行する。stagingは`develop`とtarget
+`staging`、productionはversion一致する`release/<version>`とtarget `production`に
+限定する。workflowはoffline check、SBOM、scanを通した同一imageをGHCRへpushし、
+environment別publication artifactの`runpod-worker-image.txt`へdigest付き参照を保存する。
+初回packageはprivateのままである。
 
 private imageを使う場合、RunPodにはread-only registry credentialが必要になる。
 `runpodctl registry create`はpasswordをcommand line argumentとして受け取るため使用せず、
@@ -99,15 +101,22 @@ RunPod consoleのsecret入力で登録してから`runpodctl registry list`で�
 だけを確認する。publicへ変更する場合はregistry credentialが不要になるが、GitHub上で
 privateへ戻せない操作なので明示的に選択する。
 
-image visibility、digest、registry auth ID、GPU、data centerと既存のCloudflare staging値を
-credential storeから環境変数へ読み込み、追跡外planを生成する。
+image visibility、digest、registry auth ID、GPU、data centerと同じenvironmentの
+Cloudflare値をcredential storeから環境変数へ読み込み、追跡外planを生成する。
 
 ```bash
 pnpm run runpod:config:staging
 ```
 
-`.runpod/deploy/staging-plan.json`はdirectoryを0700、fileを0600で生成する。実account ID、
-実origin、registry image、resource IDを含むため、リポジトリへ追加しない。
+productionではproduction専用の同項目を読み込み、次を使用する。
+
+```bash
+pnpm run runpod:config:production
+```
+
+`.runpod/deploy/<environment>-plan.json`はdirectoryを0700、fileを0600で生成する。
+実account ID、実origin、registry image、resource IDを含むため、リポジトリへ追加しない。
+production planはstaging markerを持つoriginとregistry auth IDを拒否する。
 
 planを確認した後、API keyをcredential storeまたは一時環境変数から供給してdeployする。
 
@@ -115,9 +124,15 @@ planを確認した後、API keyをcredential storeまたは一時環境変数�
 pnpm run runpod:deploy:staging
 ```
 
+production resource作成checkpointでは次を使用する。
+
+```bash
+pnpm run runpod:deploy:production
+```
+
 scriptは既存の同名resourceを先に検査し、固定planと一致する場合だけ再利用する。template
 確定後かつendpoint作成前に、plan digest、template ID、未確定endpointを
-`.runpod/deploy/staging-state.json`へ0600で保存する。作成応答を失っても、同じpending
+`.runpod/deploy/<environment>-state.json`へ0600で保存する。作成応答を失っても、同じpending
 state、名前、templateが一意に一致する場合だけ再利用する。stateのない既存endpointは
 自動採用しない。API応答、実ID、実originは標準出力へ出さない。削除や既存templateの
 更新は行わない。

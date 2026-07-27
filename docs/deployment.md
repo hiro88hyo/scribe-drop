@@ -268,6 +268,55 @@ pnpm exec wrangler pages deploy \
 
 resourceの作成・変更・削除とdeployの直前には、CLIの認証先、environment、resource名、IDを再確認する。dashboardだけで行った変更は残さず、Wrangler設定、migration、deployment記録へ反映する。
 
+## 追跡外production設定
+
+初回production bootstrapは
+[ADR 0022](./adr/0022-bootstrap-production-dependencies-before-applications.md)と
+[0.1.0 production readiness](./releases/0.1.0-production-readiness.md)を正とする。
+production rendererとverifierのlocal/CI検証が成功するまではremote mutationを開始しない。
+
+production専用の非secret値をcredential storeまたは一時environmentへ読み込み、次を生成する。
+変数名と生成先は[environment-variables.md](./environment-variables.md)を正とする。
+
+```bash
+pnpm cloudflare:config:production
+pnpm runpod:config:production
+
+git check-ignore .wrangler/deploy/orchestrator-production.toml
+git check-ignore .wrangler/deploy/r2-cors-production.json
+git check-ignore .wrangler/deploy/r2-lifecycle-production.json
+git check-ignore apps/web/.wrangler/deploy/wrangler-production.toml
+git check-ignore .runpod/deploy/production-plan.json
+```
+
+生成fileはmode `0600`、親directoryは`0700`でなければならない。Orchestrator production
+configにはstaging sectionを出力しない。Web config redirectは
+`wrangler-production.toml`だけを指す。RunPod planはenvironment、template、endpoint名を
+productionへ固定し、digestなしimage、staging marker、workers max 1超過、volume、
+FlashBootを拒否する。
+
+resource作成前にWranglerとrunpodctlの認証先をread-onlyで確認し、production専用の
+D1、private R2、Queue、DLQ、Pages、Orchestrator、Access、RunPodを使う。resource ID、
+origin、AUD、image digest、registry auth IDはdeployment記録へ転記しない。
+
+Access applicationとPages secretを設定した後、値を読み出さず次を確認する。
+
+```bash
+pnpm cloudflare:secrets:verify:production
+pnpm cloudflare:access:verify:production
+```
+
+RunPod resource作成はrelease commitのpublication evidenceとproduction planをreviewした後、
+別checkpointでだけ実行する。
+
+```bash
+pnpm runpod:deploy:production
+```
+
+scriptは同名resourceを無条件に採用しない。plan digestと一致するignored pending state、
+一意なtemplate/endpoint、厳格なread-backが揃う場合だけ再開する。IDを標準出力へ表示せず、
+削除と既存resourceの更新は行わない。
+
 R2 S3-compatible APIは`wrangler dev`のlocal R2 emulationでは利用できないため、
 browser uploadの自動テストはfake transportを使う。CORS、temporary credentialの
 action/object拒否、multipart、abortは専用staging bucketと設定済みのstaging exact

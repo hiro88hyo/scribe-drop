@@ -76,7 +76,7 @@
 | API、artifact、認証済みresponse、本文をCache Storageへ保存しない | Pass | `apps/e2e/tests/pwa-cache.spec.ts`、[ADR 0020](./adr/0020-cache-only-public-pwa-shell-assets.md)                                                                                        |
 | source、result、監査情報を独立期限で回収する                     | Pass | `apps/orchestrator/tests/retention.worker.spec.ts`、[ADR 0019](./adr/0019-layer-application-and-r2-retention.md)、[Phase 7 staging record](./deployments/2026-07-26-phase-7-staging.md) |
 | 利用者deleteを優先し、capability安全期限後に物理削除する         | Pass | `apps/orchestrator/tests/deletion.worker.spec.ts`、[ADR 0018](./adr/0018-asynchronous-user-deletion.md)、[Phase 7 staging record](./deployments/2026-07-26-phase-7-staging.md)          |
-| R2 lifecycleをapplication cleanupの最終防衛にする                | Pass | `scripts/cloudflare-staging-config.test.mjs`、[Phase 7 staging record](./deployments/2026-07-26-phase-7-staging.md)                                                                     |
+| R2 lifecycleをapplication cleanupの最終防衛にする                | Pass | `scripts/cloudflare-environment-config.test.mjs`、[Phase 7 staging record](./deployments/2026-07-26-phase-7-staging.md)                                                                 |
 | keyboard、focus、screen reader、mobile幅を確認する               | Pass | `apps/e2e/tests/input-accessibility.spec.ts`、`apps/e2e/tests/job-lifecycle.spec.ts`                                                                                                    |
 
 ## Verification

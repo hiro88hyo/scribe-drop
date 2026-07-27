@@ -19,7 +19,8 @@ bindingは環境変数ではなくWranglerが実行時に注入する。
 | Queue consumer   | Orchestrator      | `recording-uploaded-<environment>`     |
 | DLQ              | Orchestrator      | `recording-uploaded-dlq-<environment>` |
 
-定義は`apps/web/wrangler.toml`と`apps/orchestrator/wrangler.toml`を正とする。
+定義は`apps/web/wrangler.toml`、`apps/web/wrangler.production.toml`、
+`apps/orchestrator/wrangler.toml`を正とする。
 追跡対象のIDはplaceholderのまま維持する。stagingのremote操作では
 `CLOUDFLARE_ACCOUNT_ID`と`SCRIBE_DROP_STAGING_D1_DATABASE_ID`をcredential storeまたは
 CI secretから`pnpm cloudflare:config:staging:orchestrator`へ渡し、生成された
@@ -46,6 +47,43 @@ R2 CORSは`pnpm cloudflare:config:staging:r2-cors`、R2 lifecycleは
 
 実originはCloudflareとgit ignoredの生成設定だけに保持し、追跡対象ファイルやdeployment
 記録へ保存しない。
+
+productionでは次の非secret値をcredential storeまたは一時environmentから
+`pnpm cloudflare:config:production`へ渡す。staging用変数名をproduction生成処理へ
+流用しない。
+
+- `CLOUDFLARE_ACCOUNT_ID`
+- `SCRIBE_DROP_PRODUCTION_D1_DATABASE_ID`
+- `SCRIBE_DROP_PRODUCTION_ORCHESTRATOR_ORIGIN`
+- `SCRIBE_DROP_PRODUCTION_WEB_ORIGIN`
+- `SCRIBE_DROP_PRODUCTION_ACCESS_TEAM_DOMAIN`
+- `SCRIBE_DROP_PRODUCTION_ACCESS_AUDIENCE`
+- `MULTIPART_RETENTION_HOURS`（省略時24）
+- `SOURCE_RETENTION_DAYS`（省略時7）
+- `RESULT_RETENTION_DAYS`（省略時90）
+- `AUDIT_RETENTION_DAYS`（省略時180）
+
+生成先は`.wrangler/deploy/*-production.*`、Webは
+`apps/web/.wrangler/deploy/wrangler-production.toml`である。production rendererは
+Orchestratorのstaging sectionを出力せず、production origin、AUD、registry auth IDに
+`staging` markerがあればfail closedにする。生成fileはmode `0600`、directoryは`0700`とし、
+git ignoredであることをremote操作前に確認する。
+
+production RunPod planは次を`pnpm runpod:config:production`へ渡して
+`.runpod/deploy/production-plan.json`へ生成する。
+
+- `CLOUDFLARE_ACCOUNT_ID`
+- `SCRIBE_DROP_PRODUCTION_ORCHESTRATOR_ORIGIN`
+- `SCRIBE_DROP_PRODUCTION_RUNPOD_IMAGE`
+- `SCRIBE_DROP_PRODUCTION_RUNPOD_IMAGE_VISIBILITY`
+- `SCRIBE_DROP_PRODUCTION_RUNPOD_REGISTRY_AUTH_ID`
+- `SCRIBE_DROP_PRODUCTION_RUNPOD_GPU_ID`
+- `SCRIBE_DROP_PRODUCTION_RUNPOD_DATACENTER_IDS`
+
+imageはrelease commitのpublication evidenceにあるdigest付き参照だけを許可する。
+production planはstaging plan/stateとfile名、template名、endpoint名を共有せず、
+`pnpm runpod:deploy:production`はproduction planのread-back検証に成功したresourceだけを
+ignored stateへ記録する。
 
 ## Web / Pages Functions
 
@@ -76,6 +114,9 @@ browserへはexact object、multipart action 4種、15分に限定した派生cr
 次の4件がPagesのproduction environmentへ登録される前にWebをdeployしない。
 PagesのWrangler設定には必須secretの宣言構文がないため、
 `pnpm cloudflare:secrets:verify:staging`で暗号化secret名だけを検査する。
+production Pagesでは`pnpm cloudflare:secrets:verify:production:pages`を使用し、固定された
+production project以外を対象にできない。PagesとOrchestratorの両方をdeploy前に検証する
+場合は`pnpm cloudflare:secrets:verify:production`を使用する。
 
 - `CSRF_HMAC_SECRET`
 - `OWNER_HASH_HMAC_SECRET`
@@ -117,11 +158,16 @@ Phase 4では`RUNPOD_INTERNAL_BASE_URL`をuserinfo、path、query、fragment、�
 stagingでは`SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN`からgit ignoredのWrangler設定へ
 Custom Domainと同じ値を生成する。このoriginはCloudflare Accessの対話loginでは保護せず、
 claim/heartbeatの256 bit tokenを認証境界とする。
+productionでは`SCRIBE_DROP_PRODUCTION_ORCHESTRATOR_ORIGIN`から同じ境界を持つ
+production専用Custom Domainを生成し、staging originを共有しない。
 
 `RUNPOD_ENDPOINT_ID`、`RUNPOD_API_KEY`、`R2_ACCESS_KEY_ID`、
 `R2_SECRET_ACCESS_KEY`はOrchestrator Workerのenvironment別encrypted secretとして登録
 する。R2 keyは対象bucketのobject read/writeだけに限定し、Orchestratorがexact object・
 method・2時間のpresigned URLを発行する用途だけに使う。
+productionでは`DISCORD_WEBHOOK_URL`を含む必須5件を
+`pnpm cloudflare:secrets:verify:production:orchestrator`で名前だけ検証する。CLIのJSON
+応答にvalue fieldが含まれる場合はfail closedとし、値をlogへ出さない。
 
 Phase 5では`WEB_BASE_URL`をuserinfo、query、fragmentのない単一originに限定する。
 stagingとproductionはHTTPSを必須とし、stagingでは`SCRIBE_DROP_STAGING_WEB_ORIGIN`から

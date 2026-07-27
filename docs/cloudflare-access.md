@@ -2,8 +2,9 @@
 
 ## 適用範囲
 
-`SCRIBE_DROP_STAGING_WEB_ORIGIN`で指定するstaging Webの単一正規origin全体を
-Cloudflare Accessで保護する。実originはCloudflareと追跡外設定だけに保持し、
+`SCRIBE_DROP_STAGING_WEB_ORIGIN`または`SCRIBE_DROP_PRODUCTION_WEB_ORIGIN`で指定する
+environment別Webの単一正規origin全体をCloudflare Accessで保護する。実originは
+Cloudflareと追跡外設定だけに保持し、
 repositoryやdeployment記録には保存しない。Accessを前段に置くだけでAPI認証済みとは
 みなさず、Pages Functionsは
 [ADR 0003](./adr/0003-access-jwt-and-csrf-boundary.md)に従って
@@ -47,6 +48,19 @@ application作成後、次の非secret値を取得する。
 - `SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`
 - `SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`
 
+productionは別のself-hosted applicationとして作成し、Nameを
+`scribe-drop-web-production`、Domainを`SCRIBE_DROP_PRODUCTION_WEB_ORIGIN`のhostとする。
+policy、AUD、HMAC secret、R2 credentialをstagingと共有しない。次のproduction専用変数で
+追跡外設定を生成する。
+
+- `SCRIBE_DROP_PRODUCTION_WEB_ORIGIN`
+- `SCRIBE_DROP_PRODUCTION_ACCESS_TEAM_DOMAIN`
+- `SCRIBE_DROP_PRODUCTION_ACCESS_AUDIENCE`
+
+production applicationでもGoogle identity provider 1件、exact email allowlist、
+24時間session、iframe不許可、App Launcher非表示を維持する。bypass、Everyone、
+メールdomain全体を追加しない。
+
 ## Pages secret
 
 Webは次の4 secretを要求する。
@@ -79,6 +93,10 @@ pnpm cloudflare:secrets:verify:staging
 宣言する構文を持たないため、deploy前に検証コマンドを実行し、4件の暗号化secret名が
 揃わない場合はfail closedとする。
 
+productionでは同じ4 secretを`scribe-drop-web-production`へ別値で登録し、
+`pnpm cloudflare:secrets:verify:production:pages`で名前だけを検証する。production親R2
+credentialはproduction bucketだけへ限定し、staging credentialを登録しない。
+
 ## 未認証preflight
 
 設定生成後、rootと`/api/me`がorigin responseを返さず、期待するteam domainの
@@ -98,6 +116,14 @@ pnpm cloudflare:access:verify:staging
 - redirect先pathがAccess login endpointではない。
 
 未認証preflight成功後にだけ、[deployment.md](./deployment.md)のPages deployを実行する。
+
+productionでは次を使用し、verifierはproduction origin/team domainに`staging` markerが
+ある場合と、redirect先がproduction team domain以外の場合にfail closedとする。
+
+```bash
+pnpm cloudflare:config:production:web
+pnpm cloudflare:access:verify:production
+```
 
 ## Deploy後の確認
 
