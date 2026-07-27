@@ -64,20 +64,21 @@ source上書きの状態・監査・logを検証する。`0006_phase6_failure_in
 stagingへPhase 6 applicationをdeployする場合はこのmigrationを先に適用する。Phase 6の
 ためのproduction deploymentや実serviceへの障害注入は行わない。
 
-Phase 7のlocal checkpointでは`0007_user_deletion.sql`を追加し、user deletionの
+Phase 7では`0007_user_deletion.sql`を追加し、user deletionの
 非同期cleanup用schedule、試行回数、allowlist error codeをjob rowへ保持する。
-applicationをdeployする場合はこのmigrationをWebとOrchestratorより先に適用する。
+このmigrationをWebとOrchestratorより先にstagingへ適用した。
 論理削除直後は通常APIから非表示になるが、R2の物理削除は最後に発行された2時間の
 capabilityと5分graceが失効した後に5分Cronが実行する。migrationとcleanupのlocal
 D1/R2 integration testは成功している。stagingへのmigration、Orchestrator/Web deploy、
-R2 lifecycle適用は完了した。実dataを使わないdelete/Cron smokeは未実施であり、完了前に
-productionへ進めない。
+R2 lifecycle適用も完了した。
 
-retentionのlocal checkpointでは`0008_retention_cleanup.sql`を追加し、sourceとattempt
+retentionでは`0008_retention_cleanup.sql`を追加し、sourceとattempt
 resultの削除markerおよび候補indexを追加する。application cleanupとR2 lifecycleの責任は
 [ADR 0019](./adr/0019-layer-application-and-r2-retention.md)を正とする。`0008`を
-applicationより先に適用し、Orchestratorの4 retention変数と同じ値から生成したlifecycleを
-review後に適用する。staging適用は完了し、retention smokeは未実施である。
+applicationより先にstagingへ適用し、Orchestratorの4 retention変数と同じ値から生成した
+lifecycleもreview後に適用した。認証済みPWA offline fallback、固定dummy dataによる
+delete、retention、Cron recoveryを確認し、D1/R2の試験dataを全件清掃した。production
+environmentへのdeploymentは未実施である。
 
 `apps/orchestrator/wrangler.toml`と`apps/web/wrangler.toml`の全ゼロIDおよびoriginは
 安全なplaceholderであり、remote操作には使用できない。実IDと実originは追跡対象へ
@@ -113,7 +114,10 @@ pnpm run runpodctl user
 | staging     | 専用一式   | 専用   | 統合、migration、障害試験    |
 | production  | 専用一式   | 専用   | release branch検証後の本番用 |
 
-D1、R2、Queue、DLQ、RunPod endpoint、Access application、secretは環境間で共有しない。production設定はstagingでの手順が確定してから追加する。
+D1、R2、Queue、DLQ、RunPod endpoint、Access application、secretは環境間で共有しない。
+初回production bootstrapは
+[ADR 0022](./adr/0022-bootstrap-production-dependencies-before-applications.md)と
+[0.1.0 production readiness](./releases/0.1.0-production-readiness.md)を正とする。
 
 ## Staging構築時の順序
 

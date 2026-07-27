@@ -544,13 +544,20 @@ Android Share Target は設計書どおり別 PR とする。
 
 環境は local、staging、production を分離し、D1、R2、Queue、DLQ、RunPod endpoint、Access audience、Discord webhook を共有しない。
 
-リリース順序は次のとおりとする。
+既存environmentの後方互換なリリース順序は次のとおりとする。
 
 1. migration の後方互換性を確認して適用する。
 2. orchestrator を deploy する。
 3. Pages Functions と Web asset を deploy する。
 4. RunPod image digest と endpoint 設定を更新する。
 5. staging smoke test 後に production へ進める。
+
+初回production bootstrapではOrchestratorの必須secretであるRunPod endpoint IDを先に
+確定する必要があるため、
+[ADR 0022](./adr/0022-bootstrap-production-dependencies-before-applications.md)に従って
+Cloudflare resource、固定imageとRunPod endpoint、secret、migration、Orchestrator、
+Webの順に準備する。active workerを0に保ち、Accessとbindingのread-backが完了するまで
+jobと利用者trafficを許可しない。
 
 rollback で古いコードが新しい schema を読めるよう、破壊的 migration は追加・移行・削除の複数リリースに分ける。RunPod image は tag だけでなく digest でも記録する。
 
