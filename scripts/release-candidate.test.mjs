@@ -16,6 +16,8 @@ import {
 const temporaryDirectories = [];
 const commitSha = "a".repeat(40);
 const imageDigest = "b".repeat(64);
+const validPagesFunctionsModule =
+  'const routes=[{routePath:"/api/me"},{routePath:"/api/:path*"},{routePath:"/api"}];export default {};\n';
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
@@ -39,7 +41,11 @@ function candidateInputs() {
   const repositoryRoot = temporaryDirectory();
   writeFixture(repositoryRoot, "package.json", '{"version":"0.1.0"}\n');
   writeFixture(repositoryRoot, "apps/web/dist/index.html", "web");
-  writeFixture(repositoryRoot, "apps/web/.wrangler/functions-build/index.js", "export default {};");
+  writeFixture(
+    repositoryRoot,
+    "apps/web/.wrangler/functions-build/index.js",
+    validPagesFunctionsModule,
+  );
   writeFixture(repositoryRoot, "migrations/0001.sql", "SELECT 1;\n");
   const acceptanceFixtureDirectory = path.join(repositoryRoot, "acceptance-fixtures-build");
   writeFixture(repositoryRoot, "acceptance-fixtures-build/android.m4a", "synthetic-media");
@@ -103,6 +109,16 @@ test("rejects modified candidate artifacts", () => {
       }),
     /artifact verification failed/u,
   );
+});
+
+test("rejects a Pages Functions artifact without the authenticated API route boundary", () => {
+  const inputs = candidateInputs();
+  writeFixture(
+    inputs.applicationArtifactDirectory,
+    "pages-functions/_worker.js",
+    'export default { fetch() { return new Response("missing route"); } };\n',
+  );
+  assert.throws(() => createReleaseCandidate(inputs), /authenticated API route boundary/u);
 });
 
 test("rejects a multipart upload body as the Orchestrator module", () => {

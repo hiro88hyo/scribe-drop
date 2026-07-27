@@ -142,6 +142,9 @@ jobs:
           SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID: ${{ secrets.SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID }}
         run: pnpm run runpod:preflight:staging
 
+      - name: Install fixed Playwright browser before remote mutation
+        run: pnpm --filter @scribe-drop/e2e exec playwright install --with-deps chromium
+
       - name: Apply candidate D1 migrations
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -150,6 +153,25 @@ jobs:
             --remote \
             --config .wrangler/deploy/orchestrator-staging.toml \
             --env staging
+
+      - name: Deploy exact candidate Pages output
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          pnpm exec wrangler pages deploy "${GITHUB_WORKSPACE}/pages-candidate" \
+            --cwd apps/web \
+            --project-name "${SCRIBE_DROP_STAGING_PAGES_PROJECT}" \
+            --branch develop \
+            --commit-hash "${GITHUB_SHA}" \
+            --commit-message "release candidate ${GITHUB_SHA}" \
+            --commit-dirty=false \
+            --no-bundle
+
+      - name: Verify authenticated Pages data plane before backend promotion
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: pnpm run test:e2e:staging:readiness
 
       - name: Apply reviewed R2 browser and retention policies
         env:
@@ -184,19 +206,6 @@ jobs:
             --config .wrangler/deploy/orchestrator-staging.toml \
             --env staging
 
-      - name: Deploy exact candidate Pages output
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: |
-          pnpm exec wrangler pages deploy "${GITHUB_WORKSPACE}/pages-candidate" \
-            --cwd apps/web \
-            --project-name "${SCRIBE_DROP_STAGING_PAGES_PROJECT}" \
-            --branch develop \
-            --commit-hash "${GITHUB_SHA}" \
-            --commit-message "release candidate ${GITHUB_SHA}" \
-            --commit-dirty=false \
-            --no-bundle
-
       - name: Verify candidate and live resource read-back
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -205,9 +214,6 @@ jobs:
           pnpm run candidate:verify release-candidate
           pnpm run cloudflare:readback:staging
           pnpm run cloudflare:access:verify:staging
-
-      - name: Install fixed Playwright browser
-        run: pnpm --filter @scribe-drop/e2e exec playwright install --with-deps chromium
 
       - name: Run real staging M4A lifecycle
         env:

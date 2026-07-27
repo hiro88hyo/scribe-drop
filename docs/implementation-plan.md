@@ -571,15 +571,17 @@ Orchestrator artifactは
 検証時に満たし、multipart upload bodyを同一artifactとして扱わない。
 [ADR 0028](./adr/0028-fail-fast-before-runpod-image-build.md)に従い、application artifactを
 高コストなRunPod image buildより前に一度だけ生成・検証し、後段で再buildせずcandidateへ
-合成する。
+合成する。生成済みPages Functionsの`/api/me`固有route、fallback、API middlewareと
+route順もroot `pnpm check`とcandidate application artifact作成の両方で検証する。
 [ADR 0029](./adr/0029-discover-pages-config-from-app-root.md)に従い、Pages configはapp
 rootから検出し、同じtargetへのread-only preflightを最初のremote mutation前に完了する。
 [ADR 0030](./adr/0030-scope-access-service-credentials-to-app-origin.md)に従い、staging
 service credentialは正規Web originへだけ継続送信する。Pages config hash、Access
 service-token claim、認証済み`/api/me`をmedia uploadより前に検証する。
 [ADR 0033](./adr/0033-wait-for-pages-data-plane-convergence.md)に従い、Pagesの
-control-plane read-back後は認証済み`/api/me`を上限付きでpollし、custom domainの
-data-planeと固定E2E identityが収束してからmedia uploadを開始する。
+D1 migrationとdeploy直後に認証済み`/api/me`を上限付きでpollし、custom domainの
+data-planeと固定E2E identityが収束してからR2、RunPod、Orchestrator、media uploadへ
+進む。
 [ADR 0031](./adr/0031-retry-only-runpod-read-commands.md)に従い、RunPod promotionの
 read-only CLI一時障害だけを上限付きで再試行し、mutationは再試行しない。
 [ADR 0032](./adr/0032-automate-runpod-default-port-normalization.md)に従い、providerが

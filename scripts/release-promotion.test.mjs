@@ -18,6 +18,8 @@ const commitSha = "a".repeat(40);
 const candidateRunId = "123";
 const stagingRunId = "456";
 const environmentPolicyId = "c".repeat(64);
+const validPagesFunctionsModule =
+  'const routes=[{routePath:"/api/me"},{routePath:"/api/:path*"},{routePath:"/api"}];export default {};\n';
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
@@ -44,7 +46,7 @@ function createCandidate() {
   writeFixture(repositoryRoot, "acceptance-fixtures/android.m4a", "synthetic-media");
   writeFixture(repositoryRoot, "supply-chain/report.txt", "clean\n");
   writeFixture(repositoryRoot, "application/web-assets/index.html", "web");
-  writeFixture(repositoryRoot, "application/pages-functions/_worker.js", "export default {};");
+  writeFixture(repositoryRoot, "application/pages-functions/_worker.js", validPagesFunctionsModule);
   writeFixture(repositoryRoot, "application/orchestrator/index.js", "export default {};");
   writeFixture(
     repositoryRoot,
@@ -76,7 +78,7 @@ test("assembles Pages advanced-mode output only from a verified candidate", () =
   assert.equal(readFileSync(path.join(outputDirectory, "index.html"), "utf8"), "web");
   assert.equal(
     readFileSync(path.join(outputDirectory, "_worker.js"), "utf8"),
-    "export default {};",
+    validPagesFunctionsModule,
   );
 });
 

@@ -357,7 +357,7 @@ function validateOrchestratorModule(pathname) {
   }
 }
 
-function validatePagesFunctionsModule(pathname) {
+export function validatePagesFunctionsModule(pathname) {
   if (
     !existsSync(pathname) ||
     lstatSync(pathname).isSymbolicLink() ||
@@ -365,6 +365,23 @@ function validatePagesFunctionsModule(pathname) {
     statSync(pathname).size === 0
   ) {
     throw new Error("Pages Functions artifact is missing or invalid");
+  }
+  const source = readFileSync(pathname, "utf8");
+  const meRouteIndex = source.search(/routePath\s*:\s*["']\/api\/me["']/u);
+  const apiFallbackIndex = source.search(/routePath\s*:\s*["']\/api\/:path\*["']/u);
+  const apiMiddlewareIndex = source.search(/routePath\s*:\s*["']\/api["']/u);
+  const hasDefaultExport =
+    /\bexport\s*default\b/u.test(source) ||
+    /\bexport\s*\{[^{}]*\bas\s+default\b[^{}]*\}/u.test(source);
+  if (
+    source.includes("\0") ||
+    !hasDefaultExport ||
+    meRouteIndex === -1 ||
+    apiFallbackIndex === -1 ||
+    apiMiddlewareIndex === -1 ||
+    meRouteIndex > apiFallbackIndex
+  ) {
+    throw new Error("Pages Functions artifact lacks the authenticated API route boundary");
   }
 }
 

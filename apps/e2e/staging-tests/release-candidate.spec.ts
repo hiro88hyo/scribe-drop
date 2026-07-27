@@ -4,20 +4,13 @@ import path from "node:path";
 import { expect, test, type Download } from "@playwright/test";
 
 import {
-  headersForAccessRequest,
-  serviceTokenCookieMatchesExpectedIdentity,
-} from "../access-service-credentials.js";
-
-function requireEnvironment(name: string): string {
-  const value = process.env[name];
-  if (value === undefined || value.length === 0) {
-    throw new Error(`${name} is required`);
-  }
-  return value;
-}
+  openAuthenticatedStagingPage,
+  requireStagingEnvironment,
+  waitForAuthenticatedStagingDataPlane,
+} from "../staging-auth.js";
 
 function requireCandidateFixture(): Buffer {
-  const candidateDirectory = requireEnvironment("RELEASE_CANDIDATE_DIRECTORY");
+  const candidateDirectory = requireStagingEnvironment("RELEASE_CANDIDATE_DIRECTORY");
   const metadata = JSON.parse(
     readFileSync(path.join(candidateDirectory, "acceptance-fixtures", "metadata.json"), "utf8"),
   ) as unknown;
@@ -47,94 +40,10 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
   browser,
   baseURL,
 }) => {
-  if (baseURL === undefined) {
-    throw new Error("Staging base URL is missing");
-  }
-  const credentials = {
-    clientId: requireEnvironment("CF_ACCESS_CLIENT_ID"),
-    clientSecret: requireEnvironment("CF_ACCESS_CLIENT_SECRET"),
-  };
-  const expectedCommonName = requireEnvironment(
-    "SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME",
-  );
-  const appOrigin = new URL(baseURL).origin;
-  const context = await browser.newContext();
+  const { context, page } = await openAuthenticatedStagingPage(browser, baseURL);
 
   try {
-    await context.route("**/*", async (route) => {
-      const request = route.request();
-      const headers = headersForAccessRequest(
-        request.url(),
-        appOrigin,
-        request.headers(),
-        credentials,
-      );
-      if (new URL(request.url()).origin !== appOrigin) {
-        await route.continue({ headers });
-        return;
-      }
-
-      // Keep redirects visible to the browser so every destination is checked
-      // before Access credentials are attached.
-      const response = await route.fetch({ headers, maxRedirects: 0 });
-      await route.fulfill({ response });
-    });
-
-    const page = await context.newPage();
-    const authenticationResponse = await page.goto(baseURL, {
-      waitUntil: "domcontentloaded",
-    });
-    expect(authenticationResponse?.ok()).toBe(true);
-    const accessCookie = (await context.cookies(baseURL)).find(
-      (cookie) => cookie.name === "CF_Authorization",
-    );
-    expect(accessCookie).toBeDefined();
-    expect(
-      serviceTokenCookieMatchesExpectedIdentity(accessCookie?.value ?? "", expectedCommonName),
-    ).toBe(true);
-
-    await page.goto(baseURL, { waitUntil: "networkidle" });
-    await expect
-      .poll(
-        async () =>
-          page.evaluate(async () => {
-            try {
-              const response = await fetch("/api/me", {
-                cache: "no-store",
-                credentials: "same-origin",
-                headers: { Accept: "application/json" },
-              });
-              if (!response.ok) {
-                return { email: null, ok: false, status: response.status };
-              }
-              const body = (await response.json()) as unknown;
-              const email =
-                typeof body === "object" &&
-                body !== null &&
-                "user" in body &&
-                typeof body.user === "object" &&
-                body.user !== null &&
-                "email" in body.user &&
-                typeof body.user.email === "string"
-                  ? body.user.email
-                  : null;
-              return { email, ok: true, status: response.status };
-            } catch {
-              return { email: null, ok: false, status: 0 };
-            }
-          }),
-        {
-          intervals: [1_000, 2_000, 5_000, 10_000],
-          message: "Expected the authenticated staging data plane to converge",
-          timeout: 2 * 60 * 1_000,
-        },
-      )
-      .toEqual({
-        email: "staging-e2e@example.invalid",
-        ok: true,
-        status: 200,
-      });
-    await expect(page.getByText("staging-e2e@example.invalid")).toBeVisible();
+    await waitForAuthenticatedStagingDataPlane(page);
 
     await page.getByLabel("文字起こしする音声・動画ファイル").setInputFiles({
       buffer: requireCandidateFixture(),
@@ -143,7 +52,7 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
     });
     await page
       .getByLabel("タイトル")
-      .fill(`Release candidate ${requireEnvironment("GITHUB_SHA").slice(0, 12)}`);
+      .fill(`Release candidate ${requireStagingEnvironment("GITHUB_SHA").slice(0, 12)}`);
     for (const label of ["Markdown", "JSON", "SRT"]) {
       await page.getByLabel(label, { exact: true }).check();
     }

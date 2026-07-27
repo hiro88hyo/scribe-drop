@@ -84,7 +84,10 @@ moduleを再buildせずdeployする。
 Functions、Orchestratorは独立した`application` jobで一度だけbuildする。厳密なlayoutと
 raw module条件を検証した短期artifactをrun/attempt固有名で保存し、`publish` jobはdownload
 後に再検証してからRunPod imageのbuildとscanを開始する。`publish` jobではapplicationを
-再buildしないため、決定的なpackaging不良は高コストcontainer処理より前に停止する。
+再buildしない。Pages Functions bundleの`/api/me`固有route、fallback、API middlewareと
+route順もapplication artifact検証に含め、決定的なpackaging不良は高コストcontainer処理
+より前に停止する。同じ検証をroot `pnpm check`のbuild直後にも行い、通常CIが成功する
+までcandidate publicationをdispatchしない。
 
 ## Staging promotion gate
 
@@ -110,9 +113,10 @@ Pagesは[ADR 0029](./adr/0029-discover-pages-config-from-app-root.md)に従い�
 read-only deployment listを取得し、config discoveryまたは認証に失敗した場合は停止する。
 staging browser credentialのorigin制限は
 [ADR 0030](./adr/0030-scope-access-service-credentials-to-app-origin.md)を正とする。
-[ADR 0033](./adr/0033-wait-for-pages-data-plane-convergence.md)に従い、control-plane
-read-back後は認証済み`/api/me`の上限付きpollでcustom domainのdata-plane収束を確認し、
-固定E2E identityへ一致してからmedia uploadを開始する。
+[ADR 0033](./adr/0033-wait-for-pages-data-plane-convergence.md)に従い、全preflightと
+browser installをremote mutation前に完了する。D1 migrationとPages deployの直後に
+認証済み`/api/me`を上限付きでpollし、custom domainのdata-planeと固定E2E identityが
+収束してからR2、RunPod、Orchestrator、media lifecycleへ進む。
 RunPod promotionは[ADR 0031](./adr/0031-retry-only-runpod-read-commands.md)に従い、
 read-only CLIだけを上限付きで再試行し、結果不明のmutationを自動再送しない。
 stagingとproductionの両workflowは最初のremote mutationより前にRunPod preflightも

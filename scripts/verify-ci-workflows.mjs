@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(scriptDirectory, "..");
 const workflowsDirectory = path.join(repositoryRoot, ".github", "workflows");
+const packageManifestPath = path.join(repositoryRoot, "package.json");
 const publicationWorkflowPath = path.join(workflowsDirectory, "publish-runpod-worker.yml");
 const stagingWorkflowPath = path.join(workflowsDirectory, "deploy-staging-candidate.yml");
 const productionWorkflowPath = path.join(workflowsDirectory, "deploy-production-candidate.yml");
@@ -21,6 +22,8 @@ const stagingE2ePath = path.join(
   "staging-tests",
   "release-candidate.spec.ts",
 );
+const stagingAuthPath = path.join(repositoryRoot, "apps", "e2e", "staging-auth.ts");
+const releaseCandidateScriptPath = path.join(repositoryRoot, "scripts", "release-candidate.mjs");
 const runpodDeploymentScriptPath = path.join(
   repositoryRoot,
   "scripts",
@@ -107,11 +110,14 @@ if (actionReferenceCount === 0) {
 const workflowContents = workflowFiles
   .map((filename) => readFileSync(path.join(workflowsDirectory, filename), "utf8"))
   .join("\n");
+const packageManifestContents = readFileSync(packageManifestPath, "utf8");
 const publicationWorkflowContents = readFileSync(publicationWorkflowPath, "utf8");
 const stagingWorkflowContents = readFileSync(stagingWorkflowPath, "utf8");
 const productionWorkflowContents = readFileSync(productionWorkflowPath, "utf8");
 const cloudflareReadbackScriptContents = readFileSync(cloudflareReadbackScriptPath, "utf8");
 const stagingE2eContents = readFileSync(stagingE2ePath, "utf8");
+const stagingAuthContents = readFileSync(stagingAuthPath, "utf8");
+const releaseCandidateScriptContents = readFileSync(releaseCandidateScriptPath, "utf8");
 const runpodDeploymentScriptContents = readFileSync(runpodDeploymentScriptPath, "utf8");
 const runpodPromotionScriptContents = readFileSync(runpodPromotionScriptPath, "utf8");
 const runpodTemplateApiScriptContents = readFileSync(runpodTemplateApiScriptPath, "utf8");
@@ -340,6 +346,7 @@ for (const [description, value] of Object.entries({
   "Orchestrator no-rebuild deployment": "wrangler deploy release-candidate/orchestrator/index.js",
   "Pages no-rebuild deployment": "--no-bundle",
   "live Cloudflare read-back": "pnpm run cloudflare:readback:staging",
+  "early authenticated Pages readiness": "pnpm run test:e2e:staging:readiness",
   "real service E2E": "pnpm run test:e2e:staging",
   "staging-only Access client ID": "CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}",
   "staging-only Access client secret":
@@ -373,6 +380,41 @@ requireTextOrder(
 );
 requireTextOrder(
   stagingWorkflowContents,
+  "Install fixed Playwright browser before remote mutation",
+  "Apply candidate D1 migrations",
+  "deploy-staging-candidate.yml",
+  "browser installation before staging mutation",
+);
+requireTextOrder(
+  stagingWorkflowContents,
+  "Apply candidate D1 migrations",
+  "Deploy exact candidate Pages output",
+  "deploy-staging-candidate.yml",
+  "migration before candidate Pages deployment",
+);
+requireTextOrder(
+  stagingWorkflowContents,
+  "Deploy exact candidate Pages output",
+  "Verify authenticated Pages data plane before backend promotion",
+  "deploy-staging-candidate.yml",
+  "candidate Pages deployment before data-plane readiness",
+);
+requireTextOrder(
+  stagingWorkflowContents,
+  "Verify authenticated Pages data plane before backend promotion",
+  "Apply reviewed R2 browser and retention policies",
+  "deploy-staging-candidate.yml",
+  "data-plane readiness before R2 mutation",
+);
+requireTextOrder(
+  stagingWorkflowContents,
+  "Verify authenticated Pages data plane before backend promotion",
+  "Promote the candidate RunPod image",
+  "deploy-staging-candidate.yml",
+  "data-plane readiness before RunPod promotion",
+);
+requireTextOrder(
+  stagingWorkflowContents,
   "Deploy exact candidate Pages output",
   "Verify candidate and live resource read-back",
   "deploy-staging-candidate.yml",
@@ -387,20 +429,32 @@ for (const [description, value] of Object.entries({
   "bounded Pages data-plane convergence":
     "Expected the authenticated staging data plane to converge",
 })) {
-  requireText(stagingE2eContents, value, "release-candidate.spec.ts", description);
+  requireText(stagingAuthContents, value, "staging-auth.ts", description);
 }
 forbidText(
-  stagingE2eContents,
+  stagingAuthContents,
   "extraHTTPHeaders:",
-  "release-candidate.spec.ts",
+  "staging-auth.ts",
   "context-wide Access service credentials",
 );
 requireTextOrder(
   stagingE2eContents,
-  "Expected the authenticated staging data plane to converge",
+  "waitForAuthenticatedStagingDataPlane(page)",
   ".setInputFiles",
   "release-candidate.spec.ts",
   "data-plane readiness before media mutation",
+);
+requireText(
+  releaseCandidateScriptContents,
+  "meRouteIndex > apiFallbackIndex",
+  "release-candidate.mjs",
+  "static authenticated Pages route verification",
+);
+requireText(
+  packageManifestContents,
+  "pnpm build && pnpm candidate:pages-functions:verify",
+  "package.json",
+  "pre-candidate Pages route gate",
 );
 
 for (const [description, value] of Object.entries({
