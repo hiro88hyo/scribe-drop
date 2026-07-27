@@ -107,6 +107,30 @@ requireText(
   "Dockerfile",
   "Ubuntu snapshot",
 );
+requireTextCount(
+  dockerfileContents,
+  `snapshot.ubuntu.com/ubuntu/${image.ubuntuSnapshot}/`,
+  2,
+  "Dockerfile",
+  "Ubuntu snapshot configuration",
+);
+requireText(
+  dockerfileContents,
+  `nvidia/cuda@${image.baseImage.digest} AS system-base`,
+  "Dockerfile",
+  "shared fixed system base",
+);
+for (const stage of ["builder", "runtime"]) {
+  requireText(
+    dockerfileContents,
+    `FROM system-base AS ${stage}`,
+    "Dockerfile",
+    `shared ${stage} stage`,
+  );
+}
+for (const option of ["Acquire::Retries=8", "Acquire::https::Timeout=30"]) {
+  requireTextCount(dockerfileContents, option, 2, "Dockerfile", "APT resilience option");
+}
 requireText(
   dockerfileContents,
   `ca-certificates=${image.caCertificatesPackage}`,
@@ -128,7 +152,7 @@ for (const packageName of [
   requireTextCount(
     dockerfileContents,
     `${packageName}=${image.gnupgPackage}`,
-    2,
+    1,
     "Dockerfile",
     `${packageName} package`,
   );
@@ -137,7 +161,7 @@ for (const packageName of ["libssl3t64", "openssl"]) {
   requireTextCount(
     dockerfileContents,
     `${packageName}=${image.opensslPackage}`,
-    2,
+    1,
     "Dockerfile",
     `${packageName} package`,
   );
