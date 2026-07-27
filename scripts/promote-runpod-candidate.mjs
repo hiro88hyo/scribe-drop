@@ -7,12 +7,15 @@ import {
   parseMinimumAcceptanceRemainingMilliseconds,
   verifyStagingAcceptance,
 } from "./release-acceptance.mjs";
-import { promoteRunpodCandidate } from "./runpod-promotion.mjs";
+import { runRunpodCliWithReadRetry } from "./runpod-cli-retry.mjs";
+import { promoteRunpodCandidate, verifyRunpodPromotionPreflight } from "./runpod-promotion.mjs";
 import { validateRunpodPlan } from "./runpod-environment-config.mjs";
+import { clearRunpodTemplatePorts } from "./runpod-template-api.mjs";
 
 const [environment, planPath] = process.argv.slice(2);
+const preflightOnly = process.argv[4] === "--preflight-only";
 
-function runCli(arguments_) {
+function runCliOnce(arguments_) {
   const result = spawnSync(path.resolve(".tools", "bin", "runpodctl"), arguments_, {
     encoding: "utf8",
     env: process.env,
@@ -29,13 +32,25 @@ function runCli(arguments_) {
   }
 }
 
+function runCli(arguments_) {
+  return runRunpodCliWithReadRetry(arguments_, runCliOnce, {
+    onRetry({ attempt, command, maximumAttempts }) {
+      console.warn(
+        `Retrying read-only RunPod ${command} (${String(attempt)}/${String(maximumAttempts)})`,
+      );
+    },
+  });
+}
+
 try {
   if (
     (environment !== "staging" && environment !== "production") ||
     planPath === undefined ||
-    process.argv.length !== 4
+    (process.argv.length !== 4 && !(process.argv.length === 5 && preflightOnly))
   ) {
-    throw new Error("Usage: promote-runpod-candidate <staging|production> <plan-path>");
+    throw new Error(
+      "Usage: promote-runpod-candidate <staging|production> <plan-path> [--preflight-only]",
+    );
   }
   if (process.env["GITHUB_ACTIONS"] !== "true") {
     throw new Error("RunPod candidate promotion is restricted to GitHub Actions");
@@ -44,7 +59,7 @@ try {
   if (!String(process.env["GITHUB_WORKFLOW_REF"] ?? "").includes(expectedWorkflowSuffix)) {
     throw new Error("RunPod candidate promotion workflow identity is invalid");
   }
-  if (environment === "production") {
+  if (environment === "production" && !preflightOnly) {
     const candidateDirectory = process.env["RELEASE_CANDIDATE_DIRECTORY"];
     const evidencePath = process.env["STAGING_ACCEPTANCE_PATH"];
     const expectedEnvironmentPolicyId = process.env["EXPECTED_ENVIRONMENT_POLICY_ID"];
@@ -78,7 +93,31 @@ try {
     JSON.parse(readFileSync(path.resolve(planPath), "utf8")),
     environment,
   );
-  const result = promoteRunpodCandidate({
+  if (preflightOnly) {
+    const result = verifyRunpodPromotionPreflight({
+      endpointId,
+      environment,
+      plan,
+      runCli,
+    });
+    console.log(
+      `Verified RunPod ${environment} control-plane preflight (${
+        result.candidateTemplatePortsRequireNormalization
+          ? "candidate template port normalization pending"
+          : result.candidateTemplateExists
+            ? "candidate template ready"
+            : "candidate template pending"
+      }).`,
+    );
+    process.exit(0);
+  }
+  const result = await promoteRunpodCandidate({
+    clearTemplatePorts(templateId) {
+      return clearRunpodTemplatePorts({
+        apiKey: process.env["RUNPOD_API_KEY"],
+        templateId,
+      });
+    },
     endpointId,
     environment,
     plan,

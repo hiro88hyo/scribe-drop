@@ -577,6 +577,11 @@ rootから検出し、同じtargetへのread-only preflightを最初のremote mu
 [ADR 0030](./adr/0030-scope-access-service-credentials-to-app-origin.md)に従い、staging
 service credentialは正規Web originへだけ継続送信する。Pages config hash、Access
 service-token claim、認証済み`/api/me`をmedia uploadより前に検証する。
+[ADR 0031](./adr/0031-retry-only-runpod-read-commands.md)に従い、RunPod promotionの
+read-only CLI一時障害だけを上限付きで再試行し、mutationは再試行しない。
+[ADR 0032](./adr/0032-automate-runpod-default-port-normalization.md)に従い、providerが
+追加する既知のtemplate portだけを未接続・idle条件下で自動除去し、厳格なread-backを
+通す。candidateごとのConsole手動修正は通常手順にしない。
 
 初回production bootstrapではOrchestratorの必須secretであるRunPod endpoint IDを先に
 確定する必要があるため、

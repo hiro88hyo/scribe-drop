@@ -323,6 +323,25 @@ export function validateCreatedRunpodTemplate(untrustedTemplate, untrustedPlan) 
   return template.id;
 }
 
+export function hasOnlyKnownRunpodDefaultPortDrift(untrustedTemplate, untrustedPlan) {
+  const template = requireRecord(untrustedTemplate, "RunPod template response");
+  const ports = template.ports;
+  if (
+    !Array.isArray(ports) ||
+    ports.length !== 2 ||
+    !ports.includes("8888/http") ||
+    !ports.includes("22/tcp")
+  ) {
+    return false;
+  }
+  try {
+    validateCreatedRunpodTemplate({ ...template, ports: [] }, untrustedPlan);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function validateCreatedRunpodEndpoint(untrustedEndpoint, untrustedPlan, templateId) {
   const plan = validateRunpodPlan(untrustedPlan);
   requirePattern(templateId, resourceIdPattern, "RunPod template ID");

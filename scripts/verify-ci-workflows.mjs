@@ -26,6 +26,12 @@ const runpodDeploymentScriptPath = path.join(
   "scripts",
   "deploy-runpod-environment.mjs",
 );
+const runpodPromotionScriptPath = path.join(
+  repositoryRoot,
+  "scripts",
+  "promote-runpod-candidate.mjs",
+);
+const runpodTemplateApiScriptPath = path.join(repositoryRoot, "scripts", "runpod-template-api.mjs");
 const dockerfilePath = path.join(repositoryRoot, "apps", "runpod-worker", "Dockerfile");
 const modelBundlePath = path.join(
   repositoryRoot,
@@ -107,6 +113,8 @@ const productionWorkflowContents = readFileSync(productionWorkflowPath, "utf8");
 const cloudflareReadbackScriptContents = readFileSync(cloudflareReadbackScriptPath, "utf8");
 const stagingE2eContents = readFileSync(stagingE2ePath, "utf8");
 const runpodDeploymentScriptContents = readFileSync(runpodDeploymentScriptPath, "utf8");
+const runpodPromotionScriptContents = readFileSync(runpodPromotionScriptPath, "utf8");
+const runpodTemplateApiScriptContents = readFileSync(runpodTemplateApiScriptPath, "utf8");
 const dockerfileContents = readFileSync(dockerfilePath, "utf8");
 const modelBundleContents = readFileSync(modelBundlePath, "utf8");
 const versions = JSON.parse(readFileSync(versionsPath, "utf8"));
@@ -324,6 +332,7 @@ for (const [description, value] of Object.entries({
   "candidate artifact download": "scribe-drop-release-candidate-${GITHUB_SHA}",
   "verified Pages assembly": "pnpm run candidate:pages",
   "read-only Pages deploy preflight": "wrangler pages deployment list",
+  "read-only RunPod preflight": "pnpm run runpod:preflight:staging",
   "candidate migration directory":
     "SCRIBE_DROP_CANDIDATE_MIGRATIONS_DIR: ../../release-candidate/migrations",
   "candidate-only RunPod promotion": "pnpm run runpod:promote:staging",
@@ -354,6 +363,13 @@ requireTextOrder(
   "Apply candidate D1 migrations",
   "deploy-staging-candidate.yml",
   "Pages preflight before staging mutation",
+);
+requireTextOrder(
+  stagingWorkflowContents,
+  "Verify RunPod control plane before any mutation",
+  "Apply candidate D1 migrations",
+  "deploy-staging-candidate.yml",
+  "RunPod preflight before staging mutation",
 );
 requireTextOrder(
   stagingWorkflowContents,
@@ -396,6 +412,7 @@ for (const [description, value] of Object.entries({
   "staging acceptance verification": "pnpm run staging:acceptance:verify",
   "candidate verification": "pnpm run candidate:verify",
   "read-only Pages deploy preflight": "wrangler pages deployment list",
+  "read-only RunPod preflight": "pnpm run runpod:preflight:production",
   "candidate migration directory":
     "SCRIBE_DROP_CANDIDATE_MIGRATIONS_DIR: ../../release-candidate/migrations",
   "candidate-only production RunPod promotion": "pnpm run runpod:promote:production",
@@ -421,6 +438,13 @@ requireTextOrder(
   "Apply candidate D1 migrations",
   "deploy-production-candidate.yml",
   "Pages preflight before production mutation",
+);
+requireTextOrder(
+  productionWorkflowContents,
+  "Verify RunPod control plane before any mutation",
+  "Apply candidate D1 migrations",
+  "deploy-production-candidate.yml",
+  "RunPod preflight before production mutation",
 );
 requireTextOrder(
   productionWorkflowContents,
@@ -466,6 +490,24 @@ requireText(
   "Direct production RunPod deployment is prohibited; use the ADR 0023 promotion workflow",
   "deploy-runpod-environment.mjs",
   "fail-closed production promotion guard",
+);
+requireText(
+  runpodPromotionScriptContents,
+  "runRunpodCliWithReadRetry(arguments_, runCliOnce",
+  "promote-runpod-candidate.mjs",
+  "bounded read-only RunPod CLI retry",
+);
+requireText(
+  runpodPromotionScriptContents,
+  "clearRunpodTemplatePorts({",
+  "promote-runpod-candidate.mjs",
+  "fixed template API port normalization",
+);
+requireText(
+  runpodTemplateApiScriptContents,
+  "JSON.stringify({ ports: [] })",
+  "runpod-template-api.mjs",
+  "automatic empty-port normalization",
 );
 
 if (failures.length > 0) {

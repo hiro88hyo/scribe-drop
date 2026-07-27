@@ -1,5 +1,6 @@
 import {
   createRunpodTemplateArguments,
+  hasOnlyKnownRunpodDefaultPortDrift,
   validateCreatedRunpodEndpoint,
   validateCreatedRunpodTemplate,
   validateRunpodPlan,
@@ -60,7 +61,7 @@ function matchingTemplates(templates, name) {
   );
 }
 
-function getOrCreateTemplate(plan, runCli) {
+function getOrCreateTemplateResponse(plan, runCli) {
   const matches = matchingTemplates(
     requireArray(runCli(["template", "list", "--type", "user"]), "RunPod template list"),
     plan.template.name,
@@ -71,19 +72,108 @@ function getOrCreateTemplate(plan, runCli) {
   if (matches.length === 1) {
     const summary = requireRecord(matches[0], "RunPod template summary");
     const templateId = requireResourceId(summary.id, "RunPod template ID");
-    return validateCreatedRunpodTemplate(runCli(["template", "get", templateId]), plan);
+    return runCli(["template", "get", templateId]);
   }
 
-  return validateCreatedRunpodTemplate(runCli(createRunpodTemplateArguments(plan)), plan);
+  return runCli(createRunpodTemplateArguments(plan));
 }
 
-export function promoteRunpodCandidate(input) {
+export function verifyRunpodPromotionPreflight(input) {
   const plan = validateRunpodPlan(input.plan, input.environment);
   const endpointId = requireResourceId(input.endpointId, "RunPod endpoint ID");
   input.runCli(["user"]);
-  const templateId = getOrCreateTemplate(plan, input.runCli);
+  const matches = matchingTemplates(
+    requireArray(input.runCli(["template", "list", "--type", "user"]), "RunPod template list"),
+    plan.template.name,
+  );
+  if (matches.length > 1) {
+    throw new Error("Multiple RunPod templates match the candidate plan");
+  }
+
+  let candidateTemplateId;
+  let candidateTemplatePortsRequireNormalization = false;
+  if (matches.length === 1) {
+    const summary = requireRecord(matches[0], "RunPod template summary");
+    const templateId = requireResourceId(summary.id, "RunPod template ID");
+    const candidate = input.runCli(["template", "get", templateId]);
+    if (hasOnlyKnownRunpodDefaultPortDrift(candidate, plan)) {
+      candidateTemplateId = requireResourceId(
+        requireRecord(candidate, "RunPod template response").id,
+        "RunPod template ID",
+      );
+      candidateTemplatePortsRequireNormalization = true;
+    } else {
+      candidateTemplateId = validateCreatedRunpodTemplate(candidate, plan);
+    }
+  }
+
+  const endpoint = input.runCli([
+    "serverless",
+    "get",
+    endpointId,
+    "--include-template",
+    "--include-workers",
+  ]);
+  const currentTemplateId = requireResourceId(
+    requireRecord(endpoint, "RunPod endpoint response").templateId,
+    "RunPod current template ID",
+  );
+  validateIdleEndpoint(endpoint, plan, candidateTemplateId ?? currentTemplateId);
+  if (candidateTemplatePortsRequireNormalization && currentTemplateId === candidateTemplateId) {
+    throw new Error("RunPod candidate template with default ports is already attached");
+  }
+  return {
+    candidateTemplateExists: candidateTemplateId !== undefined,
+    candidateTemplatePortsRequireNormalization,
+    endpointId,
+  };
+}
+
+export async function promoteRunpodCandidate(input) {
+  const plan = validateRunpodPlan(input.plan, input.environment);
+  const endpointId = requireResourceId(input.endpointId, "RunPod endpoint ID");
+  input.runCli(["user"]);
   const getEndpoint = () =>
     input.runCli(["serverless", "get", endpointId, "--include-template", "--include-workers"]);
+  const candidate = getOrCreateTemplateResponse(plan, input.runCli);
+  let templateId;
+  if (hasOnlyKnownRunpodDefaultPortDrift(candidate, plan)) {
+    templateId = requireResourceId(
+      requireRecord(candidate, "RunPod template response").id,
+      "RunPod template ID",
+    );
+    const endpointBeforeNormalization = getEndpoint();
+    const currentTemplateId = requireResourceId(
+      requireRecord(endpointBeforeNormalization, "RunPod endpoint response").templateId,
+      "RunPod current template ID",
+    );
+    validateIdleEndpoint(endpointBeforeNormalization, plan, currentTemplateId);
+    if (currentTemplateId === templateId) {
+      throw new Error("RunPod candidate template with default ports is already attached");
+    }
+    if (typeof input.clearTemplatePorts !== "function") {
+      throw new Error("RunPod template port normalization is unavailable");
+    }
+
+    try {
+      await input.clearTemplatePorts(templateId);
+    } catch {
+      // A lost mutation response has an unknown outcome. The exact read-back
+      // below is authoritative, so the mutation itself is never retried.
+    }
+    try {
+      templateId = validateCreatedRunpodTemplate(
+        input.runCli(["template", "get", templateId]),
+        plan,
+      );
+    } catch (error) {
+      throw new Error("RunPod candidate template port normalization failed", {
+        cause: error,
+      });
+    }
+  } else {
+    templateId = validateCreatedRunpodTemplate(candidate, plan);
+  }
   const before = getEndpoint();
   const previousTemplateId = validateIdleEndpoint(before, plan, templateId);
   if (previousTemplateId === templateId) {

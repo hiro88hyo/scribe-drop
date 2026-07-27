@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { promoteRunpodCandidate } from "./runpod-promotion.mjs";
+import { promoteRunpodCandidate, verifyRunpodPromotionPreflight } from "./runpod-promotion.mjs";
 import { createRunpodStagingPlan } from "./runpod-environment-config.mjs";
 
 const plan = createRunpodStagingPlan({
@@ -48,10 +48,253 @@ function endpoint(templateId, workers = []) {
   };
 }
 
-test("promotes an idle endpoint to the exact immutable template", () => {
+test("preflights an idle endpoint without mutating when the candidate template is pending", () => {
+  const calls = [];
+  const result = verifyRunpodPromotionPreflight({
+    endpointId: "endpoint_staging",
+    environment: "staging",
+    plan,
+    runCli(arguments_) {
+      calls.push(arguments_);
+      if (arguments_[0] === "user") return { id: "user" };
+      if (arguments_[0] === "template" && arguments_[1] === "list") return [];
+      if (arguments_[0] === "serverless" && arguments_[1] === "get") {
+        return endpoint("template_old");
+      }
+      throw new Error("Unexpected fake CLI call");
+    },
+  });
+
+  assert.deepEqual(result, {
+    candidateTemplateExists: false,
+    candidateTemplatePortsRequireNormalization: false,
+    endpointId: "endpoint_staging",
+  });
+  assert.equal(
+    calls.some((arguments_) => arguments_.includes("update")),
+    false,
+  );
+  assert.equal(
+    calls.some((arguments_) => arguments_.includes("create")),
+    false,
+  );
+});
+
+test("preflight validates an existing candidate template before any mutation", () => {
+  const result = verifyRunpodPromotionPreflight({
+    endpointId: "endpoint_staging",
+    environment: "staging",
+    plan,
+    runCli(arguments_) {
+      if (arguments_[0] === "user") return { id: "user" };
+      if (arguments_[0] === "template" && arguments_[1] === "list") {
+        return [{ id: "template_new", name: plan.template.name }];
+      }
+      if (arguments_[0] === "template" && arguments_[1] === "get") {
+        return template("template_new");
+      }
+      if (arguments_[0] === "serverless" && arguments_[1] === "get") {
+        return endpoint("template_old");
+      }
+      throw new Error("Unexpected fake CLI call");
+    },
+  });
+
+  assert.equal(result.candidateTemplateExists, true);
+});
+
+test("preflight classifies known provider-added ports without mutating", () => {
+  const calls = [];
+  const result = verifyRunpodPromotionPreflight({
+    endpointId: "endpoint_staging",
+    environment: "staging",
+    plan,
+    runCli(arguments_) {
+      calls.push(arguments_);
+      if (arguments_[0] === "user") return { id: "user" };
+      if (arguments_[0] === "template" && arguments_[1] === "list") {
+        return [{ id: "template_new", name: plan.template.name }];
+      }
+      if (arguments_[0] === "template" && arguments_[1] === "get") {
+        return { ...template("template_new"), ports: ["8888/http", "22/tcp"] };
+      }
+      if (arguments_[0] === "serverless" && arguments_[1] === "get") {
+        return endpoint("template_old");
+      }
+      throw new Error("Unexpected fake CLI call");
+    },
+  });
+
+  assert.equal(result.candidateTemplatePortsRequireNormalization, true);
+  assert.equal(
+    calls.some((arguments_) => arguments_.includes("update")),
+    false,
+  );
+});
+
+test("preflight rejects a default-port candidate that is already attached", () => {
+  assert.throws(
+    () =>
+      verifyRunpodPromotionPreflight({
+        endpointId: "endpoint_staging",
+        environment: "staging",
+        plan,
+        runCli(arguments_) {
+          if (arguments_[0] === "user") return { id: "user" };
+          if (arguments_[0] === "template" && arguments_[1] === "list") {
+            return [{ id: "template_new", name: plan.template.name }];
+          }
+          if (arguments_[0] === "template" && arguments_[1] === "get") {
+            return { ...template("template_new"), ports: ["8888/http", "22/tcp"] };
+          }
+          if (arguments_[0] === "serverless" && arguments_[1] === "get") {
+            return endpoint("template_new");
+          }
+          throw new Error("Unexpected fake CLI call");
+        },
+      }),
+    /already attached/u,
+  );
+});
+
+test("normalizes only known default ports and verifies read-back before promotion", async () => {
+  let currentTemplateId = "template_old";
+  let candidatePorts = ["8888/http", "22/tcp"];
+  let clearCalls = 0;
+  const result = await promoteRunpodCandidate({
+    async clearTemplatePorts(templateId) {
+      assert.equal(templateId, "template_new");
+      clearCalls += 1;
+      candidatePorts = [];
+    },
+    endpointId: "endpoint_staging",
+    environment: "staging",
+    plan,
+    runCli(arguments_) {
+      if (arguments_[0] === "user") return { id: "user" };
+      if (arguments_[0] === "template" && arguments_[1] === "list") return [];
+      if (arguments_[0] === "template" && arguments_[1] === "create") {
+        return { ...template("template_new"), ports: candidatePorts };
+      }
+      if (arguments_[0] === "template" && arguments_[1] === "get") {
+        return { ...template("template_new"), ports: candidatePorts };
+      }
+      if (arguments_[0] === "serverless" && arguments_[1] === "get") {
+        return endpoint(currentTemplateId);
+      }
+      if (arguments_[0] === "serverless" && arguments_[1] === "update") {
+        currentTemplateId = arguments_[4];
+        return endpoint(currentTemplateId);
+      }
+      throw new Error("Unexpected fake CLI call");
+    },
+  });
+
+  assert.equal(clearCalls, 1);
+  assert.equal(result.changed, true);
+  assert.equal(currentTemplateId, "template_new");
+});
+
+test("accepts an unknown port-update outcome only after exact read-back", async () => {
+  let currentTemplateId = "template_old";
+  let candidatePorts = ["22/tcp", "8888/http"];
+  let clearCalls = 0;
+  const result = await promoteRunpodCandidate({
+    async clearTemplatePorts() {
+      clearCalls += 1;
+      candidatePorts = [];
+      throw new Error("simulated response loss");
+    },
+    endpointId: "endpoint_staging",
+    environment: "staging",
+    plan,
+    runCli(arguments_) {
+      if (arguments_[0] === "user") return { id: "user" };
+      if (arguments_[0] === "template" && arguments_[1] === "list") {
+        return [{ id: "template_new", name: plan.template.name }];
+      }
+      if (arguments_[0] === "template" && arguments_[1] === "get") {
+        return { ...template("template_new"), ports: candidatePorts };
+      }
+      if (arguments_[0] === "serverless" && arguments_[1] === "get") {
+        return endpoint(currentTemplateId);
+      }
+      if (arguments_[0] === "serverless" && arguments_[1] === "update") {
+        currentTemplateId = arguments_[4];
+        return endpoint(currentTemplateId);
+      }
+      throw new Error("Unexpected fake CLI call");
+    },
+  });
+
+  assert.equal(clearCalls, 1);
+  assert.equal(result.changed, true);
+});
+
+test("stops before endpoint mutation when port normalization read-back still drifts", async () => {
+  let endpointUpdates = 0;
+  await assert.rejects(
+    async () =>
+      promoteRunpodCandidate({
+        async clearTemplatePorts() {
+          throw new Error("simulated unknown outcome");
+        },
+        endpointId: "endpoint_staging",
+        environment: "staging",
+        plan,
+        runCli(arguments_) {
+          if (arguments_[0] === "user") return { id: "user" };
+          if (arguments_[0] === "template" && arguments_[1] === "list") {
+            return [{ id: "template_new", name: plan.template.name }];
+          }
+          if (arguments_[0] === "template" && arguments_[1] === "get") {
+            return { ...template("template_new"), ports: ["8888/http", "22/tcp"] };
+          }
+          if (arguments_[0] === "serverless" && arguments_[1] === "get") {
+            return endpoint("template_old");
+          }
+          if (arguments_[0] === "serverless" && arguments_[1] === "update") {
+            endpointUpdates += 1;
+          }
+          throw new Error("Unexpected fake CLI call");
+        },
+      }),
+    /port normalization failed/u,
+  );
+  assert.equal(endpointUpdates, 0);
+});
+
+test("does not normalize unrecognized port drift", async () => {
+  let clearCalls = 0;
+  await assert.rejects(
+    async () =>
+      promoteRunpodCandidate({
+        async clearTemplatePorts() {
+          clearCalls += 1;
+        },
+        endpointId: "endpoint_staging",
+        environment: "staging",
+        plan,
+        runCli(arguments_) {
+          if (arguments_[0] === "user") return { id: "user" };
+          if (arguments_[0] === "template" && arguments_[1] === "list") {
+            return [{ id: "template_new", name: plan.template.name }];
+          }
+          if (arguments_[0] === "template" && arguments_[1] === "get") {
+            return { ...template("template_new"), ports: ["9999/http"] };
+          }
+          throw new Error("Unexpected fake CLI call");
+        },
+      }),
+    /does not match/u,
+  );
+  assert.equal(clearCalls, 0);
+});
+
+test("promotes an idle endpoint to the exact immutable template", async () => {
   let currentTemplateId = "template_old";
   const calls = [];
-  const result = promoteRunpodCandidate({
+  const result = await promoteRunpodCandidate({
     endpointId: "endpoint_staging",
     environment: "staging",
     plan,
@@ -85,8 +328,8 @@ test("promotes an idle endpoint to the exact immutable template", () => {
   );
 });
 
-test("does not mutate an endpoint that already uses the candidate template", () => {
-  const result = promoteRunpodCandidate({
+test("does not mutate an endpoint that already uses the candidate template", async () => {
+  const result = await promoteRunpodCandidate({
     endpointId: "endpoint_staging",
     environment: "staging",
     plan,
@@ -105,10 +348,10 @@ test("does not mutate an endpoint that already uses the candidate template", () 
   assert.equal(result.changed, false);
 });
 
-test("allows provider-retained terminal worker records", () => {
+test("allows provider-retained terminal worker records", async () => {
   let currentTemplateId = "template_old";
   const terminalWorkers = [{ desiredStatus: "EXITED" }, { desiredStatus: "TERMINATED" }];
-  const result = promoteRunpodCandidate({
+  const result = await promoteRunpodCandidate({
     endpointId: "endpoint_staging",
     environment: "staging",
     plan,
@@ -133,9 +376,9 @@ test("allows provider-retained terminal worker records", () => {
   assert.equal(currentTemplateId, "template_new");
 });
 
-test("refuses promotion while a running worker exists", () => {
-  assert.throws(
-    () =>
+test("refuses promotion while a running worker exists", async () => {
+  await assert.rejects(
+    async () =>
       promoteRunpodCandidate({
         endpointId: "endpoint_staging",
         environment: "staging",
@@ -156,9 +399,9 @@ test("refuses promotion while a running worker exists", () => {
   );
 });
 
-test("refuses promotion when a worker lifecycle status is missing", () => {
-  assert.throws(
-    () =>
+test("refuses promotion when a worker lifecycle status is missing", async () => {
+  await assert.rejects(
+    async () =>
       promoteRunpodCandidate({
         endpointId: "endpoint_staging",
         environment: "staging",
@@ -179,11 +422,11 @@ test("refuses promotion when a worker lifecycle status is missing", () => {
   );
 });
 
-test("rolls back the template switch when read-back verification fails", () => {
+test("rolls back the template switch when read-back verification fails", async () => {
   let currentTemplateId = "template_old";
   let promotedReadback = false;
-  assert.throws(
-    () =>
+  await assert.rejects(
+    async () =>
       promoteRunpodCandidate({
         endpointId: "endpoint_staging",
         environment: "staging",

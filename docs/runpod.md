@@ -130,6 +130,14 @@ promotion workflowでは、さらにstaging evidenceのcandidate digestと一致
 拒否する。production promotion script自身もcandidateとevidenceを再検証してから
 `runpodctl`を呼ぶ。
 
+promotion中のRunPod API一時障害は
+[ADR 0031](./adr/0031-retry-only-runpod-read-commands.md)に従って扱う。`user`、
+`template list/get`、`serverless get`だけを最大3回、指数backoffとjitter付きで再試行する。
+template作成とendpoint更新は結果不明時に再送せず、厳格なread-backとrollbackを維持する。
+retry logへAPI応答と実IDを出さない。
+最初のremote mutationより前に`runpod:preflight:<environment>`を実行し、認証、templateの
+一意性、endpoint invariant、workerがidleであることをread-onlyで検証する。
+
 planを確認した後、API keyをcredential storeまたは一時環境変数から供給してdeployする。
 
 ```bash
@@ -153,9 +161,10 @@ state、名前、templateが一意に一致する場合だけ再利用する。s
 固定`runpodctl`の既知の取得境界と補償制御は
 [ADR 0012](./adr/0012-runpodctl-staging-verification-boundary.md)を正とする。2.7.2では
 providerがServerless templateへ既定の`8888/http`と`22/tcp`を追加し、CLIから空へ更新
-できない。発生時はRunPod Consoleでこの二つだけを削除し、ほかの設定を変更せず、同じ
-deploy commandを再実行して`template get`の厳格照合を通す。この手順はCLIが空portを
-扱えるversionへ更新するまでの一時的なdashboard例外である。
+できない。発生時は[ADR 0032](./adr/0032-automate-runpod-default-port-normalization.md)に
+従い、promotionが未接続かつidleを確認し、公式template update APIで既知の二つだけを
+自動除去する。mutationは再試行せず、直後の`template get`が固定planへ完全一致した場合
+だけendpointの切替へ進む。Consoleでのcandidateごとのport削除は通常手順に含めない。
 
 同versionは`serverless update --workers-min 0`も成功終了するが、実際の値を0へ変更しない。
 smokeで一時的にactive workerを1へ上げた場合は、全jobのterminalを確認してからConsoleで

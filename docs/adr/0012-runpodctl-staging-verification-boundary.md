@@ -4,6 +4,8 @@
 - Date: 2026-07-26
 - Worker lifecycle recordのactive判定は
   [ADR 0026](./0026-classify-runpod-terminal-worker-records.md)で補足する。
+- templateの既定portを手動削除する判断は
+  [ADR 0032](./0032-automate-runpod-default-port-normalization.md)で置き換える。
 
 ## Context
 
@@ -32,8 +34,10 @@ rotationした直後は、endpointだけを確認すると次回のcold startで
 
 取得できない値を一致したものとして一般化すると、手動作成された同名endpointを誤って
 採用できる。逆に、取得応答に常に値があると仮定すると、正しく作成されたendpointでも
-deployが失敗し、再実行時の回復ができない。API keyを別実装へ渡してCLIを迂回することも、
-projectのPlatform CLI方針とsecret境界を増やすため採用しない。
+deployが失敗し、再実行時の回復ができない。API keyを別実装へ渡してCLIを一般的に
+迂回することも、projectのPlatform CLI方針とsecret境界を増やすため採用しない。
+空port集合だけは後続のADR 0032で、公式REST API、未接続template、厳格なread-backに
+限定した例外を定める。
 
 ## Decision
 
@@ -49,9 +53,9 @@ projectのPlatform CLI方針とsecret境界を増やすため採用しない。
   plan、完全一致テスト済みの作成引数、pending state、同一templateの組合せを補償制御
   とする。初回smokeでworkerが起動した後、workerのGPUとSecure Cloudを`runpodctl`で
   確認するまでproduction-readyとは扱わない。
-- template作成時にproviderが既定portを追加した場合だけ、RunPod Consoleでその二つの
-  portを削除する一時的な手動手順を許可する。ほかの値は変更せず、直後に
-  `runpodctl template get`の厳格照合を通す。照合前のtemplateをendpointへ関連付けない。
+- template作成時にproviderが既定portを追加した場合の扱いはADR 0032を正とする。
+  既知の二つだけを未接続templateから自動除去し、直後に`runpodctl template get`の
+  厳格照合を通す。照合前のtemplateをendpointへ関連付けない。
 - staging smokeのためにactive workerを1へ上げた場合、全jobがterminalであることをD1で
   確認してからRunPod Consoleで0へ戻す。直後に`serverless get`で0〜1 worker、timeout、
   scaler、FlashBoot、volumeを再検証する。
@@ -64,7 +68,7 @@ projectのPlatform CLI方針とsecret境界を増やすため採用しない。
   そのworkerだけをterminateする。
 - `runpodctl`が空のport集合の作成または更新と、配置条件を含む安定したread responseを
   提供し、0値のworker更新とrolling worker replacementを正しく扱うversionへ更新できた
-  時点で手動手順と省略許容を除去する。version更新は機能変更から分離し、checksum、
+  時点でREST API例外と省略許容を除去する。version更新は機能変更から分離し、checksum、
   回帰テスト、staging再検証を行う。
 
 ## Consequences
@@ -73,8 +77,9 @@ projectのPlatform CLI方針とsecret境界を増やすため採用しない。
   endpointを名前だけで採用しない。
 - worker起動前は配置条件の全項目を取得応答だけで証明できない。staging smokeと
   Secure Cloud確認がPhase 4完了条件として残る。
-- port削除とactive workerを0へ戻す操作はdashboardだけの恒久設定ではなく、CLIの
-  機能不足に限定した記録済み例外となる。厳格な取得後検証によってport、worker数、
-  registry credentialのdriftを持つresourceの利用を防ぐ。
+- port削除はADR 0032の自動化された公式API例外となる。active workerを0へ戻す操作は
+  dashboardだけの恒久設定ではなく、CLIの機能不足に限定した記録済み例外となる。
+  厳格な取得後検証によってport、worker数、registry credentialのdriftを持つresourceの
+  利用を防ぐ。
 - RunPodの応答形式またはCLI実装が変わると検証が停止する。省略項目を無条件に増やさず、
   公式実装とstaging実測を確認してこのADRを更新する必要がある。

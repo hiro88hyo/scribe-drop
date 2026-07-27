@@ -69,6 +69,8 @@
     "runpod:deploy:production": "node scripts/deploy-runpod-environment.mjs production",
     "runpod:promote:production": "node scripts/promote-runpod-candidate.mjs production .runpod/deploy/production-plan.json",
     "runpod:promote:staging": "node scripts/promote-runpod-candidate.mjs staging .runpod/deploy/staging-plan.json",
+    "runpod:preflight:production": "node scripts/promote-runpod-candidate.mjs production .runpod/deploy/production-plan.json --preflight-only",
+    "runpod:preflight:staging": "node scripts/promote-runpod-candidate.mjs staging .runpod/deploy/staging-plan.json --preflight-only",
     "playwright:install": "pnpm --filter @scribe-drop/e2e exec playwright install chromium",
     "secrets:check": "pnpm secrets:check:git && pnpm secrets:check:worktree",
     "secrets:check:git": "./.tools/bin/gitleaks git --redact --no-banner --verbose",
