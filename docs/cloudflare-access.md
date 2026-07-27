@@ -43,6 +43,12 @@ Client ID/secretはGitHub staging Environmentにだけ保存し、Client IDと�
 `common_name`を`SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME`へ設定する。
 production applicationにはこのpolicyと変数を追加しない。
 
+CI browserは[ADR 0030](./adr/0030-scope-access-service-credentials-to-app-origin.md)に従い、
+service token headerを正規のstaging Web originへの全requestへだけ付与する。
+`CF_Authorization` cookie取得後もService Authの後続requestからheaderを外さず、代わりに
+redirectを自動継承せずoriginを再判定する。R2、Access team domain、その他のoriginへ
+Client ID/secretを送らない。
+
 application作成後、次の非secret値を取得する。
 
 - team domainのexact origin:
@@ -142,7 +148,8 @@ pnpm cloudflare:access:verify:production
 5. 別applicationのaudienceを持つJWT、JWTなし、不正issuerはAPIで401になる。
 6. response、browser storage、Cloudflare logにJWT、email、CSRF tokenが残らない。
 7. stagingではCI専用service tokenがcookieを取得でき、別service tokenはWebのJWT再検証で
-   401になる。productionではservice token principalを受け入れない。
+   401になる。CIはcookie claim一致と認証済み`GET /api/me`をupload前に確認し、
+   productionではservice token principalを受け入れない。
 
 Access session確認用のscreenshot、HAR、JWTをartifactやticketへ保存しない。問題調査では
 request IDと安全なstatusだけを記録する。

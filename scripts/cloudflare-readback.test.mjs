@@ -46,6 +46,7 @@ const expected = {
   },
   pagesProjectName: "scribe-drop-web-staging",
   pagesBranch: "develop",
+  pagesConfigHash: "b".repeat(64),
   queueName: "recording-uploaded-staging",
   workerName: "scribe-drop-orchestrator-staging",
 };
@@ -161,6 +162,15 @@ test("requires the exact active Worker and Pages candidate when a commit is expe
         Source: commitSha.slice(0, 7),
       },
     ]),
+    pagesProject: JSON.stringify({
+      deployment_configs: {
+        production: {
+          wrangler_config_hash: candidateExpected.pagesConfigHash,
+        },
+      },
+      name: candidateExpected.pagesProjectName,
+      production_branch: candidateExpected.pagesBranch,
+    }),
     workerDeployment: JSON.stringify({
       strategy: "percentage",
       versions: [{ percentage: 100, version_id: "version_candidate" }],
@@ -192,5 +202,24 @@ test("requires the exact active Worker and Pages candidate when a commit is expe
         candidateExpected,
       ),
     /sole active version/u,
+  );
+  assert.throws(
+    () =>
+      verifyCloudflareReadback(
+        {
+          ...candidateOutputs,
+          pagesProject: JSON.stringify({
+            deployment_configs: {
+              production: {
+                wrangler_config_hash: "c".repeat(64),
+              },
+            },
+            name: candidateExpected.pagesProjectName,
+            production_branch: candidateExpected.pagesBranch,
+          }),
+        },
+        candidateExpected,
+      ),
+    /deployed configuration/u,
   );
 });

@@ -99,13 +99,17 @@ file picker、PWA、offline動作へ及ぶ場合は、対象実機smokeの承認
 release branch、commit、成功statusをGitHub APIで照合する。applicationを再buildせず、
 compiled bundleを`--no-bundle`でdeployする。R2 notification、Queue producer/consumer、
 DLQ/retry、CORS、lifecycle、D1 migration、PagesのGit provider無効、active Worker versionと
-binding、RunPod endpointをread-backし、実M4A、manifest-last、3成果物download、削除受付が
-成功した後だけ24時間有効なacceptance artifactを発行する。
+binding、RunPod endpointをread-backする。Pagesはdeploy済みproduction
+`wrangler_config_hash`と生成した追跡外configのSHA-256も照合する。Access service tokenの
+claimと認証済み`GET /api/me`をupload前に検証し、実M4A、manifest-last、3成果物download、
+削除受付が成功した後だけ24時間有効なacceptance artifactを発行する。
 acceptanceには実IDやoriginを含めず、retention、R2 policy、RunPod GPU・配置・runtime
 invariantをenvironment markerで正規化したpolicy hashを含める。
 Pagesは[ADR 0029](./adr/0029-discover-pages-config-from-app-root.md)に従い、app rootから
 追跡外config redirectを検出する。最初のremote mutationより前に同じ`--cwd`とprojectで
 read-only deployment listを取得し、config discoveryまたは認証に失敗した場合は停止する。
+staging browser credentialのorigin制限は
+[ADR 0030](./adr/0030-scope-access-service-credentials-to-app-origin.md)を正とする。
 
 production workflowはGitHubのproduction Environmentだけにcredentialを持ち、次をすべて
 満たす場合に限り同じcandidateをdeployする。

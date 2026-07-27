@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -59,6 +60,15 @@ export function verifyCloudflareReadback(outputs, expected) {
       latestPagesDeployment?.Source !== expected.commitSha.slice(0, 7)
     ) {
       throw new Error("Cloudflare Pages candidate deployment read-back does not match");
+    }
+    const pagesProject = JSON.parse(outputs.pagesProject);
+    if (
+      pagesProject?.name !== expected.pagesProjectName ||
+      pagesProject?.production_branch !== expected.pagesBranch ||
+      pagesProject?.deployment_configs?.production?.wrangler_config_hash !==
+        expected.pagesConfigHash
+    ) {
+      throw new Error("Cloudflare Pages deployed configuration read-back does not match");
     }
 
     const deployment = JSON.parse(outputs.workerDeployment);
@@ -210,7 +220,46 @@ function runWrangler(arguments_) {
   return result.stdout;
 }
 
-export function runCloudflareReadback(input) {
+async function fetchPagesProject(accountId, projectName) {
+  const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+  if (
+    typeof accountId !== "string" ||
+    !/^[0-9a-f]{32}$/u.test(accountId) ||
+    typeof apiToken !== "string" ||
+    apiToken.length === 0
+  ) {
+    throw new Error("Cloudflare Pages read-back credentials are missing or invalid");
+  }
+  const response = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${accountId}/pages/projects/${encodeURIComponent(projectName)}`,
+    {
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${apiToken}`,
+      },
+      redirect: "error",
+      signal: AbortSignal.timeout(60_000),
+    },
+  );
+  if (!response.ok) {
+    throw new Error("Cloudflare Pages project configuration read-back failed");
+  }
+  const envelope = await response.json();
+  if (
+    typeof envelope !== "object" ||
+    envelope === null ||
+    !("success" in envelope) ||
+    envelope.success !== true ||
+    !("result" in envelope) ||
+    typeof envelope.result !== "object" ||
+    envelope.result === null
+  ) {
+    throw new Error("Cloudflare Pages project configuration read-back is invalid");
+  }
+  return JSON.stringify(envelope.result);
+}
+
+export async function runCloudflareReadback(input) {
   const suffix = input.environment;
   const configArguments = ["--config", input.configPath, "--env", input.environment];
   const bucketName = `recording-transcriber-${suffix}`;
@@ -260,6 +309,7 @@ export function runCloudflareReadback(input) {
             "production",
             "--json",
           ]),
+    pagesProject: "{}",
     projects: runWrangler(["pages", "project", "list", "--json"]),
     queue: runWrangler(["queues", "info", queueName, ...configArguments]),
     workerDeployment:
@@ -273,6 +323,10 @@ export function runCloudflareReadback(input) {
         : runWrangler(["versions", "list", ...workerArguments]),
   };
   if (expectedCommitSha !== undefined) {
+    outputs.pagesProject = await fetchPagesProject(
+      process.env.CLOUDFLARE_ACCOUNT_ID,
+      pagesProjectName,
+    );
     const versions = JSON.parse(outputs.workerVersions);
     const deployment = JSON.parse(outputs.workerDeployment);
     const activeVersionId =
@@ -364,6 +418,10 @@ export function runCloudflareReadback(input) {
     cors: JSON.parse(readFileSync(input.corsPath, "utf8")),
     deadLetterQueueName,
     lifecycle: JSON.parse(readFileSync(input.lifecyclePath, "utf8")),
+    pagesConfigHash:
+      expectedCommitSha === undefined
+        ? undefined
+        : createHash("sha256").update(readFileSync(input.pagesConfigPath)).digest("hex"),
     pagesProjectName,
     pagesBranch: input.environment === "staging" ? "develop" : "main",
     queueName,

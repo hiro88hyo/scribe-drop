@@ -574,6 +574,9 @@ Orchestrator artifactは
 合成する。
 [ADR 0029](./adr/0029-discover-pages-config-from-app-root.md)に従い、Pages configはapp
 rootから検出し、同じtargetへのread-only preflightを最初のremote mutation前に完了する。
+[ADR 0030](./adr/0030-scope-access-service-credentials-to-app-origin.md)に従い、staging
+service credentialは正規Web originへだけ継続送信する。Pages config hash、Access
+service-token claim、認証済み`/api/me`をmedia uploadより前に検証する。
 
 初回production bootstrapではOrchestratorの必須secretであるRunPod endpoint IDを先に
 確定する必要があるため、

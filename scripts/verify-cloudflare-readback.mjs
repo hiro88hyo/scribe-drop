@@ -11,12 +11,19 @@ try {
   }
   const configName =
     environment === "staging" ? "orchestrator-staging.toml" : "orchestrator-production.toml";
-  runCloudflareReadback({
+  await runCloudflareReadback({
     configPath: path.resolve(".wrangler", "deploy", configName),
     corsPath: path.resolve(".wrangler", "deploy", `r2-cors-${environment}.json`),
     environment,
     d1DatabaseId: process.env[`SCRIBE_DROP_${environment.toUpperCase()}_D1_DATABASE_ID`],
     lifecyclePath: path.resolve(".wrangler", "deploy", `r2-lifecycle-${environment}.json`),
+    pagesConfigPath: path.resolve(
+      "apps",
+      "web",
+      ".wrangler",
+      "deploy",
+      environment === "staging" ? "wrangler.toml" : "wrangler-production.toml",
+    ),
   });
   console.log(`Verified Cloudflare ${environment} resource read-back.`);
 } catch (error) {

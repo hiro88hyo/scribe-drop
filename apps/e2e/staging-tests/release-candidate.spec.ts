@@ -3,6 +3,11 @@ import path from "node:path";
 
 import { expect, test, type Download } from "@playwright/test";
 
+import {
+  headersForAccessRequest,
+  serviceTokenCookieMatchesExpectedIdentity,
+} from "../access-service-credentials.js";
+
 function requireEnvironment(name: string): string {
   const value = process.env[name];
   if (value === undefined || value.length === 0) {
@@ -45,14 +50,36 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
   if (baseURL === undefined) {
     throw new Error("Staging base URL is missing");
   }
-  const context = await browser.newContext({
-    extraHTTPHeaders: {
-      "CF-Access-Client-Id": requireEnvironment("CF_ACCESS_CLIENT_ID"),
-      "CF-Access-Client-Secret": requireEnvironment("CF_ACCESS_CLIENT_SECRET"),
-    },
-  });
+  const credentials = {
+    clientId: requireEnvironment("CF_ACCESS_CLIENT_ID"),
+    clientSecret: requireEnvironment("CF_ACCESS_CLIENT_SECRET"),
+  };
+  const expectedCommonName = requireEnvironment(
+    "SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME",
+  );
+  const appOrigin = new URL(baseURL).origin;
+  const context = await browser.newContext();
 
   try {
+    await context.route("**/*", async (route) => {
+      const request = route.request();
+      const headers = headersForAccessRequest(
+        request.url(),
+        appOrigin,
+        request.headers(),
+        credentials,
+      );
+      if (new URL(request.url()).origin !== appOrigin) {
+        await route.continue({ headers });
+        return;
+      }
+
+      // Keep redirects visible to the browser so every destination is checked
+      // before Access credentials are attached.
+      const response = await route.fetch({ headers, maxRedirects: 0 });
+      await route.fulfill({ response });
+    });
+
     const page = await context.newPage();
     const authenticationResponse = await page.goto(baseURL, {
       waitUntil: "domcontentloaded",
@@ -62,10 +89,42 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
       (cookie) => cookie.name === "CF_Authorization",
     );
     expect(accessCookie).toBeDefined();
+    expect(
+      serviceTokenCookieMatchesExpectedIdentity(accessCookie?.value ?? "", expectedCommonName),
+    ).toBe(true);
 
-    // Never forward Access service-token headers to cross-origin presigned R2 URLs.
-    await context.setExtraHTTPHeaders({});
     await page.goto(baseURL, { waitUntil: "networkidle" });
+    const authenticatedSession = await page.evaluate(async () => {
+      try {
+        const response = await fetch("/api/me", {
+          cache: "no-store",
+          credentials: "same-origin",
+          headers: { Accept: "application/json" },
+        });
+        if (!response.ok) {
+          return { email: null, ok: false, status: response.status };
+        }
+        const body = (await response.json()) as unknown;
+        const email =
+          typeof body === "object" &&
+          body !== null &&
+          "user" in body &&
+          typeof body.user === "object" &&
+          body.user !== null &&
+          "email" in body.user &&
+          typeof body.user.email === "string"
+            ? body.user.email
+            : null;
+        return { email, ok: true, status: response.status };
+      } catch {
+        return { email: null, ok: false, status: 0 };
+      }
+    });
+    expect(authenticatedSession).toEqual({
+      email: "staging-e2e@example.invalid",
+      ok: true,
+      status: 200,
+    });
     await expect(page.getByText("staging-e2e@example.invalid")).toBeVisible();
 
     await page.getByLabel("文字起こしする音声・動画ファイル").setInputFiles({

@@ -262,6 +262,8 @@ directory自体を`--cwd`にしない。migration、R2、RunPod、Orchestrator�
 一時fileへだけ保存する。
 Accessとsecretの設定後に、[cloudflare-access.md](./cloudflare-access.md)の
 未認証preflightを通し、commit SHAを明示してdeployする。
+deploy後はPages project APIのproduction `wrangler_config_hash`と生成configのSHA-256を
+照合し、commitが一致してもconfig hashが異なる場合はpromotionを失敗させる。
 PagesのWeb Analyticsは有効化しない。外部beaconの自動注入は
 [ADR 0005](./adr/0005-web-response-security-policy.md)の同一origin限定CSPと矛盾するため、
 Metrics画面でも無効であることを確認する。

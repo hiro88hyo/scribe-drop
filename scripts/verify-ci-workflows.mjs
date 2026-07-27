@@ -9,6 +9,18 @@ const workflowsDirectory = path.join(repositoryRoot, ".github", "workflows");
 const publicationWorkflowPath = path.join(workflowsDirectory, "publish-runpod-worker.yml");
 const stagingWorkflowPath = path.join(workflowsDirectory, "deploy-staging-candidate.yml");
 const productionWorkflowPath = path.join(workflowsDirectory, "deploy-production-candidate.yml");
+const cloudflareReadbackScriptPath = path.join(
+  repositoryRoot,
+  "scripts",
+  "cloudflare-readback.mjs",
+);
+const stagingE2ePath = path.join(
+  repositoryRoot,
+  "apps",
+  "e2e",
+  "staging-tests",
+  "release-candidate.spec.ts",
+);
 const runpodDeploymentScriptPath = path.join(
   repositoryRoot,
   "scripts",
@@ -92,6 +104,8 @@ const workflowContents = workflowFiles
 const publicationWorkflowContents = readFileSync(publicationWorkflowPath, "utf8");
 const stagingWorkflowContents = readFileSync(stagingWorkflowPath, "utf8");
 const productionWorkflowContents = readFileSync(productionWorkflowPath, "utf8");
+const cloudflareReadbackScriptContents = readFileSync(cloudflareReadbackScriptPath, "utf8");
+const stagingE2eContents = readFileSync(stagingE2ePath, "utf8");
 const runpodDeploymentScriptContents = readFileSync(runpodDeploymentScriptPath, "utf8");
 const dockerfileContents = readFileSync(dockerfilePath, "utf8");
 const modelBundleContents = readFileSync(modelBundlePath, "utf8");
@@ -341,6 +355,28 @@ requireTextOrder(
   "deploy-staging-candidate.yml",
   "Pages preflight before staging mutation",
 );
+requireTextOrder(
+  stagingWorkflowContents,
+  "Deploy exact candidate Pages output",
+  "Verify candidate and live resource read-back",
+  "deploy-staging-candidate.yml",
+  "Pages deployment before live configuration read-back",
+);
+
+for (const [description, value] of Object.entries({
+  "same-origin Access credential routing": "headersForAccessRequest(",
+  "redirect boundary before credential reuse": "maxRedirects: 0",
+  "service-token cookie identity check": "serviceTokenCookieMatchesExpectedIdentity(",
+  "authenticated session preflight": 'fetch("/api/me"',
+})) {
+  requireText(stagingE2eContents, value, "release-candidate.spec.ts", description);
+}
+forbidText(
+  stagingE2eContents,
+  "extraHTTPHeaders:",
+  "release-candidate.spec.ts",
+  "context-wide Access service credentials",
+);
 
 for (const [description, value] of Object.entries({
   "staging container rebuild": "docker build",
@@ -399,6 +435,18 @@ requireTextOrder(
   "Deploy exact candidate Pages output",
   "deploy-production-candidate.yml",
   "RunPod promotion before public Web deployment",
+);
+requireText(
+  cloudflareReadbackScriptContents,
+  "deployment_configs?.production?.wrangler_config_hash",
+  "cloudflare-readback.mjs",
+  "Pages deployed configuration hash read-back",
+);
+requireText(
+  cloudflareReadbackScriptContents,
+  'createHash("sha256").update(readFileSync(input.pagesConfigPath)).digest("hex")',
+  "cloudflare-readback.mjs",
+  "generated Pages configuration hash",
 );
 
 for (const [description, value] of Object.entries({

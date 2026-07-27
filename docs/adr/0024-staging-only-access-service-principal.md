@@ -25,9 +25,10 @@ service token headerをPlaywright contextへ常設すると、cross-originのR2 
   疑似subjectを使用する。service token名、Client ID原文、credentialをlogへ出さない。
 - production configはservice principal設定を持たず、設定しようとした場合は起動境界で
   拒否する。
-- Playwrightは最初のstaging origin認証だけにservice token headerを使い、
-  `CF_Authorization` cookieを確認した直後に追加headerを削除する。その後のR2 multipart
-  requestへservice token headerを送らない。
+- Playwrightのservice token transportは
+  [ADR 0030](./0030-scope-access-service-credentials-to-app-origin.md)に従う。正規のstaging
+  Web originへだけ継続送信し、redirectとR2 multipartを含むcross-origin requestへ
+  service token headerを送らない。
 - staging実E2Eではtrace、screenshot、videoを無効にし、Access credential、cookie、
   temporary R2 credential、成果物本文をCI artifactへ保存しない。
 - service token ID/secretはGitHubのstaging Environment secretに限定し、production
@@ -52,4 +53,4 @@ Accessが期待するcookieまたはservice JWT claimを返さない場合はsta
 
 ## Status
 
-Accepted
+Accepted（credential transportはADR 0030で改訂）
