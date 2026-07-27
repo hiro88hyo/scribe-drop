@@ -1,4 +1,4 @@
-import type { Page, Route } from "@playwright/test";
+import type { BrowserContext, Page, Route } from "@playwright/test";
 
 export const JOB_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 export const PRIVATE_MARKER = "PRIVATE_E2E_JOB_MARKER";
@@ -39,6 +39,7 @@ interface JobDetailFixture extends JobSummaryFixture {
 }
 
 export interface MockBackendState {
+  created: boolean;
   createAttempts: number;
   deleted: boolean;
   detailRequests: number;
@@ -51,8 +52,11 @@ interface MockBackendOptions {
   readonly detailStatuses?: readonly JobStatus[];
   readonly failFirstCreate?: boolean;
   readonly listPrivateMarker?: boolean;
+  readonly persistCreatedJobInList?: boolean;
   readonly uploadPartDelayMilliseconds?: number;
 }
+
+type RouteTarget = BrowserContext | Page;
 
 function summary(status: JobStatus, title = "E2E meeting"): JobSummaryFixture {
   const completed = status === "COMPLETED";
@@ -112,11 +116,11 @@ function hasValidMutationHeaders(route: Route): boolean {
 }
 
 async function installStorageMock(
-  page: Page,
+  target: RouteTarget,
   state: MockBackendState,
   uploadPartDelayMilliseconds: number,
 ): Promise<void> {
-  await page.route(`${STORAGE_ORIGIN}/**`, async (route) => {
+  await target.route(`${STORAGE_ORIGIN}/**`, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const corsHeaders = {
@@ -182,7 +186,7 @@ async function installStorageMock(
     await route.abort("failed");
   });
 
-  await page.route("https://download.example.invalid/**", async (route) => {
+  await target.route("https://download.example.invalid/**", async (route) => {
     await route.fulfill({
       body: "# Dummy E2E artifact\n",
       contentType: "text/markdown",
@@ -195,11 +199,12 @@ async function installStorageMock(
 }
 
 export async function installMockBackend(
-  page: Page,
+  target: RouteTarget,
   options: MockBackendOptions = {},
 ): Promise<MockBackendState> {
   const detailStatuses = options.detailStatuses ?? ["SUBMISSION_PENDING", "RUNNING", "COMPLETED"];
   const state: MockBackendState = {
+    created: false,
     createAttempts: 0,
     deleted: false,
     detailRequests: 0,
@@ -208,8 +213,8 @@ export async function installMockBackend(
     uploadPartObserved: false,
   };
 
-  await installStorageMock(page, state, options.uploadPartDelayMilliseconds ?? 250);
-  await page.route("**/api/**", async (route) => {
+  await installStorageMock(target, state, options.uploadPartDelayMilliseconds ?? 250);
+  await target.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const path = url.pathname;
@@ -226,11 +231,19 @@ export async function installMockBackend(
     }
 
     if (request.method() === "GET" && path === "/api/jobs") {
+      const visibleJob =
+        !state.deleted &&
+        (options.listPrivateMarker === true ||
+          (options.persistCreatedJobInList === true && state.created));
       await json(route, {
-        items:
-          options.listPrivateMarker === true && !state.deleted
-            ? [summary("COMPLETED", PRIVATE_MARKER)]
-            : [],
+        items: visibleJob
+          ? [
+              summary(
+                options.listPrivateMarker === true ? "COMPLETED" : "SUBMISSION_PENDING",
+                options.listPrivateMarker === true ? PRIVATE_MARKER : "E2E meeting",
+              ),
+            ]
+          : [],
         nextCursor: null,
       });
       return;
@@ -253,6 +266,7 @@ export async function installMockBackend(
         );
         return;
       }
+      state.created = true;
       await json(route, {
         jobId: JOB_ID,
         upload: {

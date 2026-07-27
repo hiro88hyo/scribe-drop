@@ -9,6 +9,9 @@ Phase 4ではstaging RunPod endpointを作成し、初回workerのRTX 4090配置
 Ready、期限切れclaim拒否を確認した。Phase 5では5分Cronによるsubmission回収、
 status poll、finalize、cancelとnotification outboxを実装し、stagingの実browser smokeで
 RunPod terminal、manifest、Markdown・JSON・SRT、job完了とDiscord受信まで確認した。
+Phase 7では認証済みPWA offline fallback、明示削除、capability安全期限までの延期、
+source・result・監査情報の独立retention、次回Cronでの物理削除を固定dummy dataだけで
+staging確認し、試験dataをD1/R2から全件清掃した。
 production environmentへのdeploymentは未実施である。この文書の手順は
 staging/production運用の必須runbookであり、placeholder IDのままremote操作してはならない。
 
@@ -209,3 +212,11 @@ R2 lifecycleはapplication cleanupが長期間失敗した場合の最終防衛�
 完了判定には使わない。incomplete multipartはWorkers bindingから列挙できないため、
 `incoming/`のlifecycle abortが唯一の自動回収経路である。設定照合ではrule ID、enabled、
 prefix、Age秒数を確認し、bucket全体のruleを無条件に上書きしない。
+
+staging smokeのobject不存在確認は
+[ADR 0021](./adr/0021-verify-r2-cleanup-with-uncached-listing.md)に従う。同一URLを使う
+`wrangler r2 object get`はcacheされた削除前bodyを返す可能性があり、
+`r2 object delete`の表示だけでも完了判定しない。通常削除はOrchestratorのR2 bindingが
+delete後のhead/listを確認する。smokeの最終照合だけ、予約済みdummy prefixに対する
+no-cache・一意query付きObject API listingが成功かつ0件であることを確認する。
+production objectの手動CLI削除へこの手順を流用しない。

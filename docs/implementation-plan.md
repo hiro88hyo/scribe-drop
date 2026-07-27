@@ -485,7 +485,14 @@ navigation response、Access redirectを保存しない。installable manifest�
 通信失敗からのretry、multipart upload、poll、download、delete、PC drag-and-drop、
 Android相当file chooser、Cache Storage内容を検証済みである。staging D1 migration、
 Orchestrator/Web deploy、実R2 lifecycle適用、未認証Access smokeまで完了した。
-認証済みPWA、retention、delete、Cron recoveryのstaging smokeは未完了である。
+認証済みbrowserではservice workerのoffline fallbackを確認した。固定dummy dataだけを
+使うstaging smokeでは、明示削除のexact R2/D1 cleanup、7日source・90日result・180日
+監査情報の独立期限、監査期限の次回Cron物理削除、capability安全期限までの削除延期、
+重複Cronの冪等性を確認した。検証後はdummy D1 rowとR2 objectを全件清掃した。
+live tailでも正常な`reconciliation.completed`とallowlist fieldだけを確認し、
+Phase 7のstaging checkpointを完了した。upload pageを閉じ、新しいpageの履歴・詳細から
+処理状態を復元するPlaywrightも追加した。[acceptance checklist](./acceptance-checklist.md)で
+仕様の必須受け入れ条件を証跡へ全件対応付けた。production deploymentは未実施である。
 
 ### 保存期間と削除
 

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { installMockBackend } from "./mock-backend.js";
+import { JOB_ID, installMockBackend } from "./mock-backend.js";
 
 test("recovers from a network failure and completes the authenticated job lifecycle", async ({
   page,
@@ -59,4 +59,47 @@ test("recovers from a network failure and completes the authenticated job lifecy
   await expect(page.getByText("まだジョブがありません。")).toBeVisible();
   expect(backend.deleted).toBe(true);
   expect(backend.mutationHeadersValid).toBe(true);
+});
+
+test("continues after the upload page closes and restores the job from history", async ({
+  context,
+  page,
+}) => {
+  const backend = await installMockBackend(context, {
+    persistCreatedJobInList: true,
+  });
+  await page.goto("/");
+
+  await page.locator('input[type="file"]').setInputFiles({
+    buffer: Buffer.from("dummy audio"),
+    mimeType: "audio/mpeg",
+    name: "meeting.mp3",
+  });
+  await page.getByRole("button", { name: "アップロードを開始" }).click();
+  await expect(page.getByText("アップロードを受け付けました。")).toBeVisible();
+  expect(backend.multipartCompleted).toBe(true);
+
+  await page.close();
+
+  const restoredPage = await context.newPage();
+  await restoredPage.goto("/history");
+  await expect(restoredPage.getByText("E2E meeting")).toBeVisible();
+  await expect(restoredPage.getByText("処理待ち", { exact: true })).toBeVisible();
+
+  await restoredPage.getByRole("link", { name: "E2E meetingの詳細" }).click();
+  await expect.poll(() => backend.detailRequests).toBe(1);
+  await expect(restoredPage.getByRole("heading", { level: 1, name: "E2E meeting" })).toBeVisible();
+  await expect(restoredPage.getByText("処理待ち", { exact: true }).first()).toBeVisible();
+  await restoredPage.close();
+
+  const runningPage = await context.newPage();
+  await runningPage.goto(`/jobs/${JOB_ID}`);
+  await expect.poll(() => backend.detailRequests).toBe(2);
+  await expect(runningPage.getByText("文字起こし中", { exact: true }).first()).toBeVisible();
+  await runningPage.close();
+
+  const completedPage = await context.newPage();
+  await completedPage.goto(`/jobs/${JOB_ID}`);
+  await expect.poll(() => backend.detailRequests).toBe(3);
+  await expect(completedPage.getByText("完了", { exact: true }).first()).toBeVisible();
 });
