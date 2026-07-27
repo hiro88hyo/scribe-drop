@@ -70,9 +70,10 @@ CIと同じoffline check、SBOM、High/Critical scanを通し、GitHubの短期`
 GHCRへpushする。mutable tagをpromotion入力にせずregistry digestをcandidate evidenceへ
 保存する。package visibilityを暗黙に変更しない。
 
-このworkflowはcandidate publicationだけを行い、production deploy権限を持たない。
-Web、Pages Functions、Orchestrator、migrationを含むcandidate manifestとstaging acceptance、
-production promotion workflowが実装されるまでproduction deployはfail-closedとする。
+このworkflowはcandidate publicationだけを行い、staging/production credentialとdeploy
+権限を持たない。candidateはWeb asset、compiled Pages Functions、compiled Orchestrator、
+migration、RunPod image、acceptance用synthetic M4A、supply-chain reportを含み、
+manifestが各directoryのpath、byte数、file数、SHA-256を固定する。
 
 ## Staging promotion gate
 
@@ -83,6 +84,14 @@ Orchestrator bundle、migration集合のSHA-256とconfig policy versionを含め
 staging workflowはcandidateだけを入力に取り、deploy後に実resourceをread-backしてから、
 固定dummy mediaを実R2、Queue、RunPodへ通すE2Eを実行する。変更がOSやbrowser固有の
 file picker、PWA、offline動作へ及ぶ場合は、対象実機smokeの承認もcandidateへ結び付ける。
+`Deploy release candidate to staging`はcandidate workflow runのrepository、workflow path、
+release branch、commit、成功statusをGitHub APIで照合する。applicationを再buildせず、
+compiled bundleを`--no-bundle`でdeployする。R2 notification、Queue producer/consumer、
+DLQ/retry、CORS、lifecycle、D1 migration、PagesのGit provider無効、active Worker versionと
+binding、RunPod endpointをread-backし、実M4A、manifest-last、3成果物download、削除受付が
+成功した後だけ24時間有効なacceptance artifactを発行する。
+acceptanceには実IDやoriginを含めず、retention、R2 policy、RunPod GPU・配置・runtime
+invariantをenvironment markerで正規化したpolicy hashを含める。
 
 production workflowはGitHubのproduction Environmentだけにcredentialを持ち、次をすべて
 満たす場合に限り同じcandidateをdeployする。
@@ -97,6 +106,15 @@ production workflowはbuild stepと任意image引数を持たない。通常のl
 workflowへproduction credentialを渡さない。break-glassはADR 0023の記録と明示承認を
 満たす別経路とし、通常workflowの条件を一時的に緩めない。
 
+`Promote staging-accepted candidate to production`はproduction Environment承認前のjobで
+staging runとcandidate runを検証し、承認後のjobでもartifactを再downloadして全検証を
+繰り返す。production設定から同じ正規化policy hashを再計算し、最初のD1/R2/RunPod/
+Cloudflare mutationより前にstaging evidenceとの一致を要求する。evidenceが承認待ち中に
+期限切れになった場合、またはproduction job上限25分に対して30分未満しか残っていない
+場合はdeployしない。legacyの
+`pnpm runpod:deploy:production`は引き続き常に失敗し、証跡を内部検証するpromotion script
+だけをproduction workflowから使用する。
+
 ## Branch protection
 
 GitHub repository 作成後、`main` と `develop` への直接 push を禁止し、少なくとも
@@ -107,3 +125,11 @@ required status checkに設定する。これはrepository側の設定であり�
 production Environmentにはrequired reviewerとrelease branch制限を設定する。
 candidate publication、staging acceptance、production promotionを別のGitHub Deployment
 として記録し、production jobは対応するstaging成功statusをAPIで照合する。
+staging Environmentにはstaging専用credentialだけを置く。Cloudflare Pages projectは
+Git providerを`No`にし、pushによる自動build/deployでcandidate gateを迂回できない状態を
+各promotionのread-backで検証する。
+
+private repositoryでこれらを利用できないGitHub planの場合は
+[ADR 0025](./adr/0025-require-supported-github-deployment-protection.md)に従い、
+repository secretやworkflow inputで代替しない。credentialを持たないcandidate publication
+だけを許可し、staging/production promotionは停止する。

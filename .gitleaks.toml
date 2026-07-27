@@ -11,4 +11,4 @@ description = "RunPod registry auth IDs are non-secret resource identifiers"
 condition = "AND"
 regexTarget = "line"
 regexes = ['''^\s*"registryAuthId": "[A-Za-z0-9_-]{3,128}",?\s*$''']
-paths = ['''^\.runpod/deploy/staging-plan\.json$''']
+paths = ['''^\.runpod/deploy/(?:staging|production)-plan\.json$''']

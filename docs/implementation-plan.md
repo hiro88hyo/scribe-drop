@@ -492,7 +492,9 @@ Orchestrator/Web deploy、実R2 lifecycle適用、未認証Access smokeまで完
 live tailでも正常な`reconciliation.completed`とallowlist fieldだけを確認し、
 Phase 7のstaging checkpointを完了した。upload pageを閉じ、新しいpageの履歴・詳細から
 処理状態を復元するPlaywrightも追加した。[acceptance checklist](./acceptance-checklist.md)で
-仕様の必須受け入れ条件を証跡へ全件対応付けた。production deploymentは未実施である。
+仕様の必須受け入れ条件を証跡へ全件対応付けた。当時production deploymentは未実施
+だった。その後の初回production試験deployはADR 0023の同一candidate条件を満たさず、
+release evidenceとして無効化している。
 
 ### 保存期間と削除
 
@@ -562,8 +564,8 @@ digest、migration集合は同じcandidateを使用し、production用に再buil
 
 candidate作成後にcode、dependency、migration、deployment設定を変更した場合は既存の
 staging evidenceを無効とし、buildとstaging acceptanceをやり直す。mock E2Eやunit testだけ
-で実service staging acceptanceを代替しない。promotion workflowとparity verifierが
-未実装または失敗している間はproductionへdeployしない。
+で実service staging acceptanceを代替しない。promotion workflowまたは実resource
+read-back verifierが欠落・失敗している間はproductionへdeployしない。
 
 初回production bootstrapではOrchestratorの必須secretであるRunPod endpoint IDを先に
 確定する必要があるため、

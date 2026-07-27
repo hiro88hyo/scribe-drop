@@ -39,6 +39,8 @@ R2 CORSは`pnpm cloudflare:config:staging:r2-cors`、R2 lifecycleは
 - `SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`:
   `https://<team>.cloudflareaccess.com`のexact origin
 - `SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`: staging Access applicationの単一AUD tag
+- `SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME`:
+  ADR 0024のstaging CI専用Access service principalの`common_name`
 - `SCRIBE_DROP_STAGING_RUNPOD_IMAGE`: GHCRのdigest付きstaging image参照
 - `SCRIBE_DROP_STAGING_RUNPOD_IMAGE_VISIBILITY`: `private`または`public`
 - `SCRIBE_DROP_STAGING_RUNPOD_REGISTRY_AUTH_ID`: private image用のRunPod registry auth ID
@@ -89,20 +91,26 @@ ignored stateへ記録する。
 
 localでは`apps/web/.dev.vars.example`を`apps/web/.dev.vars`へコピーし、dummy secretをローカル専用のランダム値へ置き換える。
 
-| Variable                      | Secret | Purpose                                  |
-| ----------------------------- | :----: | ---------------------------------------- |
-| `APP_ENV`                     |   no   | `local`、`staging`、`production`         |
-| `ALLOWED_ORIGIN`              |   no   | 状態変更APIで許可する単一origin          |
-| `ACCESS_TEAM_DOMAIN`          |   no   | Cloudflare Access issuer/JWKSの基準      |
-| `ACCESS_AUDIENCES`            |   no   | 許可AUD tagのJSON配列                    |
-| `CSRF_HMAC_SECRET`            |  yes   | `sub`に結び付くCSRF tokenの署名          |
-| `OWNER_HASH_HMAC_SECRET`      |  yes   | owner `sub`の不可逆hash生成              |
-| `CLOUDFLARE_ACCOUNT_ID`       |   no   | R2 Temporary Credentials発行対象account  |
-| `R2_BUCKET_NAME`              |   no   | D1へ記録する環境別R2 bucket名            |
-| `R2_PARENT_ACCESS_KEY_ID`     |  yes   | object限定temporary credentialの親key    |
-| `R2_PARENT_SECRET_ACCESS_KEY` |  yes   | object限定temporary credentialの親secret |
+| Variable                                | Secret | Purpose                                          |
+| --------------------------------------- | :----: | ------------------------------------------------ |
+| `APP_ENV`                               |   no   | `local`、`staging`、`production`                 |
+| `ALLOWED_ORIGIN`                        |   no   | 状態変更APIで許可する単一origin                  |
+| `ACCESS_TEAM_DOMAIN`                    |   no   | Cloudflare Access issuer/JWKSの基準              |
+| `ACCESS_AUDIENCES`                      |   no   | 許可AUD tagのJSON配列                            |
+| `CSRF_HMAC_SECRET`                      |  yes   | `sub`に結び付くCSRF tokenの署名                  |
+| `OWNER_HASH_HMAC_SECRET`                |  yes   | owner `sub`の不可逆hash生成                      |
+| `CLOUDFLARE_ACCOUNT_ID`                 |   no   | R2 Temporary Credentials発行対象account          |
+| `R2_BUCKET_NAME`                        |   no   | D1へ記録する環境別R2 bucket名                    |
+| `R2_PARENT_ACCESS_KEY_ID`               |  yes   | object限定temporary credentialの親key            |
+| `R2_PARENT_SECRET_ACCESS_KEY`           |  yes   | object限定temporary credentialの親secret         |
+| `STAGING_E2E_SERVICE_TOKEN_COMMON_NAME` |   no   | staging CI専用Access service principal完全一致値 |
 
 `ACCESS_AUDIENCES`はenvironment固有の1件以上のAUD tagをJSON配列で指定する。stagingとproductionのaudienceを同じ配列に混在させない。AUD tagは検証対象の識別子でありcredentialではない。
+
+`STAGING_E2E_SERVICE_TOKEN_COMMON_NAME`は`APP_ENV=staging`でだけ許可する。production
+Wrangler設定には出力せず、productionで指定された場合はWeb security configを拒否する。
+対応するAccess client ID/secretは追跡対象の変数ではなく、GitHub staging Environment
+secret `CF_ACCESS_CLIENT_ID`と`CF_ACCESS_CLIENT_SECRET`に保存する。
 
 `CSRF_HMAC_SECRET`は32 byte以上のrandom secretとし、environment間で共有しない。
 `OWNER_HASH_HMAC_SECRET`と`R2_PARENT_SECRET_ACCESS_KEY`も32 byte以上とし、
@@ -207,6 +215,36 @@ originと2種のhost allowlistはwildcardやsuffix一致ではなくexact hostna
 requestごとに全A/AAAAを検査し、一つでもprivate、loopback、link-local、metadata相当、
 reservedのaddressを含む場合は拒否する。接続時は検証済みIPへ固定し、HTTP `Host`とTLS
 SNIだけを元hostnameに保つ。proxyとredirectは使用しない。
+
+## GitHub Environment
+
+promotion workflowのcredentialと非secret設定はrepository共通へ置かず、`staging`と
+`production`のGitHub Environmentへ分離する。値はこの文書やdeployment recordへ転記しない。
+4件のretention値とRunPodのimage visibility、GPU、data centerはstagingとproductionで
+一致させる。workflowは実IDとoriginを除外してこれらを正規化したpolicy hashを比較し、
+差異があればproductionの最初のremote mutation前に失敗する。
+
+`staging` Environmentは次を持つ。
+
+- Variables: `CLOUDFLARE_ACCOUNT_ID`、`SCRIBE_DROP_STAGING_D1_DATABASE_ID`、
+  `SCRIBE_DROP_STAGING_WEB_ORIGIN`、`SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN`、
+  `SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`、`SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`、
+  `SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME`、
+  `SCRIBE_DROP_STAGING_PAGES_PROJECT`、staging RunPodのvisibility、registry auth、GPU、
+  data center、4件のretention値
+- Secrets: `CLOUDFLARE_API_TOKEN`、`RUNPOD_API_KEY`、
+  `SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID`、`CF_ACCESS_CLIENT_ID`、
+  `CF_ACCESS_CLIENT_SECRET`
+
+`production` Environmentは同じ役割の`SCRIBE_DROP_PRODUCTION_*` Variablesと、
+`CLOUDFLARE_API_TOKEN`、`RUNPOD_API_KEY`、
+`SCRIBE_DROP_PRODUCTION_RUNPOD_ENDPOINT_ID` Secretsだけを持つ。Access E2E service tokenを
+productionへ置かない。production Environmentにはrequired reviewerと`release/*` branch
+制限を必須とする。
+
+Cloudflare API tokenは対象accountのPages、Workers、D1、R2、Queuesをpromotion workflowが
+行う範囲だけに制限する。RunPod keyとendpoint IDはOrchestrator runtime secretとは別に
+GitHub Environmentへ登録し、stagingとproductionで共有しない。
 
 Python依存は`uv.lock`に固定し、RunPod SDK 1.11.0、faster-whisper 1.2.1、
 CTranslate2 4.8.1、Pydantic 2.13.4、httpx 0.28.1、Hugging Face Hub 1.24.0を

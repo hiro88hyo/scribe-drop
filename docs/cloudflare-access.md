@@ -36,6 +36,13 @@ applicationを作成する。
 bypass、Everyone、メールdomain全体、service tokenだけのallow ruleは追加しない。許可emailは
 Access policyにだけ保存し、repository、deployment記録、application logへ残さない。
 
+ADR 0024のstaging自動E2Eを有効にする場合は、人間向けAllow policyとは別に、
+CI専用service token 1件へ完全一致する`Service Auth` policyを追加する。service tokenを
+通常のAllow policyへ入れず、ほかのservice tokenや`Any valid service token`へ広げない。
+Client ID/secretはGitHub staging Environmentにだけ保存し、Client IDと同じJWT
+`common_name`を`SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME`へ設定する。
+production applicationにはこのpolicyと変数を追加しない。
+
 application作成後、次の非secret値を取得する。
 
 - team domainのexact origin:
@@ -47,6 +54,7 @@ application作成後、次の非secret値を取得する。
 - `SCRIBE_DROP_STAGING_WEB_ORIGIN`
 - `SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`
 - `SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`
+- `SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME`
 
 productionは別のself-hosted applicationとして作成し、Nameを
 `scribe-drop-web-production`、Domainを`SCRIBE_DROP_PRODUCTION_WEB_ORIGIN`のhostとする。
@@ -133,6 +141,8 @@ pnpm cloudflare:access:verify:production
 4. 認証後の`GET /api/me`が200となり、CSRF tokenを返す。
 5. 別applicationのaudienceを持つJWT、JWTなし、不正issuerはAPIで401になる。
 6. response、browser storage、Cloudflare logにJWT、email、CSRF tokenが残らない。
+7. stagingではCI専用service tokenがcookieを取得でき、別service tokenはWebのJWT再検証で
+   401になる。productionではservice token principalを受け入れない。
 
 Access session確認用のscreenshot、HAR、JWTをartifactやticketへ保存しない。問題調査では
 request IDと安全なstatusだけを記録する。

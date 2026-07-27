@@ -5,7 +5,8 @@
 - 評価日: 2026-07-27 UTC
 - 対象: Phase 1からPhase 7のlocal、CI、staging checkpoint
 - 結果: Phase 7までのbaselineは確認済み。現在のrelease candidateはstaging再検証待ち
-- 対象外: production deploymentとAndroid Share Target。Share Targetは仕様どおり別PRとする
+- 対象外: production promotionの合格判定とAndroid Share Target。過去のproduction試験
+  deployは無効な証跡であり、Share Targetは仕様どおり別PRとする
 
 実account、domain、resource/deployment ID、credential、利用者dataはこのchecklistへ
 保存しない。手動確認の詳細はenvironment別deployment recordを参照する。

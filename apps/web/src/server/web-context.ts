@@ -18,6 +18,7 @@ export interface WebEnvironment {
   R2_BUCKET_NAME: string;
   RECORDINGS: R2Bucket;
   SCRIBE_DROP_DB: D1Database;
+  STAGING_E2E_SERVICE_TOKEN_COMMON_NAME?: string;
 }
 
 export type WebPagesFunction<Parameter extends string = never> = PagesFunction<

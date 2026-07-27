@@ -65,6 +65,7 @@
 - mock E2Eやunit testは実service staging acceptanceの代替にしない。変更経路を固定dummy dataで実R2、Queue、RunPod、成果物downloadまで検証する。
 - OSやbrowser固有のfile picker、PWA、offline動作を変更した場合は、対象実機のstaging smokeも必須とする。
 - deploy前後に実resourceをread-backし、許可したenvironment固有値以外の構成差分を拒否する。
+- staging自動E2EのAccess service principalはADR 0024の完全一致値だけを許可し、credentialをstaging GitHub Environmentに限定する。productionではservice principal設定を拒否する。
 - promotion workflowとparity verifierが未実装または失敗している間はproduction deployを行わない。
 - 緊急時のgate省略は[ADR 0023](docs/adr/0023-promote-only-staging-verified-artifacts.md)のbreak-glass条件に限定し、明示承認と監査記録なしに実行しない。
 

@@ -54,8 +54,10 @@ deployした。実browserのend-to-end smokeではRunPod terminal、complete man
 Markdown・JSON・SRT、原子的finalize、Discord送信まで成功した。RunPod、Discord、R2の
 公開endpointへ送るglobal `fetch()`は
 [ADR 0016](./adr/0016-use-manual-redirects-in-workers.md)に従い、
-`manual` redirect modeで自動追従を拒否する。
-production environmentへのdeploymentは未実施である。
+`manual` redirect modeで自動追従を拒否する。その後の初回production試験deployは
+stagingと別image digestを使用し、実M4Aのstaging acceptanceも欠いていた。production
+smokeは`INVALID_MEDIA`で成果物を作成せず、この試験deployをrelease evidenceとして
+無効化して追加deployを停止した。
 
 Phase 6では外部serviceへ接続しないdeterministic fault injectionをlocal/CIへ追加した。
 RunPod応答喪失、D1/Queue/R2/Discord障害、stale generation、partial result、同時Cron、
@@ -77,8 +79,9 @@ resultの削除markerおよび候補indexを追加する。application cleanup�
 [ADR 0019](./adr/0019-layer-application-and-r2-retention.md)を正とする。`0008`を
 applicationより先にstagingへ適用し、Orchestratorの4 retention変数と同じ値から生成した
 lifecycleもreview後に適用した。認証済みPWA offline fallback、固定dummy dataによる
-delete、retention、Cron recoveryを確認し、D1/R2の試験dataを全件清掃した。production
-environmentへのdeploymentは未実施である。
+delete、retention、Cron recoveryを確認し、D1/R2の試験dataを全件清掃した。初回
+production試験deployの証跡はADR 0023の同一candidate条件を満たさないため無効であり、
+Phase 7までの過去のstaging結果をproduction promotionの根拠には使用しない。
 
 `apps/orchestrator/wrangler.toml`と`apps/web/wrangler.toml`の全ゼロIDおよびoriginは
 安全なplaceholderであり、remote操作には使用できない。実IDと実originは追跡対象へ
@@ -284,10 +287,28 @@ deployment設定が変更された場合、実resource parity checkが失敗し�
 mock E2Eやlocal testは実service staging acceptanceの代替にしない。
 
 RunPod publication workflowはrelease candidateを一度だけbuildし、environment別buildと
-production deploy jobを持たない。promotion workflow、candidate manifest、実resource
-parity verifier、GitHub production Environmentのreview条件が実装されるまで、追加の
-production deployを行わない。追跡外production configの生成とread-only検査は実装準備として
-実行できるが、remote mutationの許可にはならない。
+production deploy jobを持たない。candidate manifest、staging/production promotion
+workflow、実resource read-back verifierは実装済みである。次のcandidateでstaging
+acceptanceが成功し、GitHub production Environmentのreview・branch・credential分離を
+確認するまで、追加のproduction deployを行わない。追跡外production configの生成と
+read-only検査は実行できるが、remote mutationの許可にはならない。
+
+通常の実行順序は次のとおりとする。
+
+1. `Publish RunPod release candidate`を`release/<version>`で実行する。
+2. 成功したcandidate run IDだけを`Deploy release candidate to staging`へ渡す。
+3. 24時間以内に成功したstaging run IDだけを
+   `Promote staging-accepted candidate to production`へ渡す。
+4. production jobはGitHub Environmentのrequired reviewer承認後にもrun、candidate、
+   evidence、digestを再検証し、正規化したenvironment policyがstagingと一致してから
+   D1/R2、RunPod、Orchestrator、最後に利用者入口のPagesを更新する。更新後に実resourceを
+   再検証する。最初のremote mutation前にacceptanceの残存時間が30分未満なら中止し、
+   staging acceptanceからやり直す。
+
+stagingのAccess自動試験は
+[ADR 0024](./adr/0024-staging-only-access-service-principal.md)の専用service principalだけを
+使用する。service tokenのID/secretはstaging Environment secretに置き、production
+Environmentへ複製しない。
 
 ## 追跡外production設定
 
@@ -327,9 +348,9 @@ pnpm cloudflare:secrets:verify:production
 pnpm cloudflare:access:verify:production
 ```
 
-RunPod production deployは現在fail-closedであり、次のcommandは非0で終了する。
-ADR 0023のpromotion workflow実装後もlocalから直接実行せず、candidateとstaging evidenceを
-照合したproduction jobだけが内部で使用する。
+直接のRunPod production deployはfail-closedであり、次のcommandは非0で終了する。
+candidateとstaging evidenceを内部で照合するproduction promotion jobだけが専用scriptを
+使用する。
 
 ```bash
 pnpm runpod:deploy:production

@@ -52,6 +52,13 @@ staging evidenceが参照するcandidateだけを受け付ける。次の場合�
 - 許可したenvironment差分以外でstagingとproductionの正規化設定が異なる
 - production credentialを持つGitHub Environmentのreview条件を満たしていない
 
+staging evidenceは、実ID、origin、credentialを含めずにenvironment固有値をmarkerへ
+正規化したconfiguration policyのSHA-256も保持する。少なくともretention、R2 CORSと
+lifecycle、RunPod image visibility、GPU、data center、runtime、scaling、timeoutを
+正規化対象とする。account、origin、resource名、D1/endpoint/registry credential ID、
+staging専用Access service principalだけを許可された差分とし、production workflowは
+最初のremote mutationより前に同じpolicy hashを再計算して一致を要求する。
+
 production credentialはproduction用GitHub Environmentに限定し、通常のlocal手順と
 staging workflowへ渡さない。production workflowはprotected branch、required review、
 candidate照合、deploy前後のread-backを通る唯一の通常deploy経路とする。
@@ -68,8 +75,8 @@ candidate照合、deploy前後のread-backを通る唯一の通常deploy経路�
   代替にはしない。
 - staging acceptance後の小さな修正でもcandidateは無効になり、buildとacceptanceを
   やり直す。
-- promotion workflow、candidate manifest、実resource parity verifierを実装するまで、
-  通常のproduction deployを停止する。
+- promotion workflow、candidate manifest、実resource parity verifierが欠落または
+  失敗している間は、通常のproduction deployを停止する。
 - production障害時のrollbackも、新規buildではなく過去にstaging acceptanceを通過した
   candidateを使用する。
 

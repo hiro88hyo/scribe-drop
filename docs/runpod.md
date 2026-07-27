@@ -98,9 +98,9 @@ digestだけを昇格する。production用の再buildと任意image入力を禁
 
 `Publish RunPod release candidate` workflowはenvironment選択を持たず、
 `release/<version>`からcandidate imageを一度だけ発行する。このworkflowはproduction
-credentialとdeploy jobを持たない。candidateとstaging evidenceを照合するpromotion
-workflowが完成するまでproduction deployはfail-closedとする。package visibilityは暗黙に
-変更しない。
+credentialとdeploy jobを持たない。staging/production promotion workflowはcandidateと
+短期staging evidenceを照合し、production用にimageを再buildしない。package visibilityは
+暗黙に変更しない。
 
 private imageを使う場合、RunPodにはread-only registry credentialが必要になる。
 `runpodctl registry create`はpasswordをcommand line argumentとして受け取るため使用せず、
@@ -127,7 +127,8 @@ pnpm run runpod:config:production
 実account ID、実origin、registry image、resource IDを含むため、リポジトリへ追加しない。
 production planはstaging markerを持つoriginとregistry auth IDを拒否する。
 promotion workflowでは、さらにstaging evidenceのcandidate digestと一致しないimageを
-拒否する。現在はこの照合が未実装であるためproduction deploy自体を拒否する。
+拒否する。production promotion script自身もcandidateとevidenceを再検証してから
+`runpodctl`を呼ぶ。
 
 planを確認した後、API keyをcredential storeまたは一時環境変数から供給してdeployする。
 
@@ -135,8 +136,8 @@ planを確認した後、API keyをcredential storeまたは一時環境変数�
 pnpm run runpod:deploy:staging
 ```
 
-production commandは現在fail-closedで終了する。promotion workflow実装後もlocalから
-直接実行せず、candidate照合済みのproduction jobだけが内部で使用する。
+productionのlegacy commandはfail-closedで終了する。localから直接実行せず、
+candidate照合済みのproduction workflowだけが`runpod:promote:production`を使用する。
 
 ```bash
 pnpm run runpod:deploy:production

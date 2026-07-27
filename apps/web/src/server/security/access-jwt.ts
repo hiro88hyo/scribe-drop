@@ -18,13 +18,23 @@ const JWKS_COOLDOWN_MS = 30 * 1000;
 const JWKS_TIMEOUT_MS = 5 * 1000;
 
 const tokenSchema = z.string().min(1).max(ACCESS_JWT_MAX_LENGTH);
-const verifiedClaimsSchema = z.object({
+const humanClaimsSchema = z.object({
   email: z.email().max(320),
   exp: z.number().int(),
   iat: z.number().int(),
   nbf: z.number().int().optional(),
   sub: z.string().min(1).max(512),
 });
+const serviceClaimsSchema = z.object({
+  common_name: z.string().min(3).max(512),
+  exp: z.number().int(),
+  iat: z.number().int(),
+  nbf: z.number().int().optional(),
+  sub: z.literal(""),
+  type: z.literal("app"),
+});
+const STAGING_E2E_EMAIL = "staging-e2e@example.invalid";
+const STAGING_E2E_SUBJECT_DOMAIN = "scribe-drop:staging-e2e-service:v1\u0000";
 
 const UNAUTHENTICATED_JOSE_CODES = new Set([
   "ERR_JOSE_ALG_NOT_ALLOWED",
@@ -73,6 +83,17 @@ function classifyVerificationFailure(error: unknown): AccessJwtVerificationResul
   return { status: "dependency_failure" };
 }
 
+async function deriveStagingServiceSubject(commonName: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${STAGING_E2E_SUBJECT_DOMAIN}${commonName}`),
+  );
+  const hex = [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  return `service:${hex}`;
+}
+
 export function createAccessJwtVerifier(
   dependencies: AccessJwtVerifierDependencies = {},
 ): AccessJwtVerifier {
@@ -113,16 +134,31 @@ export function createAccessJwtVerifier(
         clockTolerance: CLOCK_TOLERANCE_SECONDS,
         currentDate: now(),
         issuer: config.accessTeamDomain,
-        requiredClaims: ["exp", "iat", "sub", "email"],
+        requiredClaims: ["exp", "iat", "sub"],
       });
-      const claimsResult = verifiedClaimsSchema.safeParse(payload);
-      if (!claimsResult.success) {
+      const humanClaimsResult = humanClaimsSchema.safeParse(payload);
+      if (humanClaimsResult.success) {
+        return {
+          auth: {
+            email: humanClaimsResult.data.email,
+            sub: humanClaimsResult.data.sub,
+          },
+          status: "authenticated",
+        };
+      }
+      const serviceClaimsResult = serviceClaimsSchema.safeParse(payload);
+      if (
+        !serviceClaimsResult.success ||
+        config.appEnvironment !== "staging" ||
+        config.stagingE2eServiceTokenCommonName === undefined ||
+        serviceClaimsResult.data.common_name !== config.stagingE2eServiceTokenCommonName
+      ) {
         return { status: "unauthenticated" };
       }
       return {
         auth: {
-          email: claimsResult.data.email,
-          sub: claimsResult.data.sub,
+          email: STAGING_E2E_EMAIL,
+          sub: await deriveStagingServiceSubject(serviceClaimsResult.data.common_name),
         },
         status: "authenticated",
       };

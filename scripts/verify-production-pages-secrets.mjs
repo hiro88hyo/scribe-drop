@@ -10,7 +10,10 @@ try {
   if (process.argv.length !== 2) {
     throw new Error("Production Pages secret verification takes no arguments");
   }
-  const projectName = requirePagesProjectName("production");
+  const projectName = requirePagesProjectName(
+    "production",
+    process.env.SCRIBE_DROP_PRODUCTION_PAGES_PROJECT,
+  );
   const result = spawnSync(
     "pnpm",
     ["exec", "wrangler", "pages", "secret", "list", "--project-name", projectName],

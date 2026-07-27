@@ -38,6 +38,7 @@ const identifiers = {
   accessTeamDomain: process.env.SCRIBE_DROP_PRODUCTION_ACCESS_TEAM_DOMAIN,
   accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
   auditRetentionDays: process.env.AUDIT_RETENTION_DAYS,
+  candidateMigrationsDirectory: process.env.SCRIBE_DROP_CANDIDATE_MIGRATIONS_DIR,
   d1DatabaseId: process.env.SCRIBE_DROP_PRODUCTION_D1_DATABASE_ID,
   multipartRetentionHours: process.env.MULTIPART_RETENTION_HOURS,
   orchestratorOrigin: process.env.SCRIBE_DROP_PRODUCTION_ORCHESTRATOR_ORIGIN,

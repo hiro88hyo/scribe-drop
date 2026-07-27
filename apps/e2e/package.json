@@ -6,6 +6,7 @@
   "scripts": {
     "pretest": "pnpm --filter @scribe-drop/web run build:client",
     "test": "playwright test --config playwright.config.ts",
+    "test:staging": "playwright test --config playwright.staging.config.ts",
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "devDependencies": {

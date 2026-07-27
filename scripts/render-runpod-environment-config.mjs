@@ -7,6 +7,7 @@ import {
   createRunpodProductionPlan,
   createRunpodStagingPlan,
 } from "./runpod-environment-config.mjs";
+import { verifyReleaseCandidate } from "./release-candidate.mjs";
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(scriptDirectory, "..");
@@ -19,13 +20,30 @@ const prefix = `SCRIBE_DROP_${environment.toUpperCase()}`;
 const output = path.join(outputDirectory, `${environment}-plan.json`);
 
 try {
+  const candidateDirectory = process.env.RELEASE_CANDIDATE_DIRECTORY;
+  const candidateImage =
+    candidateDirectory === undefined
+      ? undefined
+      : verifyReleaseCandidate({
+          candidateDirectory: path.resolve(candidateDirectory),
+          expectedCommitSha: process.env.EXPECTED_COMMIT_SHA,
+          expectedReleaseVersion: process.env.EXPECTED_RELEASE_VERSION,
+        }).runpodWorker.image;
+  const configuredImage = process.env[`${prefix}_RUNPOD_IMAGE`];
+  if (
+    candidateImage !== undefined &&
+    configuredImage !== undefined &&
+    configuredImage !== candidateImage
+  ) {
+    throw new Error("Configured RunPod image does not match the release candidate");
+  }
   const createPlan =
     environment === "staging" ? createRunpodStagingPlan : createRunpodProductionPlan;
   const plan = createPlan({
     accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
     dataCenterIds: process.env[`${prefix}_RUNPOD_DATACENTER_IDS`],
     gpuId: process.env[`${prefix}_RUNPOD_GPU_ID`],
-    image: process.env[`${prefix}_RUNPOD_IMAGE`],
+    image: candidateImage ?? configuredImage,
     imageVisibility: process.env[`${prefix}_RUNPOD_IMAGE_VISIBILITY`],
     orchestratorOrigin: process.env[`${prefix}_ORCHESTRATOR_ORIGIN`],
     registryAuthId: process.env[`${prefix}_RUNPOD_REGISTRY_AUTH_ID`],

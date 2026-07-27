@@ -181,7 +181,7 @@ function main() {
   }
   if (environment === "production") {
     throw new Error(
-      "Production RunPod deployment is blocked until the ADR 0023 promotion gate is implemented",
+      "Direct production RunPod deployment is prohibited; use the ADR 0023 promotion workflow",
     );
   }
   if (!existsSync(runpodctl)) {

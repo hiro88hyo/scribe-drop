@@ -7,6 +7,8 @@ const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(scriptDirectory, "..");
 const workflowsDirectory = path.join(repositoryRoot, ".github", "workflows");
 const publicationWorkflowPath = path.join(workflowsDirectory, "publish-runpod-worker.yml");
+const stagingWorkflowPath = path.join(workflowsDirectory, "deploy-staging-candidate.yml");
+const productionWorkflowPath = path.join(workflowsDirectory, "deploy-production-candidate.yml");
 const runpodDeploymentScriptPath = path.join(
   repositoryRoot,
   "scripts",
@@ -48,6 +50,14 @@ function forbidText(contents, forbidden, location, description) {
   }
 }
 
+function requireTextOrder(contents, earlier, later, location, description) {
+  const earlierIndex = contents.indexOf(earlier);
+  const laterIndex = contents.indexOf(later);
+  if (earlierIndex === -1 || laterIndex === -1 || earlierIndex >= laterIndex) {
+    failures.push(`${location}: invalid ${description} ordering`);
+  }
+}
+
 const workflowFiles = readdirSync(workflowsDirectory)
   .filter((filename) => filename.endsWith(".yml") || filename.endsWith(".yaml"))
   .sort();
@@ -80,6 +90,8 @@ const workflowContents = workflowFiles
   .map((filename) => readFileSync(path.join(workflowsDirectory, filename), "utf8"))
   .join("\n");
 const publicationWorkflowContents = readFileSync(publicationWorkflowPath, "utf8");
+const stagingWorkflowContents = readFileSync(stagingWorkflowPath, "utf8");
+const productionWorkflowContents = readFileSync(productionWorkflowPath, "utf8");
 const runpodDeploymentScriptContents = readFileSync(runpodDeploymentScriptPath, "utf8");
 const dockerfileContents = readFileSync(dockerfilePath, "utf8");
 const modelBundleContents = readFileSync(modelBundlePath, "utf8");
@@ -171,6 +183,21 @@ for (const [description, value] of Object.entries({
   requireText(modelBundleContents, value, "model_bundle.py", description);
 }
 
+for (const command of [
+  "candidate:create --",
+  "candidate:verify --",
+  "candidate:pages --",
+  "staging:acceptance:create --",
+  "staging:acceptance:verify --",
+]) {
+  forbidText(
+    workflowContents,
+    command,
+    "GitHub Actions workflows",
+    "pnpm 11 argument separator passed through to script",
+  );
+}
+
 requireText(
   workflowContents,
   `anchore/sbom-action@${image.syft.actionCommit}`,
@@ -205,7 +232,15 @@ for (const [description, value] of Object.entries({
   "commit-addressed image tag": "git-${GITHUB_SHA}",
   "password-stdin registry login": "--password-stdin",
   "immutable image reference evidence": "runpod-worker-image.txt",
-  "environment-neutral candidate evidence": "runpod-worker-candidate-publication",
+  "environment-neutral candidate evidence": "scribe-drop-release-candidate-${{ github.sha }}",
+  "candidate manifest creation": "pnpm run candidate:create",
+  "candidate manifest verification": "pnpm run candidate:verify",
+  "candidate preflight dependency": "- preflight",
+  "preflight before quality work":
+    "quality:\n    name: Candidate quality gate\n    needs: preflight",
+  "candidate quality dependency": "- quality",
+  "candidate browser E2E dependency": "- browser-e2e",
+  "candidate security dependency": "- security",
 })) {
   requireText(publicationWorkflowContents, value, "publish-runpod-worker.yml", description);
 }
@@ -213,21 +248,92 @@ for (const [description, value] of Object.entries({
 for (const [description, value] of Object.entries({
   "environment-specific publication input": "target_environment",
   "develop-only candidate publication": "refs/heads/develop",
+  "staging deployment in build workflow": "environment: staging",
+  "production deployment in build workflow": "environment: production",
 })) {
   forbidText(publicationWorkflowContents, value, "publish-runpod-worker.yml", description);
 }
 
 for (const [description, value] of Object.entries({
-  "production Environment before promotion verification": "environment: production",
-  "production RunPod deployment before promotion verification": "runpod:deploy:production",
-  "direct production Wrangler environment before promotion verification": "--env production",
+  "staging candidate workflow name": "name: Deploy release candidate to staging",
+  "staging Environment isolation": "environment: staging",
+  "trusted candidate run verification": ".github/workflows/publish-runpod-worker.yml",
+  "candidate artifact download": "scribe-drop-release-candidate-${GITHUB_SHA}",
+  "verified Pages assembly": "pnpm run candidate:pages",
+  "candidate migration directory":
+    "SCRIBE_DROP_CANDIDATE_MIGRATIONS_DIR: ../../release-candidate/migrations",
+  "candidate-only RunPod promotion": "pnpm run runpod:promote:staging",
+  "staging environment parity evidence": "pnpm run environment:policy:export staging",
+  "Orchestrator no-rebuild deployment": "wrangler deploy release-candidate/orchestrator/index.js",
+  "Pages no-rebuild deployment": "--no-bundle",
+  "live Cloudflare read-back": "pnpm run cloudflare:readback:staging",
+  "real service E2E": "pnpm run test:e2e:staging",
+  "staging-only Access client ID": "CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}",
+  "staging-only Access client secret":
+    "CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}",
+  "staging acceptance creation": "pnpm run staging:acceptance:create",
+  "staging acceptance artifact": "scribe-drop-staging-acceptance-${{ github.sha }}",
 })) {
-  forbidText(workflowContents, value, "GitHub Actions workflows", description);
+  requireText(stagingWorkflowContents, value, "deploy-staging-candidate.yml", description);
+}
+
+for (const [description, value] of Object.entries({
+  "staging container rebuild": "docker build",
+  "staging application rebuild": "pnpm run build",
+  "direct legacy staging RunPod deploy": "runpod:deploy:staging",
+})) {
+  forbidText(stagingWorkflowContents, value, "deploy-staging-candidate.yml", description);
+}
+
+for (const [description, value] of Object.entries({
+  "production promotion workflow name": "name: Promote staging-accepted candidate to production",
+  "verification before production Environment":
+    "needs: verify-promotion\n    environment: production",
+  "trusted staging run verification": ".github/workflows/deploy-staging-candidate.yml",
+  "trusted candidate run verification": ".github/workflows/publish-runpod-worker.yml",
+  "staging acceptance verification": "pnpm run staging:acceptance:verify",
+  "candidate verification": "pnpm run candidate:verify",
+  "candidate migration directory":
+    "SCRIBE_DROP_CANDIDATE_MIGRATIONS_DIR: ../../release-candidate/migrations",
+  "candidate-only production RunPod promotion": "pnpm run runpod:promote:production",
+  "production environment parity comparison": "pnpm run environment:policy:export production",
+  "minimum production acceptance validity": 'MINIMUM_ACCEPTANCE_REMAINING_SECONDS: "1800"',
+  "production no-rebuild deployment": "--no-bundle",
+  "production live read-back": "pnpm run cloudflare:readback:production",
+  "production Access read-back": "pnpm run cloudflare:access:verify:production",
+})) {
+  requireText(productionWorkflowContents, value, "deploy-production-candidate.yml", description);
+}
+
+requireTextOrder(
+  productionWorkflowContents,
+  "Reject staging and production policy drift",
+  "Apply candidate D1 migrations",
+  "deploy-production-candidate.yml",
+  "policy verification before production mutation",
+);
+requireTextOrder(
+  productionWorkflowContents,
+  "Promote the exact candidate RunPod image",
+  "Deploy exact candidate Pages output",
+  "deploy-production-candidate.yml",
+  "RunPod promotion before public Web deployment",
+);
+
+for (const [description, value] of Object.entries({
+  "production container rebuild": "docker build",
+  "production application rebuild": "pnpm run build",
+  "direct legacy production RunPod deploy": "runpod:deploy:production",
+  "staging Access client ID in production": "CF_ACCESS_CLIENT_ID",
+  "staging Access client secret in production": "CF_ACCESS_CLIENT_SECRET",
+  "staging E2E identity in production": "STAGING_E2E_SERVICE_TOKEN_COMMON_NAME",
+})) {
+  forbidText(productionWorkflowContents, value, "deploy-production-candidate.yml", description);
 }
 
 requireText(
   runpodDeploymentScriptContents,
-  "Production RunPod deployment is blocked until the ADR 0023 promotion gate is implemented",
+  "Direct production RunPod deployment is prohibited; use the ADR 0023 promotion workflow",
   "deploy-runpod-environment.mjs",
   "fail-closed production promotion guard",
 );

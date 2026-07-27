@@ -38,10 +38,12 @@ const identifiers = {
   accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
   d1DatabaseId: process.env.SCRIBE_DROP_STAGING_D1_DATABASE_ID,
   auditRetentionDays: process.env.AUDIT_RETENTION_DAYS,
+  candidateMigrationsDirectory: process.env.SCRIBE_DROP_CANDIDATE_MIGRATIONS_DIR,
   multipartRetentionHours: process.env.MULTIPART_RETENTION_HOURS,
   orchestratorOrigin: process.env.SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN,
   resultRetentionDays: process.env.RESULT_RETENTION_DAYS,
   sourceRetentionDays: process.env.SOURCE_RETENTION_DAYS,
+  stagingE2eServiceTokenCommonName: process.env.SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME,
   webOrigin: process.env.SCRIBE_DROP_STAGING_WEB_ORIGIN,
 };
 

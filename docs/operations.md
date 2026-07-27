@@ -12,8 +12,10 @@ RunPod terminal、manifest、Markdown・JSON・SRT、job完了とDiscord受信�
 Phase 7では認証済みPWA offline fallback、明示削除、capability安全期限までの延期、
 source・result・監査情報の独立retention、次回Cronでの物理削除を固定dummy dataだけで
 staging確認し、試験dataをD1/R2から全件清掃した。
-production environmentへのdeploymentは未実施である。この文書の手順は
-staging/production運用の必須runbookであり、placeholder IDのままremote操作してはならない。
+初回production試験deployは実施したが、同一candidateのstaging acceptanceを欠き、
+実M4Aが`INVALID_MEDIA`で失敗したためrelease evidenceとして無効化した。追加deployは
+ADR 0023のpromotion gateで停止している。この文書の手順はstaging/production運用の必須
+runbookであり、placeholder IDのままremote操作してはならない。
 
 RunPodが`INVALID_MEDIA`を返した場合、利用者dataを外部toolへ送らない。固定imageと同じ
 FFmpeg packageでcontainer、codec、duration、top-level JSON fieldを再現する。

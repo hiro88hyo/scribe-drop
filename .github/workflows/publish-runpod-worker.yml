@@ -12,13 +12,10 @@ env:
   VOLTA_FEATURE_PNPM: "1"
 
 jobs:
-  publish:
-    name: Publish immutable candidate image
+  preflight:
+    name: Validate candidate identity
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    permissions:
-      contents: read
-      packages: write
+    timeout-minutes: 5
     steps:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -44,6 +41,124 @@ jobs:
               exit 1
               ;;
           esac
+
+  quality:
+    name: Candidate quality gate
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Volta
+        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
+        with:
+          volta-version: 2.0.2
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: 0.11.32
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: apps/runpod-worker/uv.lock
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Python dependencies
+        run: uv sync --project apps/runpod-worker --frozen
+
+      - name: Install checksummed project tools
+        run: |
+          pnpm run gitleaks:install
+          pnpm run runpodctl:install
+
+      - name: Run the complete local quality gate
+        run: pnpm check
+
+  browser-e2e:
+    name: Candidate browser E2E
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Volta
+        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
+        with:
+          volta-version: 2.0.2
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install fixed Playwright browser
+        run: pnpm --filter @scribe-drop/e2e exec playwright install --with-deps chromium
+
+      - name: Run mocked browser lifecycle
+        run: pnpm run test:e2e
+
+  security:
+    name: Candidate security gates
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up Volta
+        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
+        with:
+          volta-version: 2.0.2
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: 0.11.32
+          python-version: "3.12"
+          enable-cache: false
+
+      - name: Install checksummed Gitleaks
+        run: pnpm run gitleaks:install
+
+      - name: Scan Git history and working tree
+        run: pnpm run secrets:check
+
+      - name: Audit JavaScript dependencies
+        run: pnpm audit --audit-level high
+
+      - name: Audit Python dependencies
+        run: uv audit --preview-features audit-command --project apps/runpod-worker --frozen
+
+  publish:
+    name: Publish immutable release candidate
+    needs:
+      - browser-e2e
+      - preflight
+      - quality
+      - security
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Volta
+        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
+        with:
+          volta-version: 2.0.2
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Reclaim unused ephemeral runner toolchains
         run: |
@@ -79,6 +194,31 @@ jobs:
             --entrypoint python \
             scribe-drop-runpod-worker:publish \
             -m scribe_drop_worker.container_check
+
+      - name: Generate synthetic M4A acceptance fixture
+        run: |
+          mkdir -p candidate-fixtures
+          docker run \
+            --rm \
+            --network none \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --entrypoint /usr/bin/ffmpeg \
+            scribe-drop-runpod-worker:publish \
+            -nostdin \
+            -loglevel error \
+            -f lavfi \
+            -i anullsrc=r=16000:cl=mono \
+            -t 2 \
+            -c:a aac \
+            -b:a 64k \
+            -movflags frag_keyframe+empty_moov \
+            -f mp4 \
+            pipe:1 >candidate-fixtures/android-aac.m4a
+          test -s candidate-fixtures/android-aac.m4a
+          printf '%s\n' \
+            '{"schemaVersion":1,"filename":"android-aac.m4a","mediaType":"audio/mp4a-latm","synthetic":true}' \
+            >candidate-fixtures/metadata.json
 
       - name: Generate SPDX JSON SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
@@ -129,14 +269,47 @@ jobs:
           printf '%s@%s\n' "${image}" "${digest}" >runpod-worker-image.txt
           printf 'Published immutable image: %s@%s\n' "${image}" "${digest}"
 
-      - name: Upload publication evidence
-        if: ${{ always() }}
+      - name: Build immutable Web and Worker artifacts
+        run: |
+          pnpm run build
+          mkdir -p candidate-build/orchestrator
+          pnpm exec wrangler deploy \
+            --dry-run \
+            --minify \
+            --config apps/orchestrator/wrangler.toml \
+            --env staging \
+            --outdir candidate-build/orchestrator
+
+      - name: Create and verify candidate manifest
+        env:
+          EXPECTED_COMMIT_SHA: ${{ github.sha }}
+        run: |
+          mkdir -p candidate-supply-chain
+          install -m 0644 runpod-worker.spdx.json candidate-supply-chain/
+          install -m 0644 runpod-worker-trivy.txt candidate-supply-chain/
+          pnpm run candidate:create \
+            release-candidate \
+            candidate-build/orchestrator \
+            runpod-worker-image.txt \
+            candidate-fixtures \
+            candidate-supply-chain
+          pnpm run candidate:verify release-candidate
+
+      - name: Upload failed supply-chain evidence
+        if: ${{ failure() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: runpod-worker-candidate-publication
+          name: release-candidate-failure-${{ github.sha }}
           path: |
-            runpod-worker-image.txt
             runpod-worker.spdx.json
             runpod-worker-trivy.txt
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Upload immutable release candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scribe-drop-release-candidate-${{ github.sha }}
+          path: release-candidate
+          if-no-files-found: error
+          retention-days: 30

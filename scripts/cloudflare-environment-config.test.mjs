@@ -18,6 +18,7 @@ const identifiers = {
   accountId: "a".repeat(32),
   d1DatabaseId: "12345678-1234-4abc-8def-1234567890ab",
   orchestratorOrigin: "https://orchestrator-staging.example.invalid",
+  stagingE2eServiceTokenCommonName: "staging-e2e-token.access",
   webOrigin: "https://scribe-drop-staging.example.invalid",
 };
 
@@ -78,6 +79,7 @@ ACCESS_AUDIENCES = "[\\"replace-with-access-audience\\"]"
 ACCESS_TEAM_DOMAIN = "https://replace-with-team.cloudflareaccess.com"
 ALLOWED_ORIGIN = "https://replace-with-staging-web.example.invalid"
 CLOUDFLARE_ACCOUNT_ID = "${"0".repeat(32)}"
+STAGING_E2E_SERVICE_TOKEN_COMMON_NAME = "replace-with-staging-e2e-service-token"
 database_id = "00000000-0000-0000-0000-000000000101"
 `;
 
@@ -92,6 +94,7 @@ database_id = "00000000-0000-0000-0000-000000000101"
   assert.match(rendered, /ALLOWED_ORIGIN = "https:\/\/scribe-drop-staging\.example\.invalid"/u);
   assert.match(rendered, new RegExp(`CLOUDFLARE_ACCOUNT_ID = "${"a".repeat(32)}"`));
   assert.match(rendered, /database_id = "12345678-1234-4abc-8def-1234567890ab"/u);
+  assert.match(rendered, /STAGING_E2E_SERVICE_TOKEN_COMMON_NAME = "staging-e2e-token\.access"/u);
 });
 
 test("renders the R2 CORS staging origin", () => {
