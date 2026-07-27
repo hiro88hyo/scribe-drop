@@ -68,7 +68,8 @@ submission、event、outboxの件数が一致しない場合はtestを失敗さ�
 imageを一度だけbuildする。environment選択とproduction用再buildは持たない。RunPod imageは
 CIと同じoffline check、SBOM、High/Critical scanを通し、GitHubの短期`GITHUB_TOKEN`で
 GHCRへpushする。mutable tagをpromotion入力にせずregistry digestをcandidate evidenceへ
-保存する。package visibilityを暗黙に変更しない。
+保存する。push用tagはcommit、workflow run、attempt固有とし、失敗attemptのtagを再実行で
+上書きしない。package visibilityを暗黙に変更しない。
 
 このworkflowはcandidate publicationだけを行い、staging/production credentialとdeploy
 権限を持たない。candidateはWeb asset、compiled Pages Functions、compiled Orchestrator、

@@ -98,6 +98,14 @@ const modelBundleContents = readFileSync(modelBundlePath, "utf8");
 const versions = JSON.parse(readFileSync(versionsPath, "utf8"));
 const image = versions.runpodWorkerImage;
 
+for (const [filename, contents] of [
+  ["publish-runpod-worker.yml", publicationWorkflowContents],
+  ["deploy-staging-candidate.yml", stagingWorkflowContents],
+  ["deploy-production-candidate.yml", productionWorkflowContents],
+]) {
+  requireText(contents, 'WRANGLER_WRITE_LOGS: "0"', filename, "disabled Wrangler local debug logs");
+}
+
 if (image.uvImage.version !== versions.uv) {
   failures.push(
     `tools/versions.json: worker uv version (${image.uvImage.version}) must match project uv version (${versions.uv})`,
@@ -229,9 +237,11 @@ for (const [description, value] of Object.entries({
   "release candidate branch guard": "refs/heads/release/",
   "release version comparison": "Release branch and package version must match",
   "package write permission": "packages: write",
-  "commit-addressed image tag": "git-${GITHUB_SHA}",
+  "run-scoped bootstrap image tag":
+    "candidate-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}",
   "password-stdin registry login": "--password-stdin",
   "immutable image reference evidence": "runpod-worker-image.txt",
+  "deterministic Orchestrator candidate output": "--outfile candidate-build/orchestrator/index.js",
   "environment-neutral candidate evidence": "scribe-drop-release-candidate-${{ github.sha }}",
   "candidate manifest creation": "pnpm run candidate:create",
   "candidate manifest verification": "pnpm run candidate:verify",

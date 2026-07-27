@@ -10,6 +10,7 @@ permissions:
 
 env:
   VOLTA_FEATURE_PNPM: "1"
+  WRANGLER_WRITE_LOGS: "0"
 
 jobs:
   preflight:
@@ -254,11 +255,11 @@ jobs:
               --username "${GITHUB_ACTOR}" \
               --password-stdin
 
-      - name: Push commit image and record immutable reference
+      - name: Push run-scoped image and record immutable reference
         run: |
           registry_owner="${GITHUB_REPOSITORY_OWNER,,}"
           image="ghcr.io/${registry_owner}/scribe-drop-runpod-worker"
-          tagged_image="${image}:git-${GITHUB_SHA}"
+          tagged_image="${image}:candidate-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           docker tag scribe-drop-runpod-worker:publish "${tagged_image}"
           docker push "${tagged_image}"
 
@@ -278,7 +279,7 @@ jobs:
             --minify \
             --config apps/orchestrator/wrangler.toml \
             --env staging \
-            --outdir candidate-build/orchestrator
+            --outfile candidate-build/orchestrator/index.js
 
       - name: Create and verify candidate manifest
         env:

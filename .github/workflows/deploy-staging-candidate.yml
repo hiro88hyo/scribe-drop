@@ -20,6 +20,7 @@ concurrency:
 
 env:
   VOLTA_FEATURE_PNPM: "1"
+  WRANGLER_WRITE_LOGS: "0"
 
 jobs:
   deploy:
