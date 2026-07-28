@@ -2,12 +2,12 @@
 
 ## Context
 
-release branchからmainへのdraft PRにより自動CIとcandidate publicationが成功した後、
-staging workflow先頭の
+release-to-mainのdraft PRを開いたままrelease branchを更新したため、各pushでPR CIが
+自動起動していた。さらにcandidate publicationが成功した後、staging workflow先頭の
 RunPod preflightで`runpodctl template list`が3回とも正常な配列を返さず停止した。
-staging内では最初のmutation前に停止できたが、release全体ではCIとcandidateに約20分を
-費やした後の検知だった。candidate内のquality、security、browser gateも、同じcommitの
-自動CIと重複していた。
+staging内では最初のmutation前に停止できたが、release全体ではPR CIとcandidateに約20分を
+費やした後の検知だった。PR CIとcandidate内のquality/security/browser/container gateも
+重複していた。
 
 固定`runpodctl`のread pathを同じ条件で再試行するだけでは、provider API自体が正常でも
 CLIの応答変換で失敗し続ける可能性がある。また、preflightを別workflowにすると失敗時の
@@ -15,22 +15,17 @@ CLIの応答変換で失敗し続ける可能性がある。また、preflight�
 
 ## Decision
 
-- `.github/workflows/ci.yml`の手動起動を廃止する。`develop`と`main`のpush/PRで自動実行し、
-  release branchからmainへのPRもこのCIを正とする。
-- release PRのCIでは、staging Environmentへ限定したreadiness jobを最初に実行する。
-  quality、secret、dependency、browser、containerの全jobはreadinessへ依存し、失敗時は
-  既存required checkも直ちに失敗させ、高コスト処理を開始しない。release PR以外では
-  readinessをskipし、credentialless CIを維持する。
-- candidate workflowの最初のjobは、GitHub APIから同じrepository、workflow path、
-  release branch、commit、event、成功statusを満たすCI runを検証する。候補がなければ
-  applicationまたはcontainer buildを開始しない。
-- candidateではCI済みのquality、secret、dependency、browser gateを再実行しない。
-  application artifactのbuild/検証と、実際に発行するcontainer自身のoffline check、
-  SBOM、vulnerability scanは引き続き実行する。
-- candidateの最初のjobでもstaging RunPod readinessを再検証する。CI成功後のcontrol-plane
-  変化を見落とさず、後続jobはこのjobの成功を必須とする。
-- CIとcandidateのreadiness jobへ渡すstaging secretはRunPod API keyとendpoint IDだけに
-  限定する。
+- `.github/workflows/ci.yml`の手動起動を廃止する。通常CIは`develop`と`main`のpush/PRに
+  限定し、release branchではcandidate workflow自身の同等以上のquality、security、
+  browser、container gateを一度だけ実行する。
+- release-to-main PRはcandidate publicationとstaging acceptanceが成功するまでclosedに
+  保つ。成功後に同じPRをreopenし、確定済みcommitに対する最終PR CIを一度だけ実行する。
+  reopen後にcode、dependency、migration、deployment設定を変更した場合はPRを再びcloseし、
+  candidateとstaging acceptanceを無効化して最初からやり直す。
+- candidate workflowの最初のjobをstaging Environmentへ限定し、release identityの検査後、
+  高コストなbuild、browser install、container build、scanより前にRunPodのreadinessを
+  検査する。後続jobはこのjobの成功を必須とする。
+- readiness jobへ渡すstaging secretはRunPod API keyとendpoint IDだけに限定する。
   Cloudflare credential、registry credential、production secretを渡さず、RunPod mutationを
   実行しない。candidateのbuild、test、publish jobにはstaging Environmentを付けない。
 - readinessは公式REST APIのtemplate listとendpoint getを並列実行する。template listは
@@ -54,17 +49,17 @@ CLIの応答変換で失敗し続ける可能性がある。また、preflight�
 
 ## Consequences
 
-- 今回と同じRunPod認証、template list、endpoint read障害は、自動CIの最初のremote read
-  約48秒以内に検知し、quality、browser、containerを開始しない。
-- candidateは同じcommitのCI成功を再利用するため、quality、secret、dependency、browserの
-  重複jobを削減できる。
-- 通常の1 release commitでstaging acceptanceまでに起動するworkflowは、自動CI、
-  candidate、stagingの3本とする。production promotion時だけ1本を追加する。失敗後は
-  原因の特定、修正、対象preflightまたはlocal gateの成功なしに再dispatchしない。
-- release PRのCIとcandidate workflow全体は完全なcredentiallessではなくなる。staging
-  secretはread-only jobだけに限定され、通常CI、artifact build/publish jobからは利用
-  できない。
-- staging EnvironmentにはCIとcandidateのreadiness jobのDeployment記録も残る。実deployの成否は
+- 今回と同じRunPod認証、template list、endpoint read障害は、別workflowや高コスト処理を
+  開始せず、candidate workflowの最初の1分程度で検知できる。
+- release branchでPRを開いたまま更新せず、手動CIも重ねないため、作業中のpushごとに
+  高コストなPR CIを起動しない。
+- 通常の1 release commitでstaging acceptanceまでに起動するworkflowはcandidate 1本と
+  staging 1本とする。その後、PRをreopenして最終CIを1本だけ実行し、production
+  promotion時に1本を追加する。失敗後は原因の特定、修正、対象preflightまたはlocal
+  gateの成功なしに同じworkflowを再dispatchしない。
+- candidate workflow全体が完全なcredentiallessではなくなる。staging secretは最初の
+  read-only jobだけに限定され、artifact build/publish jobからは利用できない。
+- staging Environmentにはreadiness jobのDeployment記録も残る。実deployの成否は
   workflow pathとstaging acceptance artifactで区別し、readiness成功をdeploy成功として
   扱わない。
 - 外部control planeはpreflight後にも変化し得るため、staging直前のcandidate固有再検証を

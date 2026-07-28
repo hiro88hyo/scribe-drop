@@ -3,8 +3,6 @@ import process from "node:process";
 import { verifyRunpodReleaseReadiness } from "./runpod-template-api.mjs";
 
 const environment = process.argv[2];
-const releaseBranchPattern =
-  /^release\/(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$/u;
 
 function retryLogger({ attempt, command, maximumAttempts }) {
   console.warn(
@@ -19,13 +17,7 @@ try {
   if (process.env["GITHUB_ACTIONS"] !== "true") {
     throw new Error("RunPod release readiness is restricted to GitHub Actions");
   }
-  const workflowRef = String(process.env["GITHUB_WORKFLOW_REF"] ?? "");
-  const isCandidateWorkflow = workflowRef.includes("/publish-runpod-worker.yml@");
-  const isReleaseCiWorkflow =
-    workflowRef.includes("/ci.yml@") &&
-    process.env["GITHUB_EVENT_NAME"] === "pull_request" &&
-    releaseBranchPattern.test(String(process.env["GITHUB_HEAD_REF"] ?? ""));
-  if (!isCandidateWorkflow && !isReleaseCiWorkflow) {
+  if (!String(process.env["GITHUB_WORKFLOW_REF"] ?? "").includes("/publish-runpod-worker.yml@")) {
     throw new Error("RunPod release readiness workflow identity is invalid");
   }
 

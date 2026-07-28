@@ -3,10 +3,11 @@
 ## 対象
 
 `.github/workflows/ci.yml` は `main` と `develop` への push と pull requestで動作する。
-通常CIは外部サービスのcredentialを受け取らず、実際のCloudflareやRunPod resourceには
-接続しない。release branchからmainへのPRだけは、全jobより前にstaging Environmentの
-RunPod read-only readinessを実行する。ほかのCI jobへsecretを渡さず、release PR以外では
-このjobをskipする。
+CIは外部サービスのcredentialを受け取らず、実際のCloudflareやRunPod resourceには
+接続しない。release branchでは同内容の手動CIをcandidate workflowの直前に重ねず、
+candidate自身のcomplete gateを使用する。release-to-main PRはcandidateとstaging
+acceptanceが成功するまでclosedに保ち、成功後に同じPRをreopenして最終CIを一度だけ
+実行する。
 
 同じ branch と workflow の古い実行は concurrency 設定で取り消し、全 job に timeout を設定する。workflow 全体の `GITHUB_TOKEN` 権限は `contents: read` のみに制限する。
 
@@ -76,11 +77,10 @@ GHCRへpushする。mutable tagをpromotion入力にせずregistry digestをcand
 上書きしない。package visibilityを暗黙に変更しない。
 
 このworkflowは[ADR 0034](./adr/0034-fail-before-release-candidate-cost.md)に従い、最初の
-jobで同じrelease branchとcommitに対する成功済みCI runをGitHub APIから検証する。続けて
-RunPod API keyとendpoint IDによるread-only template listとendpoint getを並列実行する。
-remote readは最大約48秒で打ち切り、成功するまでapplication build、container build、
-scanを開始しない。CIで完了したquality、secret、dependency、browser gateは再実行しない。
-build、publish jobはstaging/production credentialとdeploy権限を持たず、RunPodや
+jobだけをstaging Environmentへ限定し、RunPod API keyとendpoint IDによるread-only
+template listとendpoint getを並列実行する。remote readは最大約48秒で打ち切り、成功する
+までapplication build、browser install、container build、scanを開始しない。build、
+test、publish jobはstaging/production credentialとdeploy権限を持たず、RunPodや
 Cloudflareのmutationも行わない。candidateはWeb asset、compiled Pages Functions、compiled Orchestrator、
 migration、RunPod image、acceptance用synthetic M4A、supply-chain reportを含み、
 manifestが各directoryのpath、byte数、file数、SHA-256を固定する。
@@ -95,15 +95,26 @@ raw module条件を検証した短期artifactをrun/attempt固有名で保存し
 後に再検証してからRunPod imageのbuildとscanを開始する。`publish` jobではapplicationを
 再buildしない。Pages Functions bundleの`/api/me`固有route、fallback、API middlewareと
 route順もapplication artifact検証に含め、決定的なpackaging不良は高コストcontainer処理
-より前に停止する。同じ検証をroot `pnpm check`のbuild直後とrelease PRのCI quality gateで
-行う。candidateはそのCI成功を照合してからartifactをbuildする。
+より前に停止する。同じ検証をroot `pnpm check`のbuild直後とcandidateのcomplete quality
+gateでも行う。release branchで通常CIを手動重複実行しない。
 
-通常の1 release commitでstaging acceptanceまでに起動するworkflowは、自動CI、candidate、
-stagingの3本であり、production promotion時だけ1本を追加する。release branchで追加の
-手動CIを起動しない。同じbranchの古いcandidate runはconcurrencyで取り消し、高コスト
-処理を並行させない。失敗後は安全なerror分類と失敗stepを確認し、原因修正と対象preflight
-またはlocal gateの成功を得るまで再dispatchしない。code変更がなくcandidateが有効な
-場合はcandidateを再buildせず同じartifactを使い、stagingだけを再実行する。
+通常の1 release commitでstaging acceptanceまでに起動するworkflowはcandidate 1本と
+staging 1本である。release-to-main PRをこの間にopenまたはreopenすると、その後のpushで
+`pull_request.synchronize`によるPR CIが起動するため禁止する。staging acceptance成功後、
+同じPRをreopenして確定commitの最終CIを1本だけ実行し、production promotion時に1本を
+追加する。release branchで手動CIを先行させない。同じbranchの古いcandidate runは
+concurrencyで取り消し、高コスト処理を並行させない。失敗後は安全なerror分類と失敗stepを
+確認し、原因修正と対象preflightまたはlocal gateの成功を得るまで再dispatchしない。
+code変更がなくcandidateが有効な場合はcandidateを再buildせず同じartifactを使い、
+stagingだけを再実行する。
+
+releaseの実行順序は次に固定する。
+
+1. release-to-main PRがclosedであることを確認する。
+2. candidate workflowを実行し、先頭readinessと全gateを通す。
+3. 同じcandidateをstagingへdeployし、実service acceptanceを通す。
+4. 同じPRをreopenし、以後release commitを変更せず最終PR CIを一度だけ通す。
+5. production promotionを実行する。変更が必要ならPRをcloseして手順1へ戻る。
 
 ## Staging promotion gate
 
@@ -136,8 +147,8 @@ browser installをremote mutation前に完了する。D1 migrationとPages deplo
 RunPod promotionは[ADR 0031](./adr/0031-retry-only-runpod-read-commands.md)と
 [ADR 0034](./adr/0034-fail-before-release-candidate-cost.md)に従い、template listを
 公式REST API、ほかのread-only CLIを上限付きで再試行し、結果不明のmutationを自動再送
-しない。release PRのCIとcandidate workflowの最初にread-only readinessを実行し、
-release全体で高コスト処理より前にcontrol-plane障害を検知する。
+しない。candidate workflowの最初にもread-only readinessを実行し、release全体で
+高コスト処理より前にcontrol-plane障害を検知する。
 stagingとproductionの両workflowは最初のremote mutationより前にRunPod preflightも
 実行する。providerが追加する既知の二つのtemplate portだけは
 [ADR 0032](./adr/0032-automate-runpod-default-port-normalization.md)の安全条件下で
