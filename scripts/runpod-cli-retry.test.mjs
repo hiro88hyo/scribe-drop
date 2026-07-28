@@ -8,10 +8,10 @@ test("retries malformed read responses with bounded exponential backoff", () => 
   const retries = [];
   let attempts = 0;
   const result = runRunpodCliWithReadRetry(
-    ["template", "list", "--type", "user"],
+    ["template", "get", "template"],
     () => {
       attempts += 1;
-      return attempts < 3 ? { error: {} } : [];
+      return attempts < 3 ? { error: {} } : { id: "template" };
     },
     {
       jitter: () => 0,
@@ -20,7 +20,7 @@ test("retries malformed read responses with bounded exponential backoff", () => 
     },
   );
 
-  assert.deepEqual(result, []);
+  assert.deepEqual(result, { id: "template" });
   assert.equal(attempts, 3);
   assert.deepEqual(sleeps, [1_000, 2_000]);
   assert.deepEqual(
@@ -30,8 +30,8 @@ test("retries malformed read responses with bounded exponential backoff", () => 
       maximumAttempts,
     })),
     [
-      { attempt: 2, command: "template list", maximumAttempts: 3 },
-      { attempt: 3, command: "template list", maximumAttempts: 3 },
+      { attempt: 2, command: "template get", maximumAttempts: 3 },
+      { attempt: 3, command: "template get", maximumAttempts: 3 },
     ],
   );
 });

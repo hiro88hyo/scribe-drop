@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { promoteRunpodCandidate, verifyRunpodPromotionPreflight } from "./runpod-promotion.mjs";
+import {
+  promoteRunpodCandidate as promoteRunpodCandidateWithInputs,
+  verifyRunpodPromotionPreflight as verifyRunpodPromotionPreflightWithInputs,
+} from "./runpod-promotion.mjs";
 import { createRunpodStagingPlan } from "./runpod-environment-config.mjs";
 
 const plan = createRunpodStagingPlan({
@@ -13,6 +16,22 @@ const plan = createRunpodStagingPlan({
   orchestratorOrigin: "https://orchestrator-staging.example.invalid",
   registryAuthId: "registry_staging",
 });
+
+function withTemplateList(input) {
+  return {
+    ...input,
+    listTemplates:
+      input.listTemplates ?? (() => input.runCli(["template", "list", "--type", "user"])),
+  };
+}
+
+function verifyRunpodPromotionPreflight(input) {
+  return verifyRunpodPromotionPreflightWithInputs(withTemplateList(input));
+}
+
+function promoteRunpodCandidate(input) {
+  return promoteRunpodCandidateWithInputs(withTemplateList(input));
+}
 
 function template(id) {
   return {
@@ -48,9 +67,9 @@ function endpoint(templateId, workers = []) {
   };
 }
 
-test("preflights an idle endpoint without mutating when the candidate template is pending", () => {
+test("preflights an idle endpoint without mutating when the candidate template is pending", async () => {
   const calls = [];
-  const result = verifyRunpodPromotionPreflight({
+  const result = await verifyRunpodPromotionPreflight({
     endpointId: "endpoint_staging",
     environment: "staging",
     plan,
@@ -80,8 +99,8 @@ test("preflights an idle endpoint without mutating when the candidate template i
   );
 });
 
-test("preflight validates an existing candidate template before any mutation", () => {
-  const result = verifyRunpodPromotionPreflight({
+test("preflight validates an existing candidate template before any mutation", async () => {
+  const result = await verifyRunpodPromotionPreflight({
     endpointId: "endpoint_staging",
     environment: "staging",
     plan,
@@ -103,9 +122,9 @@ test("preflight validates an existing candidate template before any mutation", (
   assert.equal(result.candidateTemplateExists, true);
 });
 
-test("preflight classifies known provider-added ports without mutating", () => {
+test("preflight classifies known provider-added ports without mutating", async () => {
   const calls = [];
-  const result = verifyRunpodPromotionPreflight({
+  const result = await verifyRunpodPromotionPreflight({
     endpointId: "endpoint_staging",
     environment: "staging",
     plan,
@@ -132,9 +151,9 @@ test("preflight classifies known provider-added ports without mutating", () => {
   );
 });
 
-test("preflight rejects a default-port candidate that is already attached", () => {
-  assert.throws(
-    () =>
+test("preflight rejects a default-port candidate that is already attached", async () => {
+  await assert.rejects(
+    async () =>
       verifyRunpodPromotionPreflight({
         endpointId: "endpoint_staging",
         environment: "staging",
@@ -154,6 +173,31 @@ test("preflight rejects a default-port candidate that is already attached", () =
         },
       }),
     /already attached/u,
+  );
+});
+
+test("uses the injected REST template list without invoking the CLI list command", async () => {
+  const cliCalls = [];
+  const result = await verifyRunpodPromotionPreflight({
+    endpointId: "endpoint_staging",
+    environment: "staging",
+    async listTemplates() {
+      return [];
+    },
+    plan,
+    runCli(arguments_) {
+      cliCalls.push(arguments_);
+      if (arguments_[0] === "serverless" && arguments_[1] === "get") {
+        return endpoint("template_old");
+      }
+      throw new Error("Unexpected fake CLI call");
+    },
+  });
+
+  assert.equal(result.candidateTemplateExists, false);
+  assert.equal(
+    cliCalls.some((arguments_) => arguments_[0] === "template" && arguments_[1] === "list"),
+    false,
   );
 });
 

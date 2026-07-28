@@ -5,14 +5,7 @@ const READ_RETRY_JITTER_MAX_MS = 250;
 
 function expectedReadResponseKind(arguments_) {
   const command = arguments_.slice(0, 2).join(" ");
-  if (command === "template list") {
-    return "array";
-  }
-  if (
-    command === "template get" ||
-    command === "serverless get" ||
-    (arguments_.length === 1 && arguments_[0] === "user")
-  ) {
+  if (command === "template get" || command === "serverless get") {
     return "record";
   }
   return undefined;
@@ -27,7 +20,7 @@ function isProviderErrorEnvelope(value) {
 }
 
 function matchesExpectedKind(value, expectedKind) {
-  return expectedKind === "array" ? Array.isArray(value) : isRecord(value);
+  return expectedKind === "record" && isRecord(value);
 }
 
 function defaultSleep(milliseconds) {

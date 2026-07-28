@@ -8,13 +8,18 @@ run-name: Publish RunPod release candidate from ${{ github.ref_name }}
 permissions:
   contents: read
 
+concurrency:
+  group: release-candidate-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   VOLTA_FEATURE_PNPM: "1"
   WRANGLER_WRITE_LOGS: "0"
 
 jobs:
   preflight:
-    name: Validate candidate identity
+    name: Validate release identity and remote readiness
+    environment: staging
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -42,6 +47,12 @@ jobs:
               exit 1
               ;;
           esac
+
+      - name: Verify read-only staging RunPod readiness before costly work
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID: ${{ secrets.SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID }}
+        run: pnpm run runpod:release-readiness:staging
 
   application:
     name: Assemble candidate application artifacts

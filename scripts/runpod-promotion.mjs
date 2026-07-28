@@ -61,9 +61,16 @@ function matchingTemplates(templates, name) {
   );
 }
 
-function getOrCreateTemplateResponse(plan, runCli) {
+async function listTemplates(input) {
+  if (typeof input.listTemplates !== "function") {
+    throw new Error("RunPod template listing is unavailable");
+  }
+  return input.listTemplates();
+}
+
+async function getOrCreateTemplateResponse(plan, input) {
   const matches = matchingTemplates(
-    requireArray(runCli(["template", "list", "--type", "user"]), "RunPod template list"),
+    requireArray(await listTemplates(input), "RunPod template list"),
     plan.template.name,
   );
   if (matches.length > 1) {
@@ -72,18 +79,17 @@ function getOrCreateTemplateResponse(plan, runCli) {
   if (matches.length === 1) {
     const summary = requireRecord(matches[0], "RunPod template summary");
     const templateId = requireResourceId(summary.id, "RunPod template ID");
-    return runCli(["template", "get", templateId]);
+    return input.runCli(["template", "get", templateId]);
   }
 
-  return runCli(createRunpodTemplateArguments(plan));
+  return input.runCli(createRunpodTemplateArguments(plan));
 }
 
-export function verifyRunpodPromotionPreflight(input) {
+export async function verifyRunpodPromotionPreflight(input) {
   const plan = validateRunpodPlan(input.plan, input.environment);
   const endpointId = requireResourceId(input.endpointId, "RunPod endpoint ID");
-  input.runCli(["user"]);
   const matches = matchingTemplates(
-    requireArray(input.runCli(["template", "list", "--type", "user"]), "RunPod template list"),
+    requireArray(await listTemplates(input), "RunPod template list"),
     plan.template.name,
   );
   if (matches.length > 1) {
@@ -132,10 +138,9 @@ export function verifyRunpodPromotionPreflight(input) {
 export async function promoteRunpodCandidate(input) {
   const plan = validateRunpodPlan(input.plan, input.environment);
   const endpointId = requireResourceId(input.endpointId, "RunPod endpoint ID");
-  input.runCli(["user"]);
   const getEndpoint = () =>
     input.runCli(["serverless", "get", endpointId, "--include-template", "--include-workers"]);
-  const candidate = getOrCreateTemplateResponse(plan, input.runCli);
+  const candidate = await getOrCreateTemplateResponse(plan, input);
   let templateId;
   if (hasOnlyKnownRunpodDefaultPortDrift(candidate, plan)) {
     templateId = requireResourceId(

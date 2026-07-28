@@ -10,7 +10,7 @@ import {
 import { runRunpodCliWithReadRetry } from "./runpod-cli-retry.mjs";
 import { promoteRunpodCandidate, verifyRunpodPromotionPreflight } from "./runpod-promotion.mjs";
 import { validateRunpodPlan } from "./runpod-environment-config.mjs";
-import { clearRunpodTemplatePorts } from "./runpod-template-api.mjs";
+import { clearRunpodTemplatePorts, listRunpodTemplates } from "./runpod-template-api.mjs";
 
 const [environment, planPath] = process.argv.slice(2);
 const preflightOnly = process.argv[4] === "--preflight-only";
@@ -40,6 +40,21 @@ function runCli(arguments_) {
       );
     },
   });
+}
+
+function listTemplates() {
+  return listRunpodTemplates(
+    { apiKey: process.env["RUNPOD_API_KEY"] },
+    {
+      onRetry({ attempt, command, maximumAttempts }) {
+        console.warn(
+          `Retrying read-only RunPod REST ${command} (${String(attempt)}/${String(
+            maximumAttempts,
+          )})`,
+        );
+      },
+    },
+  );
 }
 
 try {
@@ -94,9 +109,10 @@ try {
     environment,
   );
   if (preflightOnly) {
-    const result = verifyRunpodPromotionPreflight({
+    const result = await verifyRunpodPromotionPreflight({
       endpointId,
       environment,
+      listTemplates,
       plan,
       runCli,
     });
@@ -120,6 +136,7 @@ try {
     },
     endpointId,
     environment,
+    listTemplates,
     plan,
     runCli,
   });

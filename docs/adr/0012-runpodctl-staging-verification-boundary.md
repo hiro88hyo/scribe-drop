@@ -6,6 +6,8 @@
   [ADR 0026](./0026-classify-runpod-terminal-worker-records.md)で補足する。
 - templateの既定portを手動削除する判断は
   [ADR 0032](./0032-automate-runpod-default-port-normalization.md)で置き換える。
+- candidate/promotionのtemplate listと高コスト処理前のreadinessは
+  [ADR 0034](./0034-fail-before-release-candidate-cost.md)の公式REST境界で補足する。
 
 ## Context
 
@@ -36,8 +38,8 @@ rotationした直後は、endpointだけを確認すると次回のcold startで
 採用できる。逆に、取得応答に常に値があると仮定すると、正しく作成されたendpointでも
 deployが失敗し、再実行時の回復ができない。API keyを別実装へ渡してCLIを一般的に
 迂回することも、projectのPlatform CLI方針とsecret境界を増やすため採用しない。
-空port集合だけは後続のADR 0032で、公式REST API、未接続template、厳格なread-backに
-限定した例外を定める。
+空port集合は後続のADR 0032、candidate/promotionのtemplate listとendpoint readinessは
+ADR 0034で、hostと操作を固定した公式REST API例外を定める。
 
 ## Decision
 

@@ -98,9 +98,11 @@ digestだけを昇格する。production用の再buildと任意image入力を禁
 
 `Publish RunPod release candidate` workflowはenvironment選択を持たず、
 `release/<version>`からcandidate imageを一度だけ発行する。このworkflowはproduction
-credentialとdeploy jobを持たない。staging/production promotion workflowはcandidateと
-短期staging evidenceを照合し、production用にimageを再buildしない。package visibilityは
-暗黙に変更しない。
+credentialとdeploy jobを持たない。[ADR 0034](./adr/0034-fail-before-release-candidate-cost.md)
+に従い、最初のjobだけはstaging EnvironmentのRunPod API keyとendpoint IDを使って
+read-only readinessを行う。build、test、publish jobにはstaging credentialを渡さない。
+staging/production promotion workflowはcandidateと短期staging evidenceを照合し、
+production用にimageを再buildしない。package visibilityは暗黙に変更しない。
 
 private imageを使う場合、RunPodにはread-only registry credentialが必要になる。
 `runpodctl registry create`はpasswordをcommand line argumentとして受け取るため使用せず、
@@ -131,10 +133,13 @@ promotion workflowでは、さらにstaging evidenceのcandidate digestと一致
 `runpodctl`を呼ぶ。
 
 promotion中のRunPod API一時障害は
-[ADR 0031](./adr/0031-retry-only-runpod-read-commands.md)に従って扱う。`user`、
-`template list/get`、`serverless get`だけを最大3回、指数backoffとjitter付きで再試行する。
-template作成とendpoint更新は結果不明時に再送せず、厳格なread-backとrollbackを維持する。
-retry logへAPI応答と実IDを出さない。
+[ADR 0031](./adr/0031-retry-only-runpod-read-commands.md)と
+[ADR 0034](./adr/0034-fail-before-release-candidate-cost.md)に従って扱う。template listは
+公式REST API、`template get`と`serverless get`は固定CLIで最大3回、指数backoff付きで
+再試行する。template作成とendpoint更新は結果不明時に再送せず、厳格なread-backと
+rollbackを維持する。retry logへAPI応答と実IDを出さない。
+candidate workflowではRESTのtemplate listとendpoint getを高コスト処理前に並列実行し、
+staging promotionではcandidate固有planを再検証する。
 最初のremote mutationより前に`runpod:preflight:<environment>`を実行し、認証、templateの
 一意性、endpoint invariant、workerがidleであることをread-onlyで検証する。
 

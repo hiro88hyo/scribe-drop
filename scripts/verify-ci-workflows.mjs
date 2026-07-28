@@ -7,6 +7,7 @@ const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(scriptDirectory, "..");
 const workflowsDirectory = path.join(repositoryRoot, ".github", "workflows");
 const packageManifestPath = path.join(repositoryRoot, "package.json");
+const ciWorkflowPath = path.join(workflowsDirectory, "ci.yml");
 const publicationWorkflowPath = path.join(workflowsDirectory, "publish-runpod-worker.yml");
 const stagingWorkflowPath = path.join(workflowsDirectory, "deploy-staging-candidate.yml");
 const productionWorkflowPath = path.join(workflowsDirectory, "deploy-production-candidate.yml");
@@ -35,6 +36,11 @@ const runpodPromotionScriptPath = path.join(
   "promote-runpod-candidate.mjs",
 );
 const runpodTemplateApiScriptPath = path.join(repositoryRoot, "scripts", "runpod-template-api.mjs");
+const runpodReleaseReadinessScriptPath = path.join(
+  repositoryRoot,
+  "scripts",
+  "verify-runpod-release-readiness.mjs",
+);
 const dockerfilePath = path.join(repositoryRoot, "apps", "runpod-worker", "Dockerfile");
 const modelBundlePath = path.join(
   repositoryRoot,
@@ -111,6 +117,7 @@ const workflowContents = workflowFiles
   .map((filename) => readFileSync(path.join(workflowsDirectory, filename), "utf8"))
   .join("\n");
 const packageManifestContents = readFileSync(packageManifestPath, "utf8");
+const ciWorkflowContents = readFileSync(ciWorkflowPath, "utf8");
 const publicationWorkflowContents = readFileSync(publicationWorkflowPath, "utf8");
 const stagingWorkflowContents = readFileSync(stagingWorkflowPath, "utf8");
 const productionWorkflowContents = readFileSync(productionWorkflowPath, "utf8");
@@ -121,6 +128,7 @@ const releaseCandidateScriptContents = readFileSync(releaseCandidateScriptPath, 
 const runpodDeploymentScriptContents = readFileSync(runpodDeploymentScriptPath, "utf8");
 const runpodPromotionScriptContents = readFileSync(runpodPromotionScriptPath, "utf8");
 const runpodTemplateApiScriptContents = readFileSync(runpodTemplateApiScriptPath, "utf8");
+const runpodReleaseReadinessScriptContents = readFileSync(runpodReleaseReadinessScriptPath, "utf8");
 const dockerfileContents = readFileSync(dockerfilePath, "utf8");
 const modelBundleContents = readFileSync(modelBundlePath, "utf8");
 const versions = JSON.parse(readFileSync(versionsPath, "utf8"));
@@ -279,6 +287,10 @@ for (const [description, value] of Object.entries({
   "run-scoped candidate application artifact":
     "scribe-drop-candidate-application-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}",
   "candidate preflight dependency": "- preflight",
+  "serialized release candidate execution": "group: release-candidate-${{ github.ref }}",
+  "stale candidate cancellation": "cancel-in-progress: true",
+  "staging-scoped readiness credential": "environment: staging",
+  "read-only readiness before costly work": "pnpm run runpod:release-readiness:staging",
   "preflight before application assembly":
     "application:\n    name: Assemble candidate application artifacts\n    needs: preflight",
   "preflight before quality work":
@@ -323,13 +335,21 @@ requireTextOrder(
 for (const [description, value] of Object.entries({
   "environment-specific publication input": "target_environment",
   "develop-only candidate publication": "refs/heads/develop",
-  "staging deployment in build workflow": "environment: staging",
   "production deployment in build workflow": "environment: production",
+  "RunPod mutation in candidate workflow": "runpod:promote:",
+  "Cloudflare mutation credential in candidate workflow": "CLOUDFLARE_API_TOKEN",
   "multipart Orchestrator upload body output": "--outfile candidate-build/orchestrator/index.js",
   "config-relative Orchestrator output": "--outdir candidate-build/orchestrator",
 })) {
   forbidText(publicationWorkflowContents, value, "publish-runpod-worker.yml", description);
 }
+
+forbidText(
+  ciWorkflowContents,
+  "workflow_dispatch:",
+  "ci.yml",
+  "redundant manual CI dispatch before the complete candidate gate",
+);
 
 for (const [description, value] of Object.entries({
   "staging candidate workflow name": "name: Deploy release candidate to staging",
@@ -567,10 +587,40 @@ requireText(
   "fixed template API port normalization",
 );
 requireText(
+  runpodPromotionScriptContents,
+  "listRunpodTemplates(",
+  "promote-runpod-candidate.mjs",
+  "official REST template-list read",
+);
+forbidText(
+  runpodPromotionScriptContents,
+  'runCli(["template", "list"',
+  "promote-runpod-candidate.mjs",
+  "CLI template-list fallback",
+);
+requireText(
   runpodTemplateApiScriptContents,
   "JSON.stringify({ ports: [] })",
   "runpod-template-api.mjs",
   "automatic empty-port normalization",
+);
+requireText(
+  runpodTemplateApiScriptContents,
+  'query: { includeEndpointBoundTemplates: "true" }',
+  "runpod-template-api.mjs",
+  "endpoint-bound template enumeration",
+);
+requireText(
+  runpodTemplateApiScriptContents,
+  "await Promise.all([",
+  "runpod-template-api.mjs",
+  "parallel bounded RunPod readiness reads",
+);
+requireText(
+  runpodReleaseReadinessScriptContents,
+  "verifyRunpodReleaseReadiness(",
+  "verify-runpod-release-readiness.mjs",
+  "official REST readiness boundary",
 );
 
 if (failures.length > 0) {

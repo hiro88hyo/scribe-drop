@@ -12,8 +12,8 @@ RunPodのread APIはtimeout、一時的なprovider error、eventual consistency�
 
 ## Decision
 
-- promotionで使用する`user`、`template list`、`template get`、`serverless get`だけを
-  read-only commandとして分類する。
+- promotionで使用する`template get`と`serverless get`をread-only CLI commandとして
+  分類する。`template list`はADR 0034に従い公式REST APIから取得する。
 - read-only commandが非zero終了、invalid JSON、期待するtop-level shape以外、または
   provider error envelopeを返した場合、最大3回まで再試行する。
 - retry間隔は1秒、2秒の指数backoffに0〜250msのjitterを加える。各CLI invocationの
@@ -24,8 +24,8 @@ RunPodのread APIはtimeout、一時的なprovider error、eventual consistency�
   不明時は既存の一意resource照合・read-back・rollback経路へ渡す。
 - top-level shapeが正しい応答はretry wrapperで受理し、その後の固定plan検証を緩めない。
   port、image、environment、worker状態などの不一致は一時障害としてretryしない。
-- stagingとproductionのpromotionは同じretry wrapperを使用し、CI構成検査でwrapperの
-  bypassを拒否する。
+- stagingとproductionのpromotionはCLI readに同じretry wrapper、template listに同じ
+  公式REST read境界を使用し、CI構成検査でbypassを拒否する。
 
 ## Consequences
 
@@ -44,3 +44,4 @@ Accepted
 - [ADR 0012: runpodctl staging検証境界](./0012-runpodctl-staging-verification-boundary.md)
 - [ADR 0023: Promote only staging-verified artifacts](./0023-promote-only-staging-verified-artifacts.md)
 - [ADR 0026: RunPodのterminal worker recordを状態で分類する](./0026-classify-runpod-terminal-worker-records.md)
+- [ADR 0034: release candidateの高コスト処理前に実環境readinessを検査する](./0034-fail-before-release-candidate-cost.md)

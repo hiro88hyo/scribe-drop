@@ -1,5 +1,7 @@
 # ADR 0025: 対応planなしでdeployment protectionを迂回しない
 
+> ADR 0034により、credentialless candidate publicationの例外は廃止した。
+
 ## Context
 
 ADR 0023は、private repositoryのstaging/production GitHub Environmentへcredentialを
@@ -19,7 +21,8 @@ secret非公開性を失う。workflow input、手動チェックボックス、
 ## Decision
 
 - credentialをrepository-level secretへ移さず、ADR 0023の境界を弱めない。
-- credentialを持たないcandidate publication workflowは実行できる。
+- candidate workflowの最初に必要なread-only staging readiness credentialもEnvironment
+  secretからだけ渡す。対応planなしではcandidate publicationも実行しない。
 - staging/production promotionは、Environment secretとdeployment branch restrictionを
   利用でき、production required reviewerを強制できる状態になるまで実行しない。
 - privateを維持する場合はGitHub Enterpriseの利用を必要条件とする。public repositoryへ
@@ -29,7 +32,7 @@ secret非公開性を失う。workflow input、手動チェックボックス、
 
 ## Consequences
 
-- 現在のplanでもimmutable candidateをbuild、scan、GHCRへ発行できる。
+- 対応planなしではimmutable candidateのbuild、scan、GHCR発行も停止する。
 - staging/production credentialは未登録のままとなり、promotion workflowはfail closedに
   なる。
 - GitHub planまたはrepository visibilityの判断がproduction readinessの外部blockerに
@@ -41,6 +44,7 @@ secret非公開性を失う。workflow input、手動チェックボックス、
 
 - [GitHub protected branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)
 - [GitHub deployments and environments](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)
+- [ADR 0034: release candidateの高コスト処理前に実環境readinessを検査する](./0034-fail-before-release-candidate-cost.md)
 
 ## Status
 
