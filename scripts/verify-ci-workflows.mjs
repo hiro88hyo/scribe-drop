@@ -41,6 +41,11 @@ const runpodReleaseReadinessScriptPath = path.join(
   "scripts",
   "verify-runpod-release-readiness.mjs",
 );
+const ciWorkflowRunVerifierPath = path.join(
+  repositoryRoot,
+  "scripts",
+  "verify-ci-workflow-runs.mjs",
+);
 const dockerfilePath = path.join(repositoryRoot, "apps", "runpod-worker", "Dockerfile");
 const modelBundlePath = path.join(
   repositoryRoot,
@@ -129,6 +134,7 @@ const runpodDeploymentScriptContents = readFileSync(runpodDeploymentScriptPath, 
 const runpodPromotionScriptContents = readFileSync(runpodPromotionScriptPath, "utf8");
 const runpodTemplateApiScriptContents = readFileSync(runpodTemplateApiScriptPath, "utf8");
 const runpodReleaseReadinessScriptContents = readFileSync(runpodReleaseReadinessScriptPath, "utf8");
+const ciWorkflowRunVerifierContents = readFileSync(ciWorkflowRunVerifierPath, "utf8");
 const dockerfileContents = readFileSync(dockerfilePath, "utf8");
 const modelBundleContents = readFileSync(modelBundlePath, "utf8");
 const versions = JSON.parse(readFileSync(versionsPath, "utf8"));
@@ -290,15 +296,12 @@ for (const [description, value] of Object.entries({
   "serialized release candidate execution": "group: release-candidate-${{ github.ref }}",
   "stale candidate cancellation": "cancel-in-progress: true",
   "staging-scoped readiness credential": "environment: staging",
+  "exact successful CI evidence": "node scripts/verify-ci-workflow-runs.mjs",
+  "CI workflow run read permission": "actions: read",
   "read-only readiness before costly work": "pnpm run runpod:release-readiness:staging",
   "preflight before application assembly":
     "application:\n    name: Assemble candidate application artifacts\n    needs: preflight",
-  "preflight before quality work":
-    "quality:\n    name: Candidate quality gate\n    needs: preflight",
   "candidate application dependency": "- application",
-  "candidate quality dependency": "- quality",
-  "candidate browser E2E dependency": "- browser-e2e",
-  "candidate security dependency": "- security",
 })) {
   requireText(publicationWorkflowContents, value, "publish-runpod-worker.yml", description);
 }
@@ -338,6 +341,12 @@ for (const [description, value] of Object.entries({
   "production deployment in build workflow": "environment: production",
   "RunPod mutation in candidate workflow": "runpod:promote:",
   "Cloudflare mutation credential in candidate workflow": "CLOUDFLARE_API_TOKEN",
+  "duplicate candidate quality gate": "Candidate quality gate",
+  "duplicate candidate browser gate": "Candidate browser E2E",
+  "duplicate candidate security gate": "Candidate security gates",
+  "duplicate complete local gate": "pnpm check",
+  "duplicate mocked browser lifecycle": "pnpm run test:e2e",
+  "duplicate dependency audit": "pnpm audit",
   "multipart Orchestrator upload body output": "--outfile candidate-build/orchestrator/index.js",
   "config-relative Orchestrator output": "--outdir candidate-build/orchestrator",
 })) {
@@ -349,6 +358,29 @@ forbidText(
   "workflow_dispatch:",
   "ci.yml",
   "redundant manual CI dispatch before the complete candidate gate",
+);
+
+for (const [description, value] of Object.entries({
+  "release PR readiness job": "release-readiness:",
+  "release branch readiness condition": "startsWith(github.head_ref, 'release/')",
+  "release readiness staging isolation": "environment: staging",
+  "release readiness command": "pnpm run runpod:release-readiness:staging",
+})) {
+  requireText(ciWorkflowContents, value, "ci.yml", description);
+}
+requireTextCount(
+  ciWorkflowContents,
+  "needs: release-readiness",
+  5,
+  "ci.yml",
+  "all expensive CI jobs depending on release readiness",
+);
+requireTextCount(
+  ciWorkflowContents,
+  "Require release readiness when applicable",
+  5,
+  "ci.yml",
+  "required-check failure propagation",
 );
 
 for (const [description, value] of Object.entries({
@@ -621,6 +653,12 @@ requireText(
   "verifyRunpodReleaseReadiness(",
   "verify-runpod-release-readiness.mjs",
   "official REST readiness boundary",
+);
+requireText(
+  ciWorkflowRunVerifierContents,
+  'workflowPath: ".github/workflows/ci.yml"',
+  "verify-ci-workflow-runs.mjs",
+  "exact CI workflow identity",
 );
 
 if (failures.length > 0) {

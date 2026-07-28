@@ -21,11 +21,43 @@ env:
   VOLTA_FEATURE_PNPM: "1"
 
 jobs:
+  release-readiness:
+    name: Release environment readiness
+    if: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/') }}
+    environment: staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Volta
+        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
+        with:
+          volta-version: 2.0.2
+
+      - name: Verify read-only staging RunPod readiness before all CI work
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID: ${{ secrets.SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID }}
+        run: pnpm run runpod:release-readiness:staging
+
   quality:
     name: Quality gate
+    needs: release-readiness
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Require release readiness when applicable
+        env:
+          RELEASE_READINESS_RESULT: ${{ needs.release-readiness.result }}
+        run: |
+          case "${RELEASE_READINESS_RESULT}" in
+            success|skipped) ;;
+            *) exit 1 ;;
+          esac
+
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -79,9 +111,20 @@ jobs:
 
   secrets:
     name: Secret scan
+    needs: release-readiness
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Require release readiness when applicable
+        env:
+          RELEASE_READINESS_RESULT: ${{ needs.release-readiness.result }}
+        run: |
+          case "${RELEASE_READINESS_RESULT}" in
+            success|skipped) ;;
+            *) exit 1 ;;
+          esac
+
       - name: Check out complete history
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -100,9 +143,20 @@ jobs:
 
   dependency-audit:
     name: Dependency audit
+    needs: release-readiness
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Require release readiness when applicable
+        env:
+          RELEASE_READINESS_RESULT: ${{ needs.release-readiness.result }}
+        run: |
+          case "${RELEASE_READINESS_RESULT}" in
+            success|skipped) ;;
+            *) exit 1 ;;
+          esac
+
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -126,9 +180,20 @@ jobs:
 
   browser-e2e:
     name: Browser E2E
+    needs: release-readiness
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Require release readiness when applicable
+        env:
+          RELEASE_READINESS_RESULT: ${{ needs.release-readiness.result }}
+        run: |
+          case "${RELEASE_READINESS_RESULT}" in
+            success|skipped) ;;
+            *) exit 1 ;;
+          esac
+
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -148,9 +213,20 @@ jobs:
 
   runpod-container:
     name: RunPod container supply chain
+    needs: release-readiness
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
+      - name: Require release readiness when applicable
+        env:
+          RELEASE_READINESS_RESULT: ${{ needs.release-readiness.result }}
+        run: |
+          case "${RELEASE_READINESS_RESULT}" in
+            success|skipped) ;;
+            *) exit 1 ;;
+          esac
+
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 

@@ -133,9 +133,10 @@ end-to-end smokeを実施する。
 3. R2 CORSと`incoming/`限定Event Notificationを設定する。
 4. D1 migrationを適用し、適用済みversionを記録する。
 5. OrchestratorとWebのsecretをCloudflare secret storeへ登録する。
-6. `release/<version>`の`Publish RunPod release candidate` workflowでRunPod Worker
-   imageを一度だけbuildし、SBOM、scan、offline checkを通したcandidate digestから
-   templateとstaging endpointを作成する。
+6. `release/<version>`からmainへのPRで、read-only RunPod readinessを先頭にしたCIを通す。
+   成功した同一commitだけを`Publish RunPod release candidate` workflowへ渡し、RunPod
+   Worker imageを一度だけbuildする。SBOM、scan、offline checkを通したcandidate digest
+   からtemplateとstaging endpointを作成する。
 7. staging endpoint IDとRunPod API keyをOrchestrator secretへ登録する。
 8. [ADR 0012](./adr/0012-runpodctl-staging-verification-boundary.md)に従い、
    `runpodctl`で取得できるactive workers 0、max workers 1、GPU 1、Network Volumeなし、
@@ -313,11 +314,14 @@ imageと合成する。applicationの生成・再検証に失敗した場合はc
 
 通常の実行順序は次のとおりとする。
 
-1. `Publish RunPod release candidate`を`release/<version>`で実行する。
-2. 成功したcandidate run IDだけを`Deploy release candidate to staging`へ渡す。
-3. 24時間以内に成功したstaging run IDだけを
+1. `release/<version>`からmainへのPRで自動CIを実行する。RunPod readinessが成功するまで
+   quality、browser、container jobを開始しない。
+2. 同一commitのCI成功後に`Publish RunPod release candidate`を実行する。workflow自身も
+   CI identityとRunPod readinessを再検証する。
+3. 成功したcandidate run IDだけを`Deploy release candidate to staging`へ渡す。
+4. 24時間以内に成功したstaging run IDだけを
    `Promote staging-accepted candidate to production`へ渡す。
-4. production jobはGitHub Environmentのrequired reviewer承認後にもrun、candidate、
+5. production jobはGitHub Environmentのrequired reviewer承認後にもrun、candidate、
    evidence、digestを再検証し、正規化したenvironment policyがstagingと一致してから
    D1/R2、RunPod、Orchestrator、最後に利用者入口のPagesを更新する。更新後に実resourceを
    再検証する。最初のremote mutation前にacceptanceの残存時間が30分未満なら中止し、

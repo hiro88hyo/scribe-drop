@@ -100,7 +100,8 @@ digestだけを昇格する。production用の再buildと任意image入力を禁
 `release/<version>`からcandidate imageを一度だけ発行する。このworkflowはproduction
 credentialとdeploy jobを持たない。[ADR 0034](./adr/0034-fail-before-release-candidate-cost.md)
 に従い、最初のjobだけはstaging EnvironmentのRunPod API keyとendpoint IDを使って
-read-only readinessを行う。build、test、publish jobにはstaging credentialを渡さない。
+同一commitのCI成功照合とread-only readinessを行う。release PRのCIでも全jobより前に
+同じreadinessを行う。build、test、publish jobにはstaging credentialを渡さない。
 staging/production promotion workflowはcandidateと短期staging evidenceを照合し、
 production用にimageを再buildしない。package visibilityは暗黙に変更しない。
 

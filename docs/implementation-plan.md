@@ -587,12 +587,12 @@ read-only CLI一時障害だけを上限付きで再試行し、mutationは再�
 [ADR 0032](./adr/0032-automate-runpod-default-port-normalization.md)に従い、providerが
 追加する既知のtemplate portだけを未接続・idle条件下で自動除去し、厳格なread-backを
 通す。candidateごとのConsole手動修正は通常手順にしない。
-[ADR 0034](./adr/0034-fail-before-release-candidate-cost.md)に従い、release branchでは
-candidateと重複する手動CIを起動しない。candidate workflowの最初にstaging限定の
-read-only RunPod readinessを並列・上限付きで検査し、成功するまでbuild、browser install、
-container build、scanを開始しない。candidate作成後のstagingでは完全planを再検証する。
-通常のrelease commitはcandidate 1本とstaging 1本に限定し、原因修正と対象gateの成功なしに
-失敗workflowを再dispatchしない。
+[ADR 0034](./adr/0034-fail-before-release-candidate-cost.md)に従い、release PRの自動CIでは
+staging限定のread-only RunPod readinessを最初に実行し、成功するまでquality、browser、
+containerを開始しない。candidateは同一commitのCI成功を照合して重複gateを省き、RunPod
+readinessを再検証してからapplicationと発行対象containerをbuildする。candidate作成後の
+stagingでは完全planを再検証する。通常のrelease commitは自動CI、candidate、stagingの
+3本に限定し、原因修正と対象gateの成功なしに失敗workflowを再dispatchしない。
 
 初回production bootstrapではOrchestratorの必須secretであるRunPod endpoint IDを先に
 確定する必要があるため、

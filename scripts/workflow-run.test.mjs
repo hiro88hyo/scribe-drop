@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { validateTrustedWorkflowRun } from "./workflow-run.mjs";
+import { validateTrustedCiWorkflowRuns, validateTrustedWorkflowRun } from "./workflow-run.mjs";
 
 const expected = {
   branch: "release/0.1.0",
@@ -44,6 +44,61 @@ test("rejects workflow, commit, branch, repository, and conclusion mismatches", 
     assert.throws(
       () => validateTrustedWorkflowRun(mutation, expected),
       /does not match|not a trusted successful run/u,
+    );
+  }
+});
+
+test("accepts a successful CI pull request run for the exact release commit", () => {
+  const ciRun = {
+    ...run,
+    event: "pull_request",
+    path: ".github/workflows/ci.yml",
+  };
+  assert.deepEqual(
+    validateTrustedCiWorkflowRuns(
+      {
+        workflow_runs: [{ invalid: true }, ciRun],
+      },
+      {
+        ...expected,
+        workflowPath: ".github/workflows/ci.yml",
+      },
+    ),
+    {
+      branch: expected.branch,
+      commitSha: expected.commitSha,
+      runId: expected.runId,
+      workflowPath: ".github/workflows/ci.yml",
+    },
+  );
+});
+
+test("rejects CI results that do not prove the exact release commit", () => {
+  for (const mutation of [
+    { ...run, event: "push", path: ".github/workflows/ci.yml" },
+    { ...run, conclusion: "failure", event: "pull_request", path: ".github/workflows/ci.yml" },
+    {
+      ...run,
+      event: "pull_request",
+      head_sha: "b".repeat(40),
+      path: ".github/workflows/ci.yml",
+    },
+    {
+      ...run,
+      event: "pull_request",
+      path: ".github/workflows/other.yml",
+    },
+  ]) {
+    assert.throws(
+      () =>
+        validateTrustedCiWorkflowRuns(
+          { workflow_runs: [mutation] },
+          {
+            ...expected,
+            workflowPath: ".github/workflows/ci.yml",
+          },
+        ),
+      /No trusted successful CI workflow run/u,
     );
   }
 });

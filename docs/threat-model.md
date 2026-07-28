@@ -174,7 +174,12 @@ artifact/finalize/notificationのend-to-end経路もPhase 5のstaging smokeで�
 
 ## Test boundary
 
-通常CIでは実Cloudflare Accessや外部JWKS endpointを呼ばない。固定clock、生成したRSA test key、in-memory JWKS fetch fakeを使い、signatureと全claim分岐を決定的に検証する。
+通常CIでは実Cloudflare Accessや外部JWKS endpointを呼ばない。固定clock、生成したRSA
+test key、in-memory JWKS fetch fakeを使い、signatureと全claim分岐を決定的に検証する。
+release PRだけは[ADR 0034](./adr/0034-fail-before-release-candidate-cost.md)に従い、最初の
+jobへstaging RunPod API keyとendpoint IDだけを渡し、host・method・response上限を固定した
+read-only template listとendpoint getを行う。全required checkはこのjobへ依存し、
+credentialを後続job、artifact、logへ渡さない。
 
 stagingではAccess policyとapplication audienceを実値で構成した後に、未認証browser、許可利用者、別application audience、key rotation smoke testを行う。Phase 4では固定のdummy音声だけを使い、claim競合、capability scope、endpoint設定、offline image、timeout、cleanupを検証する。stagingのtoken、email、署名URL、音声、文字起こし結果をCI artifact、screenshot、logへ保存しない。
 

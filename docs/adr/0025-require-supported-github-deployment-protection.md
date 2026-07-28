@@ -21,8 +21,9 @@ secret非公開性を失う。workflow input、手動チェックボックス、
 ## Decision
 
 - credentialをrepository-level secretへ移さず、ADR 0023の境界を弱めない。
-- candidate workflowの最初に必要なread-only staging readiness credentialもEnvironment
-  secretからだけ渡す。対応planなしではcandidate publicationも実行しない。
+- release PRのCIとcandidate workflowの最初に必要なread-only staging readiness
+  credentialもEnvironment secretからだけ渡す。対応planなしではrelease CIとcandidate
+  publicationを実行しない。
 - staging/production promotionは、Environment secretとdeployment branch restrictionを
   利用でき、production required reviewerを強制できる状態になるまで実行しない。
 - privateを維持する場合はGitHub Enterpriseの利用を必要条件とする。public repositoryへ

@@ -6,6 +6,7 @@ on:
 run-name: Publish RunPod release candidate from ${{ github.ref_name }}
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -47,6 +48,20 @@ jobs:
               exit 1
               ;;
           esac
+
+      - name: Require successful CI for the exact release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api \
+            --method GET \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs" \
+            -f event=pull_request \
+            -f head_sha="${GITHUB_SHA}" \
+            -f per_page=100 \
+            -f status=completed \
+            >"${RUNNER_TEMP}/ci-runs.json"
+          node scripts/verify-ci-workflow-runs.mjs "${RUNNER_TEMP}/ci-runs.json"
 
       - name: Verify read-only staging RunPod readiness before costly work
         env:
@@ -94,108 +109,11 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  quality:
-    name: Candidate quality gate
-    needs: preflight
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Set up Volta
-        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
-        with:
-          volta-version: 2.0.2
-
-      - name: Set up uv and Python
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
-        with:
-          version: 0.11.32
-          python-version: "3.12"
-          enable-cache: true
-          cache-dependency-glob: apps/runpod-worker/uv.lock
-
-      - name: Install JavaScript dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Install Python dependencies
-        run: uv sync --project apps/runpod-worker --frozen
-
-      - name: Install checksummed project tools
-        run: |
-          pnpm run gitleaks:install
-          pnpm run runpodctl:install
-
-      - name: Run the complete local quality gate
-        run: pnpm check
-
-  browser-e2e:
-    name: Candidate browser E2E
-    needs: preflight
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Set up Volta
-        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
-        with:
-          volta-version: 2.0.2
-
-      - name: Install JavaScript dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Install fixed Playwright browser
-        run: pnpm --filter @scribe-drop/e2e exec playwright install --with-deps chromium
-
-      - name: Run mocked browser lifecycle
-        run: pnpm run test:e2e
-
-  security:
-    name: Candidate security gates
-    needs: preflight
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Check out complete history
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0
-
-      - name: Set up Volta
-        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
-        with:
-          volta-version: 2.0.2
-
-      - name: Set up uv and Python
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
-        with:
-          version: 0.11.32
-          python-version: "3.12"
-          enable-cache: false
-
-      - name: Install checksummed Gitleaks
-        run: pnpm run gitleaks:install
-
-      - name: Scan Git history and working tree
-        run: pnpm run secrets:check
-
-      - name: Audit JavaScript dependencies
-        run: pnpm audit --audit-level high
-
-      - name: Audit Python dependencies
-        run: uv audit --preview-features audit-command --project apps/runpod-worker --frozen
-
   publish:
     name: Publish immutable release candidate
     needs:
       - application
-      - browser-e2e
       - preflight
-      - quality
-      - security
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:

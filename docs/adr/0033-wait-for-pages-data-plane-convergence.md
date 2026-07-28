@@ -16,9 +16,8 @@ workflow全体を無条件に再実行すると、既に完了したD1、R2、Ru
 - candidate application artifactの作成・検証時に、生成済みPages Functions bundleが
   `/api/me`固有route、`/api/:path*` fallback、`/api` middlewareを持ち、固有routeが
   fallbackより前であることを静的に検証する。この検証をRunPod image buildより前に行う。
-- 同じ静的検証をroot `pnpm check`のbuild直後にも実行する。release candidate workflowは、
-  自身のcomplete quality gateでも同じ検証を行う。release branchで同内容の手動CIを
-  先行させない。
+- 同じ静的検証をroot `pnpm check`のbuild直後とrelease PRのCI quality gateで実行する。
+  release candidate workflowは同一commitのCI成功を照合してからartifactをbuildする。
 - stagingの全read-only preflightとbrowser installを最初のremote mutationより前に完了する。
 - D1 migrationとcandidate Pages deployの直後、R2 policy、RunPod promotion、
   Orchestrator deployより前にdata-plane readiness専用testを実行する。
