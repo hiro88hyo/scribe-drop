@@ -49,6 +49,11 @@ const runpodReleaseReadinessScriptPath = path.join(
   "verify-runpod-release-readiness.mjs",
 );
 const pagesPromotionScriptPath = path.join(repositoryRoot, "scripts", "pages-promotion.mjs");
+const pagesUploadPermissionScriptPath = path.join(
+  repositoryRoot,
+  "scripts",
+  "pages-upload-permission.mjs",
+);
 const promotePagesCandidateScriptPath = path.join(
   repositoryRoot,
   "scripts",
@@ -159,11 +164,17 @@ const runpodPromotionScriptContents = readFileSync(runpodPromotionScriptPath, "u
 const runpodTemplateApiScriptContents = readFileSync(runpodTemplateApiScriptPath, "utf8");
 const runpodReleaseReadinessScriptContents = readFileSync(runpodReleaseReadinessScriptPath, "utf8");
 const pagesPromotionScriptContents = readFileSync(pagesPromotionScriptPath, "utf8");
+const pagesUploadPermissionScriptContents = readFileSync(pagesUploadPermissionScriptPath, "utf8");
 const promotePagesCandidateScriptContents = readFileSync(promotePagesCandidateScriptPath, "utf8");
 const dockerfileContents = readFileSync(dockerfilePath, "utf8");
 const modelBundleContents = readFileSync(modelBundlePath, "utf8");
 const versions = JSON.parse(readFileSync(versionsPath, "utf8"));
 const image = versions.runpodWorkerImage;
+const publicationPreflightJob = workflowJob(
+  publicationWorkflowContents,
+  "preflight",
+  "publish-runpod-worker.yml",
+);
 const stagingPreflightJob = workflowJob(
   stagingWorkflowContents,
   "preflight",
@@ -347,6 +358,10 @@ for (const [description, value] of Object.entries({
   "stale candidate cancellation": "cancel-in-progress: true",
   "staging-scoped readiness credential": "environment: staging",
   "read-only readiness before costly work": "pnpm run runpod:release-readiness:staging",
+  "Pages upload permission before costly work":
+    "pnpm run cloudflare:pages:upload-permission:verify:staging",
+  "Pages-only staging credential":
+    "CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}",
   "reusable Worker candidate run input": "reusable_worker_candidate_run_id:",
   "reusable source run verification": "verify-reusable-workflow-run.mjs",
   "reusable source ancestry verification": "git merge-base --is-ancestor",
@@ -367,6 +382,27 @@ for (const [description, value] of Object.entries({
 })) {
   requireText(publicationWorkflowContents, value, "publish-runpod-worker.yml", description);
 }
+requireTextOrder(
+  publicationPreflightJob,
+  "Require the versioned release branch",
+  "pnpm run cloudflare:pages:upload-permission:verify:staging",
+  "publish-runpod-worker.yml preflight job",
+  "release identity before Pages upload permission",
+);
+requireTextOrder(
+  publicationPreflightJob,
+  "pnpm run cloudflare:pages:upload-permission:verify:staging",
+  "Verify reusable unchanged RunPod Worker candidate",
+  "publish-runpod-worker.yml preflight job",
+  "Pages upload permission before reusable candidate download",
+);
+requireTextOrder(
+  publicationPreflightJob,
+  "pnpm run cloudflare:pages:upload-permission:verify:staging",
+  "pnpm run runpod:release-readiness:staging",
+  "publish-runpod-worker.yml preflight job",
+  "Pages upload permission before RunPod readiness",
+);
 
 requireTextCount(
   publicationWorkflowContents,
@@ -509,6 +545,9 @@ for (const [job, location] of [[stagingPreflightJob, "preflight job"]]) {
 for (const [description, expected] of Object.entries({
   "Access control-plane fail-fast command":
     "pnpm run cloudflare:access:control-plane:verify:staging",
+  "Pages upload permission fail-fast command":
+    "pnpm run cloudflare:pages:upload-permission:verify:staging",
+  "Pages-only API token": "CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}",
   "authenticated Access fail-fast command": "pnpm run cloudflare:access:service:verify:staging",
   "Cloudflare API token for Access read-back":
     "CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}",
@@ -532,9 +571,16 @@ requireTextOrder(
 requireTextOrder(
   stagingPreflightJob,
   "pnpm run cloudflare:access:control-plane:verify:staging",
+  "pnpm run cloudflare:pages:upload-permission:verify:staging",
+  "deploy-staging-candidate.yml preflight job",
+  "Access control-plane verification before Pages upload permission",
+);
+requireTextOrder(
+  stagingPreflightJob,
+  "pnpm run cloudflare:pages:upload-permission:verify:staging",
   "pnpm run cloudflare:access:service:verify:staging",
   "deploy-staging-candidate.yml preflight job",
-  "Access control-plane verification before data-plane authentication",
+  "Pages upload permission before data-plane authentication",
 );
 requireTextOrder(
   stagingPreflightJob,
@@ -591,6 +637,25 @@ for (const [description, expected] of Object.entries({
 })) {
   requireText(pagesPromotionScriptContents, expected, "pages-promotion.mjs", description);
 }
+for (const [description, expected] of Object.entries({
+  "fixed Pages upload permission endpoint": "/upload-token",
+  "read-only upload capability request": 'method: "GET"',
+  "redirect rejection": 'redirect: "error"',
+  "bounded permission check": "AbortSignal.timeout(15_000)",
+})) {
+  requireText(
+    pagesUploadPermissionScriptContents,
+    expected,
+    "pages-upload-permission.mjs",
+    description,
+  );
+}
+forbidText(
+  pagesUploadPermissionScriptContents,
+  "console.",
+  "pages-upload-permission.mjs",
+  "upload capability logging",
+);
 for (const [description, expected] of Object.entries({
   "workflow identity restriction": "/deploy-staging-candidate.yml@",
   "array-based Wrangler invocation": "spawnSync(",

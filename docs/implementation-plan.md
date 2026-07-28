@@ -583,6 +583,9 @@ service-token claim、認証済み`/api/me`をmedia uploadより前に検証す�
 [ADR 0041](./adr/0041-authenticate-both-staging-access-layers.md)に従い、custom hostnameと
 Pages Previewの二重Accessを、外側用標準2 header、内側用JSON `Authorization`、相異なる
 2 AUDで構成する。3 headerはexact Web originへだけ送り、cookie取得後も継続する。
+[ADR 0042](./adr/0042-preflight-pages-upload-permission.md)に従い、Pages projectのread権限
+だけでdeploy可能と判断せず、短期upload capabilityの取得をrelease-candidateとstaging
+promotionの高コスト処理より前に検証して即座に破棄する。
 [ADR 0040](./adr/0040-verify-staging-service-auth-before-mutation.md)に従い、同じService Auth
 検証をdependency install直後のread-only preflightにも置き、RunPod CLI install、candidate
 download、D1、Pages、backendの変更前にcredential、policy、Access data planeの不整合を

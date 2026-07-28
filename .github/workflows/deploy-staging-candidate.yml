@@ -67,6 +67,11 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: pnpm run cloudflare:access:control-plane:verify:staging
 
+      - name: Verify staging Pages upload permission before remote work
+        env:
+          CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
+        run: pnpm run cloudflare:pages:upload-permission:verify:staging
+
       - name: Verify staging service authentication before remote work
         env:
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
@@ -259,7 +264,7 @@ jobs:
 
       - name: Promote Pages candidate with exact read-back
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
         run: pnpm run cloudflare:pages:promote:staging pages-candidate
 
   deploy-backend:

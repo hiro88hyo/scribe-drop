@@ -35,6 +35,20 @@ pnpm container:build:runpod
 pnpm container:check:runpod
 ```
 
+release candidateまたはstaging promotionをdispatchする前に、
+[ADR 0042](./adr/0042-preflight-pages-upload-permission.md)の同じgateをlocal credentialで
+実行する。
+
+```bash
+pnpm cloudflare:pages:upload-permission:verify:staging
+```
+
+Pages projectの一覧取得だけではdeploy権限の証拠にならない。`GET /upload-token`の成功を
+対象accountのCloudflare Pages Editだけを持つ専用`CLOUDFLARE_PAGES_API_TOKEN`で確認し、
+返された短期capabilityは保持または表示しない。release-candidate preflightではreusable
+candidate downloadとRunPod readinessより前、staging preflightではcandidate download、
+RunPod CLI、D1より前に同じ検査を実行する。
+
 PlaywrightのOS共有libraryは公式の`playwright install --with-deps chromium`で準備する。
 `sudo`を利用できないmanaged hostでは管理者に依頼し、CIはephemeral runnerへだけ導入する。
 E2EのAPI、R2 multipart、artifact downloadは予約済みdummy値のbrowser routeで置換し、

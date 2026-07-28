@@ -60,6 +60,13 @@ jobs:
               ;;
           esac
 
+      - name: Verify staging Pages upload permission before costly work
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
+          SCRIBE_DROP_STAGING_PAGES_PROJECT: ${{ vars.SCRIBE_DROP_STAGING_PAGES_PROJECT }}
+        run: pnpm run cloudflare:pages:upload-permission:verify:staging
+
       - name: Verify reusable unchanged RunPod Worker candidate
         id: reusable-worker
         if: ${{ inputs.reusable_worker_candidate_run_id != '' }}

@@ -239,7 +239,7 @@ promotion workflowのcredentialと非secret設定はrepository共通へ置かず
   `SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME`、
   `SCRIBE_DROP_STAGING_PAGES_PROJECT`、staging RunPodのvisibility、registry auth、GPU、
   data center、4件のretention値
-- Secrets: `CLOUDFLARE_API_TOKEN`、`RUNPOD_API_KEY`、
+- Secrets: `CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_PAGES_API_TOKEN`、`RUNPOD_API_KEY`、
   `SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID`、`CF_ACCESS_CLIENT_ID`、
   `CF_ACCESS_CLIENT_SECRET`
 
@@ -249,8 +249,10 @@ promotion workflowのcredentialと非secret設定はrepository共通へ置かず
 productionへ置かない。production Environmentにはrequired reviewerと`release/*` branch
 制限を必須とする。
 
-Cloudflare API tokenは対象accountのPages、Workers、D1、R2、Queuesをpromotion workflowが
-行う範囲だけに制限する。RunPod keyとendpoint IDはOrchestrator runtime secretとは別に
+stagingの`CLOUDFLARE_PAGES_API_TOKEN`は対象accountのCloudflare Pages Editだけに制限する。
+stagingの`CLOUDFLARE_API_TOKEN`はAccess、Workers、D1、R2、Queuesをpromotion workflowが
+行う範囲だけに制限し、Pages権限を重複させない。production tokenの分割はproduction固有の
+gateと同じ変更で行う。RunPod keyとendpoint IDはOrchestrator runtime secretとは別に
 GitHub Environmentへ登録し、stagingとproductionで共有しない。
 
 Python依存は`uv.lock`に固定し、RunPod SDK 1.11.0、faster-whisper 1.2.1、

@@ -272,7 +272,15 @@ Metrics画面でも無効であることを確認する。
 ```bash
 pnpm cloudflare:secrets:verify:staging
 pnpm cloudflare:access:verify:staging
+pnpm cloudflare:pages:upload-permission:verify:staging
 ```
+
+[ADR 0042](./adr/0042-preflight-pages-upload-permission.md)に従い、Pages projectとdeployment
+一覧のread-backだけでdeploy可能と判断しない。`GET /upload-token`が成功するAPI tokenを
+使い、短期upload capabilityはlog、file、artifactへ保存しない。tokenは対象accountの
+Cloudflare Pages Editだけを持つ`CLOUDFLARE_PAGES_API_TOKEN`として、Access、D1、R2、
+Workers用tokenと分離する。このgateがlocalで成功するまでrelease-candidateとstaging
+promotionをdispatchしない。
 
 ```bash
 pnpm exec wrangler pages deploy \
