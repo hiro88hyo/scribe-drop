@@ -8,14 +8,14 @@ const CREATED_AT = "2026-01-01T00:00:00.000Z";
 const UPDATED_AT = "2026-01-01T00:01:00.000Z";
 const STORAGE_ORIGIN = "https://storage.example.invalid";
 
-type JobStatus = "COMPLETED" | "RUNNING" | "SUBMISSION_PENDING" | "UPLOADED";
+type JobStatus = "COMPLETED" | "FAILED" | "RUNNING" | "SUBMISSION_PENDING" | "UPLOADED";
 
 interface JobSummaryFixture {
   readonly actualSizeBytes: number;
   readonly completedAt: string | null;
   readonly createdAt: string;
   readonly durationSeconds: number | null;
-  readonly errorCode: null;
+  readonly errorCode: "PROCESSING_FAILED" | null;
   readonly expectedSizeBytes: number;
   readonly id: string;
   readonly originalFilename: string;
@@ -60,12 +60,13 @@ type RouteTarget = BrowserContext | Page;
 
 function summary(status: JobStatus, title = "E2E meeting"): JobSummaryFixture {
   const completed = status === "COMPLETED";
+  const failed = status === "FAILED";
   return {
     actualSizeBytes: 11,
     completedAt: completed ? UPDATED_AT : null,
     createdAt: CREATED_AT,
     durationSeconds: completed ? 12 : null,
-    errorCode: null,
+    errorCode: failed ? "PROCESSING_FAILED" : null,
     expectedSizeBytes: 11,
     id: JOB_ID,
     originalFilename: "meeting.mp3",

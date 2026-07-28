@@ -1,8 +1,9 @@
-import { expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { expect, type Browser, type BrowserContext, type Page, type Route } from "@playwright/test";
 
 import {
   headersForAccessRequest,
   serviceTokenCookieMatchesExpectedIdentity,
+  type AccessServiceCredentials,
 } from "./access-service-credentials.js";
 
 export function requireStagingEnvironment(name: string): string {
@@ -42,6 +43,37 @@ export function stagingReadinessUrl(baseURL: string, commitSha: string): string 
 export function hasExpectedStagingOrigin(currentUrl: string, baseURL: string): boolean {
   const expectedOrigin = requireExactHttpsOrigin(baseURL, "Staging base URL");
   return new URL(currentUrl).origin === expectedOrigin;
+}
+
+export function createStagingAccessRouteHandler(
+  appOrigin: string,
+  credentials: AccessServiceCredentials,
+): (route: Route) => Promise<void> {
+  return async (route) => {
+    try {
+      const request = route.request();
+      if (new URL(request.url()).origin !== appOrigin) {
+        throw new Error("Staging Access route received a cross-origin request");
+      }
+      const requestHeaders = await request.allHeaders();
+      const headers = headersForAccessRequest(
+        request.url(),
+        appOrigin,
+        requestHeaders,
+        credentials,
+        request.method(),
+      );
+
+      // The route is registered only for the exact application origin. The
+      // browser follows redirects and sends R2 requests without this adapter.
+      const response = await route.fetch({ headers, maxRedirects: 0 });
+      await route.fulfill({ response });
+    } catch {
+      // route.fetch errors can include request headers in their diagnostic
+      // text. Never propagate the credential-bearing Playwright error.
+      throw new Error("Staging Access request adapter failed");
+    }
+  };
 }
 
 export interface StagingAccessHandshakePage {
@@ -122,30 +154,24 @@ export async function openAuthenticatedStagingPage(
   );
   const appOrigin = requireExactHttpsOrigin(baseURL, "Staging base URL");
   const context = await browser.newContext();
+  const accessRouteHandler = createStagingAccessRouteHandler(appOrigin, credentials);
 
-  await context.route(`${appOrigin}/**`, async (route) => {
-    const request = route.request();
-    if (new URL(request.url()).origin !== appOrigin) {
-      throw new Error("Staging Access route received a cross-origin request");
-    }
-    const requestHeaders = await request.allHeaders();
-    const headers = headersForAccessRequest(
-      request.url(),
-      appOrigin,
-      requestHeaders,
-      credentials,
-      request.method(),
-    );
+  await context.route(`${appOrigin}/**`, accessRouteHandler);
 
-    // The route is registered only for the exact application origin. The
-    // browser follows redirects and sends R2 requests without this adapter.
-    const response = await route.fetch({ headers, maxRedirects: 0 });
-    await route.fulfill({ response });
-  });
+  try {
+    const page = await context.newPage();
+    await completeStagingBrowserAccessHandshake(page, context, baseURL, expectedCommonName);
 
-  const page = await context.newPage();
-  await completeStagingBrowserAccessHandshake(page, context, baseURL, expectedCommonName);
-  return { context, page };
+    // The service-token headers are needed only to exchange them for the
+    // CF_Authorization cookie. Remove the route before returning so no
+    // credential-bearing request callback can outlive the test or context.
+    await context.unrouteAll({ behavior: "wait" });
+    return { context, page };
+  } catch {
+    await context.unrouteAll({ behavior: "ignoreErrors" }).catch(() => undefined);
+    await context.close().catch(() => undefined);
+    throw new Error("Authenticated staging browser setup failed");
+  }
 }
 
 export async function waitForAuthenticatedStagingDataPlane(

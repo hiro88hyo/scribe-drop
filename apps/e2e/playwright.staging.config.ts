@@ -29,7 +29,7 @@ export default defineConfig({
   reporter: "line",
   retries: 0,
   testDir: "./staging-tests",
-  timeout: 25 * 60 * 1_000,
+  timeout: 15 * 60 * 1_000,
   use: {
     baseURL,
     screenshot: "off",

@@ -851,6 +851,10 @@ for (const [description, value] of Object.entries({
   "complete browser request headers including cookies": "await request.allHeaders()",
   "request method forwarding for Fetch Metadata": "request.method(),",
   "redirect boundary before credential reuse": "maxRedirects: 0",
+  "credential-bearing route diagnostic suppression": "Staging Access request adapter failed",
+  "credential route removal after handshake": 'await context.unrouteAll({ behavior: "wait" });',
+  "credential route safe removal on setup failure":
+    'await context.unrouteAll({ behavior: "ignoreErrors" })',
   "authenticated application navigation": "const applicationResponse = await page.goto(baseURL",
   "service-token cookie identity check": "serviceTokenCookieMatchesExpectedIdentity(",
   "staging page origin verification": "hasExpectedStagingOrigin(page.url(), baseURL)",
@@ -882,6 +886,12 @@ for (const [description, value] of Object.entries({
   "cross-origin route rejection": "https://storage.example.test/upload",
   "existing Fetch Metadata preservation": "existingFetchMetadata",
   "safe method Fetch Metadata rejection": "safeGet",
+  "credential-bearing route diagnostic regression":
+    "does not propagate credential-bearing route diagnostics",
+  "credential client ID redaction assertion":
+    "expect(errorMessage).not.toContain(credentials.clientId)",
+  "credential client secret redaction assertion":
+    "expect(errorMessage).not.toContain(credentials.clientSecret)",
 })) {
   requireText(
     stagingAccessCredentialsTestContents,
@@ -966,6 +976,13 @@ requireTextOrder(
   "await completeStagingBrowserAccessHandshake(",
   "staging-auth.ts",
   "same-origin interception before browser Access handshake",
+);
+requireTextOrder(
+  stagingAuthContents,
+  "await completeStagingBrowserAccessHandshake(",
+  'await context.unrouteAll({ behavior: "wait" });',
+  "staging-auth.ts",
+  "credential route removal after browser Access handshake",
 );
 requireTextOrder(
   stagingAuthContents,

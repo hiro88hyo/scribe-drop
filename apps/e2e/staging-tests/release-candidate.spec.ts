@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs";
 
 import { expect, test, type Download } from "@playwright/test";
+import { createJobResponseSchema } from "@scribe-drop/contracts";
 
 import { readCandidateFixture } from "../candidate-fixture.js";
+import { deleteStagingFixtureJob, waitForStagingJobCompletion } from "../staging-lifecycle.js";
 import {
   openAuthenticatedStagingPage,
   requireStagingEnvironment,
@@ -39,6 +41,8 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
     throw new Error("Staging base URL is missing");
   }
   const { context, page } = await openAuthenticatedStagingPage(browser, baseURL);
+  let createdJobId: string | undefined;
+  let fixtureDeleted = false;
 
   try {
     await waitForAuthenticatedStagingDataPlane(page, baseURL);
@@ -61,9 +65,8 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
       mimeType: "audio/mp4a-latm",
       name: "android-aac.m4a",
     });
-    await page
-      .getByLabel("タイトル")
-      .fill(`Release candidate ${requireStagingEnvironment("GITHUB_SHA").slice(0, 12)}`);
+    const title = `Release candidate ${requireStagingEnvironment("GITHUB_SHA").slice(0, 12)}`;
+    await page.getByLabel("タイトル").fill(title);
     for (const label of ["Markdown", "JSON", "SRT"]) {
       await page.getByLabel(label, { exact: true }).check();
     }
@@ -96,21 +99,22 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
       `csrf=${createRequestHeaders["x-csrf-token"] === undefined ? "missing" : "present"}`,
     ].join(", ");
     let createFailure = "non-json response";
+    let createBody: unknown;
     if (
       createResponse.headers()["content-type"]?.toLowerCase().startsWith("application/json") ===
       true
     ) {
-      const body = (await createResponse.json()) as unknown;
+      createBody = (await createResponse.json()) as unknown;
       const code =
-        typeof body === "object" &&
-        body !== null &&
-        "error" in body &&
-        typeof body.error === "object" &&
-        body.error !== null &&
-        "code" in body.error &&
-        typeof body.error.code === "string" &&
-        /^[A-Z][A-Z0-9_]{0,63}$/u.test(body.error.code)
-          ? body.error.code
+        typeof createBody === "object" &&
+        createBody !== null &&
+        "error" in createBody &&
+        typeof createBody.error === "object" &&
+        createBody.error !== null &&
+        "code" in createBody.error &&
+        typeof createBody.error.code === "string" &&
+        /^[A-Z][A-Z0-9_]{0,63}$/u.test(createBody.error.code)
+          ? createBody.error.code
           : "invalid JSON error";
       createFailure = `API error ${code}`;
     }
@@ -118,6 +122,12 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
       createResponse.status(),
       `Create job API must accept the synthetic staging job; received ${createFailure}; ${requestSecurityObservation}`,
     ).toBe(201);
+    const createdJob = createJobResponseSchema.safeParse(createBody);
+    expect(createdJob.success, "Create job API must return the strict upload contract").toBe(true);
+    if (!createdJob.success) {
+      throw new Error("Create job API returned an invalid success response");
+    }
+    createdJobId = createdJob.data.jobId;
 
     const uploadAccepted = page.getByText("アップロードを受け付けました。");
     const uploadError = page.getByRole("alert");
@@ -131,9 +141,7 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
     await expect(uploadAccepted).toBeVisible();
     await page.getByRole("link", { name: "ジョブ詳細を確認" }).click();
 
-    await expect(page.getByText("完了", { exact: true }).first()).toBeVisible({
-      timeout: 20 * 60 * 1_000,
-    });
+    await waitForStagingJobCompletion(page);
 
     for (const [label, filename, validate] of [
       [
@@ -171,10 +179,15 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
       validate(await readSuccessfulDownload(download));
     }
 
-    await page.getByRole("button", { name: "ジョブを削除" }).click();
-    await page.getByRole("button", { name: "完全削除を受け付ける" }).click();
-    await expect(page).toHaveURL(/\/history$/u);
+    await deleteStagingFixtureJob(page, createdJobId);
+    fixtureDeleted = true;
   } finally {
-    await context.close();
+    try {
+      if (createdJobId !== undefined && !fixtureDeleted) {
+        await deleteStagingFixtureJob(page, createdJobId);
+      }
+    } finally {
+      await context.close();
+    }
   }
 });

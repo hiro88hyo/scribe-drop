@@ -4,7 +4,10 @@ import {
   headersForAccessRequest,
   serviceTokenCookieMatchesExpectedIdentity,
 } from "../access-service-credentials.js";
-import { completeStagingBrowserAccessHandshake } from "../staging-auth.js";
+import {
+  completeStagingBrowserAccessHandshake,
+  createStagingAccessRouteHandler,
+} from "../staging-auth.js";
 
 const credentials = {
   clientId: "test-client.access",
@@ -66,6 +69,33 @@ test("adds Access credentials after enforcing the exact application origin", () 
       credentials,
     ),
   ).toThrow("exact application origin");
+});
+
+test("does not propagate credential-bearing route diagnostics", async () => {
+  const routeHandler = createStagingAccessRouteHandler(appOrigin, credentials);
+  const route = {
+    fetch: () =>
+      Promise.reject(
+        new Error(`request failed with ${credentials.clientId} and ${credentials.clientSecret}`),
+      ),
+    fulfill: () => Promise.resolve(),
+    request: () => ({
+      allHeaders: () => Promise.resolve({ accept: "text/html" }),
+      method: () => "GET",
+      url: () => appOrigin,
+    }),
+  };
+
+  let errorMessage = "";
+  try {
+    await routeHandler(route as never);
+  } catch (error) {
+    errorMessage = error instanceof Error ? error.message : String(error);
+  }
+
+  expect(errorMessage).toBe("Staging Access request adapter failed");
+  expect(errorMessage).not.toContain(credentials.clientId);
+  expect(errorMessage).not.toContain(credentials.clientSecret);
 });
 
 test("restores same-origin Fetch Metadata only for exact-origin unsafe requests", () => {
