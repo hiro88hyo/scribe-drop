@@ -41,6 +41,9 @@ Consoleでendpointを保存するとtemplateのregistry credentialが以前の�
 
 Queue、DLQ、D1、R2はenvironmentごとに分離する。操作前にGit branch、Wranglerの
 versionと認証先、Cloudflare account、environment、queue名を声出し確認する。
+使用tokenの役割と全permissionは
+[cloudflare-permissions.md](./cloudflare-permissions.md)を先に確認し、read-only確認の
+途中で権限を追加しない。
 
 ```bash
 pnpm exec wrangler --version
@@ -181,6 +184,12 @@ terminal status、artifact、cancel request、notification outboxを同じservic
   D1書込み失敗で未記録の`NULL`であり、claim期限切れ、winnerなし、
   submission記録なしを同時に満たす場合だけ`FAILED`へ収束させる。同じattemptを
   `/run`へ再送しない。
+- `accepted`のまま10分以内にwinner claimへ進まないattemptは、active attemptと
+  winner不在をCASで確認して`FAILED`へ収束させる。記録済みのexact RunPod job IDを
+  cancelし、成功またはnot-foundをterminal観測として保存する。cancelが不確定なら
+  `job.submission_cancel_deferred`を記録し、FAILEDを戻さず次回Cronで再試行する。
+- `job.submission_start_slo_exceeded`はGPU供給またはendpoint構成のrelease blockerである。
+  claim tokenを15分より延長したり、workflowを自動retryしたりして回避しない。
 - 利用者のretryは`FAILED` jobに新しいgeneration、attempt、token、result prefixを作る。
   RunPod Consoleのprovider-side retryは使わない。
 - cancelはWeb APIが`CANCEL_REQUESTED`を記録し、Cronがwinnerを再確認してRunPod

@@ -17,8 +17,10 @@ Access application、policy、identity provider、Pages secretが揃い、未認
 
 ## Staging application
 
-Zero Trust dashboardまたは必要な最小権限を持つCloudflare API tokenで、次のself-hosted
-applicationを作成する。
+Zero Trust dashboardまたは
+[cloudflare-permissions.md](./cloudflare-permissions.md)の完成形6権限を持つ
+`CLOUDFLARE_API_TOKEN`で、次のself-hosted applicationを作成する。同じ用途のために
+Access専用API tokenを追加しない。
 
 | 項目                      | 値・制約                                        |
 | ------------------------- | ----------------------------------------------- |
@@ -212,13 +214,23 @@ request IDと安全なstatusだけを記録する。
 
 ## CLI権限
 
-WranglerのPages権限とAccess API権限は別である。AccessをAPIで管理する場合は、
-application/policyには`Access: Apps and Policies Write`、organization/IdPの読み取りには
-`Access: Organizations, Identity Providers, and Groups Read`を持つenvironment専用tokenを
-使う。tokenをWrangler OAuth credentialから抽出して再利用せず、secret managerから
-短時間の作業環境へ注入する。
+WranglerのPages権限とAccess API権限は別である。Access application/policyの管理と
+read-backには`Access: Apps and Policies Edit`、Service Tokenの作成、rotation、
+read-backには`Access: Service Tokens Edit`を含む、環境別の`CLOUDFLARE_API_TOKEN`を使う。
+このtokenはD1、Queues、R2、Workersの必須権限も最初から持つ。Access専用tokenの追加、
+Wrangler OAuth credentialの抽出、作業ごとのpermission追加・除去を行わない。
 
-Service Tokenの存在、Client ID、有効期限、policy参照をread-backする診断には
-`Access: Service Tokens Read`、rotationには`Access: Service Tokens Write`だけを追加する。
 rotationは自動test済みのprobeを用意してから一度だけ行い、新secretをlocalで検証して
-GitHub staging Environmentを更新する。調査終了後は不要なWrite権限を除去する。
+GitHub staging Environmentを更新する。API token自体はsecret managerから短時間の作業環境へ
+注入し、値をshell historyやlogへ残さない。
+
+Cloudflare APIのrotation成功とAccess data planeでの新secret受理は同時とは限らない。
+rotation responseを受けたら、新credentialをGitHubへ書く前にmode `0600`の追跡外recovery
+fileへfsyncし、0、1、2、4、8、16秒の上限付きbackoffでrootと`/api/me`を検証する。最初の
+probeが失敗してもrotation APIを再実行しない。processを再開する場合もrecovery fileの
+credentialだけを使い、同じservice tokenを再rotationして新secretを失わない。
+
+新credentialの認証成功後に、GitHub staging Environmentの`CLOUDFLARE_API_TOKEN`、
+`CF_ACCESS_CLIENT_ID`、`CF_ACCESS_CLIENT_SECRET`を更新する。更新時刻のmetadataを確認して
+から旧secretのoverlapを短縮し、旧credentialが拒否されたことを独立probeで確認した後にだけ
+recovery fileを正式なlocal credential fileへ置換する。

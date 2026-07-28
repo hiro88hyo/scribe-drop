@@ -51,6 +51,10 @@ Pages projectの一覧取得だけではdeploy権限の証拠にならない。`
 candidate downloadとRunPod readinessより前、staging preflightではcandidate download、
 RunPod CLI、D1より前に同じ検査を実行する。stagingのPages secret、project、deployment、
 config hashのread-backも同じ専用tokenを使い、一般Cloudflare tokenへPages権限を要求しない。
+Cloudflare資格情報の全役割とexact permissionは
+[cloudflare-permissions.md](./cloudflare-permissions.md)を正とする。
+`pnpm ci:verify`は機械可読policyも検証し、Backend/Access tokenの完成形6権限からの欠落、
+zone権限、未reviewの権限追加を拒否する。
 
 PlaywrightのOS共有libraryは公式の`playwright install --with-deps chromium`で準備する。
 `sudo`を利用できないmanaged hostでは管理者に依頼し、CIはephemeral runnerへだけ導入する。
@@ -159,10 +163,19 @@ claimと認証済み`GET /api/me`をupload前に検証し、実M4A、manifest-la
 削除受付が成功した後だけ24時間有効なacceptance artifactを発行する。
 acceptanceには実IDやoriginを含めず、retention、R2 policy、RunPod GPU・配置・runtime
 invariantをenvironment markerで正規化したpolicy hashを含める。
+[ADR 0043](./adr/0043-bound-runpod-start-slo-and-staging-wait.md)に従い、実E2Eは
+RunPod winner claimを最大10分だけ待つ。FAILED、CANCELLED、EXPIRED、
+SOURCE_MUTATEDは即時失敗とし、COMPLETEDだけを長時間待たない。synthetic jobは
+成功・失敗にかかわらずexact job IDで削除を要求する。GPU開始SLOを満たさないrunを
+自動retryせず、原因と供給状況を確認するまで次のworkflowを起動しない。
 Access service tokenは[ADR 0041](./adr/0041-authenticate-both-staging-access-layers.md)に
 従い、browser requestをhopごとにinterceptする。exact application originだけへ外側用
-標準2 headerと内側用JSON `Authorization`を同時送信し、cookie取得後も継続する。
-routeはexact application originだけに登録し、callback内でもoriginを再検証する。
+標準2 headerと内側用JSON `Authorization`を同時送信する。routeはexact application
+originだけに登録し、callback内でもoriginを再検証する。最初のnavigationで
+`CF_Authorization` cookieとservice principal claimを確認した直後に、進行中handlerの完了を
+待ってrouteを解除する。その後のrequestはcookieだけを使い、credential-bearing callbackを
+test終了処理まで残さない。route errorはrequest headerを含み得るため、raw errorを
+再throwまたはlogしない。
 redirectはbrowserへ返して次requestを新たに評価させる。R2、Access team domain、
 artifact download先、その他のcross-origin requestはadapterを通さず、browserが生成した
 headerを変更しない。`route.fetch()`が同一origin mutationの`Sec-Fetch-Site`を
@@ -235,8 +248,9 @@ workflowへproduction credentialを渡さない。break-glassはADR 0023の記�
 満たす別経路とし、通常workflowの条件を一時的に緩めない。
 production Pagesのupload capability、secret名、deployment list、deploy、config hash
 read-backはproduction専用`CLOUDFLARE_PAGES_API_TOKEN`だけを使う。一般
-`CLOUDFLARE_API_TOKEN`はAccess、D1、R2、Queues、Workersに限定し、Pages権限不足を
-backend mutation後まで遅延させない。
+`CLOUDFLARE_API_TOKEN`は
+[Cloudflare権限表](./cloudflare-permissions.md)のBackend CI権限だけに限定し、
+Pages権限不足をbackend mutation後まで遅延させない。
 production controls verifierはGitHub APIから値ではなく設定名だけを抽出し、default branch
 `develop`上のproduction workflow、required reviewer、custom `release/*` branch policy、
 review済み15変数と4 secretのexact setを要求する。production workflowをrelease branchだけ

@@ -249,11 +249,13 @@ promotion workflowのcredentialと非secret設定はrepository共通へ置かず
 productionへ置かない。production Environmentにはrequired reviewerと`release/*` branch
 制限を必須とする。
 
-各environmentの`CLOUDFLARE_PAGES_API_TOKEN`は対象accountのCloudflare Pages Editだけに
-制限する。各environmentの`CLOUDFLARE_API_TOKEN`はAccess、Workers、D1、R2、Queuesを
-promotion workflowが行う範囲だけに制限し、Pages権限を重複させない。RunPod keyと
-endpoint IDはOrchestrator runtime secretとは別にGitHub Environmentへ登録し、stagingと
-productionで共有しない。
+各Cloudflare tokenのexact permission、account scope、用途、保存先は
+[cloudflare-permissions.md](./cloudflare-permissions.md)を正とする。各environmentの
+`CLOUDFLARE_PAGES_API_TOKEN`は`Cloudflare Pages Edit`だけに制限する。
+`CLOUDFLARE_API_TOKEN`はAccess application/policyとservice tokenの管理、Workers、D1、
+R2、Queuesに必要な完成形6権限を一度に設定し、Pages権限を重複させない。Access変更用の
+追加tokenは作らない。RunPod keyとendpoint IDはOrchestrator runtime secretとは別に
+GitHub Environmentへ登録し、stagingとproductionで共有しない。
 
 Python依存は`uv.lock`に固定し、RunPod SDK 1.11.0、faster-whisper 1.2.1、
 CTranslate2 4.8.1、Pydantic 2.13.4、httpx 0.28.1、Hugging Face Hub 1.24.0を
