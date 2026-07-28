@@ -45,11 +45,13 @@ team domainの`/api/me`を問い合わせ、staging data planeの404と誤分類
 
 ## Status
 
-Accepted
+Superseded by
+[ADR 0039](./0039-use-browser-scoped-access-handshake.md).
 
 ## References
 
 - [ADR 0024: stagingだけでAccess service principalを受け入れる](./0024-staging-only-access-service-principal.md)
 - [ADR 0030: Access service credentialをapplication originへ限定して継続送信する](./0030-scope-access-service-credentials-to-app-origin.md)
+- [ADR 0039: browser-scoped requestでAccess handshakeを行う](./0039-use-browser-scoped-access-handshake.md)
 - [Cloudflare Access service tokens](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/)
 - [Playwright API testing](https://playwright.dev/docs/api-testing)

@@ -554,7 +554,7 @@ requireTextCount(
 for (const [description, value] of Object.entries({
   "same-origin Access credential routing": "headersForAccessRequest(",
   "redirect boundary before credential reuse": "maxRedirects: 0",
-  "cookie-jar Access bootstrap": "establishStagingAccessSession(",
+  "browser-scoped Access bootstrap": "const applicationResponse = await page.goto(baseURL",
   "service-token cookie identity check": "serviceTokenCookieMatchesExpectedIdentity(",
   "staging page origin verification": "hasExpectedStagingOrigin(page.url(), baseURL)",
   "authenticated session preflight": "fetch(url,",
@@ -573,23 +573,42 @@ forbidText(
 );
 forbidText(
   stagingAuthContents,
+  "context.request.",
+  "staging-auth.ts",
+  "API request Access bootstrap",
+);
+forbidText(
+  stagingAuthContents,
+  "establishStagingAccessSession",
+  "staging-auth.ts",
+  "superseded manual Access redirect traversal",
+);
+forbidText(
+  stagingAuthContents,
   'fetch("/api/me"',
   "staging-auth.ts",
   "page-relative staging readiness request",
 );
 requireTextOrder(
   stagingAuthContents,
-  "await establishStagingAccessSession(",
   'await context.route("**/*"',
+  "const applicationResponse = await page.goto(baseURL",
   "staging-auth.ts",
-  "Access cookie bootstrap before browser request interception",
+  "same-origin interception before browser Access handshake",
 );
 requireTextOrder(
   stagingAuthContents,
-  "serviceTokenCookieMatchesExpectedIdentity(",
-  "const page = await context.newPage()",
+  "const applicationResponse = await page.goto(baseURL",
+  "hasExpectedStagingOrigin(page.url(), baseURL)",
   "staging-auth.ts",
-  "service-token cookie verification before browser navigation",
+  "browser Access handshake before final-origin verification",
+);
+requireTextOrder(
+  stagingAuthContents,
+  "hasExpectedStagingOrigin(page.url(), baseURL)",
+  "serviceTokenCookieMatchesExpectedIdentity(",
+  "staging-auth.ts",
+  "final-origin verification before service-token cookie verification",
 );
 requireTextOrder(
   stagingE2eContents,

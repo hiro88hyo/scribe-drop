@@ -137,11 +137,12 @@ claimと認証済み`GET /api/me`をupload前に検証し、実M4A、manifest-la
 削除受付が成功した後だけ24時間有効なacceptance artifactを発行する。
 acceptanceには実IDやoriginを含めず、retention、R2 policy、RunPod GPU・配置・runtime
 invariantをenvironment markerで正規化したpolicy hashを含める。
-Access service tokenは[ADR 0037](./adr/0037-bootstrap-access-before-browser-navigation.md)に
-従い、共有cookie jarを持つrequest clientでredirect先を1 hopずつ検証してからbrowserを
-開く。pageが正規のstaging originへ到達したことを明示的に検証し、
-`/api/me?candidate=<commit>`はそのoriginから構築した絶対URLへ送る。Access team domain上の
-相対URLをdata-plane応答として受け入れない。
+Access service tokenは[ADR 0039](./adr/0039-use-browser-scoped-access-handshake.md)に従い、
+browser requestをhopごとにinterceptし、exact application originだけへcredentialを送る。
+redirectはbrowserへ返して次requestのoriginを再評価し、cross-originへcredentialを継承
+しない。pageが正規のstaging originへ到達し、application cookieのservice principal
+claimが一致することを明示的に検証する。`/api/me?candidate=<commit>`はそのoriginから
+構築した絶対URLへ送り、Access team domain上の相対URLをdata-plane応答として受け入れない。
 staging workflowは[ADR 0036](./adr/0036-defer-custom-domain-readiness-to-acceptance.md)に従い、
 `preflight`、`migrate`、`deploy-pages`、`deploy-backend`、`acceptance`の独立jobへ
 分ける。custom domainの認証済みreadinessは`acceptance`のbrowser lifecycle先頭で確認し、
