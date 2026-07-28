@@ -13,6 +13,43 @@ export function requireStagingEnvironment(name: string): string {
   return value;
 }
 
+export function stagingReadinessPath(commitSha: string): string {
+  if (!/^[0-9a-f]{40}$/u.test(commitSha)) {
+    throw new Error("Expected staging commit is invalid");
+  }
+  return `/api/me?candidate=${commitSha}`;
+}
+
+export type StagingReadinessResponseKind =
+  "api-boundary" | "static-or-edge" | "unknown" | "unavailable";
+
+export function classifyStagingReadinessResponse(
+  headers: Readonly<{
+    cacheControl: string | null;
+    cacheStatus: string | null;
+    contentType: string | null;
+    contentTypeOptions: string | null;
+  }>,
+): StagingReadinessResponseKind {
+  const contentType = headers.contentType?.split(";", 1)[0]?.trim().toLowerCase();
+  const cacheControl = headers.cacheControl
+    ?.split(",")
+    .map((directive) => directive.trim().toLowerCase());
+  const contentTypeOptions = headers.contentTypeOptions?.toLowerCase();
+
+  if (
+    contentType === "application/json" &&
+    cacheControl?.includes("no-store") === true &&
+    contentTypeOptions === "nosniff"
+  ) {
+    return "api-boundary";
+  }
+  if (contentType === "text/html" || headers.cacheStatus?.toUpperCase() === "HIT") {
+    return "static-or-edge";
+  }
+  return "unknown";
+}
+
 export async function openAuthenticatedStagingPage(
   browser: Browser,
   baseURL: string | undefined,
@@ -66,18 +103,30 @@ export async function openAuthenticatedStagingPage(
 }
 
 export async function waitForAuthenticatedStagingDataPlane(page: Page): Promise<void> {
+  const readinessPath = stagingReadinessPath(requireStagingEnvironment("EXPECTED_COMMIT_SHA"));
   await expect
     .poll(
-      async () =>
-        page.evaluate(async () => {
+      async () => {
+        const observation = await page.evaluate(async (path) => {
           try {
-            const response = await fetch("/api/me", {
+            const response = await fetch(path, {
               cache: "no-store",
               credentials: "same-origin",
               headers: { Accept: "application/json" },
             });
+            const responseHeaders = {
+              cacheControl: response.headers.get("Cache-Control"),
+              cacheStatus: response.headers.get("CF-Cache-Status"),
+              contentType: response.headers.get("Content-Type"),
+              contentTypeOptions: response.headers.get("X-Content-Type-Options"),
+            };
             if (!response.ok) {
-              return { email: null, ok: false, status: response.status };
+              return {
+                email: null,
+                ok: false,
+                responseHeaders,
+                status: response.status,
+              };
             }
             const body = (await response.json()) as unknown;
             const email =
@@ -90,11 +139,21 @@ export async function waitForAuthenticatedStagingDataPlane(page: Page): Promise<
               typeof body.user.email === "string"
                 ? body.user.email
                 : null;
-            return { email, ok: true, status: response.status };
+            return { email, ok: true, responseHeaders, status: response.status };
           } catch {
-            return { email: null, ok: false, status: 0 };
+            return { email: null, ok: false, responseHeaders: null, status: 0 };
           }
-        }),
+        }, readinessPath);
+        return {
+          email: observation.email,
+          ok: observation.ok,
+          responseKind:
+            observation.responseHeaders === null
+              ? "unavailable"
+              : classifyStagingReadinessResponse(observation.responseHeaders),
+          status: observation.status,
+        };
+      },
       {
         intervals: [1_000, 2_000, 5_000, 10_000],
         message: "Expected the authenticated staging data plane to converge",
@@ -104,6 +163,7 @@ export async function waitForAuthenticatedStagingDataPlane(page: Page): Promise<
     .toEqual({
       email: "staging-e2e@example.invalid",
       ok: true,
+      responseKind: "api-boundary",
       status: 200,
     });
   await expect(page.getByText("staging-e2e@example.invalid")).toBeVisible();

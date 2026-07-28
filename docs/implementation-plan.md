@@ -579,9 +579,13 @@ rootから検出し、同じtargetへのread-only preflightを最初のremote mu
 service credentialは正規Web originへだけ継続送信する。Pages config hash、Access
 service-token claim、認証済み`/api/me`をmedia uploadより前に検証する。
 [ADR 0033](./adr/0033-wait-for-pages-data-plane-convergence.md)に従い、Pagesの
-D1 migrationとdeploy直後に認証済み`/api/me`を上限付きでpollし、custom domainの
+D1 migrationとdeploy直後に認証済み`/api/me?candidate=<commit>`を上限付きでpollし、custom domainの
 data-planeと固定E2E identityが収束してからR2、RunPod、Orchestrator、media uploadへ
 進む。
+[ADR 0035](./adr/0035-isolate-staging-readiness-from-mutations.md)に従い、stagingは
+preflight、migration、Pages、read-only readiness、backend、acceptanceを独立jobにする。
+readiness失敗で成功済みmutationを再実行せず、Pages deployはexact read-backを先行して
+同じcandidateへのmutationを省略する。
 [ADR 0031](./adr/0031-retry-only-runpod-read-commands.md)に従い、RunPod promotionの
 read-only CLI一時障害だけを上限付きで再試行し、mutationは再試行しない。
 [ADR 0032](./adr/0032-automate-runpod-default-port-normalization.md)に従い、providerが
@@ -594,6 +598,8 @@ container build、scanを開始しない。candidate作成後のstagingでは完
 release-to-main PRはstaging acceptance成功までclosedに保ち、通常のrelease commitは
 candidate 1本とstaging 1本に限定する。その後、同じPRをreopenして確定commitの最終CIを
 一度だけ実行する。原因修正と対象gateの成功なしに失敗workflowを再dispatchしない。
+変更したpromotionロジックとworkflow構造を含むlocal gateが成功するまでremote workflowを
+起動せず、remote runをlocal testの代替にしない。
 
 初回production bootstrapではOrchestratorの必須secretであるRunPod endpoint IDを先に
 確定する必要があるため、

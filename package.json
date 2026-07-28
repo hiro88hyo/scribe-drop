@@ -43,6 +43,7 @@
     "cloudflare:secrets:verify:production:pages": "node scripts/verify-production-pages-secrets.mjs",
     "cloudflare:readback:production": "node scripts/verify-cloudflare-readback.mjs production",
     "cloudflare:readback:staging": "node scripts/verify-cloudflare-readback.mjs staging",
+    "cloudflare:pages:promote:staging": "node scripts/promote-pages-candidate.mjs",
     "container:build:runpod": "docker buildx build --load --tag scribe-drop-runpod-worker:local --file apps/runpod-worker/Dockerfile .",
     "container:check:runpod": "docker run --rm --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m --entrypoint python scribe-drop-runpod-worker:local -m scribe_drop_worker.container_check",
     "d1:migrate:local": "wrangler d1 migrations apply SCRIBE_DROP_DB --local --config apps/orchestrator/wrangler.toml",

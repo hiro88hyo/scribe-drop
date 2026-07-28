@@ -23,11 +23,11 @@ env:
   WRANGLER_WRITE_LOGS: "0"
 
 jobs:
-  deploy:
-    name: Verify, deploy, and accept candidate
+  preflight:
+    name: Verify candidate and all remote prerequisites
     environment: staging
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 15
     env:
       AUDIT_RETENTION_DAYS: ${{ vars.AUDIT_RETENTION_DAYS }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -95,7 +95,7 @@ jobs:
             .github/workflows/publish-runpod-worker.yml \
             "${CANDIDATE_RUN_ID}"
 
-      - name: Download immutable release candidate
+      - name: Download and verify immutable release candidate
         env:
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
           GH_TOKEN: ${{ github.token }}
@@ -142,10 +142,53 @@ jobs:
           SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID: ${{ secrets.SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID }}
         run: pnpm run runpod:preflight:staging
 
-      - name: Install fixed Playwright browser before remote mutation
-        run: pnpm --filter @scribe-drop/e2e exec playwright install --with-deps chromium
+  migrate:
+    name: Apply candidate D1 migrations
+    needs: preflight
+    environment: staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      AUDIT_RETENTION_DAYS: ${{ vars.AUDIT_RETENTION_DAYS }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      EXPECTED_COMMIT_SHA: ${{ github.sha }}
+      MULTIPART_RETENTION_HOURS: ${{ vars.MULTIPART_RETENTION_HOURS }}
+      RELEASE_CANDIDATE_DIRECTORY: release-candidate
+      RESULT_RETENTION_DAYS: ${{ vars.RESULT_RETENTION_DAYS }}
+      SCRIBE_DROP_CANDIDATE_MIGRATIONS_DIR: ../../release-candidate/migrations
+      SCRIBE_DROP_STAGING_D1_DATABASE_ID: ${{ vars.SCRIBE_DROP_STAGING_D1_DATABASE_ID }}
+      SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN: ${{ vars.SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN }}
+      SCRIBE_DROP_STAGING_WEB_ORIGIN: ${{ vars.SCRIBE_DROP_STAGING_WEB_ORIGIN }}
+      SOURCE_RETENTION_DAYS: ${{ vars.SOURCE_RETENTION_DAYS }}
+    steps:
+      - name: Check out release commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Apply candidate D1 migrations
+      - name: Set up Volta
+        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
+        with:
+          volta-version: 2.0.2
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Export release version
+        run: printf 'EXPECTED_RELEASE_VERSION=%s\n' "$(node -p "require('./package.json').version")" >>"${GITHUB_ENV}"
+
+      - name: Download and verify immutable release candidate
+        env:
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "${CANDIDATE_RUN_ID}" \
+            --name "scribe-drop-release-candidate-${GITHUB_SHA}" \
+            --dir release-candidate
+          pnpm run candidate:verify release-candidate
+
+      - name: Render migration deployment configuration
+        run: pnpm run cloudflare:config:staging:orchestrator
+
+      - name: Apply candidate D1 migrations exactly once
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
@@ -154,24 +197,148 @@ jobs:
             --config .wrangler/deploy/orchestrator-staging.toml \
             --env staging
 
-      - name: Deploy exact candidate Pages output
+  deploy-pages:
+    name: Promote exact candidate Pages deployment
+    needs: migrate
+    environment: staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      EXPECTED_COMMIT_SHA: ${{ github.sha }}
+      RELEASE_CANDIDATE_DIRECTORY: release-candidate
+      SCRIBE_DROP_STAGING_ACCESS_AUDIENCE: ${{ vars.SCRIBE_DROP_STAGING_ACCESS_AUDIENCE }}
+      SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN: ${{ vars.SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN }}
+      SCRIBE_DROP_STAGING_D1_DATABASE_ID: ${{ vars.SCRIBE_DROP_STAGING_D1_DATABASE_ID }}
+      SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME: ${{ vars.SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME }}
+      SCRIBE_DROP_STAGING_PAGES_PROJECT: ${{ vars.SCRIBE_DROP_STAGING_PAGES_PROJECT }}
+      SCRIBE_DROP_STAGING_WEB_ORIGIN: ${{ vars.SCRIBE_DROP_STAGING_WEB_ORIGIN }}
+    steps:
+      - name: Check out release commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Volta
+        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
+        with:
+          volta-version: 2.0.2
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Export release version
+        run: printf 'EXPECTED_RELEASE_VERSION=%s\n' "$(node -p "require('./package.json').version")" >>"${GITHUB_ENV}"
+
+      - name: Download and verify immutable release candidate
+        env:
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "${CANDIDATE_RUN_ID}" \
+            --name "scribe-drop-release-candidate-${GITHUB_SHA}" \
+            --dir release-candidate
+          pnpm run candidate:verify release-candidate
+
+      - name: Assemble verified Pages advanced-mode output
+        run: pnpm run candidate:pages release-candidate pages-candidate
+
+      - name: Render Pages deployment configuration
+        run: pnpm run cloudflare:config:staging:web
+
+      - name: Promote Pages candidate with exact read-back
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: |
-          pnpm exec wrangler pages deploy "${GITHUB_WORKSPACE}/pages-candidate" \
-            --cwd apps/web \
-            --project-name "${SCRIBE_DROP_STAGING_PAGES_PROJECT}" \
-            --branch develop \
-            --commit-hash "${GITHUB_SHA}" \
-            --commit-message "release candidate ${GITHUB_SHA}" \
-            --commit-dirty=false \
-            --no-bundle
+        run: pnpm run cloudflare:pages:promote:staging pages-candidate
 
-      - name: Verify authenticated Pages data plane before backend promotion
+  pages-readiness:
+    name: Verify authenticated Pages data plane
+    needs: deploy-pages
+    environment: staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      EXPECTED_COMMIT_SHA: ${{ github.sha }}
+      SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME: ${{ vars.SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME }}
+      SCRIBE_DROP_STAGING_WEB_ORIGIN: ${{ vars.SCRIBE_DROP_STAGING_WEB_ORIGIN }}
+    steps:
+      - name: Check out release commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Volta
+        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
+        with:
+          volta-version: 2.0.2
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install fixed Playwright browser
+        run: pnpm --filter @scribe-drop/e2e exec playwright install --with-deps chromium
+
+      - name: Verify authenticated Pages data plane without mutation
         env:
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
         run: pnpm run test:e2e:staging:readiness
+
+  deploy-backend:
+    name: Promote R2, RunPod, and Orchestrator
+    needs: pages-readiness
+    environment: staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      AUDIT_RETENTION_DAYS: ${{ vars.AUDIT_RETENTION_DAYS }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      EXPECTED_COMMIT_SHA: ${{ github.sha }}
+      MULTIPART_RETENTION_HOURS: ${{ vars.MULTIPART_RETENTION_HOURS }}
+      RELEASE_CANDIDATE_DIRECTORY: release-candidate
+      RESULT_RETENTION_DAYS: ${{ vars.RESULT_RETENTION_DAYS }}
+      SCRIBE_DROP_CANDIDATE_MIGRATIONS_DIR: ../../release-candidate/migrations
+      SCRIBE_DROP_STAGING_ACCESS_AUDIENCE: ${{ vars.SCRIBE_DROP_STAGING_ACCESS_AUDIENCE }}
+      SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN: ${{ vars.SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN }}
+      SCRIBE_DROP_STAGING_D1_DATABASE_ID: ${{ vars.SCRIBE_DROP_STAGING_D1_DATABASE_ID }}
+      SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME: ${{ vars.SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME }}
+      SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN: ${{ vars.SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN }}
+      SCRIBE_DROP_STAGING_PAGES_PROJECT: ${{ vars.SCRIBE_DROP_STAGING_PAGES_PROJECT }}
+      SCRIBE_DROP_STAGING_RUNPOD_DATACENTER_IDS: ${{ vars.SCRIBE_DROP_STAGING_RUNPOD_DATACENTER_IDS }}
+      SCRIBE_DROP_STAGING_RUNPOD_GPU_ID: ${{ vars.SCRIBE_DROP_STAGING_RUNPOD_GPU_ID }}
+      SCRIBE_DROP_STAGING_RUNPOD_IMAGE_VISIBILITY: ${{ vars.SCRIBE_DROP_STAGING_RUNPOD_IMAGE_VISIBILITY }}
+      SCRIBE_DROP_STAGING_RUNPOD_REGISTRY_AUTH_ID: ${{ vars.SCRIBE_DROP_STAGING_RUNPOD_REGISTRY_AUTH_ID }}
+      SCRIBE_DROP_STAGING_WEB_ORIGIN: ${{ vars.SCRIBE_DROP_STAGING_WEB_ORIGIN }}
+      SOURCE_RETENTION_DAYS: ${{ vars.SOURCE_RETENTION_DAYS }}
+    steps:
+      - name: Check out release commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Volta
+        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
+        with:
+          volta-version: 2.0.2
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install checksummed RunPod CLI
+        run: pnpm run runpodctl:install
+
+      - name: Export release version
+        run: printf 'EXPECTED_RELEASE_VERSION=%s\n' "$(node -p "require('./package.json').version")" >>"${GITHUB_ENV}"
+
+      - name: Download and verify immutable release candidate
+        env:
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "${CANDIDATE_RUN_ID}" \
+            --name "scribe-drop-release-candidate-${GITHUB_SHA}" \
+            --dir release-candidate
+          pnpm run candidate:verify release-candidate
+
+      - name: Render backend deployment configuration
+        run: |
+          pnpm run cloudflare:config:staging
+          pnpm run runpod:config:staging
+          pnpm run environment:policy:export staging
 
       - name: Apply reviewed R2 browser and retention policies
         env:
@@ -206,6 +373,63 @@ jobs:
             --config .wrangler/deploy/orchestrator-staging.toml \
             --env staging
 
+  acceptance:
+    name: Verify live resources and run real staging acceptance
+    needs: deploy-backend
+    environment: staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AUDIT_RETENTION_DAYS: ${{ vars.AUDIT_RETENTION_DAYS }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      EXPECTED_COMMIT_SHA: ${{ github.sha }}
+      MULTIPART_RETENTION_HOURS: ${{ vars.MULTIPART_RETENTION_HOURS }}
+      RELEASE_CANDIDATE_DIRECTORY: release-candidate
+      RESULT_RETENTION_DAYS: ${{ vars.RESULT_RETENTION_DAYS }}
+      SCRIBE_DROP_CANDIDATE_MIGRATIONS_DIR: ../../release-candidate/migrations
+      SCRIBE_DROP_STAGING_ACCESS_AUDIENCE: ${{ vars.SCRIBE_DROP_STAGING_ACCESS_AUDIENCE }}
+      SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN: ${{ vars.SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN }}
+      SCRIBE_DROP_STAGING_D1_DATABASE_ID: ${{ vars.SCRIBE_DROP_STAGING_D1_DATABASE_ID }}
+      SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME: ${{ vars.SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME }}
+      SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN: ${{ vars.SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN }}
+      SCRIBE_DROP_STAGING_PAGES_PROJECT: ${{ vars.SCRIBE_DROP_STAGING_PAGES_PROJECT }}
+      SCRIBE_DROP_STAGING_RUNPOD_DATACENTER_IDS: ${{ vars.SCRIBE_DROP_STAGING_RUNPOD_DATACENTER_IDS }}
+      SCRIBE_DROP_STAGING_RUNPOD_GPU_ID: ${{ vars.SCRIBE_DROP_STAGING_RUNPOD_GPU_ID }}
+      SCRIBE_DROP_STAGING_RUNPOD_IMAGE_VISIBILITY: ${{ vars.SCRIBE_DROP_STAGING_RUNPOD_IMAGE_VISIBILITY }}
+      SCRIBE_DROP_STAGING_RUNPOD_REGISTRY_AUTH_ID: ${{ vars.SCRIBE_DROP_STAGING_RUNPOD_REGISTRY_AUTH_ID }}
+      SCRIBE_DROP_STAGING_WEB_ORIGIN: ${{ vars.SCRIBE_DROP_STAGING_WEB_ORIGIN }}
+      SOURCE_RETENTION_DAYS: ${{ vars.SOURCE_RETENTION_DAYS }}
+    steps:
+      - name: Check out release commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Volta
+        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
+        with:
+          volta-version: 2.0.2
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Export release version
+        run: printf 'EXPECTED_RELEASE_VERSION=%s\n' "$(node -p "require('./package.json').version")" >>"${GITHUB_ENV}"
+
+      - name: Download and verify immutable release candidate
+        env:
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "${CANDIDATE_RUN_ID}" \
+            --name "scribe-drop-release-candidate-${GITHUB_SHA}" \
+            --dir release-candidate
+          pnpm run candidate:verify release-candidate
+
+      - name: Render exact read-back and acceptance configuration
+        run: |
+          pnpm run cloudflare:config:staging
+          pnpm run runpod:config:staging
+          pnpm run environment:policy:export staging
+
       - name: Verify candidate and live resource read-back
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -214,6 +438,9 @@ jobs:
           pnpm run candidate:verify release-candidate
           pnpm run cloudflare:readback:staging
           pnpm run cloudflare:access:verify:staging
+
+      - name: Install fixed Playwright browser
+        run: pnpm --filter @scribe-drop/e2e exec playwright install --with-deps chromium
 
       - name: Run real staging M4A lifecycle
         env:

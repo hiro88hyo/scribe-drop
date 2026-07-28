@@ -329,6 +329,15 @@ imageと合成する。applicationの生成・再検証に失敗した場合はc
 PRをreopenした後にcode、dependency、migration、deployment設定を変更する必要が生じた
 場合はPRをcloseし、既存candidateとstaging evidenceを無効化して手順1からやり直す。
 
+staging workflowは[ADR 0035](./adr/0035-isolate-staging-readiness-from-mutations.md)の
+job境界を維持する。Pages readinessの404ではworkflow全体を再dispatchしない。
+`pages-readiness`はread-onlyのまま停止し、成功済み`migrate`と`deploy-pages`を再実行
+しない。Pages promotion自体を再開する場合も、公式APIのexact read-backが一致すれば
+deployを省略し、結果不明のmutationを自動再送しない。
+
+candidate、staging、production workflowを起動する前に、変更対象のlocal testと標準local
+gateを完了する。remote workflowをlocal検証の代替に使用しない。
+
 stagingのAccess自動試験は
 [ADR 0024](./adr/0024-staging-only-access-service-principal.md)の専用service principalだけを
 使用する。service tokenのID/secretはstaging Environment secretに置き、production

@@ -41,6 +41,12 @@ const runpodReleaseReadinessScriptPath = path.join(
   "scripts",
   "verify-runpod-release-readiness.mjs",
 );
+const pagesPromotionScriptPath = path.join(repositoryRoot, "scripts", "pages-promotion.mjs");
+const promotePagesCandidateScriptPath = path.join(
+  repositoryRoot,
+  "scripts",
+  "promote-pages-candidate.mjs",
+);
 const dockerfilePath = path.join(repositoryRoot, "apps", "runpod-worker", "Dockerfile");
 const modelBundlePath = path.join(
   repositoryRoot,
@@ -83,6 +89,20 @@ function requireTextOrder(contents, earlier, later, location, description) {
   if (earlierIndex === -1 || laterIndex === -1 || earlierIndex >= laterIndex) {
     failures.push(`${location}: invalid ${description} ordering`);
   }
+}
+
+function workflowJob(contents, jobName, location) {
+  const marker = `  ${jobName}:\n`;
+  const start = contents.indexOf(marker);
+  if (start === -1) {
+    failures.push(`${location}: missing job ${jobName}`);
+    return "";
+  }
+  const remainder = contents.slice(start + marker.length);
+  const nextJob = remainder.search(/^ {2}[a-z0-9-]+:\n/mu);
+  return nextJob === -1
+    ? contents.slice(start)
+    : contents.slice(start, start + marker.length + nextJob);
 }
 
 const workflowFiles = readdirSync(workflowsDirectory)
@@ -129,10 +149,42 @@ const runpodDeploymentScriptContents = readFileSync(runpodDeploymentScriptPath, 
 const runpodPromotionScriptContents = readFileSync(runpodPromotionScriptPath, "utf8");
 const runpodTemplateApiScriptContents = readFileSync(runpodTemplateApiScriptPath, "utf8");
 const runpodReleaseReadinessScriptContents = readFileSync(runpodReleaseReadinessScriptPath, "utf8");
+const pagesPromotionScriptContents = readFileSync(pagesPromotionScriptPath, "utf8");
+const promotePagesCandidateScriptContents = readFileSync(promotePagesCandidateScriptPath, "utf8");
 const dockerfileContents = readFileSync(dockerfilePath, "utf8");
 const modelBundleContents = readFileSync(modelBundlePath, "utf8");
 const versions = JSON.parse(readFileSync(versionsPath, "utf8"));
 const image = versions.runpodWorkerImage;
+const stagingPreflightJob = workflowJob(
+  stagingWorkflowContents,
+  "preflight",
+  "deploy-staging-candidate.yml",
+);
+const stagingMigrationJob = workflowJob(
+  stagingWorkflowContents,
+  "migrate",
+  "deploy-staging-candidate.yml",
+);
+const stagingPagesDeploymentJob = workflowJob(
+  stagingWorkflowContents,
+  "deploy-pages",
+  "deploy-staging-candidate.yml",
+);
+const stagingPagesReadinessJob = workflowJob(
+  stagingWorkflowContents,
+  "pages-readiness",
+  "deploy-staging-candidate.yml",
+);
+const stagingBackendJob = workflowJob(
+  stagingWorkflowContents,
+  "deploy-backend",
+  "deploy-staging-candidate.yml",
+);
+const stagingAcceptanceJob = workflowJob(
+  stagingWorkflowContents,
+  "acceptance",
+  "deploy-staging-candidate.yml",
+);
 
 for (const [filename, contents] of [
   ["publish-runpod-worker.yml", publicationWorkflowContents],
@@ -364,7 +416,7 @@ for (const [description, value] of Object.entries({
   "candidate-only RunPod promotion": "pnpm run runpod:promote:staging",
   "staging environment parity evidence": "pnpm run environment:policy:export staging",
   "Orchestrator no-rebuild deployment": "wrangler deploy release-candidate/orchestrator/index.js",
-  "Pages no-rebuild deployment": "--no-bundle",
+  "idempotent Pages promotion": "pnpm run cloudflare:pages:promote:staging pages-candidate",
   "live Cloudflare read-back": "pnpm run cloudflare:readback:staging",
   "early authenticated Pages readiness": "pnpm run test:e2e:staging:readiness",
   "real service E2E": "pnpm run test:e2e:staging",
@@ -380,72 +432,114 @@ for (const [description, value] of Object.entries({
 requireTextCount(
   stagingWorkflowContents,
   "--cwd apps/web",
-  2,
+  1,
   "deploy-staging-candidate.yml",
-  "Pages app-root config discovery",
+  "read-only Pages app-root config discovery",
+);
+for (const [job, expected, description] of [
+  [stagingMigrationJob, "needs: preflight", "migration dependency on preflight"],
+  [stagingPagesDeploymentJob, "needs: migrate", "Pages dependency on migration"],
+  [
+    stagingPagesReadinessJob,
+    "needs: deploy-pages",
+    "read-only Pages readiness dependency on Pages deployment",
+  ],
+  [stagingBackendJob, "needs: pages-readiness", "backend dependency on read-only Pages readiness"],
+  [stagingAcceptanceJob, "needs: deploy-backend", "acceptance dependency on backend promotion"],
+]) {
+  requireText(job, expected, "deploy-staging-candidate.yml", description);
+}
+
+for (const [job, location] of [
+  [stagingPreflightJob, "preflight job"],
+  [stagingPagesReadinessJob, "Pages readiness job"],
+]) {
+  for (const [description, forbidden] of Object.entries({
+    "D1 mutation": "d1 migrations apply",
+    "Orchestrator mutation": "wrangler deploy",
+    "Pages mutation": "cloudflare:pages:promote:staging",
+    "R2 mutation": "r2 bucket cors set",
+    "RunPod mutation": "runpod:promote:staging",
+  })) {
+    forbidText(job, forbidden, `deploy-staging-candidate.yml ${location}`, description);
+  }
+}
+
+for (const [description, forbidden] of Object.entries({
+  "backend mutation": "runpod:promote:staging",
+  "D1 mutation": "d1 migrations apply",
+  "Orchestrator mutation": "wrangler deploy",
+  "Pages mutation": "cloudflare:pages:promote:staging",
+  "R2 mutation": "r2 bucket cors set",
+})) {
+  forbidText(
+    stagingPagesReadinessJob,
+    forbidden,
+    "deploy-staging-candidate.yml pages-readiness job",
+    description,
+  );
+}
+
+requireText(
+  stagingPagesReadinessJob,
+  "Install fixed Playwright browser",
+  "deploy-staging-candidate.yml pages-readiness job",
+  "browser installation inside isolated readiness job",
 );
 requireTextOrder(
-  stagingWorkflowContents,
-  "Verify Pages deploy configuration and target",
-  "Apply candidate D1 migrations",
-  "deploy-staging-candidate.yml",
-  "Pages preflight before staging mutation",
+  stagingPagesReadinessJob,
+  "Install fixed Playwright browser",
+  "Verify authenticated Pages data plane without mutation",
+  "deploy-staging-candidate.yml pages-readiness job",
+  "browser installation before read-only readiness",
 );
 requireTextOrder(
-  stagingWorkflowContents,
-  "Verify RunPod control plane before any mutation",
-  "Apply candidate D1 migrations",
-  "deploy-staging-candidate.yml",
-  "RunPod preflight before staging mutation",
-);
-requireTextOrder(
-  stagingWorkflowContents,
-  "Install fixed Playwright browser before remote mutation",
-  "Apply candidate D1 migrations",
-  "deploy-staging-candidate.yml",
-  "browser installation before staging mutation",
-);
-requireTextOrder(
-  stagingWorkflowContents,
-  "Apply candidate D1 migrations",
-  "Deploy exact candidate Pages output",
-  "deploy-staging-candidate.yml",
-  "migration before candidate Pages deployment",
-);
-requireTextOrder(
-  stagingWorkflowContents,
-  "Deploy exact candidate Pages output",
-  "Verify authenticated Pages data plane before backend promotion",
-  "deploy-staging-candidate.yml",
-  "candidate Pages deployment before data-plane readiness",
-);
-requireTextOrder(
-  stagingWorkflowContents,
-  "Verify authenticated Pages data plane before backend promotion",
-  "Apply reviewed R2 browser and retention policies",
-  "deploy-staging-candidate.yml",
-  "data-plane readiness before R2 mutation",
-);
-requireTextOrder(
-  stagingWorkflowContents,
-  "Verify authenticated Pages data plane before backend promotion",
-  "Promote the candidate RunPod image",
-  "deploy-staging-candidate.yml",
-  "data-plane readiness before RunPod promotion",
-);
-requireTextOrder(
-  stagingWorkflowContents,
-  "Deploy exact candidate Pages output",
+  stagingAcceptanceJob,
   "Verify candidate and live resource read-back",
-  "deploy-staging-candidate.yml",
-  "Pages deployment before live configuration read-back",
+  "Run real staging M4A lifecycle",
+  "deploy-staging-candidate.yml acceptance job",
+  "live read-back before real staging E2E",
+);
+
+for (const [description, expected] of Object.entries({
+  "fixed Cloudflare Pages API": "https://api.cloudflare.com/client/v4/accounts/",
+  "production deployment query": "deployments?env=production&page=1&per_page=1",
+  "Functions deployment verification": "deployment.uses_functions === true",
+  "exact config hash verification": 'createHash("sha256")',
+  "read-only request method": 'method: "GET"',
+  "redirect rejection": 'redirect: "error"',
+  "unknown mutation outcome read-back":
+    "Cloudflare Pages deployment outcome is unknown and read-back did not match",
+})) {
+  requireText(pagesPromotionScriptContents, expected, "pages-promotion.mjs", description);
+}
+for (const [description, expected] of Object.entries({
+  "workflow identity restriction": "/deploy-staging-candidate.yml@",
+  "array-based Wrangler invocation": "spawnSync(",
+  "no-bundle Pages deployment": '"--no-bundle"',
+  "single promotion call": "promotePagesCandidate(",
+})) {
+  requireText(
+    promotePagesCandidateScriptContents,
+    expected,
+    "promote-pages-candidate.mjs",
+    description,
+  );
+}
+requireTextCount(
+  promotePagesCandidateScriptContents,
+  '"pages",\n      "deploy"',
+  1,
+  "promote-pages-candidate.mjs",
+  "single Pages mutation boundary",
 );
 
 for (const [description, value] of Object.entries({
   "same-origin Access credential routing": "headersForAccessRequest(",
   "redirect boundary before credential reuse": "maxRedirects: 0",
   "service-token cookie identity check": "serviceTokenCookieMatchesExpectedIdentity(",
-  "authenticated session preflight": 'fetch("/api/me"',
+  "authenticated session preflight": "fetch(path,",
+  "candidate-specific readiness URL": "/api/me?candidate=",
   "bounded Pages data-plane convergence":
     "Expected the authenticated staging data plane to converge",
 })) {

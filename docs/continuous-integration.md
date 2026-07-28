@@ -135,15 +135,24 @@ claimと認証済み`GET /api/me`をupload前に検証し、実M4A、manifest-la
 削除受付が成功した後だけ24時間有効なacceptance artifactを発行する。
 acceptanceには実IDやoriginを含めず、retention、R2 policy、RunPod GPU・配置・runtime
 invariantをenvironment markerで正規化したpolicy hashを含める。
+staging workflowは[ADR 0035](./adr/0035-isolate-staging-readiness-from-mutations.md)に従い、
+`preflight`、`migrate`、`deploy-pages`、`pages-readiness`、`deploy-backend`、
+`acceptance`の独立jobへ分ける。`pages-readiness`はGETとbrowser setupだけを持ち、
+mutation commandを持たない。404またはbrowser setup失敗で、成功済みmigrationとPages
+promotionを再実行しない。
+Pages promotionは公式APIでcommit、production branch、deploy status、`uses_functions`、
+設定hashを先に照合し、exact candidateがactiveならdeployを省略する。deploy応答喪失時も
+mutationを再送せず、上限付きread-backだけで結果を確定する。
 Pagesは[ADR 0029](./adr/0029-discover-pages-config-from-app-root.md)に従い、app rootから
 追跡外config redirectを検出する。最初のremote mutationより前に同じ`--cwd`とprojectで
 read-only deployment listを取得し、config discoveryまたは認証に失敗した場合は停止する。
 staging browser credentialのorigin制限は
 [ADR 0030](./adr/0030-scope-access-service-credentials-to-app-origin.md)を正とする。
-[ADR 0033](./adr/0033-wait-for-pages-data-plane-convergence.md)に従い、全preflightと
-browser installをremote mutation前に完了する。D1 migrationとPages deployの直後に
-認証済み`/api/me`を上限付きでpollし、custom domainのdata-planeと固定E2E identityが
-収束してからR2、RunPod、Orchestrator、media lifecycleへ進む。
+[ADR 0033](./adr/0033-wait-for-pages-data-plane-convergence.md)に従い、全read-only
+control-plane preflightをremote mutation前に完了する。D1 migrationとPages deployの直後、
+独立readiness jobで認証済み`/api/me?candidate=<commit>`を上限付きでpollし、custom
+domainのdata-planeと固定E2E identityが収束してからR2、RunPod、Orchestrator、media
+lifecycleへ進む。
 RunPod promotionは[ADR 0031](./adr/0031-retry-only-runpod-read-commands.md)と
 [ADR 0034](./adr/0034-fail-before-release-candidate-cost.md)に従い、template listを
 公式REST API、ほかのread-only CLIを上限付きで再試行し、結果不明のmutationを自動再送
@@ -153,6 +162,11 @@ stagingとproductionの両workflowは最初のremote mutationより前にRunPod 
 実行する。providerが追加する既知の二つのtemplate portだけは
 [ADR 0032](./adr/0032-automate-runpod-default-port-normalization.md)の安全条件下で
 1回だけ自動除去し、厳格なread-back後にpromotionする。
+
+promotion workflowをdispatchする前に、少なくとも`pnpm check`、`pnpm test:e2e`、
+`pnpm secrets:check`、`pnpm security:audit`をlocalで成功させる。変更対象に応じた専用testと
+`pnpm ci:verify`も先に通す。local gateが未完了または失敗している間は、検証目的でremote
+workflowを起動しない。
 
 production workflowはGitHubのproduction Environmentだけにcredentialを持ち、次をすべて
 満たす場合に限り同じcandidateをdeployする。

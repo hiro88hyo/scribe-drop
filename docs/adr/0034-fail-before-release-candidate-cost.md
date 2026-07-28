@@ -64,6 +64,8 @@ CLIの応答変換で失敗し続ける可能性がある。また、preflight�
   扱わない。
 - 外部control planeはpreflight後にも変化し得るため、staging直前のcandidate固有再検証を
   省略できない。
+- staging内のreadiness失敗とmutation再実行の分離は
+  [ADR 0035](./0035-isolate-staging-readiness-from-mutations.md)を正とする。
 
 ## Status
 
@@ -74,5 +76,6 @@ Accepted
 - [ADR 0023: Promote only staging-verified artifacts](./0023-promote-only-staging-verified-artifacts.md)
 - [ADR 0031: RunPod promotionではread commandだけを再試行する](./0031-retry-only-runpod-read-commands.md)
 - [ADR 0032: RunPodの既定template portを自動で正規化する](./0032-automate-runpod-default-port-normalization.md)
+- [ADR 0035: staging readinessをremote mutationからjob単位で分離する](./0035-isolate-staging-readiness-from-mutations.md)
 - [RunPod list templates API](https://docs.runpod.io/api-reference/templates/GET/templates)
 - [RunPod get endpoint API](https://docs.runpod.io/api-reference/endpoints/GET/endpoints/endpointId)

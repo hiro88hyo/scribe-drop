@@ -20,11 +20,15 @@ workflow全体を無条件に再実行すると、既に完了したD1、R2、Ru
   自身のcomplete quality gateでも同じ検証を行う。release branchで同内容の手動CIを
   先行させない。release-to-main PRはstaging acceptance成功後にreopenし、最終CIを
   一度だけ実行する。
-- stagingの全read-only preflightとbrowser installを最初のremote mutationより前に完了する。
+- stagingの全read-only control-plane preflightを最初のremote mutationより前に完了する。
+- [ADR 0035](./0035-isolate-staging-readiness-from-mutations.md)に従い、D1 migration、
+  candidate Pages promotion、data-plane readiness、backend promotionを独立jobにする。
+  browser installはmutationを持たないreadiness job内で完了し、その失敗で成功済みPages
+  jobを再実行しない。
 - D1 migrationとcandidate Pages deployの直後、R2 policy、RunPod promotion、
   Orchestrator deployより前にdata-plane readiness専用testを実行する。
-- readinessでは実browserから同一originの`GET /api/me`を認証cookie付き、`no-store`で
-  取得する。
+- readinessでは実browserからcandidate commitをqueryに含む同一originの
+  `GET /api/me?candidate=<commit>`を認証cookie付き、`no-store`で取得する。
 - probeは1秒、2秒、5秒、10秒間隔を上限内で繰り返し、最大2分で停止する。
 - HTTP 200だけでなく、schema上のuser emailがstaging専用の固定E2E identityと一致する
   ことを要求する。Access迂回、別environment、旧bundle、未認証応答をreadyとしない。
@@ -32,11 +36,15 @@ workflow全体を無条件に再実行すると、既に完了したD1、R2、Ru
   lifecycleを開始する。R2、RunPod、Orchestratorの変更もreadiness成立後に行う。
 - probeはGETだけを使用する。uploadやほかのmutationを自動再試行しない。
 - timeout時は最後のstatusと安全な期待値差分だけを残し、response body、JWT、cookie、
-  credential、実resource IDを出力しない。
+  credential、実resource IDを出力しない。`Content-Type`、`Cache-Control`、
+  `X-Content-Type-Options`の固定条件だけで、Pages FunctionsのAPI境界を通ったresponseと
+  staticまたはedge由来のresponseを分類する。header原文やresponse bodyは出力しない。
 
 ## Consequences
 
 - Pages edgeの短時間の反映差で、staging workflow全体を手動再実行する頻度を下げられる。
+- readiness失敗はread-only jobだけに閉じ、D1、Pages、R2、RunPod、Orchestratorの
+  mutationを再実行しない。
 - routeを欠くcandidateはcontainer build前、AccessまたはPages data-plane不良はRunPod
   promotion前に停止する。
 - 恒久的なroute、Access、binding、identity不良は2分以内にfail closedとなる。
@@ -51,3 +59,4 @@ Accepted
 
 - [ADR 0029: Pages configはapp rootから検出する](./0029-discover-pages-config-from-app-root.md)
 - [ADR 0030: Access service credentialを正規app originへ限定する](./0030-scope-access-service-credentials-to-app-origin.md)
+- [ADR 0035: staging readinessをremote mutationからjob単位で分離する](./0035-isolate-staging-readiness-from-mutations.md)
