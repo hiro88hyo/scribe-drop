@@ -107,20 +107,22 @@ test("accepts exact Cloudflare resource read-back", () => {
   assert.doesNotThrow(() => verifyCloudflareReadback(outputs, expected));
 });
 
-test("uses the dedicated Pages token only for staging", () => {
+test("requires the dedicated Pages token in every environment", () => {
   const variables = {
     CLOUDFLARE_API_TOKEN: "general-cloudflare-token-value",
     CLOUDFLARE_PAGES_API_TOKEN: "dedicated-pages-token-value",
   };
   assert.equal(requirePagesApiToken("staging", variables), variables.CLOUDFLARE_PAGES_API_TOKEN);
-  assert.equal(requirePagesApiToken("production", variables), variables.CLOUDFLARE_API_TOKEN);
-  assert.throws(
-    () =>
-      requirePagesApiToken("staging", {
-        CLOUDFLARE_API_TOKEN: variables.CLOUDFLARE_API_TOKEN,
-      }),
-    /CLOUDFLARE_PAGES_API_TOKEN/u,
-  );
+  assert.equal(requirePagesApiToken("production", variables), variables.CLOUDFLARE_PAGES_API_TOKEN);
+  for (const environment of ["staging", "production"]) {
+    assert.throws(
+      () =>
+        requirePagesApiToken(environment, {
+          CLOUDFLARE_API_TOKEN: variables.CLOUDFLARE_API_TOKEN,
+        }),
+      /CLOUDFLARE_PAGES_API_TOKEN/u,
+    );
+  }
 });
 
 test("rejects duplicate notification rules and consumer drift", () => {

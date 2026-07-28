@@ -231,8 +231,7 @@ export function requirePagesApiToken(environment, variables) {
   if (environment !== "staging" && environment !== "production") {
     throw new Error("Cloudflare Pages environment is invalid");
   }
-  const variableName =
-    environment === "staging" ? "CLOUDFLARE_PAGES_API_TOKEN" : "CLOUDFLARE_API_TOKEN";
+  const variableName = "CLOUDFLARE_PAGES_API_TOKEN";
   const apiToken = variables[variableName];
   if (typeof apiToken !== "string" || !/^[A-Za-z0-9_-]{20,256}$/u.test(apiToken)) {
     throw new Error(`${variableName} is missing or invalid`);

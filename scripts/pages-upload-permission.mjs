@@ -18,7 +18,7 @@ export async function verifyPagesUploadPermission(
   const projectName = requireIdentifier(
     projectNameInput,
     projectNamePattern,
-    "SCRIBE_DROP_STAGING_PAGES_PROJECT",
+    "Cloudflare Pages project name",
   );
   let response;
   try {

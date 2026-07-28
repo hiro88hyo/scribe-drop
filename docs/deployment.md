@@ -282,6 +282,10 @@ Cloudflare Pages Editだけを持つ`CLOUDFLARE_PAGES_API_TOKEN`として、Acce
 Workers用tokenと分離する。このgateがlocalで成功するまでrelease-candidateとstaging
 promotionをdispatchしない。stagingのPages secret、project、deployment、config hashの
 read-backにもこの専用tokenを使い、一般tokenはPages commandへ渡さない。
+productionもproduction Environment固有の専用Pages tokenを使い、staging evidenceとpolicyを
+照合した後、D1/R2/RunPod/Workerの最初のmutationより前にproduction projectの
+`GET /upload-token`を検証する。production Pages secret、deployment list、deploy、最終
+config hash read-backへ一般tokenを渡さない。
 
 ```bash
 pnpm exec wrangler pages deploy \
@@ -327,14 +331,17 @@ imageと合成する。applicationの生成・再検証に失敗した場合はc
 
 通常の実行順序は次のとおりとする。
 
-1. release-to-main PRがclosedであることを確認し、
+1. production workflowの同一pathがdefault branch `develop`へ登録済みであること、
+   GitHub production Environmentのreview、`release/*` policy、15変数名、4 secret名を
+   `pnpm github:controls:verify:production`で確認する。失敗中はcandidateを開始しない。
+2. release-to-main PRがclosedであることを確認し、
    `Publish RunPod release candidate`を`release/<version>`で実行する。
-2. 成功したcandidate run IDだけを`Deploy release candidate to staging`へ渡す。
-3. staging acceptance成功後に同じrelease-to-main PRをreopenし、release commitを
+3. 成功したcandidate run IDだけを`Deploy release candidate to staging`へ渡す。
+4. staging acceptance成功後に同じrelease-to-main PRをreopenし、release commitを
    変更せず最終PR CIを一度だけ通す。
-4. 24時間以内に成功したstaging run IDだけを
+5. 24時間以内に成功したstaging run IDだけを
    `Promote staging-accepted candidate to production`へ渡す。
-5. production jobはGitHub Environmentのrequired reviewer承認後にもrun、candidate、
+6. production jobはGitHub Environmentのrequired reviewer承認後にもrun、candidate、
    evidence、digestを再検証し、正規化したenvironment policyがstagingと一致してから
    D1/R2、RunPod、Orchestrator、最後に利用者入口のPagesを更新する。更新後に実resourceを
    再検証する。最初のremote mutation前にacceptanceの残存時間が30分未満なら中止し、
@@ -383,6 +390,8 @@ remote mutationより前に置き、localで同じprobeが成功するまでprom
 [ADR 0022](./adr/0022-bootstrap-production-dependencies-before-applications.md)と
 [0.1.0 production readiness](./releases/0.1.0-production-readiness.md)を正とする。
 production rendererとverifierのlocal/CI検証が成功するまではremote mutationを開始しない。
+また、production workflowがdefault branchに未登録、または
+`pnpm github:controls:verify:production`が失敗する間はcandidateも開始しない。
 
 production専用の非secret値をcredential storeまたは一時environmentへ読み込み、次を生成する。
 変数名と生成先は[environment-variables.md](./environment-variables.md)を正とする。

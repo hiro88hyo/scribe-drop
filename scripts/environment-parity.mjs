@@ -35,17 +35,19 @@ function canonicalJson(value) {
   return JSON.stringify(value);
 }
 
-function normalizedCors(untrustedCors, webOrigin) {
+function normalizedCors(untrustedCors, webOrigin, environment) {
   const cors = structuredClone(requireRecord(untrustedCors, "R2 CORS policy"));
   if (
     !Array.isArray(cors.rules) ||
     cors.rules.length !== 1 ||
+    cors.rules[0]?.id !== `scribe-drop-browser-multipart-${environment}` ||
     !Array.isArray(cors.rules[0]?.allowed?.origins) ||
     cors.rules[0].allowed.origins.length !== 1 ||
     cors.rules[0].allowed.origins[0] !== webOrigin
   ) {
-    throw new Error("R2 CORS origin does not match the environment");
+    throw new Error("R2 CORS policy does not match the environment");
   }
+  cors.rules[0].id = "scribe-drop-browser-multipart-$ENVIRONMENT";
   cors.rules[0].allowed.origins = ["$WEB_ORIGIN"];
   return cors;
 }
@@ -148,7 +150,7 @@ export function createEnvironmentPolicy(input) {
   return {
     schemaVersion: 1,
     cloudflare: {
-      cors: normalizedCors(input.cors, input.webOrigin),
+      cors: normalizedCors(input.cors, input.webOrigin, input.environment),
       lifecycle: normalizedLifecycle(input.lifecycle, input.environment),
       retention,
     },

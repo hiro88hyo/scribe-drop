@@ -993,6 +993,12 @@ requireText(
   "package.json",
   "pre-candidate Pages route gate",
 );
+requireText(
+  packageManifestContents,
+  '"github:controls:verify:production": "node scripts/verify-production-github-controls.mjs"',
+  "package.json",
+  "pre-dispatch production GitHub controls gate",
+);
 
 for (const [description, value] of Object.entries({
   "staging container rebuild": "docker build",
@@ -1011,6 +1017,10 @@ for (const [description, value] of Object.entries({
   "trusted candidate run verification": ".github/workflows/publish-runpod-worker.yml",
   "staging acceptance verification": "pnpm run staging:acceptance:verify",
   "candidate verification": "pnpm run candidate:verify",
+  "production Pages upload capability preflight":
+    "pnpm run cloudflare:pages:upload-permission:verify:production",
+  "dedicated production Pages token":
+    "CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}",
   "read-only Pages deploy preflight": "wrangler pages deployment list",
   "read-only RunPod preflight": "pnpm run runpod:preflight:production",
   "candidate migration directory":
@@ -1034,10 +1044,24 @@ requireTextCount(
 );
 requireTextOrder(
   productionWorkflowContents,
+  "Verify Pages upload permission before any mutation",
+  "Apply candidate D1 migrations",
+  "deploy-production-candidate.yml",
+  "Pages upload permission before production mutation",
+);
+requireTextOrder(
+  productionWorkflowContents,
   "Verify Pages deploy configuration and target",
   "Apply candidate D1 migrations",
   "deploy-production-candidate.yml",
   "Pages preflight before production mutation",
+);
+requireTextCount(
+  productionWorkflowContents,
+  "${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}",
+  5,
+  "deploy-production-candidate.yml",
+  "dedicated production Pages token usage",
 );
 requireTextOrder(
   productionWorkflowContents,

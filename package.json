@@ -46,6 +46,8 @@
     "cloudflare:readback:production": "node scripts/verify-cloudflare-readback.mjs production",
     "cloudflare:readback:staging": "node scripts/verify-cloudflare-readback.mjs staging",
     "cloudflare:pages:promote:staging": "node scripts/promote-pages-candidate.mjs",
+    "cloudflare:pages:upload-permission:verify:production": "node scripts/verify-production-pages-upload-permission.mjs",
+    "github:controls:verify:production": "node scripts/verify-production-github-controls.mjs",
     "cloudflare:pages:upload-permission:verify:staging": "node scripts/verify-staging-pages-upload-permission.mjs",
     "container:build:runpod": "docker buildx build --load --tag scribe-drop-runpod-worker:local --file apps/runpod-worker/Dockerfile .",
     "container:check:runpod": "docker run --rm --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m --entrypoint python scribe-drop-runpod-worker:local -m scribe_drop_worker.container_check",

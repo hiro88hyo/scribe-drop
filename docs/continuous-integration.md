@@ -37,10 +37,12 @@ pnpm container:check:runpod
 
 release candidateまたはstaging promotionをdispatchする前に、
 [ADR 0042](./adr/0042-preflight-pages-upload-permission.md)の同じgateをlocal credentialで
-実行する。
+実行する。production releaseでは、時間のかかるcandidateを開始する前にGitHub側の
+promotion入口とEnvironmentも検証する。
 
 ```bash
 pnpm cloudflare:pages:upload-permission:verify:staging
+pnpm github:controls:verify:production
 ```
 
 Pages projectの一覧取得だけではdeploy権限の証拠にならない。`GET /upload-token`の成功を
@@ -224,9 +226,23 @@ production workflowはGitHubのproduction Environmentだけにcredentialを持�
 - 正規化したstaging/production構成の差分がenvironment固有allowlist内だけである
 - protected branchとrequired reviewerの条件を満たす
 
+environment policyはR2 CORSのexact originと環境固有rule IDを検証してから両方をmarkerへ
+正規化する。fixtureからrule IDを省略して見かけ上hashが一致するtestを禁止し、別environment
+のrule ID、retention、GPU、location、runtime driftをそれぞれ回帰testで拒否する。
+
 production workflowはbuild stepと任意image引数を持たない。通常のlocal環境とstaging
 workflowへproduction credentialを渡さない。break-glassはADR 0023の記録と明示承認を
 満たす別経路とし、通常workflowの条件を一時的に緩めない。
+production Pagesのupload capability、secret名、deployment list、deploy、config hash
+read-backはproduction専用`CLOUDFLARE_PAGES_API_TOKEN`だけを使う。一般
+`CLOUDFLARE_API_TOKEN`はAccess、D1、R2、Queues、Workersに限定し、Pages権限不足を
+backend mutation後まで遅延させない。
+production controls verifierはGitHub APIから値ではなく設定名だけを抽出し、default branch
+`develop`上のproduction workflow、required reviewer、custom `release/*` branch policy、
+review済み15変数と4 secretのexact setを要求する。production workflowをrelease branchだけ
+へ初めて追加した状態ではdispatchが成立しないため、同じpathをrelease freeze前にfeature PR
+で`develop`へ登録する。登録漏れやEnvironment未設定をremote workflowの404または長時間
+処理の後で発見しない。
 
 candidate workflowは[ADR 0038](./adr/0038-reuse-unchanged-runpod-worker-image.md)に従い、
 同じrelease branchの成功済みcandidate run IDを明示した場合だけ、変更されていないRunPod

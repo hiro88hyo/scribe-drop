@@ -58,10 +58,19 @@ lifecycle、RunPod image visibility、GPU、data center、runtime、scaling、ti
 正規化対象とする。account、origin、resource名、D1/endpoint/registry credential ID、
 staging専用Access service principalだけを許可された差分とし、production workflowは
 最初のremote mutationより前に同じpolicy hashを再計算して一致を要求する。
+R2 CORSはexact Web originだけでなく
+`scribe-drop-browser-multipart-<environment>`のrule IDも各environmentで厳密に検証してから
+共通markerへ正規化する。rule IDを検証せずhashへ残すことも、別environmentのIDを
+正規化して受け入れることもしない。
 
 production credentialはproduction用GitHub Environmentに限定し、通常のlocal手順と
 staging workflowへ渡さない。production workflowはprotected branch、required review、
 candidate照合、deploy前後のread-backを通る唯一の通常deploy経路とする。
+`workflow_dispatch`をrelease branchから実行できるよう、production workflowの同一pathを
+release freezeより前にGitHubのdefault branchである`develop`へ登録しておく。dispatch前に
+default branch上のworkflow path、required reviewer、custom `release/*` branch policy、
+15件の非secret変数名、4件のsecret名をread-only APIで一括検証し、どれか一つでも不足または
+余分ならcandidate workflowを開始しない。検査では変数値とsecret値を出力しない。
 
 緊急のsecurityまたはavailability対応で通常gateを省略する場合はbreak-glassとして扱う。
 対象、理由、承認、rollback先、実行者、除去条件を事前にincident記録または追加ADRへ残し、

@@ -30,6 +30,7 @@ function input(environment, overrides = {}) {
     cors: {
       rules: [
         {
+          id: `scribe-drop-browser-multipart-${environment}`,
           allowed: {
             headers: ["content-type"],
             methods: ["PUT"],
@@ -87,5 +88,14 @@ test("detects operational retention, GPU, and location drift", () => {
   assert.notEqual(
     stagingPolicy,
     environmentPolicyId(input("production", { dataCenterIds: "EU-RO-1" })),
+  );
+});
+
+test("rejects a CORS rule identifier from another environment", () => {
+  const production = input("production");
+  production.cors.rules[0].id = "scribe-drop-browser-multipart-staging";
+  assert.throws(
+    () => environmentPolicyId(production),
+    /R2 CORS policy does not match the environment/u,
   );
 });
