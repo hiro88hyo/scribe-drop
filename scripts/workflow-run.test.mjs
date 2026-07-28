@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { validateTrustedWorkflowRun } from "./workflow-run.mjs";
+import { validateReusableWorkflowRun, validateTrustedWorkflowRun } from "./workflow-run.mjs";
 
 const expected = {
   branch: "release/0.1.0",
@@ -44,6 +44,44 @@ test("rejects workflow, commit, branch, repository, and conclusion mismatches", 
     assert.throws(
       () => validateTrustedWorkflowRun(mutation, expected),
       /does not match|not a trusted successful run/u,
+    );
+  }
+});
+
+test("accepts a successful reusable run and returns its validated source commit", () => {
+  assert.deepEqual(
+    validateReusableWorkflowRun(run, {
+      branch: expected.branch,
+      repository: expected.repository,
+      runId: expected.runId,
+      workflowPath: expected.workflowPath,
+    }),
+    {
+      branch: expected.branch,
+      commitSha: expected.commitSha,
+      runId: expected.runId,
+      workflowPath: expected.workflowPath,
+    },
+  );
+});
+
+test("rejects an untrusted reusable run before returning its commit", () => {
+  for (const mutation of [
+    { ...run, conclusion: "failure" },
+    { ...run, event: "push" },
+    { ...run, head_branch: "release/0.1.1" },
+    { ...run, head_sha: "invalid" },
+    { ...run, path: ".github/workflows/other.yml" },
+  ]) {
+    assert.throws(
+      () =>
+        validateReusableWorkflowRun(mutation, {
+          branch: expected.branch,
+          repository: expected.repository,
+          runId: expected.runId,
+          workflowPath: expected.workflowPath,
+        }),
+      /GitHub workflow run/u,
     );
   }
 });

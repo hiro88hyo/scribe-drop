@@ -286,20 +286,24 @@ resourceの作成・変更・削除とdeployの直前には、CLIの認証先、
 
 productionへ影響する変更は
 [ADR 0023](./adr/0023-promote-only-staging-verified-artifacts.md)のcandidateとstaging
-acceptanceを必須とする。`release/<version>`の単一commitから一度だけbuildし、stagingと
-productionで同じapplication artifact、RunPod image digest、migration集合を使用する。
-production用に再buildしない。
+acceptanceを必須とする。各candidateは単一の`release/<version>` commitへ固定し、
+stagingとproductionで同じapplication artifact、RunPod image digest、migration集合を
+使用する。Worker inputsが変わったcandidateではimageを一度だけbuildする。変更されて
+いないdigestの検証済み再利用は
+[ADR 0038](./adr/0038-reuse-unchanged-runpod-worker-image.md)に従い、production用には
+いずれの経路でも再buildしない。
 
 production deployは成功したstaging evidenceが参照するcandidateだけを入力とする。
 commitまたはartifact digestが異なる場合、acceptance後にcode、dependency、migration、
 deployment設定が変更された場合、実resource parity checkが失敗した場合は停止する。
 mock E2Eやlocal testは実service staging acceptanceの代替にしない。
 
-RunPod publication workflowはrelease candidateを一度だけbuildし、environment別buildと
-production deploy jobを持たない。candidate manifest、staging/production promotion
-workflow、実resource read-back verifierは実装済みである。次のcandidateでstaging
-acceptanceが成功し、GitHub production Environmentのreview・branch・credential分離を
-確認するまで、追加のproduction deployを行わない。追跡外production configの生成と
+RunPod publication workflowはapplication artifactをcandidateごとに一度だけbuildし、
+Worker imageは新規buildまたはADR 0038の固定digest再利用の一方だけを選ぶ。environment別
+buildとproduction deploy jobを持たない。candidate manifest、staging/production
+promotion workflow、実resource read-back verifierは実装済みである。次のcandidateで
+staging acceptanceが成功し、GitHub production Environmentのreview・branch・credential
+分離を確認するまで、追加のproduction deployを行わない。追跡外production configの生成と
 read-only検査は実行できるが、remote mutationの許可にはならない。
 
 Orchestrator artifactは
@@ -339,6 +343,13 @@ read-backが一致すればdeployを省略し、結果不明のmutationを自動
 
 candidate、staging、production workflowを起動する前に、変更対象のlocal testと標準local
 gateを完了する。remote workflowをlocal検証の代替に使用しない。
+
+RunPod Worker build inputsに差分がないapplication-only candidateでは、
+[ADR 0038](./adr/0038-reuse-unchanged-runpod-worker-image.md)の検証済みsource candidate
+run IDをcandidate workflowへ指定できる。workflowはsource run、artifact、祖先関係、
+Worker input差分を検証し、任意image inputは受け付けない。再利用したdigestにも現在runの
+container check、SBOM、vulnerability scanを必須とする。検証失敗時に自動buildへ
+fallbackせず、新規buildが必要かを明示的に判断する。
 
 stagingのAccess自動試験は
 [ADR 0024](./adr/0024-staging-only-access-service-principal.md)の専用service principalだけを

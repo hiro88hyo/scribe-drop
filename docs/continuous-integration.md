@@ -13,13 +13,13 @@ acceptanceが成功するまでclosedに保ち、成功後に同じPRをreopen�
 
 ## Job
 
-| Job                | 検査内容                                                                                                                                     |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `quality`          | lockfile固定install、toolchain、format、lint、型検査、Vitest、pytest、build、local D1 migration、Web/OrchestratorのWorkers/D1/R2 integration |
-| `secrets`          | Gitleaks による完全な Git 履歴と現在の checkout の検査                                                                                       |
-| `dependency-audit` | `pnpm audit` と `uv audit` による直接・推移依存の既知脆弱性検査                                                                              |
-| `browser-e2e`      | 固定Playwright/Chromiumとmock API/R2によるupload、poll、download、delete、mobile、PWA cache検査                                              |
-| `runpod-container` | 固定digest/snapshotからの実image build、非root・networkなし・read-only起動、model全hash、SPDX JSON SBOM、High/Critical vulnerability scan    |
+| Job                | 検査内容                                                                                                                                                                  |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `quality`          | lockfile固定install、toolchain、format、lint、型検査、Vitest、pytest、build、local D1 migration、Web/OrchestratorのWorkers/D1/R2 integration                              |
+| `secrets`          | Gitleaks による完全な Git 履歴と現在の checkout の検査                                                                                                                    |
+| `dependency-audit` | `pnpm audit` と `uv audit` による直接・推移依存の既知脆弱性検査                                                                                                           |
+| `browser-e2e`      | 固定Playwright/Chromiumとmock API/R2によるupload、poll、download、delete、mobile、PWA cache検査                                                                           |
+| `runpod-container` | 固定digest/snapshotからの実image buildまたは検証済み不変digestの再利用、非root・networkなし・read-only起動、model全hash、SPDX JSON SBOM、High/Critical vulnerability scan |
 
 `pnpm audit` と `uv audit` は脆弱性データサービスへ接続するため、通常の `pnpm check` とは分離する。ローカルで CI 相当を確認するときは次を実行する。
 
@@ -69,12 +69,14 @@ submission、event、outboxの件数が一致しない場合はtestを失敗さ�
 満たせない場合はscanを開始せず失敗する。localでは十分な空き容量を確認してからscanし、
 空き容量不足をscan成功として扱わない。
 
-`Publish RunPod release candidate` workflowは`release/<version>`の単一commitからRunPod
-imageを一度だけbuildする。environment選択とproduction用再buildは持たない。RunPod imageは
-CIと同じoffline check、SBOM、High/Critical scanを通し、GitHubの短期`GITHUB_TOKEN`で
-GHCRへpushする。mutable tagをpromotion入力にせずregistry digestをcandidate evidenceへ
-保存する。push用tagはcommit、workflow run、attempt固有とし、失敗attemptのtagを再実行で
-上書きしない。package visibilityを暗黙に変更しない。
+`Publish RunPod release candidate` workflowは、RunPod Worker inputsが変わった
+`release/<version>` commitではimageを一度だけbuildする。変更されていない場合に限り、
+[ADR 0038](./adr/0038-reuse-unchanged-runpod-worker-image.md)の検証を通った過去の固定digestを
+再利用できる。environment選択とproduction用再buildは持たない。RunPod imageはどちらの
+経路でも現在runのoffline check、SBOM、High/Critical scanを通す。新規buildはGitHubの
+短期`GITHUB_TOKEN`でGHCRへpushする。mutable tagをpromotion入力にせずregistry digestを
+candidate evidenceへ保存する。push用tagはcommit、workflow run、attempt固有とし、
+失敗attemptのtagを再実行で上書きしない。package visibilityを暗黙に変更しない。
 
 このworkflowは[ADR 0034](./adr/0034-fail-before-release-candidate-cost.md)に従い、最初の
 jobだけをstaging Environmentへ限定し、RunPod API keyとendpoint IDによるread-only
@@ -187,6 +189,15 @@ production workflowはGitHubのproduction Environmentだけにcredentialを持�
 production workflowはbuild stepと任意image引数を持たない。通常のlocal環境とstaging
 workflowへproduction credentialを渡さない。break-glassはADR 0023の記録と明示承認を
 満たす別経路とし、通常workflowの条件を一時的に緩めない。
+
+candidate workflowは[ADR 0038](./adr/0038-reuse-unchanged-runpod-worker-image.md)に従い、
+同じrelease branchの成功済みcandidate run IDを明示した場合だけ、変更されていないRunPod
+Worker digestを再利用できる。任意image referenceは入力に取らない。source runと完全な
+candidate artifactを検証し、source commitが現在commitの祖先であり、`.dockerignore`、
+`apps/runpod-worker/`、`tools/versions.json`に差分がないことをremote build前に要求する。
+再利用時も現在runでdigestをpullし、offline container check、synthetic M4A、SBOM、
+High/Critical scanを実行する。source identityと現在runの再検査はcandidateのsupply-chain
+provenanceへ記録する。
 
 `Promote staging-accepted candidate to production`はproduction Environment承認前のjobで
 staging runとcandidate runを検証し、承認後のjobでもartifactを再downloadして全検証を

@@ -547,7 +547,9 @@ Android Share Target は設計書どおり別 PR とする。
 環境は local、staging、production を分離し、D1、R2、Queue、DLQ、RunPod endpoint、Access audience、Discord webhook を共有しない。
 
 productionへ影響する変更は[ADR 0023](./adr/0023-promote-only-staging-verified-artifacts.md)
-に従い、`release/<version>`の単一commitからrelease candidateを一度だけbuildする。
+に従い、`release/<version>`の単一commitへrelease candidateを固定する。Worker inputsが
+変わったcandidateではRunPod imageを一度だけbuildし、変更されていない場合の固定digest
+再利用は[ADR 0038](./adr/0038-reuse-unchanged-runpod-worker-image.md)の検証条件を必須とする。
 stagingとproductionはresourceとsecretを分離するが、application artifact、RunPod image
 digest、migration集合は同じcandidateを使用し、production用に再buildしない。
 

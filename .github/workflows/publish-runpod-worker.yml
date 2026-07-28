@@ -2,10 +2,16 @@ name: Publish RunPod release candidate
 
 on:
   workflow_dispatch:
+    inputs:
+      reusable_worker_candidate_run_id:
+        description: Successful candidate run whose unchanged RunPod Worker digest may be reused
+        required: false
+        type: string
 
 run-name: Publish RunPod release candidate from ${{ github.ref_name }}
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -22,9 +28,15 @@ jobs:
     environment: staging
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      reusable_worker_image: ${{ steps.reusable-worker.outputs.image }}
+      reusable_worker_source_run_id: ${{ steps.reusable-worker.outputs.source_run_id }}
+      reusable_worker_source_sha: ${{ steps.reusable-worker.outputs.source_sha }}
     steps:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
 
       - name: Set up Volta
         uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
@@ -47,6 +59,58 @@ jobs:
               exit 1
               ;;
           esac
+
+      - name: Verify reusable unchanged RunPod Worker candidate
+        id: reusable-worker
+        if: ${{ inputs.reusable_worker_candidate_run_id != '' }}
+        env:
+          EXPECTED_RELEASE_BRANCH: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_CANDIDATE_RUN_ID: ${{ inputs.reusable_worker_candidate_run_id }}
+        run: |
+          if ! printf '%s' "${SOURCE_CANDIDATE_RUN_ID}" | grep -Eq '^[1-9][0-9]*$'; then
+            echo "Reusable Worker candidate run ID is invalid" >&2
+            exit 1
+          fi
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_CANDIDATE_RUN_ID}" \
+            >"${RUNNER_TEMP}/reusable-worker-run.json"
+          source_sha="$(
+            node scripts/verify-reusable-workflow-run.mjs \
+              "${RUNNER_TEMP}/reusable-worker-run.json" \
+              .github/workflows/publish-runpod-worker.yml \
+              "${SOURCE_CANDIDATE_RUN_ID}"
+          )"
+          if [ "${source_sha}" = "${GITHUB_SHA}" ]; then
+            echo "Reusable Worker source must be an earlier candidate" >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "${source_sha}" "${GITHUB_SHA}"; then
+            echo "Reusable Worker source is not an ancestor of this candidate" >&2
+            exit 1
+          fi
+          if ! git diff --quiet "${source_sha}" "${GITHUB_SHA}" -- \
+            .dockerignore \
+            apps/runpod-worker \
+            tools/versions.json; then
+            echo "RunPod Worker build or scan inputs changed; a new image build is required" >&2
+            exit 1
+          fi
+          gh run download "${SOURCE_CANDIDATE_RUN_ID}" \
+            --name "scribe-drop-release-candidate-${source_sha}" \
+            --dir "${RUNNER_TEMP}/reusable-worker-candidate"
+          release_version="$(node -p "require('./package.json').version")"
+          worker_image="$(
+            EXPECTED_COMMIT_SHA="${source_sha}" \
+            EXPECTED_RELEASE_VERSION="${release_version}" \
+              node scripts/read-reusable-worker-reference.mjs \
+                "${RUNNER_TEMP}/reusable-worker-candidate"
+          )"
+          {
+            printf 'image=%s\n' "${worker_image}"
+            printf 'source_run_id=%s\n' "${SOURCE_CANDIDATE_RUN_ID}"
+            printf 'source_sha=%s\n' "${source_sha}"
+          } >>"${GITHUB_OUTPUT}"
 
       - name: Verify read-only staging RunPod readiness before costly work
         env:
@@ -233,7 +297,17 @@ jobs:
             exit 1
           fi
 
+      - name: Authenticate to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "${GHCR_TOKEN}" |
+            docker login ghcr.io \
+              --username "${GITHUB_ACTOR}" \
+              --password-stdin
+
       - name: Build fixed RunPod Worker image
+        if: ${{ needs.preflight.outputs.reusable_worker_image == '' }}
         run: |
           docker buildx build \
             --file apps/runpod-worker/Dockerfile \
@@ -242,6 +316,14 @@ jobs:
             --load \
             --tag scribe-drop-runpod-worker:publish \
             .
+
+      - name: Pull verified reusable RunPod Worker image
+        if: ${{ needs.preflight.outputs.reusable_worker_image != '' }}
+        env:
+          REUSABLE_WORKER_IMAGE: ${{ needs.preflight.outputs.reusable_worker_image }}
+        run: |
+          docker pull "${REUSABLE_WORKER_IMAGE}"
+          docker tag "${REUSABLE_WORKER_IMAGE}" scribe-drop-runpod-worker:publish
 
       - name: Verify non-root offline runtime and model integrity
         run: |
@@ -304,16 +386,8 @@ jobs:
           cache: false
           version: v0.72.0
 
-      - name: Authenticate to GHCR
-        env:
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          printf '%s' "${GHCR_TOKEN}" |
-            docker login ghcr.io \
-              --username "${GITHUB_ACTOR}" \
-              --password-stdin
-
       - name: Push run-scoped image and record immutable reference
+        if: ${{ needs.preflight.outputs.reusable_worker_image == '' }}
         run: |
           registry_owner="${GITHUB_REPOSITORY_OWNER,,}"
           image="ghcr.io/${registry_owner}/scribe-drop-runpod-worker"
@@ -328,13 +402,27 @@ jobs:
           printf '%s@%s\n' "${image}" "${digest}" >runpod-worker-image.txt
           printf 'Published immutable image: %s@%s\n' "${image}" "${digest}"
 
+      - name: Record verified reusable immutable reference
+        if: ${{ needs.preflight.outputs.reusable_worker_image != '' }}
+        env:
+          REUSABLE_WORKER_IMAGE: ${{ needs.preflight.outputs.reusable_worker_image }}
+        run: |
+          docker buildx imagetools inspect "${REUSABLE_WORKER_IMAGE}" >/dev/null
+          printf '%s\n' "${REUSABLE_WORKER_IMAGE}" >runpod-worker-image.txt
+          printf 'Reused verified immutable RunPod Worker image.\n'
+
       - name: Create and verify candidate manifest
         env:
           EXPECTED_COMMIT_SHA: ${{ github.sha }}
+          REUSABLE_WORKER_SOURCE_RUN_ID: ${{ needs.preflight.outputs.reusable_worker_source_run_id }}
+          REUSABLE_WORKER_SOURCE_SHA: ${{ needs.preflight.outputs.reusable_worker_source_sha }}
         run: |
           mkdir -p candidate-supply-chain
           install -m 0644 runpod-worker.spdx.json candidate-supply-chain/
           install -m 0644 runpod-worker-trivy.txt candidate-supply-chain/
+          node scripts/create-runpod-worker-provenance.mjs \
+            runpod-worker-image.txt \
+            candidate-supply-chain/runpod-worker-provenance.json
           pnpm run candidate:create \
             release-candidate \
             candidate-application \

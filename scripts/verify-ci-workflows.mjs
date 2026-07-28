@@ -338,6 +338,15 @@ for (const [description, value] of Object.entries({
   "stale candidate cancellation": "cancel-in-progress: true",
   "staging-scoped readiness credential": "environment: staging",
   "read-only readiness before costly work": "pnpm run runpod:release-readiness:staging",
+  "reusable Worker candidate run input": "reusable_worker_candidate_run_id:",
+  "reusable source run verification": "verify-reusable-workflow-run.mjs",
+  "reusable source ancestry verification": "git merge-base --is-ancestor",
+  "reusable source candidate verification": "read-reusable-worker-reference.mjs",
+  "reusable immutable image pull": 'docker pull "${REUSABLE_WORKER_IMAGE}"',
+  "current-run Worker provenance": "create-runpod-worker-provenance.mjs",
+  "current-run offline container check": "-m scribe_drop_worker.container_check",
+  "current-run Worker SBOM": "runpod-worker.spdx.json",
+  "current-run Worker vulnerability scan": "runpod-worker-trivy.txt",
   "preflight before application assembly":
     "application:\n    name: Assemble candidate application artifacts\n    needs: preflight",
   "preflight before quality work":
@@ -356,6 +365,13 @@ requireTextCount(
   1,
   "publish-runpod-worker.yml",
   "single candidate application build",
+);
+requireTextCount(
+  publicationWorkflowContents,
+  "docker buildx build \\",
+  1,
+  "publish-runpod-worker.yml",
+  "single conditional RunPod Worker image build",
 );
 requireTextCount(
   publicationWorkflowContents,
@@ -378,6 +394,34 @@ requireTextOrder(
   "publish-runpod-worker.yml",
   "application verification before RunPod image build",
 );
+requireTextOrder(
+  publicationWorkflowContents,
+  "verify-reusable-workflow-run.mjs",
+  'gh run download "${SOURCE_CANDIDATE_RUN_ID}"',
+  "publish-runpod-worker.yml",
+  "source run verification before reusable candidate download",
+);
+requireTextOrder(
+  publicationWorkflowContents,
+  "read-reusable-worker-reference.mjs",
+  'docker pull "${REUSABLE_WORKER_IMAGE}"',
+  "publish-runpod-worker.yml",
+  "source candidate verification before immutable image pull",
+);
+requireTextOrder(
+  publicationWorkflowContents,
+  "Pull verified reusable RunPod Worker image",
+  "Verify non-root offline runtime and model integrity",
+  "publish-runpod-worker.yml",
+  "reusable image pull before current-run container verification",
+);
+requireTextOrder(
+  publicationWorkflowContents,
+  "Scan image vulnerabilities",
+  "create-runpod-worker-provenance.mjs",
+  "publish-runpod-worker.yml",
+  "current vulnerability scan before provenance and candidate creation",
+);
 
 for (const [description, value] of Object.entries({
   "environment-specific publication input": "target_environment",
@@ -387,6 +431,8 @@ for (const [description, value] of Object.entries({
   "Cloudflare mutation credential in candidate workflow": "CLOUDFLARE_API_TOKEN",
   "multipart Orchestrator upload body output": "--outfile candidate-build/orchestrator/index.js",
   "config-relative Orchestrator output": "--outdir candidate-build/orchestrator",
+  "arbitrary RunPod Worker image input": "runpod_worker_image:",
+  "mutable reusable Worker fallback": "continue-on-error:",
 })) {
   forbidText(publicationWorkflowContents, value, "publish-runpod-worker.yml", description);
 }

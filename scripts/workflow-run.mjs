@@ -48,3 +48,35 @@ export function validateTrustedWorkflowRun(value, expected) {
     workflowPath: expected.workflowPath,
   };
 }
+
+export function validateReusableWorkflowRun(value, expected) {
+  const run = requireRecord(value, "GitHub workflow run");
+  const repository = requireRecord(run.repository, "GitHub workflow run repository");
+  const expectedRunId = requireString(expected.runId, "Expected workflow run ID");
+  if (!runIdPattern.test(expectedRunId) || String(run.id) !== expectedRunId) {
+    throw new Error("GitHub workflow run ID does not match");
+  }
+  const commitSha = requireString(run.head_sha, "GitHub workflow run commit");
+  if (!commitShaPattern.test(commitSha)) {
+    throw new Error("GitHub workflow run commit is invalid");
+  }
+  const branch = requireString(run.head_branch, "GitHub workflow run branch");
+  if (!releaseBranchPattern.test(branch) || branch !== expected.branch) {
+    throw new Error("GitHub workflow run branch does not match");
+  }
+  if (
+    run.path !== expected.workflowPath ||
+    run.event !== "workflow_dispatch" ||
+    run.status !== "completed" ||
+    run.conclusion !== "success" ||
+    repository.full_name !== expected.repository
+  ) {
+    throw new Error("GitHub workflow run is not a reusable successful run");
+  }
+  return {
+    branch,
+    commitSha,
+    runId: expectedRunId,
+    workflowPath: expected.workflowPath,
+  };
+}
