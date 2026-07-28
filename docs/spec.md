@@ -1065,6 +1065,9 @@ CANCEL_REQUESTED
 処理:
 
 * `winning_runpod_job_id`があるものをRunPod `/status`で照会
+* `accepted`後10分以内にwinner claimへ進まないsubmissionをCASでFAILEDへ収束させ、
+  D1に記録したexact RunPod job IDだけをcancelする
+* stale accepted submissionのcancelが不確定ならFAILEDを戻さず次回Cronで再試行する
 * terminal状態をD1へ保存し、14章のfinalize処理を行う
 * heartbeatが一定時間ないものを確認
 * 実行期限を超えたものをFAILEDにする

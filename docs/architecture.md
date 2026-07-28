@@ -76,6 +76,11 @@ version、active attemptをWHERE条件に含むcompare-and-setであり、event�
 一意制約を併用する。duplicate/out-of-order messageは成功済み状態を再利用するか安全な
 conflictとして終了する。
 
+RunPodがsubmissionを受理しても10分以内にwinner claimへ進まない場合は、
+[ADR 0043](./adr/0043-bound-runpod-start-slo-and-staging-wait.md)に従ってactive attemptを
+FAILEDへCAS遷移し、記録済みのexact provider jobだけをcancelする。cancel不確定時も
+FAILEDをSUBMITTINGへ戻さず、Cronがcancelを再試行する。
+
 ## 削除と保持期限
 
 ユーザー削除はowner/CSRF検証後に`deleted_at`をCAS更新し、通常APIから直ちに隠す。

@@ -304,6 +304,9 @@ temporary credentialのexact-object multipart/abort成功とaction/object拒否�
 - attemptごとに固有のresult prefixを決めるが、source/result URLとheartbeat tokenはwinner claim成功後に初めて発行する。
 - Queue からの submission を `SUBMISSION_PENDING` → `SUBMITTING` と条件付き遷移させる。
 - `/run` の成功、明示的失敗、timeout で結果不明のケースを別に扱い、submission の追跡情報を記録する。
+- [ADR 0043](./adr/0043-bound-runpod-start-slo-and-staging-wait.md)に従い、
+  accepted後10分以内にwinner claimへ進まないattemptをFAILEDへCAS遷移し、
+  exact provider jobのcancelを成功確認まで再試行する。
 - claim API を実装する。
   - token hashの定時間比較、expiry、consumptionを確認
   - current active attempt、generation、cancel状態を確認
@@ -374,6 +377,7 @@ temporary credentialのexact-object multipart/abort成功とaction/object拒否�
   - 同じ D1 batch で一意な notification outbox を作成
 - 5 分間隔の reconciliation Cron を実装する。
   - `SUBMITTING`、`RUNNING`、`CANCEL_REQUESTED` の status poll
+  - accepted submissionの10分開始SLOと、失敗済みunclaimed jobのcancel再試行
   - stale heartbeat と実行期限
   - 中途半端な submission
   - 期限切れ upload
