@@ -50,6 +50,8 @@
     "cloudflare:pages:upload-permission:verify:production": "node scripts/verify-production-pages-upload-permission.mjs",
     "github:controls:verify:production": "node scripts/verify-production-github-controls.mjs",
     "cloudflare:pages:upload-permission:verify:staging": "node scripts/verify-staging-pages-upload-permission.mjs",
+    "cloudflare:worker-route:verify:production": "node scripts/verify-cloudflare-worker-route-permission.mjs production",
+    "cloudflare:worker-route:verify:staging": "node scripts/verify-cloudflare-worker-route-permission.mjs staging",
     "container:build:runpod": "docker buildx build --load --tag scribe-drop-runpod-worker:local --file apps/runpod-worker/Dockerfile .",
     "container:check:runpod": "docker run --rm --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m --entrypoint python scribe-drop-runpod-worker:local -m scribe_drop_worker.container_check",
     "d1:migrate:local": "wrangler d1 migrations apply SCRIBE_DROP_DB --local --config apps/orchestrator/wrangler.toml",

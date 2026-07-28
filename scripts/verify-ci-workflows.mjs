@@ -553,6 +553,7 @@ for (const [description, value] of Object.entries({
   "candidate artifact download": "scribe-drop-release-candidate-${GITHUB_SHA}",
   "verified Pages assembly": "pnpm run candidate:pages",
   "read-only Pages deploy preflight": "wrangler pages deployment list",
+  "read-only Worker route preflight": "pnpm run cloudflare:worker-route:verify:staging",
   "read-only RunPod preflight": "pnpm run runpod:preflight:staging",
   "candidate migration directory":
     "SCRIBE_DROP_CANDIDATE_MIGRATIONS_DIR: ../../release-candidate/migrations",
@@ -619,6 +620,20 @@ requireTextOrder(
   'pnpm run candidate:pages "${RELEASE_CANDIDATE_DIRECTORY}" pages-candidate',
   "deploy-staging-candidate.yml preflight job",
   "real E2E fixture preflight before deployment assembly",
+);
+requireTextOrder(
+  stagingPreflightJob,
+  "pnpm run cloudflare:config:staging",
+  "pnpm run cloudflare:worker-route:verify:staging",
+  "deploy-staging-candidate.yml preflight job",
+  "rendered custom-domain configuration before Worker route capability preflight",
+);
+requireTextOrder(
+  stagingPreflightJob,
+  "pnpm run cloudflare:worker-route:verify:staging",
+  "pnpm run runpod:preflight:staging",
+  "deploy-staging-candidate.yml preflight job",
+  "Worker route capability verification before RunPod preflight",
 );
 
 requireTextCount(
@@ -1057,6 +1072,8 @@ for (const [description, value] of Object.entries({
   "candidate verification": "pnpm run candidate:verify",
   "production Pages upload capability preflight":
     "pnpm run cloudflare:pages:upload-permission:verify:production",
+  "production Worker route capability preflight":
+    "pnpm run cloudflare:worker-route:verify:production",
   "dedicated production Pages token":
     "CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}",
   "read-only Pages deploy preflight": "wrangler pages deployment list",
@@ -1093,6 +1110,20 @@ requireTextOrder(
   "Apply candidate D1 migrations",
   "deploy-production-candidate.yml",
   "Pages preflight before production mutation",
+);
+requireTextOrder(
+  productionWorkflowContents,
+  "pnpm run cloudflare:config:production",
+  "pnpm run cloudflare:worker-route:verify:production",
+  "deploy-production-candidate.yml",
+  "rendered custom-domain configuration before production Worker route preflight",
+);
+requireTextOrder(
+  productionWorkflowContents,
+  "pnpm run cloudflare:worker-route:verify:production",
+  "Apply candidate D1 migrations",
+  "deploy-production-candidate.yml",
+  "Worker route preflight before production mutation",
 );
 requireTextCount(
   productionWorkflowContents,

@@ -133,6 +133,11 @@ jobs:
           pnpm run cloudflare:config:staging
           pnpm run runpod:config:staging
 
+      - name: Verify Worker route capability before any mutation
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: pnpm run cloudflare:worker-route:verify:staging
+
       - name: Export normalized staging environment policy
         run: pnpm run environment:policy:export staging
 

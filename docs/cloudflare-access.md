@@ -18,7 +18,7 @@ Access application、policy、identity provider、Pages secretが揃い、未認
 ## Staging application
 
 Zero Trust dashboardまたは
-[cloudflare-permissions.md](./cloudflare-permissions.md)の完成形6権限を持つ
+[cloudflare-permissions.md](./cloudflare-permissions.md)の完成形8権限を持つ
 `CLOUDFLARE_API_TOKEN`で、次のself-hosted applicationを作成する。同じ用途のために
 Access専用API tokenを追加しない。
 

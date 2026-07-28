@@ -48,7 +48,7 @@ function collectCloudflareApiFiles(directory) {
       ? readFileSync(absolutePath, "utf8")
       : "";
     if (
-      source.includes("api.cloudflare.com/client/v4/accounts/") &&
+      source.includes("https://api.cloudflare.com/client/v4") &&
       /\bfetch[A-Za-z]*\s*\(/u.test(source)
     ) {
       files.push(relativePath);

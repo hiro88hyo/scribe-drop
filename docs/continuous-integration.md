@@ -53,8 +53,8 @@ RunPod CLI、D1より前に同じ検査を実行する。stagingのPages secret�
 config hashのread-backも同じ専用tokenを使い、一般Cloudflare tokenへPages権限を要求しない。
 Cloudflare資格情報の全役割とexact permissionは
 [cloudflare-permissions.md](./cloudflare-permissions.md)を正とする。
-`pnpm ci:verify`は機械可読policyも検証し、Backend/Access tokenの完成形6権限からの欠落、
-zone権限、未reviewの権限追加を拒否する。
+`pnpm ci:verify`は機械可読policyも検証し、Backend/Access tokenの完成形8権限からの欠落、
+exact application zone以外のscope、未reviewの権限追加を拒否する。
 
 PlaywrightのOS共有libraryは公式の`playwright install --with-deps chromium`で準備する。
 `sudo`を利用できないmanaged hostでは管理者に依頼し、CIはephemeral runnerへだけ導入する。

@@ -26,6 +26,7 @@ const workflows =
   "pnpm exec wrangler r2 bucket lifecycle set bucket \\\n";
 const cloudflareApiFiles = [
   "scripts/cloudflare-readback.mjs",
+  "scripts/cloudflare-worker-route-permission.mjs",
   "scripts/pages-promotion.mjs",
   "scripts/pages-upload-permission.mjs",
   "scripts/staging-access-control-plane.mjs",
@@ -39,7 +40,7 @@ function clonePolicy() {
 test("accepts the reviewed Cloudflare credential policy", () => {
   assert.deepEqual(verifyCloudflareCredentialPolicy(policy, evidence), {
     apiTokenRoles: 2,
-    cloudflareApiFiles: 4,
+    cloudflareApiFiles: 5,
     credentialRoles: 4,
     wranglerCommands: 6,
   });
@@ -59,6 +60,16 @@ test("rejects an incomplete backend control-plane permission set", () => {
   const changed = clonePolicy();
   changed.roles[0].accountPermissions[0] = "Access: Apps and Policies Read";
   changed.roles[0].accountPermissions[1] = "Access: Service Tokens Read";
+
+  assert.throws(
+    () => verifyCloudflareCredentialPolicy(changed, evidence),
+    /least-privilege policy/u,
+  );
+});
+
+test("rejects an incomplete Worker route permission set", () => {
+  const changed = clonePolicy();
+  changed.roles[0].zonePermissions.pop();
 
   assert.throws(
     () => verifyCloudflareCredentialPolicy(changed, evidence),

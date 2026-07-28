@@ -100,7 +100,7 @@ pnpm exec wrangler whoami
 対話ログインできないCIでは、
 [cloudflare-permissions.md](./cloudflare-permissions.md)で全操作を先に棚卸しした役割別
 Cloudflare API tokenをCI secretから渡す。Backend/Access用`CLOUDFLARE_API_TOKEN`は完成形
-6権限を一度に設定し、別のAccess管理tokenを作らない。Pages用tokenだけは分離する。
+8権限を一度に設定し、別のAccess管理tokenを作らない。Pages用tokenだけは分離する。
 token、account固有値、resource IDをshell scriptや追跡対象ファイルへ埋め込まない。
 
 RunPod操作にはchecksum検証済みのproject-local `runpodctl`を使用する。
@@ -293,6 +293,9 @@ config hash read-backへ一般tokenを渡さない。
 Cloudflare tokenのexact permissionと不要な権限は
 [cloudflare-permissions.md](./cloudflare-permissions.md)を正とし、権限不足をremote
 mutation後に見つけて場当たり的に追加しない。
+staging/productionとも、D1、R2、RunPod、Worker、Pagesの最初のmutationより前に
+`pnpm cloudflare:worker-route:verify:<environment>`を実行し、固定Wranglerが使う
+`Zone Read`と`Workers Routes Read`を実credentialで確認する。
 
 ```bash
 pnpm exec wrangler pages deploy \

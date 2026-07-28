@@ -17,6 +17,11 @@ const exactApiTokenPermissions = {
   "pages-ci": ["Cloudflare Pages Edit"],
 };
 
+const exactApiTokenZonePermissions = {
+  "backend-control-plane": ["Workers Routes Read", "Zone Read"],
+  "pages-ci": [],
+};
+
 const forbiddenPermissionFragments = [
   "Account Analytics",
   "Account Settings",
@@ -39,6 +44,7 @@ const allowedWorkflowWranglerCommandPrefixes = [
 
 const exactCloudflareApiFiles = [
   "scripts/cloudflare-readback.mjs",
+  "scripts/cloudflare-worker-route-permission.mjs",
   "scripts/pages-promotion.mjs",
   "scripts/pages-upload-permission.mjs",
   "scripts/staging-access-control-plane.mjs",
@@ -82,7 +88,11 @@ export function verifyCloudflareCredentialPolicy(policy, evidence) {
       throw new Error(`${roleId} must remain a Cloudflare API token`);
     }
     requireExactStrings(role.accountPermissions, permissions, `${roleId} account permissions`);
-    requireExactStrings(role.zonePermissions, [], `${roleId} zone permissions`);
+    requireExactStrings(
+      role.zonePermissions,
+      exactApiTokenZonePermissions[roleId],
+      `${roleId} zone permissions`,
+    );
     for (const permission of role.accountPermissions) {
       if (forbiddenPermissionFragments.some((fragment) => permission.includes(fragment))) {
         throw new Error(`${roleId} includes an unreviewed broad permission`);
@@ -105,6 +115,9 @@ export function verifyCloudflareCredentialPolicy(policy, evidence) {
   );
   if (backendRole.credentialName !== "CLOUDFLARE_API_TOKEN") {
     throw new Error("backend-control-plane credential name is invalid");
+  }
+  if (backendRole.zoneScope !== "exact-application-zone") {
+    throw new Error("backend-control-plane zone scope is invalid");
   }
 
   const pagesRole = requireRecord(roles.get("pages-ci"), "pages-ci role");
@@ -154,6 +167,8 @@ export function verifyCloudflareCredentialPolicy(policy, evidence) {
     "Queues Edit",
     "Workers R2 Storage Edit",
     "Workers Scripts Edit",
+    "Workers Routes Read",
+    "Zone Read",
     "Cloudflare Pages Edit",
     "Object Read & Write",
   ]) {

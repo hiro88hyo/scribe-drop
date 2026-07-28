@@ -24,10 +24,9 @@ Account permissionを一度に設定する。
 4. `Queues Edit`
 5. `Workers R2 Storage Edit`
 6. `Workers Scripts Edit`
-
-Account Resourcesは対象account 1件だけをIncludeし、Zone permission、Pages permission、
-Analytics、Logs、Account Settings、API Tokens permissionは付けない。Accessの`Edit`が
-read-backを含むため、対応する`Read`は追加しない。
+   Account Resourcesは対象account 1件だけをIncludeし、Zone permission、Pages permission、
+   Analytics、Logs、Account Settings、API Tokens permissionは付けない。Accessの`Edit`が
+   read-backを含むため、対応する`Read`は追加しない。
 
 Stagingとproductionのtoken値は共有しない。GitHub Environmentに保存した対象環境のtokenを
 通常promotionで使い、Access保守時だけ同じtokenをlocal credential storeへ一時注入する。
@@ -57,4 +56,4 @@ product commandを拒否する。新しい操作に別permissionが必要な場�
 
 ## Status
 
-Accepted
+Superseded by [ADR 0045](./0045-preflight-wrangler-worker-route-capability.md)

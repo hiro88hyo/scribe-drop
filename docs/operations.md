@@ -44,6 +44,10 @@ versionと認証先、Cloudflare account、environment、queue名を声出し確
 使用tokenの役割と全permissionは
 [cloudflare-permissions.md](./cloudflare-permissions.md)を先に確認し、read-only確認の
 途中で権限を追加しない。
+Worker custom domainを含むdeployでは、固定WranglerがWorker upload後にzoneと既存routeを
+read-backする。`pnpm cloudflare:worker-route:verify:<environment>`が成功するまでD1、R2、
+RunPod、Worker、Pagesを変更しない。以前成功したtokenを置換する場合は、成功時の8権限と
+Account/Zone scopeからの差分を先に確認し、未記録のdashboard構成を棄却しない。
 
 ```bash
 pnpm exec wrangler --version
