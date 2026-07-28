@@ -61,6 +61,11 @@ const pagesUploadPermissionScriptPath = path.join(
   "scripts",
   "pages-upload-permission.mjs",
 );
+const productionGithubControlsVerifierPath = path.join(
+  repositoryRoot,
+  "scripts",
+  "verify-production-github-controls.mjs",
+);
 const stagingPagesSecretsScriptPath = path.join(
   repositoryRoot,
   "scripts",
@@ -192,6 +197,10 @@ const runpodTemplateApiScriptContents = readFileSync(runpodTemplateApiScriptPath
 const runpodReleaseReadinessScriptContents = readFileSync(runpodReleaseReadinessScriptPath, "utf8");
 const pagesPromotionScriptContents = readFileSync(pagesPromotionScriptPath, "utf8");
 const pagesUploadPermissionScriptContents = readFileSync(pagesUploadPermissionScriptPath, "utf8");
+const productionGithubControlsVerifierContents = readFileSync(
+  productionGithubControlsVerifierPath,
+  "utf8",
+);
 const stagingPagesSecretsScriptContents = readFileSync(stagingPagesSecretsScriptPath, "utf8");
 const promotePagesCandidateScriptContents = readFileSync(promotePagesCandidateScriptPath, "utf8");
 const dockerfileContents = readFileSync(dockerfilePath, "utf8");
@@ -998,6 +1007,18 @@ requireText(
   '"github:controls:verify:production": "node scripts/verify-production-github-controls.mjs"',
   "package.json",
   "pre-dispatch production GitHub controls gate",
+);
+requireText(
+  productionGithubControlsVerifierContents,
+  "`branches/${encodeURIComponent(branch)}/protection`",
+  "verify-production-github-controls.mjs",
+  "live branch protection read-back",
+);
+requireText(
+  productionGithubControlsVerifierContents,
+  "branchProtections,",
+  "verify-production-github-controls.mjs",
+  "branch protections passed to the fail-fast validator",
 );
 
 for (const [description, value] of Object.entries({

@@ -1,3 +1,5 @@
+import { verifyBranchProtections } from "./github-branch-protection.mjs";
+
 const workflowPath = ".github/workflows/deploy-production-candidate.yml";
 
 export const requiredProductionVariableNames = [
@@ -67,6 +69,13 @@ export function verifyProductionGithubControls(untrustedInput) {
   }
   if (input.workflowPath !== workflowPath) {
     failures.push("Production workflow is not registered on the default branch");
+  }
+  let branchProtectionCount = 0;
+  try {
+    const result = verifyBranchProtections(input.branchProtections, input.releaseBranch);
+    branchProtectionCount = result.branchProtectionCount;
+  } catch (error) {
+    failures.push(error instanceof Error ? error.message : "GitHub branch protections are invalid");
   }
 
   try {
@@ -139,6 +148,7 @@ export function verifyProductionGithubControls(untrustedInput) {
   }
 
   return {
+    branchProtectionCount,
     secretCount,
     variableCount,
   };

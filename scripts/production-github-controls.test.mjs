@@ -6,9 +6,43 @@ import {
   requiredProductionVariableNames,
   verifyProductionGithubControls,
 } from "./production-github-controls.mjs";
+import { requiredStatusCheckNames } from "./github-branch-protection.mjs";
+
+const releaseBranch = "release/0.1.0";
+
+function branchProtection(branch) {
+  const longLived = branch === "main" || branch === "develop";
+  return {
+    allow_deletions: { enabled: false },
+    allow_force_pushes: { enabled: false },
+    enforce_admins: { enabled: true },
+    lock_branch: { enabled: false },
+    required_conversation_resolution: { enabled: longLived },
+    required_linear_history: { enabled: false },
+    required_pull_request_reviews: longLived
+      ? {
+          dismiss_stale_reviews: true,
+          require_code_owner_reviews: false,
+          require_last_push_approval: true,
+          required_approving_review_count: 1,
+        }
+      : null,
+    required_status_checks: longLived
+      ? {
+          checks: requiredStatusCheckNames.map((context) => ({ context })),
+          strict: true,
+        }
+      : null,
+  };
+}
 
 function controls() {
   return {
+    branchProtections: {
+      develop: branchProtection("develop"),
+      main: branchProtection("main"),
+      [releaseBranch]: branchProtection(releaseBranch),
+    },
     branchPolicyNames: ["release/*"],
     defaultBranch: "develop",
     environment: {
@@ -27,6 +61,7 @@ function controls() {
         },
       ],
     },
+    releaseBranch,
     secretNames: [...requiredProductionSecretNames],
     variableNames: [...requiredProductionVariableNames],
     workflowPath: ".github/workflows/deploy-production-candidate.yml",
@@ -35,6 +70,7 @@ function controls() {
 
 test("accepts exact fail-fast production controls without reading values", () => {
   assert.deepEqual(verifyProductionGithubControls(controls()), {
+    branchProtectionCount: 3,
     secretCount: 4,
     variableCount: 15,
   });
@@ -65,5 +101,14 @@ test("rejects missing review and broader deployment branches", () => {
   assert.throws(
     () => verifyProductionGithubControls(broadBranch),
     /branch policies does not match/u,
+  );
+});
+
+test("rejects missing repository branch protection with other controls intact", () => {
+  const unprotected = controls();
+  delete unprotected.branchProtections.main;
+  assert.throws(
+    () => verifyProductionGithubControls(unprotected),
+    /branch protection targets do not match/u,
   );
 });

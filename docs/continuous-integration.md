@@ -264,10 +264,16 @@ Cloudflare mutationより前にstaging evidenceとの一致を要求する。evi
 
 ## Branch protection
 
-GitHub repository 作成後、`main` と `develop` への直接 push を禁止し、少なくとも
-`Quality gate`、`Secret scan`、`Dependency audit`、`RunPod container supply chain`を
-required status checkに設定する。これはrepository側の設定であり、ローカル基盤作成では
-変更しない。
+`main`と`develop`への直接pushを禁止し、`Quality gate`、`Secret scan`、
+`Dependency audit`、`Browser E2E`、`RunPod container supply chain`の5件をstrictな
+required status checkに設定する。承認1名、stale review破棄、最新push以外の承認拒否、
+conversation解決を要求し、管理者にも適用する。force-pushとbranch削除は禁止する。
+
+現行`release/<version>`はrelease修正を直接積めるGit-flowを維持するためPRとstatus checkを
+必須にしない。一方で管理者を含むforce-pushとbranch削除は禁止する。production deployは
+production Environmentのrequired reviewerとcustom `release/*` policyで別途保護する。
+`pnpm github:controls:verify:production`は、3 branchのこの非対称な設定も値を表示せず
+read-backし、欠落や緩和があればcandidate開始前に失敗する。
 
 production Environmentにはrequired reviewerとrelease branch制限を設定する。
 candidate publication、staging acceptance、production promotionを別のGitHub Deployment

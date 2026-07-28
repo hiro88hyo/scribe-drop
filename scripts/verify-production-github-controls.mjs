@@ -51,6 +51,18 @@ try {
   );
   const defaultBranch =
     typeof repositoryIdentity.defaultBranch === "string" ? repositoryIdentity.defaultBranch : "";
+  const releaseBranch = run("git", ["branch", "--show-current"], "Release branch");
+  const branchProtections = Object.fromEntries(
+    ["main", "develop", releaseBranch].map((branch) => [
+      branch,
+      githubJsonOr(
+        `branches/${encodeURIComponent(branch)}/protection`,
+        ".",
+        `${branch} branch protection`,
+        null,
+      ),
+    ]),
+  );
   const workflowIdentity = githubJsonOr(
     "contents/.github/workflows/deploy-production-candidate.yml?ref=develop",
     "{workflowPath:.path}",
@@ -84,9 +96,11 @@ try {
   let result;
   try {
     result = verifyProductionGithubControls({
+      branchProtections,
       branchPolicyNames,
       defaultBranch,
       environment,
+      releaseBranch,
       secretNames,
       variableNames,
       workflowPath: workflowIdentity.workflowPath,
@@ -102,7 +116,7 @@ try {
     throw new Error([...new Set(apiFailures)].join("; "));
   }
   console.log(
-    `Verified production GitHub controls (${result.variableCount} variables, ${result.secretCount} secrets).`,
+    `Verified production GitHub controls (${result.branchProtectionCount} protected branches, ${result.variableCount} variables, ${result.secretCount} secrets).`,
   );
 } catch (error) {
   console.error(

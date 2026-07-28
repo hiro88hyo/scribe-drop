@@ -332,7 +332,8 @@ imageと合成する。applicationの生成・再検証に失敗した場合はc
 通常の実行順序は次のとおりとする。
 
 1. production workflowの同一pathがdefault branch `develop`へ登録済みであること、
-   GitHub production Environmentのreview、`release/*` policy、15変数名、4 secret名を
+   `main`、`develop`、現行release branchのprotection、GitHub production Environmentの
+   review、`release/*` policy、15変数名、4 secret名を
    `pnpm github:controls:verify:production`で確認する。失敗中はcandidateを開始しない。
 2. release-to-main PRがclosedであることを確認し、
    `Publish RunPod release candidate`を`release/<version>`で実行する。

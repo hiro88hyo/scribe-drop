@@ -29,6 +29,12 @@ secret非公開性を失う。workflow input、手動チェックボックス、
   変更する案は技術的な代替だが、可視性を変えるため明示的な所有者判断なしに行わない。
 - `release/*`、`develop`、`main`へ必要なbranch protectionを設定し、そのread-backが成功
   するまでcandidateをproduction-readyと扱わない。
+- 所有者がpublic repositoryへの変更を明示承認し、Environment protectionを利用可能に
+  した後もbranch protectionを省略しない。`main`と`develop`はPR、承認1名、最新head承認、
+  conversation解決、5 required checksを必須とする。
+- 現行release branchはGit-flowのrelease修正を継続できるようPR/status checkを必須に
+  せず、管理者を含むforce-pushとbranch削除を禁止する。production deploy自体は別途
+  production Environmentのrequired reviewerと`release/*` policyで保護する。
 
 ## Consequences
 
