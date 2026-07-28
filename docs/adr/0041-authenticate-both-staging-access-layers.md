@@ -38,8 +38,14 @@ AUDは内側のPages applicationであるため、外側のAUDだけを許可し
   ```
 
 - CIのread-only verifierとPlaywrightは、exact staging Web originへの全requestだけに
-  標準2 headerと上記`Authorization`を同時送信する。cookie取得後も両方を継続する。
-  Access team domain、R2、download先、その他のoriginでは3 headerをすべて除去する。
+  標準2 headerと上記Access JSON `Authorization`を同時送信する。cookie取得後も両方を
+  継続する。Playwright route自体を`${appOrigin}/**`だけに登録し、callback内でもoriginを
+  再検証してからcredentialを付与する。Access team domain、R2、download先、その他の
+  originはこのadapterを通さず、browserが生成したheaderを変更しない。
+- Playwrightの`route.fetch()`をexact application originへ使う際、Chromiumが生成した
+  `Sec-Fetch-Site`がrequest headersに存在しないことがある。unsafe method、exact
+  `Origin`一致、header欠落の3条件をすべて満たす場合だけ`same-origin`を補完する。
+  cross-origin、`Origin`不一致、既存のFetch Metadataは補正しない。
 - Web runtimeの`ACCESS_AUDIENCES`には、外側AUDと内側Pages AUDの2件を含める。
   `SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`と
   `SCRIBE_DROP_STAGING_PAGES_ACCESS_AUDIENCE`を別々に検証し、欠落、不正形式、重複を
@@ -66,7 +72,10 @@ AUDは内側のPages applicationであるため、外側のAUDだけを許可し
 - staging runtimeは環境固有の2 AUDを信頼する。どちらもAccess JWTの署名、issuer、claim、
   staging-only service principal検証を迂回しない。
 - genericな`Authorization`をE2E routeが上書きするため、この機械認証browser contextを
-  別のBearer認証試験へ流用しない。
+  別のBearer認証試験へ流用しない。route scope外のR2 SigV4やartifact download requestは
+  adapterが解釈、除去、再構築しない。
+- E2E routeのrequest再送はbrowser security metadataを暗黙に再構築しない。mutationの
+  回帰testではOrigin、CSRF、Fetch Metadataを個別に検証する。
 - Pages Preview Accessを無効化または構成変更する場合は、2 AUDと二重headerを惰性で残さず、
   control-plane read-back、test、文書を同じ変更で更新する。
 

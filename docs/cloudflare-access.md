@@ -63,9 +63,18 @@ mutation前にread-only Service Auth verifierでapplication cookieと`GET /api/m
 その後のbrowser acceptanceは
 [ADR 0041](./adr/0041-authenticate-both-staging-access-layers.md)に従う。exact staging Web
 originだけへ、外側custom hostname Access用の標準2 headerと、内側Pages Preview Access用の
-JSON `Authorization`を同時送信する。cookie取得後も3 headerを継続し、R2、Access team
-domain、その他のoriginではすべて除去する。現在のpage originが正規originであることを確認し、
-`/api/me`は相対URLではなく正規originから組み立てた絶対URLで確認する。
+JSON `Authorization`を同時送信する。cookie取得後も3 headerを継続する。Access team
+domain、R2、artifact download先、その他のoriginはPlaywright routeの対象外とし、adapterが
+headerを解釈、除去、再構築しない。callback内でもoriginを再検証してからcredentialを
+付与する。現在のpage originが正規originであることを確認し、`/api/me`は相対URLではなく
+正規originから組み立てた絶対URLで確認する。
+
+Playwrightの`route.fetch()`はChromiumのFetch Metadataを常に再構築するとは限らない。
+unsafe methodのexact application requestで、`Origin`が正規originと一致し、
+`Sec-Fetch-Site`だけが欠落している場合に限り`same-origin`を補完する。Origin不一致、
+cross-origin、既存headerは補正しない。exact-origin route、callback内origin guard、
+Fetch Metadata条件はunit testと静的CI検査で固定する。実staging acceptanceはjob作成の
+201とmultipart actionの成否を直後に判定してからGPU待ちへ進む。
 
 application作成後、次の非secret値を取得する。
 

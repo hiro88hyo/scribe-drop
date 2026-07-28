@@ -123,17 +123,22 @@ export async function openAuthenticatedStagingPage(
   const appOrigin = requireExactHttpsOrigin(baseURL, "Staging base URL");
   const context = await browser.newContext();
 
-  await context.route("**/*", async (route) => {
+  await context.route(`${appOrigin}/**`, async (route) => {
     const request = route.request();
-    const requestHeaders = await request.allHeaders();
-    const headers = headersForAccessRequest(request.url(), appOrigin, requestHeaders, credentials);
     if (new URL(request.url()).origin !== appOrigin) {
-      await route.continue({ headers });
-      return;
+      throw new Error("Staging Access route received a cross-origin request");
     }
+    const requestHeaders = await request.allHeaders();
+    const headers = headersForAccessRequest(
+      request.url(),
+      appOrigin,
+      requestHeaders,
+      credentials,
+      request.method(),
+    );
 
-    // Keep redirects visible to the browser so every destination is checked
-    // before Access credentials are attached.
+    // The route is registered only for the exact application origin. The
+    // browser follows redirects and sends R2 requests without this adapter.
     const response = await route.fetch({ headers, maxRedirects: 0 });
     await route.fulfill({ response });
   });

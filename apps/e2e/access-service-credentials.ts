@@ -6,6 +6,17 @@ const ACCESS_CREDENTIAL_HEADER_NAMES = new Set([
   ACCESS_CLIENT_SECRET_HEADER.toLowerCase(),
   ACCESS_AUTHORIZATION_HEADER.toLowerCase(),
 ]);
+const UNSAFE_METHODS = new Set(["DELETE", "PATCH", "POST", "PUT"]);
+
+function headerValue(
+  headers: Readonly<Record<string, string>>,
+  expectedName: string,
+): string | undefined {
+  const normalizedExpectedName = expectedName.toLowerCase();
+  return Object.entries(headers).find(
+    ([name]) => name.toLowerCase() === normalizedExpectedName,
+  )?.[1];
+}
 
 function accessAuthorizationValue(credentials: AccessServiceCredentials): string {
   return JSON.stringify({
@@ -24,16 +35,27 @@ export function headersForAccessRequest(
   appOrigin: string,
   requestHeaders: Readonly<Record<string, string>>,
   credentials: AccessServiceCredentials,
+  requestMethod = "GET",
 ): Record<string, string> {
+  if (new URL(requestUrl).origin !== appOrigin) {
+    throw new Error("Access credential routing requires the exact application origin");
+  }
   const headers = Object.fromEntries(
     Object.entries(requestHeaders).filter(
       ([name]) => !ACCESS_CREDENTIAL_HEADER_NAMES.has(name.toLowerCase()),
     ),
   );
-  if (new URL(requestUrl).origin === appOrigin) {
-    headers[ACCESS_CLIENT_ID_HEADER] = credentials.clientId;
-    headers[ACCESS_CLIENT_SECRET_HEADER] = credentials.clientSecret;
-    headers[ACCESS_AUTHORIZATION_HEADER] = accessAuthorizationValue(credentials);
+  headers[ACCESS_CLIENT_ID_HEADER] = credentials.clientId;
+  headers[ACCESS_CLIENT_SECRET_HEADER] = credentials.clientSecret;
+  headers[ACCESS_AUTHORIZATION_HEADER] = accessAuthorizationValue(credentials);
+  if (
+    UNSAFE_METHODS.has(requestMethod.toUpperCase()) &&
+    headerValue(requestHeaders, "Origin") === appOrigin &&
+    headerValue(requestHeaders, "Sec-Fetch-Site") === undefined
+  ) {
+    // route.fetch() preserves the reviewed request headers but does not
+    // reconstruct Chromium's same-origin Fetch Metadata header.
+    headers["Sec-Fetch-Site"] = "same-origin";
   }
   return headers;
 }

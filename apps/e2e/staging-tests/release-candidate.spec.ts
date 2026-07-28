@@ -9,6 +9,23 @@ import {
   waitForAuthenticatedStagingDataPlane,
 } from "../staging-auth.js";
 
+function multipartAction(requestUrl: string, method: string): string | undefined {
+  const url = new URL(requestUrl);
+  if (url.searchParams.has("partNumber") && url.searchParams.has("uploadId")) {
+    return "upload-part";
+  }
+  if (url.searchParams.has("uploads") && method === "POST") {
+    return "create-multipart";
+  }
+  if (url.searchParams.has("uploadId") && method === "POST") {
+    return "complete-multipart";
+  }
+  if (url.searchParams.has("uploadId") && method === "DELETE") {
+    return "abort-multipart";
+  }
+  return undefined;
+}
+
 async function readSuccessfulDownload(download: Download): Promise<Buffer> {
   expect(await download.failure()).toBeNull();
   return readFileSync(await download.path());
@@ -18,10 +35,26 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
   browser,
   baseURL,
 }) => {
+  if (baseURL === undefined) {
+    throw new Error("Staging base URL is missing");
+  }
   const { context, page } = await openAuthenticatedStagingPage(browser, baseURL);
 
   try {
     await waitForAuthenticatedStagingDataPlane(page, baseURL);
+    const multipartObservations: string[] = [];
+    page.on("response", (response) => {
+      const action = multipartAction(response.url(), response.request().method());
+      if (action !== undefined && multipartObservations.length < 8) {
+        multipartObservations.push(`${action}:status-${String(response.status())}`);
+      }
+    });
+    page.on("requestfailed", (request) => {
+      const action = multipartAction(request.url(), request.method());
+      if (action !== undefined && multipartObservations.length < 8) {
+        multipartObservations.push(`${action}:network-failure`);
+      }
+    });
 
     await page.getByLabel("文字起こしする音声・動画ファイル").setInputFiles({
       buffer: readCandidateFixture(requireStagingEnvironment("RELEASE_CANDIDATE_DIRECTORY")),
@@ -39,10 +72,63 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
       name: "アップロードを開始",
     });
     await expect(uploadButton).toBeEnabled();
+    const createJobResponse = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).origin === baseURL &&
+        new URL(response.url()).pathname === "/api/jobs" &&
+        response.request().method() === "POST",
+      { timeout: 30_000 },
+    );
     await uploadButton.click();
-    await expect(page.getByText("アップロードを受け付けました。")).toBeVisible({
+    const createResponse = await createJobResponse;
+    const createRequestHeaders = await createResponse.request().allHeaders();
+    const fetchSite = createRequestHeaders["sec-fetch-site"];
+    const requestSecurityObservation = [
+      `origin=${createRequestHeaders["origin"] === baseURL ? "match" : "mismatch"}`,
+      `fetch-site=${
+        fetchSite === "same-origin" ||
+        fetchSite === "same-site" ||
+        fetchSite === "cross-site" ||
+        fetchSite === "none"
+          ? fetchSite
+          : "missing-or-invalid"
+      }`,
+      `csrf=${createRequestHeaders["x-csrf-token"] === undefined ? "missing" : "present"}`,
+    ].join(", ");
+    let createFailure = "non-json response";
+    if (
+      createResponse.headers()["content-type"]?.toLowerCase().startsWith("application/json") ===
+      true
+    ) {
+      const body = (await createResponse.json()) as unknown;
+      const code =
+        typeof body === "object" &&
+        body !== null &&
+        "error" in body &&
+        typeof body.error === "object" &&
+        body.error !== null &&
+        "code" in body.error &&
+        typeof body.error.code === "string" &&
+        /^[A-Z][A-Z0-9_]{0,63}$/u.test(body.error.code)
+          ? body.error.code
+          : "invalid JSON error";
+      createFailure = `API error ${code}`;
+    }
+    expect(
+      createResponse.status(),
+      `Create job API must accept the synthetic staging job; received ${createFailure}; ${requestSecurityObservation}`,
+    ).toBe(201);
+
+    const uploadAccepted = page.getByText("アップロードを受け付けました。");
+    const uploadError = page.getByRole("alert");
+    await expect(uploadAccepted.or(uploadError)).toBeVisible({
       timeout: 2 * 60 * 1_000,
     });
+    expect(
+      await uploadError.isVisible(),
+      `Upload UI reported an error after job creation; multipart=${multipartObservations.join(",") || "none"}`,
+    ).toBe(false);
+    await expect(uploadAccepted).toBeVisible();
     await page.getByRole("link", { name: "ジョブ詳細を確認" }).click();
 
     await expect(page.getByText("完了", { exact: true }).first()).toBeVisible({

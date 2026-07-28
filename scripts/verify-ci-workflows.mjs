@@ -30,6 +30,13 @@ const stagingAccessCredentialsPath = path.join(
   "e2e",
   "access-service-credentials.ts",
 );
+const stagingAccessCredentialsTestPath = path.join(
+  repositoryRoot,
+  "apps",
+  "e2e",
+  "tests",
+  "access-service-credentials.spec.ts",
+);
 const accessVerifierPath = path.join(repositoryRoot, "scripts", "access-verifier.mjs");
 const releaseCandidateScriptPath = path.join(repositoryRoot, "scripts", "release-candidate.mjs");
 const runpodDeploymentScriptPath = path.join(
@@ -176,6 +183,7 @@ const cloudflareReadbackScriptContents = readFileSync(cloudflareReadbackScriptPa
 const stagingE2eContents = readFileSync(stagingE2ePath, "utf8");
 const stagingAuthContents = readFileSync(stagingAuthPath, "utf8");
 const stagingAccessCredentialsContents = readFileSync(stagingAccessCredentialsPath, "utf8");
+const stagingAccessCredentialsTestContents = readFileSync(stagingAccessCredentialsTestPath, "utf8");
 const accessVerifierContents = readFileSync(accessVerifierPath, "utf8");
 const releaseCandidateScriptContents = readFileSync(releaseCandidateScriptPath, "utf8");
 const runpodDeploymentScriptContents = readFileSync(runpodDeploymentScriptPath, "utf8");
@@ -829,7 +837,10 @@ requireTextCount(
 
 for (const [description, value] of Object.entries({
   "same-origin Access credential routing": "headersForAccessRequest(",
+  "exact-origin route registration": "await context.route(`${appOrigin}/**`",
+  "callback origin defense": "Staging Access route received a cross-origin request",
   "complete browser request headers including cookies": "await request.allHeaders()",
+  "request method forwarding for Fetch Metadata": "request.method(),",
   "redirect boundary before credential reuse": "maxRedirects: 0",
   "authenticated application navigation": "const applicationResponse = await page.goto(baseURL",
   "service-token cookie identity check": "serviceTokenCookieMatchesExpectedIdentity(",
@@ -841,6 +852,34 @@ for (const [description, value] of Object.entries({
     "Expected the authenticated staging data plane to converge",
 })) {
   requireText(stagingAuthContents, value, "staging-auth.ts", description);
+}
+for (const [description, value] of Object.entries({
+  "exact application origin guard":
+    "Access credential routing requires the exact application origin",
+  "same-origin Fetch Metadata restoration": '"Sec-Fetch-Site"] = "same-origin"',
+  "unsafe method restriction": "UNSAFE_METHODS.has(requestMethod.toUpperCase())",
+  "exact Origin restriction": 'headerValue(requestHeaders, "Origin") === appOrigin',
+})) {
+  requireText(
+    stagingAccessCredentialsContents,
+    value,
+    "access-service-credentials.ts",
+    description,
+  );
+}
+for (const [description, value] of Object.entries({
+  "Fetch Metadata exact-condition regression test":
+    "restores same-origin Fetch Metadata only for exact-origin unsafe requests",
+  "cross-origin route rejection": "https://storage.example.test/upload",
+  "existing Fetch Metadata preservation": "existingFetchMetadata",
+  "safe method Fetch Metadata rejection": "safeGet",
+})) {
+  requireText(
+    stagingAccessCredentialsTestContents,
+    value,
+    "access-service-credentials.spec.ts",
+    description,
+  );
 }
 for (const [contents, location] of [
   [stagingAccessCredentialsContents, "access-service-credentials.ts"],
@@ -884,6 +923,12 @@ forbidText(
 );
 forbidText(
   stagingAuthContents,
+  'context.route("**/*"',
+  "staging-auth.ts",
+  "global request interception",
+);
+forbidText(
+  stagingAuthContents,
   "context.request.",
   "staging-auth.ts",
   "API request Access bootstrap",
@@ -908,7 +953,7 @@ forbidText(
 );
 requireTextOrder(
   stagingAuthContents,
-  'await context.route("**/*"',
+  "await context.route(`${appOrigin}/**`",
   "await completeStagingBrowserAccessHandshake(",
   "staging-auth.ts",
   "same-origin interception before browser Access handshake",
@@ -927,6 +972,15 @@ requireTextOrder(
   "release-candidate.spec.ts",
   "data-plane readiness before media mutation",
 );
+for (const [description, value] of Object.entries({
+  "immediate create response observation": "const createJobResponse = page.waitForResponse(",
+  "successful job admission assertion": "createResponse.status(),",
+  "safe request-security diagnostics": "requestSecurityObservation",
+  "safe multipart diagnostics": "multipartObservations",
+  "immediate upload failure observation": "uploadAccepted.or(uploadError)",
+})) {
+  requireText(stagingE2eContents, value, "release-candidate.spec.ts", description);
+}
 requireText(
   releaseCandidateScriptContents,
   "meRouteIndex > apiFallbackIndex",

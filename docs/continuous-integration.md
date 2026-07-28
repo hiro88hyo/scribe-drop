@@ -160,9 +160,14 @@ invariantをenvironment markerで正規化したpolicy hashを含める。
 Access service tokenは[ADR 0041](./adr/0041-authenticate-both-staging-access-layers.md)に
 従い、browser requestをhopごとにinterceptする。exact application originだけへ外側用
 標準2 headerと内側用JSON `Authorization`を同時送信し、cookie取得後も継続する。
-redirectはbrowserへ返して次requestのoriginを再評価し、cross-originでは3 headerを
-すべて除去する。最初のnavigationが2xxかつexact application originであることと、
-application cookieのservice principal claimを検証する。
+routeはexact application originだけに登録し、callback内でもoriginを再検証する。
+redirectはbrowserへ返して次requestを新たに評価させる。R2、Access team domain、
+artifact download先、その他のcross-origin requestはadapterを通さず、browserが生成した
+headerを変更しない。`route.fetch()`が同一origin mutationの`Sec-Fetch-Site`を
+欠落させた場合は、unsafe method、exact `Origin`一致、header欠落の条件下だけ
+`same-origin`を補完する。
+最初のnavigationが2xxかつexact application originであることと、application cookieの
+service principal claimを検証する。
 `/api/me?candidate=<commit>`はそのoriginから構築した絶対URLへ送り、Access team domain上の
 相対URLをdata-plane応答として受け入れない。
 [ADR 0040](./adr/0040-verify-staging-service-auth-before-mutation.md)に従い、`preflight`は
@@ -177,7 +182,10 @@ staging workflowは[ADR 0036](./adr/0036-defer-custom-domain-readiness-to-accept
 分ける。custom domainの認証済みreadinessは`acceptance`のbrowser lifecycle先頭で確認し、
 成功するまでmedia uploadとGPU jobを開始しない。readiness失敗時は同じrunのfailed
 `acceptance` jobだけを再実行し、成功済みmigration、Pages、backend promotionを
-再実行しない。
+再実行しない。media mutation開始後はjob作成responseを30秒以内に直接観測して201を
+要求する。失敗時は秘密値や本文を出さず、machine-readable error codeとOrigin、CSRF、
+Fetch Metadataの有無だけを報告する。作成成功後もupload成功表示と安全なmultipart
+action分類を直ちに競合させ、R2障害を長いGPU完了timeoutまで待たない。
 Pages promotionは公式APIでcommit、production branch、deploy status、`uses_functions`、
 設定hashを先に照合し、exact candidateがactiveならdeployを省略する。deploy応答喪失時も
 mutationを再送せず、上限付きread-backだけで結果を確定する。

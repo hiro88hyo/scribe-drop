@@ -16,7 +16,7 @@ function tokenFor(payload: unknown): string {
   return `header.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.signature`;
 }
 
-test("adds Access credentials only to the exact application origin", () => {
+test("adds Access credentials after enforcing the exact application origin", () => {
   const appHeaders = headersForAccessRequest(
     "https://app.example.test/api/me",
     "https://app.example.test",
@@ -58,16 +58,93 @@ test("adds Access credentials only to the exact application origin", () => {
     cookie: "CF_Authorization=test-cookie",
   });
 
-  const storageHeaders = headersForAccessRequest(
-    "https://storage.example.test/upload",
+  expect(() =>
+    headersForAccessRequest(
+      "https://storage.example.test/upload",
+      "https://app.example.test",
+      authenticatedHeaders,
+      credentials,
+    ),
+  ).toThrow("exact application origin");
+});
+
+test("restores same-origin Fetch Metadata only for exact-origin unsafe requests", () => {
+  const exactOriginPost = headersForAccessRequest(
+    "https://app.example.test/api/jobs",
     "https://app.example.test",
-    authenticatedHeaders,
+    {
+      "content-type": "application/json",
+      origin: "https://app.example.test",
+      "x-csrf-token": "test-csrf-token",
+    },
     credentials,
+    "POST",
   );
-  expect(storageHeaders).toEqual({
-    accept: "application/json",
-    cookie: "CF_Authorization=test-cookie",
-  });
+  expect(exactOriginPost).toEqual(
+    expect.objectContaining({
+      "Sec-Fetch-Site": "same-origin",
+    }),
+  );
+
+  const mismatchedOriginPost = headersForAccessRequest(
+    "https://app.example.test/api/jobs",
+    "https://app.example.test",
+    {
+      "content-type": "application/json",
+      origin: "https://attacker.example",
+      "x-csrf-token": "test-csrf-token",
+    },
+    credentials,
+    "POST",
+  );
+  expect(mismatchedOriginPost).not.toHaveProperty("Sec-Fetch-Site");
+
+  const existingFetchMetadata = headersForAccessRequest(
+    "https://app.example.test/api/jobs",
+    "https://app.example.test",
+    {
+      origin: "https://app.example.test",
+      "sec-fetch-site": "cross-site",
+    },
+    credentials,
+    "POST",
+  );
+  expect(existingFetchMetadata).toEqual(
+    expect.objectContaining({
+      "sec-fetch-site": "cross-site",
+    }),
+  );
+  expect(existingFetchMetadata).not.toHaveProperty("Sec-Fetch-Site");
+
+  const safeGet = headersForAccessRequest(
+    "https://app.example.test/api/me",
+    "https://app.example.test",
+    {
+      accept: "application/json",
+      origin: "https://app.example.test",
+    },
+    credentials,
+    "GET",
+  );
+  expect(safeGet).toEqual(
+    expect.objectContaining({
+      accept: "application/json",
+    }),
+  );
+  expect(safeGet).not.toHaveProperty("Sec-Fetch-Site");
+
+  expect(() =>
+    headersForAccessRequest(
+      "https://storage.example.test/upload",
+      "https://app.example.test",
+      {
+        authorization: "AWS4-HMAC-SHA256 test",
+        origin: "https://app.example.test",
+      },
+      credentials,
+      "POST",
+    ),
+  ).toThrow("exact application origin");
 });
 
 test("validates only the expected service-token identity shape", () => {

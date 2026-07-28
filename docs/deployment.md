@@ -367,9 +367,10 @@ stagingのAccess自動試験は
 Environmentへ複製しない。transportは
 [ADR 0041](./adr/0041-authenticate-both-staging-access-layers.md)に従い、browser requestの
 各hopで送信先を再評価する。exact application originだけへ、外側Access用の標準2 headerと
-内側Pages Access用のJSON `Authorization`を同時送信し、cookie取得後も継続する。その他の
-originでは3 headerを除去する。最終originと、絶対URLで送る認証済み`/api/me`のoriginが
-正規staging originと一致しない場合はupload前に停止する。
+内側Pages Access用のJSON `Authorization`を同時送信し、cookie取得後も継続する。Playwright
+routeはexact application originだけへ登録し、callback内でもoriginを再検証する。その他の
+originはadapterを通さず、browserが生成したheaderを変更しない。最終originと、絶対URLで
+送る認証済み`/api/me`のoriginが正規staging originと一致しない場合はupload前に停止する。
 [ADR 0040](./adr/0040-verify-staging-service-auth-before-mutation.md)に従い、同じcredentialの
 形式、2 application、相異なるAUD、layer固有header、exact policy、application cookie、
 service principal claim、認証済み`GET /api/me`をstaging `preflight`でも検証する。この
