@@ -43,27 +43,43 @@ Client ID/secretはGitHub staging Environmentにだけ保存し、Client IDと�
 `common_name`を`SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME`へ設定する。
 production applicationにはこのpolicyと変数を追加しない。
 
-CI browserは[ADR 0030](./adr/0030-scope-access-service-credentials-to-app-origin.md)と
-[ADR 0037](./adr/0037-bootstrap-access-before-browser-navigation.md)に従う。最初に
-BrowserContextとcookie jarを共有するrequest clientでAccess sessionを確立し、redirectは
-自動追跡せず、正規のstaging Web originとAccess team originだけを1 hopずつ追跡する。
-service token headerはstaging Web originへだけ送る。cookie取得後のbrowser requestでも
-Service Auth用headerを正規originへだけ継続し、redirectごとにoriginを再判定する。R2、
-Access team domain、その他のoriginへClient ID/secretを送らない。applicationを開いた後は
-現在のpage originが正規originへ戻ったことを確認し、`/api/me`は相対URLではなく正規origin
-から組み立てた絶対URLで確認する。
+Pages Preview Accessを有効にしたstagingでは、custom hostname applicationの背後にPages
+applicationがあるため、[ADR 0041](./adr/0041-authenticate-both-staging-access-layers.md)の
+二重境界として構成する。両applicationへ同じCI専用tokenだけを許可する`Service Auth`
+policyを1件ずつ置く。custom hostname applicationは標準2 headerのままとし、Pages
+applicationだけを`Authorization`からService Tokenを読む設定にする。`Any valid service
+token`、複数の`Service Auth` policy、Pages側の標準header設定を許可しない。
+
+API tokenと非secret変数を一時environmentから渡し、次のread-only検査で2 application、
+相異なるAUD、layer固有header、exact policyを確認する。実ID、AUD、domain、token値は
+出力しない。
+
+```bash
+pnpm cloudflare:access:control-plane:verify:staging
+```
+
+CIは[ADR 0040](./adr/0040-verify-staging-service-auth-before-mutation.md)に従い、remote
+mutation前にread-only Service Auth verifierでapplication cookieと`GET /api/me`を確認する。
+その後のbrowser acceptanceは
+[ADR 0041](./adr/0041-authenticate-both-staging-access-layers.md)に従う。exact staging Web
+originだけへ、外側custom hostname Access用の標準2 headerと、内側Pages Preview Access用の
+JSON `Authorization`を同時送信する。cookie取得後も3 headerを継続し、R2、Access team
+domain、その他のoriginではすべて除去する。現在のpage originが正規originであることを確認し、
+`/api/me`は相対URLではなく正規originから組み立てた絶対URLで確認する。
 
 application作成後、次の非secret値を取得する。
 
 - team domainのexact origin:
   `https://<team>.cloudflareaccess.com`
-- application固有のAUD tag
+- custom hostname Access application固有のAUD tag
+- Pages Preview Access application固有のAUD tag
 
 値は追跡対象ファイルへ直接書かず、設定生成時だけ次の環境変数で渡す。
 
 - `SCRIBE_DROP_STAGING_WEB_ORIGIN`
 - `SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`
 - `SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`
+- `SCRIBE_DROP_STAGING_PAGES_ACCESS_AUDIENCE`
 - `SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME`
 
 productionは別のself-hosted applicationとして作成し、Nameを
@@ -143,6 +159,33 @@ pnpm cloudflare:config:production:web
 pnpm cloudflare:access:verify:production
 ```
 
+## Staging Service Auth preflight
+
+未認証Access境界の確認とは別に、CI専用Service Tokenがrootと`/api/me`へ到達できることを
+確認する。Client ID/secretはGitHub staging Environmentまたは一時credential storeから
+環境変数で渡し、shell引数や追跡対象ファイルへ書かない。
+
+```bash
+pnpm cloudflare:access:service:verify:staging
+```
+
+このコマンドは次をすべて確認する。
+
+- Client IDと期待する`common_name`が完全一致し、Client Secretを含め形式が正しい。
+- 外側用標準2 headerと内側用JSON `Authorization`をexact staging Web originへだけ送り、
+  cookie取得後も継続する。
+- redirectを自動追跡せず、同一originだけを上限付きで追跡する。
+- cookieの有無にかかわらずAccess team login redirectとその他のcross-origin redirectを
+  認証成功とせず、3つのcredential headerも送らない。
+- application domainの`CF_Authorization` cookieが期待するservice principalを表す。
+- 同じsessionで`GET /api/me`が2xxとなり、API固有の`application/json`、`no-store`、
+  `nosniff`を返す。
+
+response本文、Client ID/secret、cookie、JWT、redirect URLは出力しない。local probeが
+成功するまでpromotion workflowを起動せず、staging workflowでもdependency install直後、
+control-plane read-back、candidate download、RunPod CLI install、すべてのremote mutation
+より前に同じコマンドを実行する。このpreflightはdeploy後browser acceptanceを代替しない。
+
 ## Deploy後の確認
 
 1. 未認証のprivate windowでrootと`/api/me`がAccess loginへ遷移する。
@@ -165,3 +208,8 @@ application/policyには`Access: Apps and Policies Write`、organization/IdPの�
 `Access: Organizations, Identity Providers, and Groups Read`を持つenvironment専用tokenを
 使う。tokenをWrangler OAuth credentialから抽出して再利用せず、secret managerから
 短時間の作業環境へ注入する。
+
+Service Tokenの存在、Client ID、有効期限、policy参照をread-backする診断には
+`Access: Service Tokens Read`、rotationには`Access: Service Tokens Write`だけを追加する。
+rotationは自動test済みのprobeを用意してから一度だけ行い、新secretをlocalで検証して
+GitHub staging Environmentを更新する。調査終了後は不要なWrite権限を除去する。

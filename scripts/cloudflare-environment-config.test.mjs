@@ -18,6 +18,7 @@ const identifiers = {
   accountId: "a".repeat(32),
   d1DatabaseId: "12345678-1234-4abc-8def-1234567890ab",
   orchestratorOrigin: "https://orchestrator-staging.example.invalid",
+  pagesAccessAudience: "staging-pages-access-audience",
   stagingE2eServiceTokenCommonName: "staging-e2e-token.access",
   webOrigin: "https://scribe-drop-staging.example.invalid",
 };
@@ -86,7 +87,10 @@ database_id = "00000000-0000-0000-0000-000000000101"
   const rendered = renderWebStagingConfig(template, identifiers);
 
   assert.match(rendered, /pages_build_output_dir = "\.\.\/\.\.\/dist"/u);
-  assert.match(rendered, /ACCESS_AUDIENCES = "\[\\"staging-access-audience\\"\]"/u);
+  assert.match(
+    rendered,
+    /ACCESS_AUDIENCES = "\[\\"staging-access-audience\\",\\"staging-pages-access-audience\\"\]"/u,
+  );
   assert.match(
     rendered,
     /ACCESS_TEAM_DOMAIN = "https:\/\/scribe-drop-staging\.cloudflareaccess\.com"/u,
@@ -173,6 +177,26 @@ database_id = "00000000-0000-0000-0000-000000000101"
         { ...identifiers, accessTeamDomain: "https://example.com" },
       ),
     /SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN/u,
+  );
+  assert.throws(
+    () =>
+      renderWebStagingConfig(
+        `CLOUDFLARE_ACCOUNT_ID = "${"0".repeat(32)}"
+database_id = "00000000-0000-0000-0000-000000000101"
+`,
+        { ...identifiers, pagesAccessAudience: undefined },
+      ),
+    /SCRIBE_DROP_STAGING_PAGES_ACCESS_AUDIENCE/u,
+  );
+  assert.throws(
+    () =>
+      renderWebStagingConfig(
+        `CLOUDFLARE_ACCOUNT_ID = "${"0".repeat(32)}"
+database_id = "00000000-0000-0000-0000-000000000101"
+`,
+        { ...identifiers, pagesAccessAudience: identifiers.accessAudience },
+      ),
+    /must be distinct/u,
   );
   assert.throws(
     () =>

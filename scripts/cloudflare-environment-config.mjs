@@ -243,6 +243,14 @@ export function renderWebStagingConfig(template, identifiers) {
     accessAudiencePattern,
     "SCRIBE_DROP_STAGING_ACCESS_AUDIENCE",
   );
+  const pagesAccessAudience = requireIdentifier(
+    identifiers.pagesAccessAudience,
+    accessAudiencePattern,
+    "SCRIBE_DROP_STAGING_PAGES_ACCESS_AUDIENCE",
+  );
+  if (accessAudience === pagesAccessAudience) {
+    throw new Error("Staging custom-domain and Pages Access audiences must be distinct");
+  }
   const accessTeamDomain = requireIdentifier(
     identifiers.accessTeamDomain,
     accessTeamDomainPattern,
@@ -278,8 +286,8 @@ export function renderWebStagingConfig(template, identifiers) {
   rendered = replaceOnce(
     rendered,
     `ACCESS_AUDIENCES = ${JSON.stringify(JSON.stringify([accessAudiencePlaceholder]))}`,
-    `ACCESS_AUDIENCES = ${JSON.stringify(JSON.stringify([accessAudience]))}`,
-    "web staging Access audience",
+    `ACCESS_AUDIENCES = ${JSON.stringify(JSON.stringify([accessAudience, pagesAccessAudience]))}`,
+    "web staging Access audiences",
   );
   rendered = replaceOnce(
     rendered,

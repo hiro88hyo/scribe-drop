@@ -24,6 +24,13 @@ const stagingE2ePath = path.join(
   "release-candidate.spec.ts",
 );
 const stagingAuthPath = path.join(repositoryRoot, "apps", "e2e", "staging-auth.ts");
+const stagingAccessCredentialsPath = path.join(
+  repositoryRoot,
+  "apps",
+  "e2e",
+  "access-service-credentials.ts",
+);
+const accessVerifierPath = path.join(repositoryRoot, "scripts", "access-verifier.mjs");
 const releaseCandidateScriptPath = path.join(repositoryRoot, "scripts", "release-candidate.mjs");
 const runpodDeploymentScriptPath = path.join(
   repositoryRoot,
@@ -144,6 +151,8 @@ const productionWorkflowContents = readFileSync(productionWorkflowPath, "utf8");
 const cloudflareReadbackScriptContents = readFileSync(cloudflareReadbackScriptPath, "utf8");
 const stagingE2eContents = readFileSync(stagingE2ePath, "utf8");
 const stagingAuthContents = readFileSync(stagingAuthPath, "utf8");
+const stagingAccessCredentialsContents = readFileSync(stagingAccessCredentialsPath, "utf8");
+const accessVerifierContents = readFileSync(accessVerifierPath, "utf8");
 const releaseCandidateScriptContents = readFileSync(releaseCandidateScriptPath, "utf8");
 const runpodDeploymentScriptContents = readFileSync(runpodDeploymentScriptPath, "utf8");
 const runpodPromotionScriptContents = readFileSync(runpodPromotionScriptPath, "utf8");
@@ -497,6 +506,58 @@ for (const [job, location] of [[stagingPreflightJob, "preflight job"]]) {
   }
 }
 
+for (const [description, expected] of Object.entries({
+  "Access control-plane fail-fast command":
+    "pnpm run cloudflare:access:control-plane:verify:staging",
+  "authenticated Access fail-fast command": "pnpm run cloudflare:access:service:verify:staging",
+  "Cloudflare API token for Access read-back":
+    "CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}",
+  "staging Access client ID secret": "CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}",
+  "staging Access client secret": "CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}",
+})) {
+  requireText(
+    stagingPreflightJob,
+    expected,
+    "deploy-staging-candidate.yml preflight job",
+    description,
+  );
+}
+requireTextOrder(
+  stagingPreflightJob,
+  "pnpm install --frozen-lockfile",
+  "pnpm run cloudflare:access:control-plane:verify:staging",
+  "deploy-staging-candidate.yml preflight job",
+  "dependency install before Access control-plane fail-fast",
+);
+requireTextOrder(
+  stagingPreflightJob,
+  "pnpm run cloudflare:access:control-plane:verify:staging",
+  "pnpm run cloudflare:access:service:verify:staging",
+  "deploy-staging-candidate.yml preflight job",
+  "Access control-plane verification before data-plane authentication",
+);
+requireTextOrder(
+  stagingPreflightJob,
+  "pnpm run cloudflare:access:service:verify:staging",
+  "pnpm run runpodctl:install",
+  "deploy-staging-candidate.yml preflight job",
+  "authenticated Access fail-fast before RunPod CLI installation",
+);
+requireTextOrder(
+  stagingPreflightJob,
+  "pnpm run cloudflare:access:service:verify:staging",
+  "gh run download",
+  "deploy-staging-candidate.yml preflight job",
+  "authenticated Access fail-fast before candidate download",
+);
+requireTextCount(
+  stagingWorkflowContents,
+  "SCRIBE_DROP_STAGING_PAGES_ACCESS_AUDIENCE: ${{ vars.SCRIBE_DROP_STAGING_PAGES_ACCESS_AUDIENCE }}",
+  4,
+  "deploy-staging-candidate.yml",
+  "Pages Access audience in every staging job that renders or verifies Web configuration",
+);
+
 forbidText(
   stagingWorkflowContents,
   "  pages-readiness:",
@@ -553,8 +614,9 @@ requireTextCount(
 
 for (const [description, value] of Object.entries({
   "same-origin Access credential routing": "headersForAccessRequest(",
+  "complete browser request headers including cookies": "await request.allHeaders()",
   "redirect boundary before credential reuse": "maxRedirects: 0",
-  "browser-scoped Access bootstrap": "const applicationResponse = await page.goto(baseURL",
+  "authenticated application navigation": "const applicationResponse = await page.goto(baseURL",
   "service-token cookie identity check": "serviceTokenCookieMatchesExpectedIdentity(",
   "staging page origin verification": "hasExpectedStagingOrigin(page.url(), baseURL)",
   "authenticated session preflight": "fetch(url,",
@@ -565,6 +627,40 @@ for (const [description, value] of Object.entries({
 })) {
   requireText(stagingAuthContents, value, "staging-auth.ts", description);
 }
+for (const [contents, location] of [
+  [stagingAccessCredentialsContents, "access-service-credentials.ts"],
+  [accessVerifierContents, "access-verifier.mjs"],
+]) {
+  for (const [description, value] of Object.entries({
+    "outer Access client ID header": '"CF-Access-Client-Id"',
+    "outer Access client secret header": '"CF-Access-Client-Secret"',
+    "inner Access Authorization client ID": '"cf-access-client-id"',
+    "inner Access Authorization client secret": '"cf-access-client-secret"',
+  })) {
+    requireText(contents, value, location, description);
+  }
+}
+requireTextCount(
+  stagingAuthContents,
+  "page.goto(baseURL",
+  1,
+  "staging-auth.ts",
+  "single authenticated application navigation",
+);
+requireTextOrder(
+  stagingAuthContents,
+  "const applicationResponse = await page.goto(baseURL",
+  "hasExpectedStagingOrigin(page.url(), baseURL)",
+  "staging-auth.ts",
+  "authenticated navigation before exact origin validation",
+);
+requireTextOrder(
+  stagingAuthContents,
+  "hasExpectedStagingOrigin(page.url(), baseURL)",
+  'cookie.name === "CF_Authorization"',
+  "staging-auth.ts",
+  "exact origin validation before service-principal cookie validation",
+);
 forbidText(
   stagingAuthContents,
   "extraHTTPHeaders:",
@@ -576,6 +672,12 @@ forbidText(
   "context.request.",
   "staging-auth.ts",
   "API request Access bootstrap",
+);
+forbidText(
+  stagingAuthContents,
+  "request.headers(),",
+  "staging-auth.ts",
+  "partial browser request headers that omit cookies",
 );
 forbidText(
   stagingAuthContents,
@@ -592,7 +694,7 @@ forbidText(
 requireTextOrder(
   stagingAuthContents,
   'await context.route("**/*"',
-  "const applicationResponse = await page.goto(baseURL",
+  "await completeStagingBrowserAccessHandshake(",
   "staging-auth.ts",
   "same-origin interception before browser Access handshake",
 );
@@ -601,14 +703,7 @@ requireTextOrder(
   "const applicationResponse = await page.goto(baseURL",
   "hasExpectedStagingOrigin(page.url(), baseURL)",
   "staging-auth.ts",
-  "browser Access handshake before final-origin verification",
-);
-requireTextOrder(
-  stagingAuthContents,
-  "hasExpectedStagingOrigin(page.url(), baseURL)",
-  "serviceTokenCookieMatchesExpectedIdentity(",
-  "staging-auth.ts",
-  "final-origin verification before service-token cookie verification",
+  "application navigation before final-origin verification",
 );
 requireTextOrder(
   stagingE2eContents,

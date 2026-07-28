@@ -237,6 +237,7 @@ Web設定には同じexact originと、Access application作成後の次の非se
 
 - `SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`
 - `SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`
+- `SCRIBE_DROP_STAGING_PAGES_ACCESS_AUDIENCE`
 
 ```bash
 pnpm cloudflare:config:staging:web
@@ -355,10 +356,16 @@ stagingのAccess自動試験は
 [ADR 0024](./adr/0024-staging-only-access-service-principal.md)の専用service principalだけを
 使用する。service tokenのID/secretはstaging Environment secretに置き、production
 Environmentへ複製しない。transportは
-[ADR 0039](./adr/0039-use-browser-scoped-access-handshake.md)に従い、browser requestの各hopで
-送信先を再評価し、service token headerをexact application originだけへ付与する。browser
-の最終origin、application cookieのservice principal claim、絶対URLで送る認証済み
-`/api/me`のoriginが正規staging originと一致しない場合はupload前に停止する。
+[ADR 0041](./adr/0041-authenticate-both-staging-access-layers.md)に従い、browser requestの
+各hopで送信先を再評価する。exact application originだけへ、外側Access用の標準2 headerと
+内側Pages Access用のJSON `Authorization`を同時送信し、cookie取得後も継続する。その他の
+originでは3 headerを除去する。最終originと、絶対URLで送る認証済み`/api/me`のoriginが
+正規staging originと一致しない場合はupload前に停止する。
+[ADR 0040](./adr/0040-verify-staging-service-auth-before-mutation.md)に従い、同じcredentialの
+形式、2 application、相異なるAUD、layer固有header、exact policy、application cookie、
+service principal claim、認証済み`GET /api/me`をstaging `preflight`でも検証する。この
+read-only gateはdependency install直後、candidate download、RunPod CLI install、すべての
+remote mutationより前に置き、localで同じprobeが成功するまでpromotion workflowを起動しない。
 
 ## 追跡外production設定
 

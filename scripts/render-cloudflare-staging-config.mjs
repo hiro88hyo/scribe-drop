@@ -41,6 +41,7 @@ const identifiers = {
   candidateMigrationsDirectory: process.env.SCRIBE_DROP_CANDIDATE_MIGRATIONS_DIR,
   multipartRetentionHours: process.env.MULTIPART_RETENTION_HOURS,
   orchestratorOrigin: process.env.SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN,
+  pagesAccessAudience: process.env.SCRIBE_DROP_STAGING_PAGES_ACCESS_AUDIENCE,
   resultRetentionDays: process.env.RESULT_RETENTION_DAYS,
   sourceRetentionDays: process.env.SOURCE_RETENTION_DAYS,
   stagingE2eServiceTokenCommonName: process.env.SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME,

@@ -580,6 +580,14 @@ rootから検出し、同じtargetへのread-only preflightを最初のremote mu
 [ADR 0030](./adr/0030-scope-access-service-credentials-to-app-origin.md)に従い、staging
 service credentialは正規Web originへだけ継続送信する。Pages config hash、Access
 service-token claim、認証済み`/api/me`をmedia uploadより前に検証する。
+[ADR 0041](./adr/0041-authenticate-both-staging-access-layers.md)に従い、custom hostnameと
+Pages Previewの二重Accessを、外側用標準2 header、内側用JSON `Authorization`、相異なる
+2 AUDで構成する。3 headerはexact Web originへだけ送り、cookie取得後も継続する。
+[ADR 0040](./adr/0040-verify-staging-service-auth-before-mutation.md)に従い、同じService Auth
+検証をdependency install直後のread-only preflightにも置き、RunPod CLI install、candidate
+download、D1、Pages、backendの変更前にcredential、policy、Access data planeの不整合を
+停止する。Access team redirectはcookieの有無にかかわらず拒否し、localで同じprobeと
+標準gateが成功するまでremote workflowを起動しない。
 [ADR 0033](./adr/0033-wait-for-pages-data-plane-convergence.md)と、それを一部更新する
 [ADR 0036](./adr/0036-defer-custom-domain-readiness-to-acceptance.md)に従い、Pages
 promotionはcompiled routeと公式APIのexact read-backで確定する。stagingはpreflight、

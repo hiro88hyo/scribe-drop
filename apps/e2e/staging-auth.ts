@@ -44,6 +44,38 @@ export function hasExpectedStagingOrigin(currentUrl: string, baseURL: string): b
   return new URL(currentUrl).origin === expectedOrigin;
 }
 
+export interface StagingAccessHandshakePage {
+  goto(
+    url: string,
+    options: Readonly<{ waitUntil: "domcontentloaded" | "networkidle" }>,
+  ): Promise<{ ok(): boolean } | null>;
+  url(): string;
+}
+
+export interface StagingAccessHandshakeContext {
+  cookies(url: string): Promise<readonly { name: string; value: string }[]>;
+}
+
+export async function completeStagingBrowserAccessHandshake(
+  page: StagingAccessHandshakePage,
+  context: StagingAccessHandshakeContext,
+  baseURL: string,
+  expectedCommonName: string,
+): Promise<void> {
+  const applicationResponse = await page.goto(baseURL, {
+    waitUntil: "networkidle",
+  });
+  expect(applicationResponse?.ok()).toBe(true);
+  expect(hasExpectedStagingOrigin(page.url(), baseURL)).toBe(true);
+  const accessCookie = (await context.cookies(baseURL)).find(
+    (cookie) => cookie.name === "CF_Authorization",
+  );
+  expect(accessCookie).toBeDefined();
+  expect(
+    serviceTokenCookieMatchesExpectedIdentity(accessCookie?.value ?? "", expectedCommonName),
+  ).toBe(true);
+}
+
 export type StagingReadinessResponseKind =
   "api-boundary" | "static-or-edge" | "unknown" | "unavailable";
 
@@ -89,20 +121,12 @@ export async function openAuthenticatedStagingPage(
     "SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME",
   );
   const appOrigin = requireExactHttpsOrigin(baseURL, "Staging base URL");
-  requireExactHttpsOrigin(
-    requireStagingEnvironment("SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN"),
-    "Staging Access team domain",
-  );
   const context = await browser.newContext();
 
   await context.route("**/*", async (route) => {
     const request = route.request();
-    const headers = headersForAccessRequest(
-      request.url(),
-      appOrigin,
-      request.headers(),
-      credentials,
-    );
+    const requestHeaders = await request.allHeaders();
+    const headers = headersForAccessRequest(request.url(), appOrigin, requestHeaders, credentials);
     if (new URL(request.url()).origin !== appOrigin) {
       await route.continue({ headers });
       return;
@@ -115,16 +139,7 @@ export async function openAuthenticatedStagingPage(
   });
 
   const page = await context.newPage();
-  const applicationResponse = await page.goto(baseURL, { waitUntil: "networkidle" });
-  expect(applicationResponse?.ok()).toBe(true);
-  expect(hasExpectedStagingOrigin(page.url(), baseURL)).toBe(true);
-  const accessCookie = (await context.cookies(baseURL)).find(
-    (cookie) => cookie.name === "CF_Authorization",
-  );
-  expect(accessCookie).toBeDefined();
-  expect(
-    serviceTokenCookieMatchesExpectedIdentity(accessCookie?.value ?? "", expectedCommonName),
-  ).toBe(true);
+  await completeStagingBrowserAccessHandshake(page, context, baseURL, expectedCommonName);
   return { context, page };
 }
 

@@ -1,9 +1,18 @@
 const ACCESS_CLIENT_ID_HEADER = "CF-Access-Client-Id";
 const ACCESS_CLIENT_SECRET_HEADER = "CF-Access-Client-Secret";
+const ACCESS_AUTHORIZATION_HEADER = "Authorization";
 const ACCESS_CREDENTIAL_HEADER_NAMES = new Set([
   ACCESS_CLIENT_ID_HEADER.toLowerCase(),
   ACCESS_CLIENT_SECRET_HEADER.toLowerCase(),
+  ACCESS_AUTHORIZATION_HEADER.toLowerCase(),
 ]);
+
+function accessAuthorizationValue(credentials: AccessServiceCredentials): string {
+  return JSON.stringify({
+    "cf-access-client-id": credentials.clientId,
+    "cf-access-client-secret": credentials.clientSecret,
+  });
+}
 
 export interface AccessServiceCredentials {
   readonly clientId: string;
@@ -24,6 +33,7 @@ export function headersForAccessRequest(
   if (new URL(requestUrl).origin === appOrigin) {
     headers[ACCESS_CLIENT_ID_HEADER] = credentials.clientId;
     headers[ACCESS_CLIENT_SECRET_HEADER] = credentials.clientSecret;
+    headers[ACCESS_AUTHORIZATION_HEADER] = accessAuthorizationValue(credentials);
   }
   return headers;
 }

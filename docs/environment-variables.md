@@ -38,7 +38,10 @@ R2 CORSは`pnpm cloudflare:config:staging:r2-cors`、R2 lifecycleは
   RunPodからclaim/heartbeatを受けるOrchestratorの単一exact HTTPS origin
 - `SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`:
   `https://<team>.cloudflareaccess.com`のexact origin
-- `SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`: staging Access applicationの単一AUD tag
+- `SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`:
+  custom hostnameを保護する外側staging Access applicationのAUD tag
+- `SCRIBE_DROP_STAGING_PAGES_ACCESS_AUDIENCE`:
+  Pages Preview Accessの内側staging applicationのAUD tag
 - `SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME`:
   ADR 0024のstaging CI専用Access service principalの`common_name`
 - `SCRIBE_DROP_STAGING_RUNPOD_IMAGE`: GHCRのdigest付きstaging image参照
@@ -105,7 +108,10 @@ localでは`apps/web/.dev.vars.example`を`apps/web/.dev.vars`へコピーし、
 | `R2_PARENT_SECRET_ACCESS_KEY`           |  yes   | object限定temporary credentialの親secret         |
 | `STAGING_E2E_SERVICE_TOKEN_COMMON_NAME` |   no   | staging CI専用Access service principal完全一致値 |
 
-`ACCESS_AUDIENCES`はenvironment固有の1件以上のAUD tagをJSON配列で指定する。stagingとproductionのaudienceを同じ配列に混在させない。AUD tagは検証対象の識別子でありcredentialではない。
+`ACCESS_AUDIENCES`はenvironment固有の1件以上のAUD tagをJSON配列で指定する。stagingは
+[ADR 0041](./adr/0041-authenticate-both-staging-access-layers.md)に従い、外側custom
+hostname Accessと内側Pages Preview Accessの相異なる2件を含める。productionのaudienceを
+同じ配列に混在させない。AUD tagは検証対象の識別子でありcredentialではない。
 
 `STAGING_E2E_SERVICE_TOKEN_COMMON_NAME`は`APP_ENV=staging`でだけ許可する。production
 Wrangler設定には出力せず、productionで指定された場合はWeb security configを拒否する。
@@ -229,6 +235,7 @@ promotion workflowのcredentialと非secret設定はrepository共通へ置かず
 - Variables: `CLOUDFLARE_ACCOUNT_ID`、`SCRIBE_DROP_STAGING_D1_DATABASE_ID`、
   `SCRIBE_DROP_STAGING_WEB_ORIGIN`、`SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN`、
   `SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`、`SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`、
+  `SCRIBE_DROP_STAGING_PAGES_ACCESS_AUDIENCE`、
   `SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME`、
   `SCRIBE_DROP_STAGING_PAGES_PROJECT`、staging RunPodのvisibility、registry auth、GPU、
   data center、4件のretention値

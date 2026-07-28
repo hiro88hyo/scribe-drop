@@ -137,12 +137,21 @@ claimと認証済み`GET /api/me`をupload前に検証し、実M4A、manifest-la
 削除受付が成功した後だけ24時間有効なacceptance artifactを発行する。
 acceptanceには実IDやoriginを含めず、retention、R2 policy、RunPod GPU・配置・runtime
 invariantをenvironment markerで正規化したpolicy hashを含める。
-Access service tokenは[ADR 0039](./adr/0039-use-browser-scoped-access-handshake.md)に従い、
-browser requestをhopごとにinterceptし、exact application originだけへcredentialを送る。
-redirectはbrowserへ返して次requestのoriginを再評価し、cross-originへcredentialを継承
-しない。pageが正規のstaging originへ到達し、application cookieのservice principal
-claimが一致することを明示的に検証する。`/api/me?candidate=<commit>`はそのoriginから
-構築した絶対URLへ送り、Access team domain上の相対URLをdata-plane応答として受け入れない。
+Access service tokenは[ADR 0041](./adr/0041-authenticate-both-staging-access-layers.md)に
+従い、browser requestをhopごとにinterceptする。exact application originだけへ外側用
+標準2 headerと内側用JSON `Authorization`を同時送信し、cookie取得後も継続する。
+redirectはbrowserへ返して次requestのoriginを再評価し、cross-originでは3 headerを
+すべて除去する。最初のnavigationが2xxかつexact application originであることと、
+application cookieのservice principal claimを検証する。
+`/api/me?candidate=<commit>`はそのoriginから構築した絶対URLへ送り、Access team domain上の
+相対URLをdata-plane応答として受け入れない。
+[ADR 0040](./adr/0040-verify-staging-service-auth-before-mutation.md)に従い、`preflight`は
+dependency install直後に2 Access application、相異なるAUD、layer固有header、exact
+Service Auth policyをcontrol planeからread-only検証し、同じService Tokenでroot cookieと
+`GET /api/me`をdata planeから検証する。この検査はRunPod CLI install、candidate download、
+browser install、D1 migrationを含むすべてのremote mutationより前に失敗する。credential
+形式不正、Access login redirect、cross-origin redirect、cookie principal不一致、API拒否は
+補正せず停止し、credential、cookie、JWT、redirect URL、response本文をlogへ出さない。
 staging workflowは[ADR 0036](./adr/0036-defer-custom-domain-readiness-to-acceptance.md)に従い、
 `preflight`、`migrate`、`deploy-pages`、`deploy-backend`、`acceptance`の独立jobへ
 分ける。custom domainの認証済みreadinessは`acceptance`のbrowser lifecycle先頭で確認し、
