@@ -54,6 +54,11 @@ const pagesUploadPermissionScriptPath = path.join(
   "scripts",
   "pages-upload-permission.mjs",
 );
+const stagingPagesSecretsScriptPath = path.join(
+  repositoryRoot,
+  "scripts",
+  "verify-cloudflare-pages-secrets.mjs",
+);
 const promotePagesCandidateScriptPath = path.join(
   repositoryRoot,
   "scripts",
@@ -117,6 +122,20 @@ function workflowJob(contents, jobName, location) {
     : contents.slice(start, start + marker.length + nextJob);
 }
 
+function workflowStep(contents, stepName, location) {
+  const marker = `      - name: ${stepName}\n`;
+  const start = contents.indexOf(marker);
+  if (start === -1) {
+    failures.push(`${location}: missing step ${stepName}`);
+    return "";
+  }
+  const remainder = contents.slice(start + marker.length);
+  const nextStep = remainder.search(/^ {6}- name: /mu);
+  return nextStep === -1
+    ? contents.slice(start)
+    : contents.slice(start, start + marker.length + nextStep);
+}
+
 const workflowFiles = readdirSync(workflowsDirectory)
   .filter((filename) => filename.endsWith(".yml") || filename.endsWith(".yaml"))
   .sort();
@@ -165,6 +184,7 @@ const runpodTemplateApiScriptContents = readFileSync(runpodTemplateApiScriptPath
 const runpodReleaseReadinessScriptContents = readFileSync(runpodReleaseReadinessScriptPath, "utf8");
 const pagesPromotionScriptContents = readFileSync(pagesPromotionScriptPath, "utf8");
 const pagesUploadPermissionScriptContents = readFileSync(pagesUploadPermissionScriptPath, "utf8");
+const stagingPagesSecretsScriptContents = readFileSync(stagingPagesSecretsScriptPath, "utf8");
 const promotePagesCandidateScriptContents = readFileSync(promotePagesCandidateScriptPath, "utf8");
 const dockerfileContents = readFileSync(dockerfilePath, "utf8");
 const modelBundleContents = readFileSync(modelBundlePath, "utf8");
@@ -199,6 +219,26 @@ const stagingAcceptanceJob = workflowJob(
   stagingWorkflowContents,
   "acceptance",
   "deploy-staging-candidate.yml",
+);
+const stagingSecretVerificationStep = workflowStep(
+  stagingPreflightJob,
+  "Verify existing encrypted secrets",
+  "deploy-staging-candidate.yml preflight job",
+);
+const stagingPagesPreflightStep = workflowStep(
+  stagingPreflightJob,
+  "Verify Pages deploy configuration and target",
+  "deploy-staging-candidate.yml preflight job",
+);
+const stagingPagesPromotionStep = workflowStep(
+  stagingPagesDeploymentJob,
+  "Promote Pages candidate with exact read-back",
+  "deploy-staging-candidate.yml deploy-pages job",
+);
+const stagingReadbackStep = workflowStep(
+  stagingAcceptanceJob,
+  "Verify candidate and live resource read-back",
+  "deploy-staging-candidate.yml acceptance job",
 );
 
 for (const [filename, contents] of [
@@ -602,6 +642,66 @@ requireTextCount(
   4,
   "deploy-staging-candidate.yml",
   "Pages Access audience in every staging job that renders or verifies Web configuration",
+);
+
+for (const [step, location] of [
+  [stagingSecretVerificationStep, "encrypted secret verification step"],
+  [stagingReadbackStep, "live resource read-back step"],
+]) {
+  requireText(
+    step,
+    "CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}",
+    `deploy-staging-candidate.yml ${location}`,
+    "general Cloudflare credential for non-Pages resources",
+  );
+  requireText(
+    step,
+    "CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}",
+    `deploy-staging-candidate.yml ${location}`,
+    "dedicated Pages credential",
+  );
+}
+for (const [step, location] of [
+  [stagingPagesPreflightStep, "Pages deployment preflight step"],
+  [stagingPagesPromotionStep, "Pages promotion step"],
+]) {
+  requireText(
+    step,
+    "CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}",
+    `deploy-staging-candidate.yml ${location}`,
+    "Wrangler mapping of the dedicated Pages credential",
+  );
+  forbidText(
+    step,
+    "CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}",
+    `deploy-staging-candidate.yml ${location}`,
+    "general Cloudflare credential in a Pages-only step",
+  );
+}
+for (const [description, expected] of Object.entries({
+  "staging-specific Pages token selection": 'environment === "staging"',
+  "dedicated staging Pages token": '"CLOUDFLARE_PAGES_API_TOKEN"',
+  "separate Pages Wrangler credential": "runWranglerWithToken(",
+  "explicit Pages read-back token": "pagesApiToken",
+})) {
+  requireText(cloudflareReadbackScriptContents, expected, "cloudflare-readback.mjs", description);
+}
+for (const [description, expected] of Object.entries({
+  "dedicated staging Pages input": "process.env.CLOUDFLARE_PAGES_API_TOKEN",
+  "Wrangler credential mapping": "CLOUDFLARE_API_TOKEN: apiToken",
+})) {
+  requireText(
+    stagingPagesSecretsScriptContents,
+    expected,
+    "verify-cloudflare-pages-secrets.mjs",
+    description,
+  );
+}
+forbidText(
+  stagingPagesSecretsScriptContents,
+  "process.env.CLOUDFLARE_API_TOKEN",
+  "verify-cloudflare-pages-secrets.mjs",
+  "general Cloudflare credential lookup",
 );
 
 forbidText(

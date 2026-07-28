@@ -208,9 +208,16 @@ export function verifyCloudflareReadback(outputs, expected) {
 }
 
 function runWrangler(arguments_) {
+  return runWranglerWithToken(arguments_, process.env.CLOUDFLARE_API_TOKEN);
+}
+
+function runWranglerWithToken(arguments_, apiToken) {
   const result = spawnSync(path.resolve("node_modules", ".bin", "wrangler"), arguments_, {
     encoding: "utf8",
-    env: process.env,
+    env: {
+      ...process.env,
+      CLOUDFLARE_API_TOKEN: apiToken,
+    },
     maxBuffer: 2 * 1024 * 1024,
     timeout: 60_000,
   });
@@ -220,13 +227,24 @@ function runWrangler(arguments_) {
   return result.stdout;
 }
 
-async function fetchPagesProject(accountId, projectName) {
-  const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+export function requirePagesApiToken(environment, variables) {
+  if (environment !== "staging" && environment !== "production") {
+    throw new Error("Cloudflare Pages environment is invalid");
+  }
+  const variableName =
+    environment === "staging" ? "CLOUDFLARE_PAGES_API_TOKEN" : "CLOUDFLARE_API_TOKEN";
+  const apiToken = variables[variableName];
+  if (typeof apiToken !== "string" || !/^[A-Za-z0-9_-]{20,256}$/u.test(apiToken)) {
+    throw new Error(`${variableName} is missing or invalid`);
+  }
+  return apiToken;
+}
+
+async function fetchPagesProject(accountId, projectName, apiToken) {
   if (
     typeof accountId !== "string" ||
     !/^[0-9a-f]{32}$/u.test(accountId) ||
-    typeof apiToken !== "string" ||
-    apiToken.length === 0
+    !/^[A-Za-z0-9_-]{20,256}$/u.test(apiToken)
   ) {
     throw new Error("Cloudflare Pages read-back credentials are missing or invalid");
   }
@@ -261,6 +279,7 @@ async function fetchPagesProject(accountId, projectName) {
 
 export async function runCloudflareReadback(input) {
   const suffix = input.environment;
+  const pagesApiToken = requirePagesApiToken(input.environment, process.env);
   const configArguments = ["--config", input.configPath, "--env", input.environment];
   const bucketName = `recording-transcriber-${suffix}`;
   const queueName = `recording-uploaded-${suffix}`;
@@ -299,18 +318,21 @@ export async function runCloudflareReadback(input) {
     pagesDeployments:
       expectedCommitSha === undefined
         ? "[]"
-        : runWrangler([
-            "pages",
-            "deployment",
-            "list",
-            "--project-name",
-            pagesProjectName,
-            "--environment",
-            "production",
-            "--json",
-          ]),
+        : runWranglerWithToken(
+            [
+              "pages",
+              "deployment",
+              "list",
+              "--project-name",
+              pagesProjectName,
+              "--environment",
+              "production",
+              "--json",
+            ],
+            pagesApiToken,
+          ),
     pagesProject: "{}",
-    projects: runWrangler(["pages", "project", "list", "--json"]),
+    projects: runWranglerWithToken(["pages", "project", "list", "--json"], pagesApiToken),
     queue: runWrangler(["queues", "info", queueName, ...configArguments]),
     workerDeployment:
       expectedCommitSha === undefined
@@ -326,6 +348,7 @@ export async function runCloudflareReadback(input) {
     outputs.pagesProject = await fetchPagesProject(
       process.env.CLOUDFLARE_ACCOUNT_ID,
       pagesProjectName,
+      pagesApiToken,
     );
     const versions = JSON.parse(outputs.workerVersions);
     const deployment = JSON.parse(outputs.workerDeployment);

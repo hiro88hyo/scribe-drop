@@ -47,7 +47,8 @@ Pages projectの一覧取得だけではdeploy権限の証拠にならない。`
 対象accountのCloudflare Pages Editだけを持つ専用`CLOUDFLARE_PAGES_API_TOKEN`で確認し、
 返された短期capabilityは保持または表示しない。release-candidate preflightではreusable
 candidate downloadとRunPod readinessより前、staging preflightではcandidate download、
-RunPod CLI、D1より前に同じ検査を実行する。
+RunPod CLI、D1より前に同じ検査を実行する。stagingのPages secret、project、deployment、
+config hashのread-backも同じ専用tokenを使い、一般Cloudflare tokenへPages権限を要求しない。
 
 PlaywrightのOS共有libraryは公式の`playwright install --with-deps chromium`で準備する。
 `sudo`を利用できないmanaged hostでは管理者に依頼し、CIはephemeral runnerへだけ導入する。

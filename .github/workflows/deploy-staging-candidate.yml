@@ -136,6 +136,7 @@ jobs:
       - name: Verify existing encrypted secrets
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
           SCRIBE_DROP_PAGES_PROJECT: ${{ vars.SCRIBE_DROP_STAGING_PAGES_PROJECT }}
         run: pnpm run cloudflare:secrets:verify:staging
 
@@ -144,7 +145,7 @@ jobs:
 
       - name: Verify Pages deploy configuration and target
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
         run: |
           pnpm exec wrangler pages deployment list \
             --cwd apps/web \
@@ -422,6 +423,7 @@ jobs:
       - name: Verify candidate and live resource read-back
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
           SCRIBE_DROP_STAGING_PAGES_PROJECT: ${{ vars.SCRIBE_DROP_STAGING_PAGES_PROJECT }}
         run: |
           pnpm run candidate:verify release-candidate

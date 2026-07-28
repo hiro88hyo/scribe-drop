@@ -22,6 +22,9 @@ resource scopeの不整合を高コスト処理の後まで検出できなかっ
   providerのerror本文は利用者向けerrorへ含めない。credentialは対象accountの
   Cloudflare Pages Editだけを持つ専用`CLOUDFLARE_PAGES_API_TOKEN`とし、Access、D1、R2、
   Workersの権限を同じtokenへ追加しない。
+- stagingのPages upload、project/deployment read-back、encrypted-secret名の検証はすべて
+  この専用tokenを使う。Wranglerが要求する場合だけstepまたはchild processの
+  `CLOUDFLARE_API_TOKEN`へ局所的に写像し、一般tokenへPages権限を戻さない。
 - release-candidate workflowのpreflightで、release branch確認直後、reusable candidate
   download、RunPod readiness、application build、container scanより前に実行する。
 - staging promotionのpreflightでも、dependency installとAccess control-plane read-backの
@@ -40,6 +43,8 @@ resource scopeの不整合を高コスト処理の後まで検出できなかっ
   の永続stateは変更しない。
 - control-plane read-back、upload capability取得、実deployment後のcommit/config hash照合を
   独立したgateとして扱える。
+- stagingのPages操作とAccess、D1、R2、Workers操作のcredential境界をworkflowと
+  read-back実装の両方で検査できる。
 
 ## Status
 

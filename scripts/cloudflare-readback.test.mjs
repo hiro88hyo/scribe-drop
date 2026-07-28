@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { verifyCloudflareReadback } from "./cloudflare-readback.mjs";
+import { requirePagesApiToken, verifyCloudflareReadback } from "./cloudflare-readback.mjs";
 
 const expected = {
   bucketName: "recording-transcriber-staging",
@@ -105,6 +105,22 @@ Consumers: worker:scribe-drop-orchestrator-staging
 
 test("accepts exact Cloudflare resource read-back", () => {
   assert.doesNotThrow(() => verifyCloudflareReadback(outputs, expected));
+});
+
+test("uses the dedicated Pages token only for staging", () => {
+  const variables = {
+    CLOUDFLARE_API_TOKEN: "general-cloudflare-token-value",
+    CLOUDFLARE_PAGES_API_TOKEN: "dedicated-pages-token-value",
+  };
+  assert.equal(requirePagesApiToken("staging", variables), variables.CLOUDFLARE_PAGES_API_TOKEN);
+  assert.equal(requirePagesApiToken("production", variables), variables.CLOUDFLARE_API_TOKEN);
+  assert.throws(
+    () =>
+      requirePagesApiToken("staging", {
+        CLOUDFLARE_API_TOKEN: variables.CLOUDFLARE_API_TOKEN,
+      }),
+    /CLOUDFLARE_PAGES_API_TOKEN/u,
+  );
 });
 
 test("rejects duplicate notification rules and consumer drift", () => {

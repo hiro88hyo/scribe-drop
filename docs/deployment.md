@@ -280,7 +280,8 @@ pnpm cloudflare:pages:upload-permission:verify:staging
 使い、短期upload capabilityはlog、file、artifactへ保存しない。tokenは対象accountの
 Cloudflare Pages Editだけを持つ`CLOUDFLARE_PAGES_API_TOKEN`として、Access、D1、R2、
 Workers用tokenと分離する。このgateがlocalで成功するまでrelease-candidateとstaging
-promotionをdispatchしない。
+promotionをdispatchしない。stagingのPages secret、project、deployment、config hashの
+read-backにもこの専用tokenを使い、一般tokenはPages commandへ渡さない。
 
 ```bash
 pnpm exec wrangler pages deploy \

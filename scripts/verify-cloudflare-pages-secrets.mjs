@@ -6,21 +6,24 @@ import {
   verifyRequiredPagesSecrets,
 } from "./cloudflare-pages-secret-verifier.mjs";
 
-const projectName = requirePagesProjectName("staging", process.env.SCRIBE_DROP_PAGES_PROJECT);
-
-const result = spawnSync(
-  "pnpm",
-  ["exec", "wrangler", "pages", "secret", "list", "--project-name", projectName],
-  {
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      WRANGLER_WRITE_LOGS: "0",
-    },
-  },
-);
-
 try {
+  const projectName = requirePagesProjectName("staging", process.env.SCRIBE_DROP_PAGES_PROJECT);
+  const apiToken = process.env.CLOUDFLARE_PAGES_API_TOKEN;
+  if (typeof apiToken !== "string" || !/^[A-Za-z0-9_-]{20,256}$/u.test(apiToken)) {
+    throw new Error("Staging Pages API token is missing or invalid");
+  }
+  const result = spawnSync(
+    "pnpm",
+    ["exec", "wrangler", "pages", "secret", "list", "--project-name", projectName],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CLOUDFLARE_API_TOKEN: apiToken,
+        WRANGLER_WRITE_LOGS: "0",
+      },
+    },
+  );
   if (result.error !== undefined || result.status !== 0) {
     throw new Error("Wrangler could not list encrypted Pages secret names");
   }
