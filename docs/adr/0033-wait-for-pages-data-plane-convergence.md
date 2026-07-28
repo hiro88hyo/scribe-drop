@@ -53,10 +53,11 @@ workflow全体を無条件に再実行すると、既に完了したD1、R2、Ru
 
 ## Status
 
-Accepted
+Superseded in part by [ADR 0036](./0036-defer-custom-domain-readiness-to-acceptance.md).
 
 ## References
 
 - [ADR 0029: Pages configはapp rootから検出する](./0029-discover-pages-config-from-app-root.md)
 - [ADR 0030: Access service credentialを正規app originへ限定する](./0030-scope-access-service-credentials-to-app-origin.md)
 - [ADR 0035: staging readinessをremote mutationからjob単位で分離する](./0035-isolate-staging-readiness-from-mutations.md)
+- [ADR 0036: custom domain readinessをacceptanceの先頭へ移す](./0036-defer-custom-domain-readiness-to-acceptance.md)

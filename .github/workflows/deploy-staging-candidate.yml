@@ -249,40 +249,9 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: pnpm run cloudflare:pages:promote:staging pages-candidate
 
-  pages-readiness:
-    name: Verify authenticated Pages data plane
-    needs: deploy-pages
-    environment: staging
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      EXPECTED_COMMIT_SHA: ${{ github.sha }}
-      SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME: ${{ vars.SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME }}
-      SCRIBE_DROP_STAGING_WEB_ORIGIN: ${{ vars.SCRIBE_DROP_STAGING_WEB_ORIGIN }}
-    steps:
-      - name: Check out release commit
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Set up Volta
-        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
-        with:
-          volta-version: 2.0.2
-
-      - name: Install JavaScript dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Install fixed Playwright browser
-        run: pnpm --filter @scribe-drop/e2e exec playwright install --with-deps chromium
-
-      - name: Verify authenticated Pages data plane without mutation
-        env:
-          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
-          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
-        run: pnpm run test:e2e:staging:readiness
-
   deploy-backend:
     name: Promote R2, RunPod, and Orchestrator
-    needs: pages-readiness
+    needs: deploy-pages
     environment: staging
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -442,7 +411,7 @@ jobs:
       - name: Install fixed Playwright browser
         run: pnpm --filter @scribe-drop/e2e exec playwright install --with-deps chromium
 
-      - name: Run real staging M4A lifecycle
+      - name: Verify authenticated data plane, then run real staging M4A lifecycle
         env:
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}

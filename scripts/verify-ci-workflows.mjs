@@ -170,11 +170,6 @@ const stagingPagesDeploymentJob = workflowJob(
   "deploy-pages",
   "deploy-staging-candidate.yml",
 );
-const stagingPagesReadinessJob = workflowJob(
-  stagingWorkflowContents,
-  "pages-readiness",
-  "deploy-staging-candidate.yml",
-);
 const stagingBackendJob = workflowJob(
   stagingWorkflowContents,
   "deploy-backend",
@@ -418,7 +413,6 @@ for (const [description, value] of Object.entries({
   "Orchestrator no-rebuild deployment": "wrangler deploy release-candidate/orchestrator/index.js",
   "idempotent Pages promotion": "pnpm run cloudflare:pages:promote:staging pages-candidate",
   "live Cloudflare read-back": "pnpm run cloudflare:readback:staging",
-  "early authenticated Pages readiness": "pnpm run test:e2e:staging:readiness",
   "real service E2E": "pnpm run test:e2e:staging",
   "staging-only Access client ID": "CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}",
   "staging-only Access client secret":
@@ -439,21 +433,13 @@ requireTextCount(
 for (const [job, expected, description] of [
   [stagingMigrationJob, "needs: preflight", "migration dependency on preflight"],
   [stagingPagesDeploymentJob, "needs: migrate", "Pages dependency on migration"],
-  [
-    stagingPagesReadinessJob,
-    "needs: deploy-pages",
-    "read-only Pages readiness dependency on Pages deployment",
-  ],
-  [stagingBackendJob, "needs: pages-readiness", "backend dependency on read-only Pages readiness"],
+  [stagingBackendJob, "needs: deploy-pages", "backend dependency on exact Pages deployment"],
   [stagingAcceptanceJob, "needs: deploy-backend", "acceptance dependency on backend promotion"],
 ]) {
   requireText(job, expected, "deploy-staging-candidate.yml", description);
 }
 
-for (const [job, location] of [
-  [stagingPreflightJob, "preflight job"],
-  [stagingPagesReadinessJob, "Pages readiness job"],
-]) {
+for (const [job, location] of [[stagingPreflightJob, "preflight job"]]) {
   for (const [description, forbidden] of Object.entries({
     "D1 mutation": "d1 migrations apply",
     "Orchestrator mutation": "wrangler deploy",
@@ -465,40 +451,25 @@ for (const [job, location] of [
   }
 }
 
-for (const [description, forbidden] of Object.entries({
-  "backend mutation": "runpod:promote:staging",
-  "D1 mutation": "d1 migrations apply",
-  "Orchestrator mutation": "wrangler deploy",
-  "Pages mutation": "cloudflare:pages:promote:staging",
-  "R2 mutation": "r2 bucket cors set",
-})) {
-  forbidText(
-    stagingPagesReadinessJob,
-    forbidden,
-    "deploy-staging-candidate.yml pages-readiness job",
-    description,
-  );
-}
-
-requireText(
-  stagingPagesReadinessJob,
-  "Install fixed Playwright browser",
-  "deploy-staging-candidate.yml pages-readiness job",
-  "browser installation inside isolated readiness job",
-);
-requireTextOrder(
-  stagingPagesReadinessJob,
-  "Install fixed Playwright browser",
-  "Verify authenticated Pages data plane without mutation",
-  "deploy-staging-candidate.yml pages-readiness job",
-  "browser installation before read-only readiness",
+forbidText(
+  stagingWorkflowContents,
+  "  pages-readiness:",
+  "deploy-staging-candidate.yml",
+  "immediate regional custom-domain readiness job",
 );
 requireTextOrder(
   stagingAcceptanceJob,
   "Verify candidate and live resource read-back",
-  "Run real staging M4A lifecycle",
+  "Verify authenticated data plane, then run real staging M4A lifecycle",
   "deploy-staging-candidate.yml acceptance job",
   "live read-back before real staging E2E",
+);
+requireTextOrder(
+  stagingAcceptanceJob,
+  "Install fixed Playwright browser",
+  "Verify authenticated data plane, then run real staging M4A lifecycle",
+  "deploy-staging-candidate.yml acceptance job",
+  "browser installation before the acceptance data-plane gate",
 );
 
 for (const [description, expected] of Object.entries({

@@ -56,11 +56,12 @@ job構造は、障害分類、冪等性、時間と外部resource消費の境界
 
 ## Status
 
-Accepted
+Superseded in part by [ADR 0036](./0036-defer-custom-domain-readiness-to-acceptance.md).
 
 ## References
 
 - [ADR 0023: staging検証済みartifactだけをproductionへ昇格する](./0023-promote-only-staging-verified-artifacts.md)
 - [ADR 0033: Pagesのdata-plane収束後にstaging E2Eを開始する](./0033-wait-for-pages-data-plane-convergence.md)
+- [ADR 0036: custom domain readinessをacceptanceの先頭へ移す](./0036-defer-custom-domain-readiness-to-acceptance.md)
 - [Cloudflare Pages deployment API](https://developers.cloudflare.com/api/resources/pages/subresources/projects/subresources/deployments/methods/get/)
 - [Cloudflare Pages advanced mode](https://developers.cloudflare.com/pages/functions/advanced-mode/)

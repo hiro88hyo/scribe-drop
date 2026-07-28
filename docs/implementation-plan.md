@@ -578,14 +578,13 @@ rootから検出し、同じtargetへのread-only preflightを最初のremote mu
 [ADR 0030](./adr/0030-scope-access-service-credentials-to-app-origin.md)に従い、staging
 service credentialは正規Web originへだけ継続送信する。Pages config hash、Access
 service-token claim、認証済み`/api/me`をmedia uploadより前に検証する。
-[ADR 0033](./adr/0033-wait-for-pages-data-plane-convergence.md)に従い、Pagesの
-D1 migrationとdeploy直後に認証済み`/api/me?candidate=<commit>`を上限付きでpollし、custom domainの
-data-planeと固定E2E identityが収束してからR2、RunPod、Orchestrator、media uploadへ
-進む。
-[ADR 0035](./adr/0035-isolate-staging-readiness-from-mutations.md)に従い、stagingは
-preflight、migration、Pages、read-only readiness、backend、acceptanceを独立jobにする。
-readiness失敗で成功済みmutationを再実行せず、Pages deployはexact read-backを先行して
-同じcandidateへのmutationを省略する。
+[ADR 0033](./adr/0033-wait-for-pages-data-plane-convergence.md)と、それを一部更新する
+[ADR 0036](./adr/0036-defer-custom-domain-readiness-to-acceptance.md)に従い、Pages
+promotionはcompiled routeと公式APIのexact read-backで確定する。stagingはpreflight、
+migration、Pages、backend、acceptanceを独立jobにし、認証済み
+`/api/me?candidate=<commit>`をacceptanceの先頭で上限付きにpollする。custom domainの
+data-planeと固定E2E identityが収束するまでmedia uploadとRunPod GPU jobを開始しない。
+readiness失敗時はfailed acceptanceだけを再実行し、成功済みmutationを繰り返さない。
 [ADR 0031](./adr/0031-retry-only-runpod-read-commands.md)に従い、RunPod promotionの
 read-only CLI一時障害だけを上限付きで再試行し、mutationは再試行しない。
 [ADR 0032](./adr/0032-automate-runpod-default-port-normalization.md)に従い、providerが

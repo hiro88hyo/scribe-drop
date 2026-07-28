@@ -135,11 +135,12 @@ claimと認証済み`GET /api/me`をupload前に検証し、実M4A、manifest-la
 削除受付が成功した後だけ24時間有効なacceptance artifactを発行する。
 acceptanceには実IDやoriginを含めず、retention、R2 policy、RunPod GPU・配置・runtime
 invariantをenvironment markerで正規化したpolicy hashを含める。
-staging workflowは[ADR 0035](./adr/0035-isolate-staging-readiness-from-mutations.md)に従い、
-`preflight`、`migrate`、`deploy-pages`、`pages-readiness`、`deploy-backend`、
-`acceptance`の独立jobへ分ける。`pages-readiness`はGETとbrowser setupだけを持ち、
-mutation commandを持たない。404またはbrowser setup失敗で、成功済みmigrationとPages
-promotionを再実行しない。
+staging workflowは[ADR 0036](./adr/0036-defer-custom-domain-readiness-to-acceptance.md)に従い、
+`preflight`、`migrate`、`deploy-pages`、`deploy-backend`、`acceptance`の独立jobへ
+分ける。custom domainの認証済みreadinessは`acceptance`のbrowser lifecycle先頭で確認し、
+成功するまでmedia uploadとGPU jobを開始しない。readiness失敗時は同じrunのfailed
+`acceptance` jobだけを再実行し、成功済みmigration、Pages、backend promotionを
+再実行しない。
 Pages promotionは公式APIでcommit、production branch、deploy status、`uses_functions`、
 設定hashを先に照合し、exact candidateがactiveならdeployを省略する。deploy応答喪失時も
 mutationを再送せず、上限付きread-backだけで結果を確定する。
@@ -148,11 +149,12 @@ Pagesは[ADR 0029](./adr/0029-discover-pages-config-from-app-root.md)に従い�
 read-only deployment listを取得し、config discoveryまたは認証に失敗した場合は停止する。
 staging browser credentialのorigin制限は
 [ADR 0030](./adr/0030-scope-access-service-credentials-to-app-origin.md)を正とする。
-[ADR 0033](./adr/0033-wait-for-pages-data-plane-convergence.md)に従い、全read-only
-control-plane preflightをremote mutation前に完了する。D1 migrationとPages deployの直後、
-独立readiness jobで認証済み`/api/me?candidate=<commit>`を上限付きでpollし、custom
-domainのdata-planeと固定E2E identityが収束してからR2、RunPod、Orchestrator、media
-lifecycleへ進む。
+[ADR 0033](./adr/0033-wait-for-pages-data-plane-convergence.md)と、それを一部更新する
+[ADR 0036](./adr/0036-defer-custom-domain-readiness-to-acceptance.md)に従い、全read-only
+control-plane preflightをremote mutation前に完了する。Pages promotionはcompiled routeと
+公式APIのexact read-backで確定する。認証済み`/api/me?candidate=<commit>`はbackend
+promotion後のacceptance先頭で上限付きにpollし、custom domainのdata-planeと固定E2E
+identityが収束してからmedia lifecycleへ進む。
 RunPod promotionは[ADR 0031](./adr/0031-retry-only-runpod-read-commands.md)と
 [ADR 0034](./adr/0034-fail-before-release-candidate-cost.md)に従い、template listを
 公式REST API、ほかのread-only CLIを上限付きで再試行し、結果不明のmutationを自動再送
