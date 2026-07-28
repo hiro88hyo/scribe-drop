@@ -66,6 +66,7 @@
     "security:audit": "pnpm audit --audit-level high && uv audit --preview-features audit-command --project apps/runpod-worker --frozen",
     "staging:acceptance:create": "node scripts/create-staging-acceptance.mjs",
     "staging:acceptance:verify": "node scripts/verify-staging-acceptance.mjs",
+    "staging:e2e:fixture:verify": "node scripts/verify-staging-e2e-fixture.mjs",
     "runpodctl": "./.tools/bin/runpodctl",
     "runpodctl:install": "bash scripts/install-runpodctl.sh",
     "runpod:config:staging": "node scripts/render-runpod-environment-config.mjs staging",

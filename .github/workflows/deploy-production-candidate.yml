@@ -30,7 +30,7 @@ jobs:
     env:
       EXPECTED_COMMIT_SHA: ${{ github.sha }}
       EXPECTED_RELEASE_BRANCH: ${{ github.ref_name }}
-      RELEASE_CANDIDATE_DIRECTORY: release-candidate
+      RELEASE_CANDIDATE_DIRECTORY: ${{ github.workspace }}/release-candidate
     steps:
       - name: Check out release commit
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -97,16 +97,16 @@ jobs:
             "${CANDIDATE_RUN_ID}"
           gh run download "${CANDIDATE_RUN_ID}" \
             --name "scribe-drop-release-candidate-${GITHUB_SHA}" \
-            --dir release-candidate
+            --dir "${RELEASE_CANDIDATE_DIRECTORY}"
 
       - name: Verify exact candidate and unexpired acceptance
         env:
           EXPECTED_STAGING_RUN_ID: ${{ inputs.staging_run_id }}
         run: |
-          pnpm run candidate:verify release-candidate
+          pnpm run candidate:verify "${RELEASE_CANDIDATE_DIRECTORY}"
           EXPECTED_CANDIDATE_RUN_ID="${CANDIDATE_RUN_ID}" \
             pnpm run staging:acceptance:verify \
-              release-candidate \
+              "${RELEASE_CANDIDATE_DIRECTORY}" \
               staging-acceptance
 
   deploy:
@@ -121,7 +121,7 @@ jobs:
       EXPECTED_COMMIT_SHA: ${{ github.sha }}
       EXPECTED_RELEASE_BRANCH: ${{ github.ref_name }}
       MULTIPART_RETENTION_HOURS: ${{ vars.MULTIPART_RETENTION_HOURS }}
-      RELEASE_CANDIDATE_DIRECTORY: release-candidate
+      RELEASE_CANDIDATE_DIRECTORY: ${{ github.workspace }}/release-candidate
       RESULT_RETENTION_DAYS: ${{ vars.RESULT_RETENTION_DAYS }}
       SCRIBE_DROP_CANDIDATE_MIGRATIONS_DIR: ../../release-candidate/migrations
       SCRIBE_DROP_PRODUCTION_ACCESS_AUDIENCE: ${{ vars.SCRIBE_DROP_PRODUCTION_ACCESS_AUDIENCE }}
@@ -205,17 +205,17 @@ jobs:
             "${CANDIDATE_RUN_ID}"
           gh run download "${CANDIDATE_RUN_ID}" \
             --name "scribe-drop-release-candidate-${GITHUB_SHA}" \
-            --dir release-candidate
+            --dir "${RELEASE_CANDIDATE_DIRECTORY}"
           EXPECTED_CANDIDATE_RUN_ID="${CANDIDATE_RUN_ID}" \
             EXPECTED_STAGING_RUN_ID="${STAGING_RUN_ID}" \
             pnpm run staging:acceptance:verify \
-              release-candidate \
+              "${RELEASE_CANDIDATE_DIRECTORY}" \
               staging-acceptance
 
       - name: Assemble and re-verify exact candidate outputs
         run: |
-          pnpm run candidate:verify release-candidate
-          pnpm run candidate:pages release-candidate pages-candidate
+          pnpm run candidate:verify "${RELEASE_CANDIDATE_DIRECTORY}"
+          pnpm run candidate:pages "${RELEASE_CANDIDATE_DIRECTORY}" pages-candidate
 
       - name: Render environment-only production configuration
         run: |
@@ -232,7 +232,7 @@ jobs:
         run: |
           EXPECTED_CANDIDATE_RUN_ID="${CANDIDATE_RUN_ID}" \
             pnpm run staging:acceptance:verify \
-              release-candidate \
+              "${RELEASE_CANDIDATE_DIRECTORY}" \
               staging-acceptance
 
       - name: Verify production encrypted secrets and Access boundary
@@ -287,7 +287,7 @@ jobs:
       - name: Promote the exact candidate RunPod image
         env:
           EXPECTED_STAGING_RUN_ID: ${{ inputs.staging_run_id }}
-          RELEASE_CANDIDATE_DIRECTORY: release-candidate
+          RELEASE_CANDIDATE_DIRECTORY: ${{ github.workspace }}/release-candidate
           RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
           SCRIBE_DROP_PRODUCTION_RUNPOD_ENDPOINT_ID: ${{ secrets.SCRIBE_DROP_PRODUCTION_RUNPOD_ENDPOINT_ID }}
           STAGING_ACCEPTANCE_PATH: staging-acceptance/staging-acceptance.json
@@ -299,7 +299,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
-          pnpm exec wrangler deploy release-candidate/orchestrator/index.js \
+          pnpm exec wrangler deploy "${RELEASE_CANDIDATE_DIRECTORY}/orchestrator/index.js" \
             --no-bundle \
             --strict \
             --tag "candidate-${GITHUB_SHA}" \
@@ -329,8 +329,8 @@ jobs:
           EXPECTED_CANDIDATE_RUN_ID="${CANDIDATE_RUN_ID}" \
             EXPECTED_STAGING_RUN_ID="${STAGING_RUN_ID}" \
             pnpm run staging:acceptance:verify \
-              release-candidate \
+              "${RELEASE_CANDIDATE_DIRECTORY}" \
               staging-acceptance
-          pnpm run candidate:verify release-candidate
+          pnpm run candidate:verify "${RELEASE_CANDIDATE_DIRECTORY}"
           pnpm run cloudflare:readback:production
           pnpm run cloudflare:access:verify:production

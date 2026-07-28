@@ -541,7 +541,8 @@ for (const [description, value] of Object.entries({
     "SCRIBE_DROP_CANDIDATE_MIGRATIONS_DIR: ../../release-candidate/migrations",
   "candidate-only RunPod promotion": "pnpm run runpod:promote:staging",
   "staging environment parity evidence": "pnpm run environment:policy:export staging",
-  "Orchestrator no-rebuild deployment": "wrangler deploy release-candidate/orchestrator/index.js",
+  "Orchestrator no-rebuild deployment":
+    'wrangler deploy "${RELEASE_CANDIDATE_DIRECTORY}/orchestrator/index.js"',
   "idempotent Pages promotion": "pnpm run cloudflare:pages:promote:staging pages-candidate",
   "live Cloudflare read-back": "pnpm run cloudflare:readback:staging",
   "real service E2E": "pnpm run test:e2e:staging",
@@ -553,6 +554,55 @@ for (const [description, value] of Object.entries({
 })) {
   requireText(stagingWorkflowContents, value, "deploy-staging-candidate.yml", description);
 }
+
+const absoluteCandidateDirectory =
+  "RELEASE_CANDIDATE_DIRECTORY: ${{ github.workspace }}/release-candidate";
+requireTextCount(
+  stagingWorkflowContents,
+  absoluteCandidateDirectory,
+  5,
+  "deploy-staging-candidate.yml",
+  "workspace-absolute candidate directory",
+);
+requireTextCount(
+  productionWorkflowContents,
+  absoluteCandidateDirectory,
+  3,
+  "deploy-production-candidate.yml",
+  "workspace-absolute candidate directory",
+);
+forbidText(
+  stagingWorkflowContents,
+  "RELEASE_CANDIDATE_DIRECTORY: release-candidate",
+  "deploy-staging-candidate.yml",
+  "working-directory-relative candidate directory",
+);
+forbidText(
+  productionWorkflowContents,
+  "RELEASE_CANDIDATE_DIRECTORY: release-candidate",
+  "deploy-production-candidate.yml",
+  "working-directory-relative candidate directory",
+);
+requireText(
+  packageManifestContents,
+  '"staging:e2e:fixture:verify": "node scripts/verify-staging-e2e-fixture.mjs"',
+  "package.json",
+  "real staging E2E fixture preflight",
+);
+requireTextOrder(
+  stagingPreflightJob,
+  'pnpm run candidate:verify "${RELEASE_CANDIDATE_DIRECTORY}"',
+  "pnpm run staging:e2e:fixture:verify",
+  "deploy-staging-candidate.yml preflight job",
+  "candidate verification before real E2E fixture preflight",
+);
+requireTextOrder(
+  stagingPreflightJob,
+  "pnpm run staging:e2e:fixture:verify",
+  'pnpm run candidate:pages "${RELEASE_CANDIDATE_DIRECTORY}" pages-candidate',
+  "deploy-staging-candidate.yml preflight job",
+  "real E2E fixture preflight before deployment assembly",
+);
 
 requireTextCount(
   stagingWorkflowContents,

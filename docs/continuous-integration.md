@@ -142,6 +142,11 @@ Orchestrator bundle、migration集合のSHA-256とconfig policy versionを含め
 staging workflowはcandidateだけを入力に取り、deploy後に実resourceをread-backしてから、
 固定dummy mediaを実R2、Queue、RunPodへ通すE2Eを実行する。変更がOSやbrowser固有の
 file picker、PWA、offline動作へ及ぶ場合は、対象実機smokeの承認もcandidateへ結び付ける。
+candidate directoryは全promotion jobで`${{ github.workspace }}/release-candidate`の絶対pathに
+固定し、package managerがsub-packageへworking directoryを変更しても相対pathとして再解釈
+させない。`preflight`はcandidate検証直後に実M4A fixtureをacceptanceと同じreaderかつ
+`apps/e2e` working directoryから読み、metadata、media contract、非空payloadを確認する。
+このfixture preflightが成功するまでD1、Pages、R2、RunPod、Workerを変更しない。
 `Deploy release candidate to staging`はcandidate workflow runのrepository、workflow path、
 release branch、commit、成功statusをGitHub APIで照合する。applicationを再buildせず、
 compiled bundleを`--no-bundle`でdeployする。R2 notification、Queue producer/consumer、

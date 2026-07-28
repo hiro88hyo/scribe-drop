@@ -1,35 +1,13 @@
 import { readFileSync } from "node:fs";
-import path from "node:path";
 
 import { expect, test, type Download } from "@playwright/test";
 
+import { readCandidateFixture } from "../candidate-fixture.js";
 import {
   openAuthenticatedStagingPage,
   requireStagingEnvironment,
   waitForAuthenticatedStagingDataPlane,
 } from "../staging-auth.js";
-
-function requireCandidateFixture(): Buffer {
-  const candidateDirectory = requireStagingEnvironment("RELEASE_CANDIDATE_DIRECTORY");
-  const metadata = JSON.parse(
-    readFileSync(path.join(candidateDirectory, "acceptance-fixtures", "metadata.json"), "utf8"),
-  ) as unknown;
-  if (
-    typeof metadata !== "object" ||
-    metadata === null ||
-    !("schemaVersion" in metadata) ||
-    metadata.schemaVersion !== 1 ||
-    !("filename" in metadata) ||
-    metadata.filename !== "android-aac.m4a" ||
-    !("mediaType" in metadata) ||
-    metadata.mediaType !== "audio/mp4a-latm" ||
-    !("synthetic" in metadata) ||
-    metadata.synthetic !== true
-  ) {
-    throw new Error("Release candidate acceptance fixture metadata is invalid");
-  }
-  return readFileSync(path.join(candidateDirectory, "acceptance-fixtures", "android-aac.m4a"));
-}
 
 async function readSuccessfulDownload(download: Download): Promise<Buffer> {
   expect(await download.failure()).toBeNull();
@@ -46,7 +24,7 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
     await waitForAuthenticatedStagingDataPlane(page, baseURL);
 
     await page.getByLabel("文字起こしする音声・動画ファイル").setInputFiles({
-      buffer: requireCandidateFixture(),
+      buffer: readCandidateFixture(requireStagingEnvironment("RELEASE_CANDIDATE_DIRECTORY")),
       mimeType: "audio/mp4a-latm",
       name: "android-aac.m4a",
     });
