@@ -43,11 +43,15 @@ Client ID/secretはGitHub staging Environmentにだけ保存し、Client IDと�
 `common_name`を`SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME`へ設定する。
 production applicationにはこのpolicyと変数を追加しない。
 
-CI browserは[ADR 0030](./adr/0030-scope-access-service-credentials-to-app-origin.md)に従い、
-service token headerを正規のstaging Web originへの全requestへだけ付与する。
-`CF_Authorization` cookie取得後もService Authの後続requestからheaderを外さず、代わりに
-redirectを自動継承せずoriginを再判定する。R2、Access team domain、その他のoriginへ
-Client ID/secretを送らない。
+CI browserは[ADR 0030](./adr/0030-scope-access-service-credentials-to-app-origin.md)と
+[ADR 0037](./adr/0037-bootstrap-access-before-browser-navigation.md)に従う。最初に
+BrowserContextとcookie jarを共有するrequest clientでAccess sessionを確立し、redirectは
+自動追跡せず、正規のstaging Web originとAccess team originだけを1 hopずつ追跡する。
+service token headerはstaging Web originへだけ送る。cookie取得後のbrowser requestでも
+Service Auth用headerを正規originへだけ継続し、redirectごとにoriginを再判定する。R2、
+Access team domain、その他のoriginへClient ID/secretを送らない。applicationを開いた後は
+現在のpage originが正規originへ戻ったことを確認し、`/api/me`は相対URLではなく正規origin
+から組み立てた絶対URLで確認する。
 
 application作成後、次の非secret値を取得する。
 

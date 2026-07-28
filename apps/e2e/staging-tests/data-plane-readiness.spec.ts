@@ -11,7 +11,7 @@ test("verifies the authenticated staging data plane before backend promotion", a
 }) => {
   const { context, page } = await openAuthenticatedStagingPage(browser, baseURL);
   try {
-    await waitForAuthenticatedStagingDataPlane(page);
+    await waitForAuthenticatedStagingDataPlane(page, baseURL);
   } finally {
     await context.close();
   }

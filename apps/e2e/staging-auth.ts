@@ -2,8 +2,28 @@ import { expect, type Browser, type BrowserContext, type Page } from "@playwrigh
 
 import {
   headersForAccessRequest,
+  type AccessServiceCredentials,
   serviceTokenCookieMatchesExpectedIdentity,
 } from "./access-service-credentials.js";
+
+const MAXIMUM_ACCESS_REDIRECTS = 10;
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+interface AccessBootstrapResponse {
+  dispose(): Promise<void>;
+  headers(): Record<string, string>;
+  ok(): boolean;
+  status(): number;
+  url(): string;
+}
+
+export type AccessBootstrapGet = (
+  url: string,
+  options: Readonly<{
+    headers: Record<string, string>;
+    maxRedirects: 0;
+  }>,
+) => Promise<AccessBootstrapResponse>;
 
 export function requireStagingEnvironment(name: string): string {
   const value = process.env[name];
@@ -18,6 +38,77 @@ export function stagingReadinessPath(commitSha: string): string {
     throw new Error("Expected staging commit is invalid");
   }
   return `/api/me?candidate=${commitSha}`;
+}
+
+function requireExactHttpsOrigin(value: string, name: string): string {
+  const parsed = new URL(value);
+  if (
+    parsed.protocol !== "https:" ||
+    parsed.origin !== value ||
+    parsed.username !== "" ||
+    parsed.password !== "" ||
+    parsed.port !== ""
+  ) {
+    throw new Error(`${name} must be an exact HTTPS origin`);
+  }
+  return value;
+}
+
+export function stagingReadinessUrl(baseURL: string, commitSha: string): string {
+  const origin = requireExactHttpsOrigin(baseURL, "Staging base URL");
+  return new URL(stagingReadinessPath(commitSha), origin).href;
+}
+
+export function hasExpectedStagingOrigin(currentUrl: string, baseURL: string): boolean {
+  const expectedOrigin = requireExactHttpsOrigin(baseURL, "Staging base URL");
+  return new URL(currentUrl).origin === expectedOrigin;
+}
+
+export async function establishStagingAccessSession(
+  get: AccessBootstrapGet,
+  baseURL: string,
+  teamDomain: string,
+  credentials: AccessServiceCredentials,
+): Promise<void> {
+  const appOrigin = requireExactHttpsOrigin(baseURL, "Staging base URL");
+  const teamOrigin = requireExactHttpsOrigin(teamDomain, "Staging Access team domain");
+  let requestUrl = baseURL;
+
+  for (let redirectCount = 0; redirectCount <= MAXIMUM_ACCESS_REDIRECTS; redirectCount += 1) {
+    const headers = headersForAccessRequest(
+      requestUrl,
+      appOrigin,
+      { Accept: "text/html" },
+      credentials,
+    );
+    const response = await get(requestUrl, { headers, maxRedirects: 0 });
+    try {
+      if (REDIRECT_STATUSES.has(response.status())) {
+        if (redirectCount === MAXIMUM_ACCESS_REDIRECTS) {
+          throw new Error("Access authentication exceeded the redirect limit");
+        }
+        const location = response.headers()["location"];
+        if (location === undefined) {
+          throw new Error("Access authentication redirect is missing Location");
+        }
+        const redirectUrl = new URL(location, response.url());
+        if (redirectUrl.origin !== appOrigin && redirectUrl.origin !== teamOrigin) {
+          throw new Error("Access authentication redirected outside approved origins");
+        }
+        requestUrl = redirectUrl.href;
+        continue;
+      }
+      if (!response.ok()) {
+        throw new Error(`Access authentication failed with status ${String(response.status())}`);
+      }
+      if (new URL(response.url()).origin !== appOrigin) {
+        throw new Error("Access authentication did not return to the staging origin");
+      }
+      return;
+    } finally {
+      await response.dispose();
+    }
+  }
 }
 
 export type StagingReadinessResponseKind =
@@ -64,8 +155,16 @@ export async function openAuthenticatedStagingPage(
   const expectedCommonName = requireStagingEnvironment(
     "SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME",
   );
-  const appOrigin = new URL(baseURL).origin;
+  const appOrigin = requireExactHttpsOrigin(baseURL, "Staging base URL");
+  const teamDomain = requireStagingEnvironment("SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN");
   const context = await browser.newContext();
+
+  await establishStagingAccessSession(
+    (url, options) => context.request.get(url, options),
+    baseURL,
+    teamDomain,
+    credentials,
+  );
 
   await context.route("**/*", async (route) => {
     const request = route.request();
@@ -86,11 +185,6 @@ export async function openAuthenticatedStagingPage(
     await route.fulfill({ response });
   });
 
-  const page = await context.newPage();
-  const authenticationResponse = await page.goto(baseURL, {
-    waitUntil: "domcontentloaded",
-  });
-  expect(authenticationResponse?.ok()).toBe(true);
   const accessCookie = (await context.cookies(baseURL)).find(
     (cookie) => cookie.name === "CF_Authorization",
   );
@@ -98,18 +192,31 @@ export async function openAuthenticatedStagingPage(
   expect(
     serviceTokenCookieMatchesExpectedIdentity(accessCookie?.value ?? "", expectedCommonName),
   ).toBe(true);
-  await page.goto(baseURL, { waitUntil: "networkidle" });
+  const page = await context.newPage();
+  const applicationResponse = await page.goto(baseURL, { waitUntil: "networkidle" });
+  expect(applicationResponse?.ok()).toBe(true);
+  expect(hasExpectedStagingOrigin(page.url(), baseURL)).toBe(true);
   return { context, page };
 }
 
-export async function waitForAuthenticatedStagingDataPlane(page: Page): Promise<void> {
-  const readinessPath = stagingReadinessPath(requireStagingEnvironment("EXPECTED_COMMIT_SHA"));
+export async function waitForAuthenticatedStagingDataPlane(
+  page: Page,
+  baseURL: string | undefined,
+): Promise<void> {
+  if (baseURL === undefined) {
+    throw new Error("Staging base URL is missing");
+  }
+  expect(hasExpectedStagingOrigin(page.url(), baseURL)).toBe(true);
+  const readinessUrl = stagingReadinessUrl(
+    baseURL,
+    requireStagingEnvironment("EXPECTED_COMMIT_SHA"),
+  );
   await expect
     .poll(
       async () => {
-        const observation = await page.evaluate(async (path) => {
+        const observation = await page.evaluate(async (url) => {
           try {
-            const response = await fetch(path, {
+            const response = await fetch(url, {
               cache: "no-store",
               credentials: "same-origin",
               headers: { Accept: "application/json" },
@@ -143,7 +250,7 @@ export async function waitForAuthenticatedStagingDataPlane(page: Page): Promise<
           } catch {
             return { email: null, ok: false, responseHeaders: null, status: 0 };
           }
-        }, readinessPath);
+        }, readinessUrl);
         return {
           email: observation.email,
           ok: observation.ok,

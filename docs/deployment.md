@@ -343,7 +343,11 @@ gateを完了する。remote workflowをlocal検証の代替に使用しない�
 stagingのAccess自動試験は
 [ADR 0024](./adr/0024-staging-only-access-service-principal.md)の専用service principalだけを
 使用する。service tokenのID/secretはstaging Environment secretに置き、production
-Environmentへ複製しない。
+Environmentへ複製しない。transportは
+[ADR 0037](./adr/0037-bootstrap-access-before-browser-navigation.md)に従い、共有cookie jarで
+Access redirectをexact app/team originに限定して確立してからbrowserを開く。browserの
+最終originと、絶対URLで送る認証済み`/api/me`のoriginが正規staging originと一致しない
+場合はupload前に停止する。
 
 ## 追跡外production設定
 

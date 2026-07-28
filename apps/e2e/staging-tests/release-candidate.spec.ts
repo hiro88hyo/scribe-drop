@@ -43,7 +43,7 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
   const { context, page } = await openAuthenticatedStagingPage(browser, baseURL);
 
   try {
-    await waitForAuthenticatedStagingDataPlane(page);
+    await waitForAuthenticatedStagingDataPlane(page, baseURL);
 
     await page.getByLabel("文字起こしする音声・動画ファイル").setInputFiles({
       buffer: requireCandidateFixture(),

@@ -508,8 +508,11 @@ requireTextCount(
 for (const [description, value] of Object.entries({
   "same-origin Access credential routing": "headersForAccessRequest(",
   "redirect boundary before credential reuse": "maxRedirects: 0",
+  "cookie-jar Access bootstrap": "establishStagingAccessSession(",
   "service-token cookie identity check": "serviceTokenCookieMatchesExpectedIdentity(",
-  "authenticated session preflight": "fetch(path,",
+  "staging page origin verification": "hasExpectedStagingOrigin(page.url(), baseURL)",
+  "authenticated session preflight": "fetch(url,",
+  "absolute readiness URL": "stagingReadinessUrl(",
   "candidate-specific readiness URL": "/api/me?candidate=",
   "bounded Pages data-plane convergence":
     "Expected the authenticated staging data plane to converge",
@@ -522,9 +525,29 @@ forbidText(
   "staging-auth.ts",
   "context-wide Access service credentials",
 );
+forbidText(
+  stagingAuthContents,
+  'fetch("/api/me"',
+  "staging-auth.ts",
+  "page-relative staging readiness request",
+);
+requireTextOrder(
+  stagingAuthContents,
+  "await establishStagingAccessSession(",
+  'await context.route("**/*"',
+  "staging-auth.ts",
+  "Access cookie bootstrap before browser request interception",
+);
+requireTextOrder(
+  stagingAuthContents,
+  "serviceTokenCookieMatchesExpectedIdentity(",
+  "const page = await context.newPage()",
+  "staging-auth.ts",
+  "service-token cookie verification before browser navigation",
+);
 requireTextOrder(
   stagingE2eContents,
-  "waitForAuthenticatedStagingDataPlane(page)",
+  "waitForAuthenticatedStagingDataPlane(page, baseURL)",
   ".setInputFiles",
   "release-candidate.spec.ts",
   "data-plane readiness before media mutation",
