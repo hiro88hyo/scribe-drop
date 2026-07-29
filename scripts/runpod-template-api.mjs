@@ -3,6 +3,7 @@ const apiKeyPattern = /^\S{16,512}$/u;
 const dataCenterIdPattern = /^[A-Z]{2,3}-[A-Z]{2,3}-[0-9]+$/u;
 const gpuTypeIdPattern = /^[A-Za-z0-9][A-Za-z0-9 ._-]{1,126}[A-Za-z0-9]$/u;
 const runpodTemplateApiOrigin = "https://rest.runpod.io";
+const runpodJobApiOrigin = "https://api.runpod.ai";
 const maximumReadResponseBytes = 2 * 1024 * 1024;
 const readRetryDelaysMilliseconds = [1_000, 2_000];
 
@@ -74,7 +75,7 @@ async function readRunpodJson(input, dependencies) {
     dependencies.createTimeoutSignal ?? ((milliseconds) => AbortSignal.timeout(milliseconds));
   const sleep = dependencies.sleep ?? defaultSleep;
   const onRetry = dependencies.onRetry ?? (() => {});
-  const url = new URL(input.pathname, runpodTemplateApiOrigin);
+  const url = new URL(input.pathname, input.origin ?? runpodTemplateApiOrigin);
   for (const [name, value] of Object.entries(input.query ?? {})) {
     url.searchParams.set(name, value);
   }
@@ -157,6 +158,53 @@ export function getRunpodEndpoint(input, dependencies = {}) {
           throw new Error("RunPod endpoint response is missing or invalid");
         }
         return value;
+      },
+    },
+    dependencies,
+  );
+}
+
+function requireNonnegativeInteger(value, name) {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`RunPod health ${name} is missing or invalid`);
+  }
+  return value;
+}
+
+export function getRunpodEndpointHealth(input, dependencies = {}) {
+  if (!resourceIdPattern.test(String(input.endpointId ?? ""))) {
+    throw new Error("RunPod endpoint ID is missing or invalid");
+  }
+  return readRunpodJson(
+    {
+      apiKey: input.apiKey,
+      command: "endpoint health",
+      origin: runpodJobApiOrigin,
+      pathname: `/v2/${encodeURIComponent(input.endpointId)}/health`,
+      validate(value) {
+        if (
+          typeof value !== "object" ||
+          value === null ||
+          Array.isArray(value) ||
+          typeof value.workers !== "object" ||
+          value.workers === null ||
+          Array.isArray(value.workers)
+        ) {
+          throw new Error("RunPod endpoint health response is missing or invalid");
+        }
+        return {
+          workers: {
+            idle: requireNonnegativeInteger(value.workers.idle ?? 0, "idle workers"),
+            initializing: requireNonnegativeInteger(
+              value.workers.initializing ?? 0,
+              "initializing workers",
+            ),
+            ready: requireNonnegativeInteger(value.workers.ready ?? 0, "ready workers"),
+            running: requireNonnegativeInteger(value.workers.running ?? 0, "running workers"),
+            throttled: requireNonnegativeInteger(value.workers.throttled ?? 0, "throttled workers"),
+            unhealthy: requireNonnegativeInteger(value.workers.unhealthy ?? 0, "unhealthy workers"),
+          },
+        };
       },
     },
     dependencies,
@@ -248,6 +296,45 @@ export async function setRunpodEndpointWorkersMax(input, dependencies = {}) {
   await cancelResponseBody(response);
   if (!response.ok) {
     throw new Error("RunPod endpoint worker update was rejected");
+  }
+}
+
+export async function setRunpodEndpointWorkersMin(input, dependencies = {}) {
+  if (!resourceIdPattern.test(String(input.endpointId ?? ""))) {
+    throw new Error("RunPod endpoint ID is missing or invalid");
+  }
+  if (!Number.isSafeInteger(input.workersMin) || input.workersMin < 0 || input.workersMin > 100) {
+    throw new Error("RunPod endpoint worker minimum is missing or invalid");
+  }
+  const apiKey = requireApiKey(input.apiKey);
+  const fetchImplementation = dependencies.fetchImplementation ?? globalThis.fetch;
+  const createTimeoutSignal =
+    dependencies.createTimeoutSignal ?? ((milliseconds) => AbortSignal.timeout(milliseconds));
+  const url = new URL(
+    `/v1/endpoints/${encodeURIComponent(input.endpointId)}`,
+    runpodTemplateApiOrigin,
+  );
+  let response;
+  try {
+    response = await fetchImplementation(url, {
+      body: JSON.stringify({ workersMin: input.workersMin }),
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      method: "PATCH",
+      redirect: "error",
+      signal: createTimeoutSignal(60_000),
+    });
+  } catch {
+    throw new Error("RunPod endpoint active worker update outcome is unknown");
+  }
+  if (typeof response !== "object" || response === null || typeof response.ok !== "boolean") {
+    throw new Error("RunPod endpoint active worker update returned an invalid response");
+  }
+  await cancelResponseBody(response);
+  if (!response.ok) {
+    throw new Error("RunPod endpoint active worker update was rejected");
   }
 }
 

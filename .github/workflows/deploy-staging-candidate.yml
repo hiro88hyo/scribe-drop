@@ -373,7 +373,7 @@ jobs:
     needs: deploy-backend
     environment: staging
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       AUDIT_RETENTION_DAYS: ${{ vars.AUDIT_RETENTION_DAYS }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -444,6 +444,12 @@ jobs:
       - name: Install fixed Playwright browser
         run: pnpm --filter @scribe-drop/e2e exec playwright install --with-deps chromium
 
+      - name: Prewarm the exact candidate worker before creating a job
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID: ${{ secrets.SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID }}
+        run: pnpm run runpod:prewarm:staging
+
       - name: Verify authenticated data plane, then run real staging M4A lifecycle
         env:
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
@@ -455,6 +461,13 @@ jobs:
           RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
           SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID: ${{ secrets.SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID }}
         run: pnpm run runpod:verify-worker:staging
+
+      - name: Restore staging scale-to-zero
+        if: ${{ always() }}
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID: ${{ secrets.SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID }}
+        run: pnpm run runpod:cooldown:staging
 
       - name: Issue short-lived staging acceptance
         env:

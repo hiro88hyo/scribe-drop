@@ -4,9 +4,11 @@ import { test } from "node:test";
 import {
   clearRunpodTemplatePorts,
   getRunpodEndpoint,
+  getRunpodEndpointHealth,
   listRunpodTemplates,
   setRunpodEndpointCapacity,
   setRunpodEndpointWorkersMax,
+  setRunpodEndpointWorkersMin,
   verifyRunpodReleaseReadiness,
 } from "./runpod-template-api.mjs";
 
@@ -147,6 +149,66 @@ test("rejects an endpoint response for a different resource", async () => {
         createTimeoutSignal: () => ({}),
         async fetchImplementation() {
           return jsonResponse({ id: "endpoint_other" });
+        },
+        async sleep() {},
+      },
+    ),
+    /failed after bounded retries/u,
+  );
+});
+
+test("reads only bounded worker counters from endpoint health", async () => {
+  const endpointId = "endpoint_test";
+  const signal = {};
+  const result = await getRunpodEndpointHealth(
+    { apiKey, endpointId },
+    {
+      createTimeoutSignal(milliseconds) {
+        assert.equal(milliseconds, 15_000);
+        return signal;
+      },
+      async fetchImplementation(url, init) {
+        assert.equal(url.href, `https://api.runpod.ai/v2/${endpointId}/health`);
+        assert.deepEqual(init, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          method: "GET",
+          redirect: "error",
+          signal,
+        });
+        return jsonResponse({
+          jobs: { inQueue: 7 },
+          workers: {
+            idle: 0,
+            initializing: 1,
+            ready: 2,
+            running: 0,
+            throttled: 0,
+            unhealthy: 0,
+          },
+        });
+      },
+    },
+  );
+  assert.deepEqual(result, {
+    workers: {
+      idle: 0,
+      initializing: 1,
+      ready: 2,
+      running: 0,
+      throttled: 0,
+      unhealthy: 0,
+    },
+  });
+});
+
+test("rejects malformed endpoint health counters", async () => {
+  await assert.rejects(
+    getRunpodEndpointHealth(
+      { apiKey, endpointId: "endpoint_test" },
+      {
+        createTimeoutSignal: () => ({}),
+        async fetchImplementation() {
+          return jsonResponse({ workers: { running: -1 } });
         },
         async sleep() {},
       },
@@ -351,6 +413,87 @@ test("classifies endpoint worker update response loss without retrying", async (
     ),
     (error) => {
       assert.equal(error.message, "RunPod endpoint worker update outcome is unknown");
+      return true;
+    },
+  );
+  assert.equal(requests, 1);
+});
+
+test("sets an endpoint active worker minimum through the fixed REST boundary", async () => {
+  const endpointId = "endpoint_test";
+  const signal = {};
+  let bodyCancelled = false;
+  await setRunpodEndpointWorkersMin(
+    { apiKey, endpointId, workersMin: 1 },
+    {
+      createTimeoutSignal(milliseconds) {
+        assert.equal(milliseconds, 60_000);
+        return signal;
+      },
+      async fetchImplementation(url, init) {
+        assert.equal(url.href, `https://rest.runpod.io/v1/endpoints/${endpointId}`);
+        assert.deepEqual(init, {
+          body: JSON.stringify({ workersMin: 1 }),
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          method: "PATCH",
+          redirect: "error",
+          signal,
+        });
+        return {
+          body: {
+            async cancel() {
+              bodyCancelled = true;
+            },
+          },
+          ok: true,
+        };
+      },
+    },
+  );
+  assert.equal(bodyCancelled, true);
+});
+
+test("validates active worker minimum before sending a mutation", async () => {
+  let requests = 0;
+  for (const input of [
+    { endpointId: "../unsafe", workersMin: 0 },
+    { endpointId: "endpoint_test", workersMin: -1 },
+    { endpointId: "endpoint_test", workersMin: 1.5 },
+    { endpointId: "endpoint_test", workersMin: 101 },
+  ]) {
+    await assert.rejects(
+      setRunpodEndpointWorkersMin(
+        { apiKey, ...input },
+        {
+          async fetchImplementation() {
+            requests += 1;
+            return { ok: true };
+          },
+        },
+      ),
+      /missing or invalid/u,
+    );
+  }
+  assert.equal(requests, 0);
+});
+
+test("classifies active worker update response loss without retrying", async () => {
+  let requests = 0;
+  await assert.rejects(
+    setRunpodEndpointWorkersMin(
+      { apiKey, endpointId: "endpoint_test", workersMin: 1 },
+      {
+        async fetchImplementation() {
+          requests += 1;
+          throw new Error("provider response containing sensitive data");
+        },
+      },
+    ),
+    (error) => {
+      assert.equal(error.message, "RunPod endpoint active worker update outcome is unknown");
       return true;
     },
   );

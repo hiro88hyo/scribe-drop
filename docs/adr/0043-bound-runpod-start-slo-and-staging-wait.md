@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-07-28
 - Supersedes: ADR 0011の「stagingでp99を確認する」だけで開始遅延を運用する決定
+- Refined by: ADR 0051のjob作成前staging prewarm
 
 ## Context
 

@@ -187,6 +187,10 @@ terminal status、artifact、cancel request、notification outboxを同じservic
 回収する。Cronが重複しても期待status、active attempt、generation、winner、versionを
 含むCASで一度だけ状態を進める。
 
+10分開始SLOはsubmissionをstaleと判定する境界であり、provider cancel完了時刻ではない。
+実際のFAILED遷移とcancel開始は次の5分Cron境界になり得る。利用者表示、alert、staging
+timeoutでは「10分ちょうどでprovider queueから消える」と扱わない。
+
 - `SUBMITTING`でprovider応答が不明なattemptは、`submission_outcome`が`unknown`または
   D1書込み失敗で未記録の`NULL`であり、claim期限切れ、winnerなし、
   submission記録なしを同時に満たす場合だけ`FAILED`へ収束させる。同じattemptを
@@ -203,6 +207,10 @@ terminal status、artifact、cancel request、notification outboxを同じservic
 - inventory preflightは固定GPU候補がすべてSecure Cloud専用かつavailableであることを
   確認する。stock tierは運用シグナルでありreleaseの合否には使わない。条件を満たさない
   場合はworkflowを開始せず、同じjobやworkflowを繰り返して供給待ちを隠さない。
+- inventoryのavailableは実割り当てを保証しない。staging acceptanceは
+  [ADR 0051](./adr/0051-prewarm-staging-before-job-creation.md)に従い、job作成前に
+  candidate Workerを最大8分prewarmする。ready evidenceを得られなければjobを作らず、
+  `workersMin=0`のexact read-backまで確認する。cleanup失敗は課金継続のalert対象とする。
 - 全候補が一時的に不足しても、利用者画面は`SUBMITTING`を「GPU起動中」と表示し、開始SLO
   超過後は`FAILED`と手動retryを提供する。同じattemptの自動再投入やclaim TTL延長はしない。
 - 利用者のretryは`FAILED` jobに新しいgeneration、attempt、token、result prefixを作る。

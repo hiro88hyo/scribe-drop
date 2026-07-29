@@ -88,6 +88,11 @@ GPU順序の完全一致をread-backする。検証不能なdata center固定は
 不足した場合も開始SLO、FAILEDへのCAS、exact cancelを維持し、無期限待機や同じattemptの
 自動再投入は行わない。
 
+staging release gateでは[ADR 0051](./adr/0051-prewarm-staging-before-job-creation.md)に従い、
+一時的に`workersMin=1`としてcandidate Workerの実割り当てとreadinessを確認してから
+synthetic jobを作る。全結果で`workersMin=0`へ戻し、productionのFlex構成を常時Activeへ
+暗黙に変更しない。inventoryの`available`はpromotion前提であり、ready evidenceではない。
+
 ## 削除と保持期限
 
 ユーザー削除はowner/CSRF検証後に`deleted_at`をCAS更新し、通常APIから直ちに隠す。

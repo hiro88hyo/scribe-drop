@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-07-29
 - Supersedes: ADR 0049の第1GPU候補High/Medium条件
+- Refined by: ADR 0051のjob作成前staging prewarm
 
 ## Context
 

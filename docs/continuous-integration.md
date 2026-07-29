@@ -174,6 +174,11 @@ RunPod winner claimを最大10分だけ待つ。FAILED、CANCELLED、EXPIRED、
 SOURCE_MUTATEDは即時失敗とし、COMPLETEDだけを長時間待たない。synthetic jobは
 成功・失敗にかかわらずexact job IDで削除を要求する。GPU開始SLOを満たさないrunを
 自動retryせず、原因と供給状況を確認するまで次のworkflowを起動しない。
+[ADR 0051](./adr/0051-prewarm-staging-before-job-creation.md)に従い、upload前に
+`workersMin=1`を一時設定し、candidate template/imageのWorkerとhealth readinessを最大8分
+だけ待つ。readyにならなければsynthetic jobを作らず失敗し、prewarm内部とworkflowの
+`always()` cleanupの両方で`workersMin=0`をexact read-backする。candidate Workerの
+post-lifecycle evidenceとscale-to-zero復元が成功した後だけacceptanceを発行する。
 Access service tokenは[ADR 0041](./adr/0041-authenticate-both-staging-access-layers.md)に
 従い、browser requestをhopごとにinterceptする。exact application originだけへ外側用
 標準2 headerと内側用JSON `Authorization`を同時送信する。routeはexact application

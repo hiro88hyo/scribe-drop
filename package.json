@@ -80,6 +80,8 @@
     "runpod:deploy:production": "node scripts/deploy-runpod-environment.mjs production",
     "runpod:promote:production": "node scripts/promote-runpod-candidate.mjs production .runpod/deploy/production-plan.json",
     "runpod:promote:staging": "node scripts/promote-runpod-candidate.mjs staging .runpod/deploy/staging-plan.json",
+    "runpod:prewarm:staging": "node scripts/manage-staging-runpod-active-worker.mjs prewarm",
+    "runpod:cooldown:staging": "node scripts/manage-staging-runpod-active-worker.mjs cooldown",
     "runpod:preflight:production": "node scripts/promote-runpod-candidate.mjs production .runpod/deploy/production-plan.json --preflight-only",
     "runpod:preflight:staging": "node scripts/promote-runpod-candidate.mjs staging .runpod/deploy/staging-plan.json --preflight-only",
     "runpod:verify-worker:staging": "node scripts/promote-runpod-candidate.mjs staging .runpod/deploy/staging-plan.json --preflight-only --require-candidate-worker",

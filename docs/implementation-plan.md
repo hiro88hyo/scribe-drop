@@ -27,8 +27,11 @@ smokeと処理時間の計測は、後述するPhase 5のstaging検証で完了�
 [ADR 0049](./adr/0049-pin-observed-runpod-capacity.md)に従い、現行releaseは
 staging/production共通の実API検証済みSecure-only GPU候補`A40`、`L4`、inventory gate、
 公式REST APIのexact GPU read-backへ更新する。検証不能なdata center固定は行わない。
-全候補不足時も10分開始SLOとexact cancelを維持し、CIだけでなく実利用時の無期限待機と
-孤児provider jobを防ぐ。
+全候補不足時も10分開始SLO、次の5分Cron境界でのFAILED収束、exact cancelを維持し、
+CIだけでなく実利用時の無期限待機と孤児provider jobを防ぐ。さらに
+[ADR 0051](./adr/0051-prewarm-staging-before-job-creation.md)に従い、staging acceptanceは
+一時的なActive workerがcandidate imageでreadyになった後にだけsynthetic jobを作成し、
+成功・失敗後は`workersMin=0`をexact read-backする。
 
 Phase 5では[ADR 0013](./adr/0013-reconciliation-and-fresh-attempt-retry.md)に従い、
 5分Cron、RunPod status観測、terminal状態の先行保存、manifest/artifact検証、
@@ -313,7 +316,7 @@ temporary credentialのexact-object multipart/abort成功とaction/object拒否�
 - `/run` の成功、明示的失敗、timeout で結果不明のケースを別に扱い、submission の追跡情報を記録する。
 - [ADR 0043](./adr/0043-bound-runpod-start-slo-and-staging-wait.md)に従い、
   accepted後10分以内にwinner claimへ進まないattemptをFAILEDへCAS遷移し、
-  exact provider jobのcancelを成功確認まで再試行する。
+  次のCron境界からexact provider jobのcancelを成功確認まで再試行する。
 - claim API を実装する。
   - token hashの定時間比較、expiry、consumptionを確認
   - current active attempt、generation、cancel状態を確認

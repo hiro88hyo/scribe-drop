@@ -834,9 +834,16 @@ requireTextOrder(
 requireTextOrder(
   stagingAcceptanceJob,
   "Install fixed Playwright browser",
+  "Prewarm the exact candidate worker before creating a job",
+  "deploy-staging-candidate.yml acceptance job",
+  "browser installation before candidate worker prewarm",
+);
+requireTextOrder(
+  stagingAcceptanceJob,
+  "Prewarm the exact candidate worker before creating a job",
   "Verify authenticated data plane, then run real staging M4A lifecycle",
   "deploy-staging-candidate.yml acceptance job",
-  "browser installation before the acceptance data-plane gate",
+  "candidate worker readiness before the acceptance data-plane gate",
 );
 requireTextCount(
   stagingWorkflowContents,
@@ -854,6 +861,38 @@ requireTextCount(
 );
 requireText(
   packageManifestContents,
+  '"runpod:prewarm:staging": "node scripts/manage-staging-runpod-active-worker.mjs prewarm"',
+  "package.json",
+  "bounded staging candidate worker prewarm script",
+);
+requireText(
+  packageManifestContents,
+  '"runpod:cooldown:staging": "node scripts/manage-staging-runpod-active-worker.mjs cooldown"',
+  "package.json",
+  "staging scale-to-zero restoration script",
+);
+requireText(
+  stagingAcceptanceJob,
+  "if: ${{ always() }}",
+  "deploy-staging-candidate.yml acceptance job",
+  "scale-to-zero cleanup after every staging outcome",
+);
+requireTextCount(
+  stagingAcceptanceJob,
+  "pnpm run runpod:prewarm:staging",
+  1,
+  "deploy-staging-candidate.yml acceptance job",
+  "single pre-job candidate worker allocation",
+);
+requireTextCount(
+  stagingAcceptanceJob,
+  "pnpm run runpod:cooldown:staging",
+  1,
+  "deploy-staging-candidate.yml acceptance job",
+  "single staging scale-to-zero restoration",
+);
+requireText(
+  packageManifestContents,
   '"runpod:verify-worker:staging": "node scripts/promote-runpod-candidate.mjs staging .runpod/deploy/staging-plan.json --preflight-only --require-candidate-worker"',
   "package.json",
   "post-lifecycle candidate worker verification script",
@@ -864,6 +903,20 @@ requireTextOrder(
   "Verify the candidate RunPod worker handled the lifecycle",
   "deploy-staging-candidate.yml acceptance job",
   "candidate worker read-back after real staging E2E",
+);
+requireTextOrder(
+  stagingAcceptanceJob,
+  "Verify the candidate RunPod worker handled the lifecycle",
+  "Restore staging scale-to-zero",
+  "deploy-staging-candidate.yml acceptance job",
+  "candidate worker evidence before scale-to-zero restoration",
+);
+requireTextOrder(
+  stagingAcceptanceJob,
+  "Restore staging scale-to-zero",
+  "Issue short-lived staging acceptance",
+  "deploy-staging-candidate.yml acceptance job",
+  "scale-to-zero restoration before staging acceptance issuance",
 );
 requireTextCount(
   productionWorkflowContents,
