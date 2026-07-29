@@ -172,10 +172,11 @@ Access service tokenは[ADR 0041](./adr/0041-authenticate-both-staging-access-la
 従い、browser requestをhopごとにinterceptする。exact application originだけへ外側用
 標準2 headerと内側用JSON `Authorization`を同時送信する。routeはexact application
 originだけに登録し、callback内でもoriginを再検証する。最初のnavigationで
-`CF_Authorization` cookieとservice principal claimを確認した直後に、進行中handlerの完了を
-待ってrouteを解除する。その後のrequestはcookieだけを使い、credential-bearing callbackを
-test終了処理まで残さない。route errorはrequest headerを含み得るため、raw errorを
-再throwまたはlogしない。
+`CF_Authorization` cookieとservice principal claimを確認した後も、二重Accessの内側が
+要求するJSON `Authorization`を含む3 headerをexact application originへ継続する。
+routeはcleanup完了後に新規callback受付を止め、進行中handlerを待ってからbrowser contextを
+閉じる。途中で解除してcookie-onlyへ切り替えず、contextを先に閉じて保留中handlerを
+失敗させない。route errorはrequest headerを含み得るため、raw errorを再throwまたはlogしない。
 redirectはbrowserへ返して次requestを新たに評価させる。R2、Access team domain、
 artifact download先、その他のcross-origin requestはadapterを通さず、browserが生成した
 headerを変更しない。`route.fetch()`が同一origin mutationの`Sec-Fetch-Site`を

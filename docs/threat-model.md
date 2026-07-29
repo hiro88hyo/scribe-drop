@@ -176,7 +176,7 @@ artifact/finalize/notificationのend-to-end経路もPhase 5のstaging smokeで�
 
 通常CIでは実Cloudflare Accessや外部JWKS endpointを呼ばない。固定clock、生成したRSA test key、in-memory JWKS fetch fakeを使い、signatureと全claim分岐を決定的に検証する。
 
-stagingではAccess policyとapplication audienceを実値で構成した後に、未認証browser、許可利用者、別application audience、key rotation smoke testを行う。browser adapterはservice cookie取得後にcredential-bearing routeを解除し、raw route errorをlogしない。Phase 4では固定のdummy音声だけを使い、claim競合、capability scope、endpoint設定、offline image、timeout、cleanupを検証する。stagingのtoken、email、署名URL、音声、文字起こし結果をCI artifact、screenshot、logへ保存しない。
+stagingではAccess policyとapplication audienceを実値で構成した後に、未認証browser、許可利用者、別application audience、key rotation smoke testを行う。browser adapterは二重Accessのためservice cookie取得後もexact application originだけへ3つのcredential headerを継続する。cleanup後に新規route callbackを止め、進行中handlerを待ってからcontextを閉じる。callbackはoriginを再検証し、raw route errorをlogしない。Phase 4では固定のdummy音声だけを使い、claim競合、capability scope、endpoint設定、offline image、timeout、cleanupを検証する。stagingのtoken、email、署名URL、音声、文字起こし結果をCI artifact、screenshot、logへ保存しない。
 
 ## 残余リスク
 

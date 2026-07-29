@@ -1,6 +1,7 @@
 import { test } from "@playwright/test";
 
 import {
+  closeAuthenticatedStagingContext,
   openAuthenticatedStagingPage,
   waitForAuthenticatedStagingDataPlane,
 } from "../staging-auth.js";
@@ -13,6 +14,6 @@ test("verifies the authenticated staging data plane before backend promotion", a
   try {
     await waitForAuthenticatedStagingDataPlane(page, baseURL);
   } finally {
-    await context.close();
+    await closeAuthenticatedStagingContext(context);
   }
 });

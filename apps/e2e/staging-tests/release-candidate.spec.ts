@@ -6,6 +6,7 @@ import { createJobResponseSchema } from "@scribe-drop/contracts";
 import { readCandidateFixture } from "../candidate-fixture.js";
 import { deleteStagingFixtureJob, waitForStagingJobCompletion } from "../staging-lifecycle.js";
 import {
+  closeAuthenticatedStagingContext,
   openAuthenticatedStagingPage,
   requireStagingEnvironment,
   waitForAuthenticatedStagingDataPlane,
@@ -187,7 +188,7 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
         await deleteStagingFixtureJob(page, createdJobId);
       }
     } finally {
-      await context.close();
+      await closeAuthenticatedStagingContext(context);
     }
   }
 });

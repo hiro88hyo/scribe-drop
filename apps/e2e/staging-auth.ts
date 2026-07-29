@@ -162,15 +162,24 @@ export async function openAuthenticatedStagingPage(
     const page = await context.newPage();
     await completeStagingBrowserAccessHandshake(page, context, baseURL, expectedCommonName);
 
-    // The service-token headers are needed only to exchange them for the
-    // CF_Authorization cookie. Remove the route before returning so no
-    // credential-bearing request callback can outlive the test or context.
-    await context.unrouteAll({ behavior: "wait" });
+    // Keep the exact-origin credential route active for the full browser
+    // context. The nested Pages Access layer requires the Authorization
+    // credential after the outer layer has issued CF_Authorization.
     return { context, page };
   } catch {
     await context.unrouteAll({ behavior: "ignoreErrors" }).catch(() => undefined);
     await context.close().catch(() => undefined);
     throw new Error("Authenticated staging browser setup failed");
+  }
+}
+
+export async function closeAuthenticatedStagingContext(context: BrowserContext): Promise<void> {
+  try {
+    // Stop accepting new credential-bearing callbacks and wait for every
+    // in-flight callback before closing the context that owns them.
+    await context.unrouteAll({ behavior: "wait" });
+  } finally {
+    await context.close();
   }
 }
 

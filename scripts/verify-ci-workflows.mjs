@@ -23,6 +23,13 @@ const stagingE2ePath = path.join(
   "staging-tests",
   "release-candidate.spec.ts",
 );
+const stagingReadinessTestPath = path.join(
+  repositoryRoot,
+  "apps",
+  "e2e",
+  "staging-tests",
+  "data-plane-readiness.spec.ts",
+);
 const stagingAuthPath = path.join(repositoryRoot, "apps", "e2e", "staging-auth.ts");
 const stagingAccessCredentialsPath = path.join(
   repositoryRoot,
@@ -186,6 +193,7 @@ const stagingWorkflowContents = readFileSync(stagingWorkflowPath, "utf8");
 const productionWorkflowContents = readFileSync(productionWorkflowPath, "utf8");
 const cloudflareReadbackScriptContents = readFileSync(cloudflareReadbackScriptPath, "utf8");
 const stagingE2eContents = readFileSync(stagingE2ePath, "utf8");
+const stagingReadinessTestContents = readFileSync(stagingReadinessTestPath, "utf8");
 const stagingAuthContents = readFileSync(stagingAuthPath, "utf8");
 const stagingAccessCredentialsContents = readFileSync(stagingAccessCredentialsPath, "utf8");
 const stagingAccessCredentialsTestContents = readFileSync(stagingAccessCredentialsTestPath, "utf8");
@@ -867,9 +875,10 @@ for (const [description, value] of Object.entries({
   "request method forwarding for Fetch Metadata": "request.method(),",
   "redirect boundary before credential reuse": "maxRedirects: 0",
   "credential-bearing route diagnostic suppression": "Staging Access request adapter failed",
-  "credential route removal after handshake": 'await context.unrouteAll({ behavior: "wait" });',
-  "credential route safe removal on setup failure":
-    'await context.unrouteAll({ behavior: "ignoreErrors" })',
+  "continued exact-origin Access route":
+    "Keep the exact-origin credential route active for the full browser",
+  "route drain before context close": 'await context.unrouteAll({ behavior: "wait" });',
+  "setup failure route removal": 'await context.unrouteAll({ behavior: "ignoreErrors" })',
   "authenticated application navigation": "const applicationResponse = await page.goto(baseURL",
   "service-token cookie identity check": "serviceTokenCookieMatchesExpectedIdentity(",
   "staging page origin verification": "hasExpectedStagingOrigin(page.url(), baseURL)",
@@ -903,6 +912,9 @@ for (const [description, value] of Object.entries({
   "safe method Fetch Metadata rejection": "safeGet",
   "credential-bearing route diagnostic regression":
     "does not propagate credential-bearing route diagnostics",
+  "continued nested Access authentication regression":
+    "continues both Access layer credentials after the service cookie is issued",
+  "route drain regression": "drains the Access route before closing its browser context",
   "credential client ID redaction assertion":
     "expect(errorMessage).not.toContain(credentials.clientId)",
   "credential client secret redaction assertion":
@@ -995,10 +1007,47 @@ requireTextOrder(
 requireTextOrder(
   stagingAuthContents,
   "await completeStagingBrowserAccessHandshake(",
-  'await context.unrouteAll({ behavior: "wait" });',
+  "return { context, page };",
   "staging-auth.ts",
-  "credential route removal after browser Access handshake",
+  "continued credential route after browser Access handshake",
 );
+const stagingOpenPageStart = stagingAuthContents.indexOf(
+  "export async function openAuthenticatedStagingPage(",
+);
+const stagingOpenPageEnd = stagingAuthContents.indexOf(
+  "export async function closeAuthenticatedStagingContext(",
+);
+if (stagingOpenPageStart < 0 || stagingOpenPageEnd <= stagingOpenPageStart) {
+  throw new Error("staging-auth.ts: authenticated browser lifecycle is missing");
+}
+const stagingOpenPageSuccessPath = stagingAuthContents.slice(
+  stagingOpenPageStart,
+  stagingAuthContents.indexOf("return { context, page };", stagingOpenPageStart),
+);
+forbidText(
+  stagingOpenPageSuccessPath,
+  "unrouteAll(",
+  "staging-auth.ts",
+  "credential route removal before the authenticated page is returned",
+);
+requireTextOrder(
+  stagingAuthContents,
+  'await context.unrouteAll({ behavior: "wait" });',
+  "await context.close();",
+  "staging-auth.ts",
+  "route drain before browser context close",
+);
+for (const [contents, location] of [
+  [stagingE2eContents, "release-candidate.spec.ts"],
+  [stagingReadinessTestContents, "data-plane-readiness.spec.ts"],
+]) {
+  requireText(
+    contents,
+    "closeAuthenticatedStagingContext(context)",
+    location,
+    "drained authenticated context cleanup",
+  );
+}
 requireTextOrder(
   stagingAuthContents,
   "const applicationResponse = await page.goto(baseURL",

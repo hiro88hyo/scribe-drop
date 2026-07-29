@@ -5,6 +5,7 @@ import {
   serviceTokenCookieMatchesExpectedIdentity,
 } from "../access-service-credentials.js";
 import {
+  closeAuthenticatedStagingContext,
   completeStagingBrowserAccessHandshake,
   createStagingAccessRouteHandler,
 } from "../staging-auth.js";
@@ -96,6 +97,72 @@ test("does not propagate credential-bearing route diagnostics", async () => {
   expect(errorMessage).toBe("Staging Access request adapter failed");
   expect(errorMessage).not.toContain(credentials.clientId);
   expect(errorMessage).not.toContain(credentials.clientSecret);
+});
+
+test("continues both Access layer credentials after the service cookie is issued", async () => {
+  const routeHandler = createStagingAccessRouteHandler(appOrigin, credentials);
+  const forwarded: {
+    headers?: Record<string, string>;
+    maxRedirects?: number;
+  }[] = [];
+  const response = { status: 200 };
+  let fulfilled = false;
+  const route = {
+    fetch: (options: { headers: Record<string, string>; maxRedirects: number }) => {
+      forwarded.push(options);
+      return Promise.resolve(response);
+    },
+    fulfill: (options: { response: unknown }) => {
+      fulfilled = options.response === response;
+      return Promise.resolve();
+    },
+    request: () => ({
+      allHeaders: () =>
+        Promise.resolve({
+          accept: "application/json",
+          cookie: "CF_Authorization=test-cookie",
+        }),
+      method: () => "GET",
+      url: () => `${appOrigin}/api/me`,
+    }),
+  };
+
+  await routeHandler(route as never);
+
+  expect(forwarded).toEqual([
+    {
+      headers: {
+        accept: "application/json",
+        Authorization: JSON.stringify({
+          "cf-access-client-id": credentials.clientId,
+          "cf-access-client-secret": credentials.clientSecret,
+        }),
+        "CF-Access-Client-Id": credentials.clientId,
+        "CF-Access-Client-Secret": credentials.clientSecret,
+        cookie: "CF_Authorization=test-cookie",
+      },
+      maxRedirects: 0,
+    },
+  ]);
+  expect(fulfilled).toBe(true);
+});
+
+test("drains the Access route before closing its browser context", async () => {
+  const calls: string[] = [];
+  const context = {
+    close: () => {
+      calls.push("close");
+      return Promise.resolve();
+    },
+    unrouteAll: (options: { behavior: string }) => {
+      calls.push(`unroute:${options.behavior}`);
+      return Promise.resolve();
+    },
+  };
+
+  await closeAuthenticatedStagingContext(context as never);
+
+  expect(calls).toEqual(["unroute:wait", "close"]);
 });
 
 test("restores same-origin Fetch Metadata only for exact-origin unsafe requests", () => {
