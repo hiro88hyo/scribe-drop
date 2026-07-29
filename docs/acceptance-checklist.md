@@ -2,27 +2,31 @@
 
 ## 状態と範囲
 
-- 評価日: 2026-07-27 UTC
+- 評価日: 2026-07-29 UTC
 - 対象: Phase 1からPhase 7のlocal、CI、staging checkpoint
-- 結果: Phase 7までのbaselineは確認済み。現在のrelease candidateはstaging再検証待ち
+- 結果: Phase 7までのbaselineは確認済み。Pixel M4Aの補助stream修正は新candidateで
+  staging再検証待ち
 - 対象外: production promotionの合格判定とAndroid Share Target。過去のproduction試験
   deployは無効な証跡であり、Share Targetは仕様どおり別PRとする
 
 実account、domain、resource/deployment ID、credential、利用者dataはこのchecklistへ
 保存しない。手動確認の詳細はenvironment別deployment recordを参照する。
 
-Pixelの`.m4a` file picker対応はmock browser E2Eだけを通し、実R2、Queue、RunPodを使う
-staging acceptance前にproductionへdeployされた。従来のPassはこの変更のpromotion
-evidenceとして使用しない。[ADR 0023](./adr/0023-promote-only-staging-verified-artifacts.md)
-に従い、同じrelease candidateで実service E2Eと対象実機smokeを完了するまでrelease判断を
-Blockedとする。
+Pixelの`.m4a` file picker対応を含む同一candidateは実R2、Queue、RunPodを使うstaging
+acceptanceとproduction promotionを通過した。しかしPixel実機のproduction smokeで、
+AAC音声に付随する`codec_name`なしのdata streamをWorkerのffprobe response schemaが
+拒否した。実録音をfixtureへ保存せず同じstream構造の回帰テストを追加し、修正前の
+`INVALID_MEDIA`と修正後の受理を同一Worker image上で再現した。
+[ADR 0023](./adr/0023-promote-only-staging-verified-artifacts.md)に従い、修正を含む新しい
+release candidateで実service staging acceptanceと対象実機production smokeを完了するまで
+release判断をBlockedとする。
 
 ## UX
 
 | 受け入れ条件                              | 状態    | 主な証跡                                                                                                                                                                                  |
 | ----------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | PCでdrag-and-dropできる                   | Pass    | `apps/e2e/tests/input-accessibility.spec.ts`                                                                                                                                              |
-| Android相当環境でfile chooserを使用できる | Pending | Playwrightの`.m4a` media type検証は成功。Pixel実機のstaging smokeと実service E2Eをやり直す                                                                                                |
+| Android相当環境でfile chooserを使用できる | Pending | Pixel実機で選択とupload受付、Playwrightで`.m4a` media type、Workerで補助data streamの回帰を確認。修正後candidateの実service staging acceptanceとproduction完了を待つ                      |
 | upload進捗を表示する                      | Pass    | `apps/e2e/tests/job-lifecycle.spec.ts`、`apps/web/src/client/multipart-uploader.test.ts`                                                                                                  |
 | 通信失敗から再試行できる                  | Pass    | `apps/e2e/tests/job-lifecycle.spec.ts`                                                                                                                                                    |
 | upload後に画面を閉じても処理が継続する    | Pass    | page close後に新pageの履歴・詳細から待機、実行、完了を復元する`apps/e2e/tests/job-lifecycle.spec.ts`、Queue/RunPodの[Phase 5 staging record](./deployments/2026-07-26-phase-5-staging.md) |
