@@ -10,10 +10,15 @@ import {
 import { runRunpodCliWithReadRetry } from "./runpod-cli-retry.mjs";
 import { promoteRunpodCandidate, verifyRunpodPromotionPreflight } from "./runpod-promotion.mjs";
 import { validateRunpodPlan } from "./runpod-environment-config.mjs";
-import { clearRunpodTemplatePorts, listRunpodTemplates } from "./runpod-template-api.mjs";
+import {
+  clearRunpodTemplatePorts,
+  listRunpodTemplates,
+  setRunpodEndpointWorkersMax,
+} from "./runpod-template-api.mjs";
 
-const [environment, planPath] = process.argv.slice(2);
-const preflightOnly = process.argv[4] === "--preflight-only";
+const [environment, planPath, ...flags] = process.argv.slice(2);
+const preflightOnly = flags.includes("--preflight-only");
+const requireCandidateWorker = flags.includes("--require-candidate-worker");
 
 function runCliOnce(arguments_) {
   const result = spawnSync(path.resolve(".tools", "bin", "runpodctl"), arguments_, {
@@ -61,10 +66,13 @@ try {
   if (
     (environment !== "staging" && environment !== "production") ||
     planPath === undefined ||
-    (process.argv.length !== 4 && !(process.argv.length === 5 && preflightOnly))
+    flags.some((flag) => flag !== "--preflight-only" && flag !== "--require-candidate-worker") ||
+    flags.length !== new Set(flags).size ||
+    (!preflightOnly && flags.length !== 0) ||
+    (requireCandidateWorker && !preflightOnly)
   ) {
     throw new Error(
-      "Usage: promote-runpod-candidate <staging|production> <plan-path> [--preflight-only]",
+      "Usage: promote-runpod-candidate <staging|production> <plan-path> [--preflight-only [--require-candidate-worker]]",
     );
   }
   if (process.env["GITHUB_ACTIONS"] !== "true") {
@@ -114,6 +122,7 @@ try {
       environment,
       listTemplates,
       plan,
+      requireCandidateWorker,
       runCli,
     });
     console.log(
@@ -132,6 +141,13 @@ try {
       return clearRunpodTemplatePorts({
         apiKey: process.env["RUNPOD_API_KEY"],
         templateId,
+      });
+    },
+    setEndpointWorkersMax({ endpointId: targetEndpointId, workersMax }) {
+      return setRunpodEndpointWorkersMax({
+        apiKey: process.env["RUNPOD_API_KEY"],
+        endpointId: targetEndpointId,
+        workersMax,
       });
     },
     endpointId,

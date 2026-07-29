@@ -422,6 +422,9 @@ jobs:
             --dir "${RELEASE_CANDIDATE_DIRECTORY}"
           pnpm run candidate:verify "${RELEASE_CANDIDATE_DIRECTORY}"
 
+      - name: Install checksummed RunPod CLI
+        run: pnpm run runpodctl:install
+
       - name: Render exact read-back and acceptance configuration
         run: |
           pnpm run cloudflare:config:staging
@@ -432,11 +435,14 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
           SCRIBE_DROP_STAGING_PAGES_PROJECT: ${{ vars.SCRIBE_DROP_STAGING_PAGES_PROJECT }}
+          SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID: ${{ secrets.SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID }}
         run: |
           pnpm run candidate:verify "${RELEASE_CANDIDATE_DIRECTORY}"
           pnpm run cloudflare:readback:staging
           pnpm run cloudflare:access:verify:staging
+          pnpm run runpod:preflight:staging
 
       - name: Install fixed Playwright browser
         run: pnpm --filter @scribe-drop/e2e exec playwright install --with-deps chromium
@@ -446,6 +452,12 @@ jobs:
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
         run: pnpm run test:e2e:staging
+
+      - name: Verify the candidate RunPod worker handled the lifecycle
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID: ${{ secrets.SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID }}
+        run: pnpm run runpod:verify-worker:staging
 
       - name: Issue short-lived staging acceptance
         env:

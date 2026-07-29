@@ -30,7 +30,30 @@ function verifyRunpodPromotionPreflight(input) {
 }
 
 function promoteRunpodCandidate(input) {
-  return promoteRunpodCandidateWithInputs(withTemplateList(input));
+  let workersMax = plan.endpoint.workersMax;
+  const runCli = input.runCli;
+  return promoteRunpodCandidateWithInputs(
+    withTemplateList({
+      ...input,
+      runCli(arguments_) {
+        const result = runCli(arguments_);
+        if (arguments_[0] === "serverless" && arguments_[1] === "get") {
+          return {
+            ...result,
+            workers: workersMax === 0 ? [] : result.workers,
+            workersMax,
+          };
+        }
+        return result;
+      },
+      async setEndpointWorkersMax(request) {
+        if (input.setEndpointWorkersMax !== undefined) {
+          await input.setEndpointWorkersMax(request);
+        }
+        workersMax = request.workersMax;
+      },
+    }),
+  );
 }
 
 function template(id) {
@@ -47,7 +70,7 @@ function template(id) {
   };
 }
 
-function endpoint(templateId, workers = []) {
+function endpoint(templateId, workers = [], workersMax = plan.endpoint.workersMax) {
   return {
     executionTimeoutMs: plan.endpoint.executionTimeoutSeconds * 1_000,
     flashBootType: "OFF",
@@ -62,7 +85,7 @@ function endpoint(templateId, workers = []) {
     scalerValue: plan.endpoint.scalerValue,
     templateId,
     workers,
-    workersMax: plan.endpoint.workersMax,
+    workersMax,
     workersMin: plan.endpoint.workersMin,
   };
 }
@@ -119,6 +142,69 @@ test("preflight validates an existing candidate template before any mutation", a
     },
   });
 
+  assert.equal(result.candidateTemplateExists, true);
+});
+
+test("preflight rejects a stale worker when the candidate template is already attached", async () => {
+  await assert.rejects(
+    verifyRunpodPromotionPreflight({
+      endpointId: "endpoint_staging",
+      environment: "staging",
+      plan,
+      runCli(arguments_) {
+        if (arguments_[0] === "user") return { id: "user" };
+        if (arguments_[0] === "template" && arguments_[1] === "list") {
+          return [{ id: "template_new", name: plan.template.name }];
+        }
+        if (arguments_[0] === "template" && arguments_[1] === "get") {
+          return template("template_new");
+        }
+        if (arguments_[0] === "serverless" && arguments_[1] === "get") {
+          return endpoint("template_new", [
+            {
+              desiredStatus: "EXITED",
+              imageName: `ghcr.io/example/scribe-drop-runpod-worker@sha256:${"a".repeat(64)}`,
+              templateId: "template_old",
+            },
+          ]);
+        }
+        throw new Error("Unexpected fake CLI call");
+      },
+    }),
+    /different template or image/u,
+  );
+});
+
+test("post-lifecycle preflight requires a candidate worker record", async () => {
+  const runPreflight = (workers) =>
+    verifyRunpodPromotionPreflight({
+      endpointId: "endpoint_staging",
+      environment: "staging",
+      plan,
+      requireCandidateWorker: true,
+      runCli(arguments_) {
+        if (arguments_[0] === "user") return { id: "user" };
+        if (arguments_[0] === "template" && arguments_[1] === "list") {
+          return [{ id: "template_new", name: plan.template.name }];
+        }
+        if (arguments_[0] === "template" && arguments_[1] === "get") {
+          return template("template_new");
+        }
+        if (arguments_[0] === "serverless" && arguments_[1] === "get") {
+          return endpoint("template_new", workers);
+        }
+        throw new Error("Unexpected fake CLI call");
+      },
+    });
+
+  await assert.rejects(runPreflight([]), /worker evidence is missing/u);
+  const result = await runPreflight([
+    {
+      desiredStatus: "EXITED",
+      imageName: plan.template.image,
+      templateId: "template_new",
+    },
+  ]);
   assert.equal(result.candidateTemplateExists, true);
 });
 
@@ -392,9 +478,18 @@ test("does not mutate an endpoint that already uses the candidate template", asy
   assert.equal(result.changed, false);
 });
 
-test("allows provider-retained terminal worker records", async () => {
+test("drains provider-retained terminal worker records before promotion", async () => {
   let currentTemplateId = "template_old";
-  const terminalWorkers = [{ desiredStatus: "EXITED" }, { desiredStatus: "TERMINATED" }];
+  const terminalWorkers = () => [
+    {
+      desiredStatus: "EXITED",
+      imageName:
+        currentTemplateId === "template_new"
+          ? plan.template.image
+          : `ghcr.io/example/scribe-drop-runpod-worker@sha256:${"a".repeat(64)}`,
+      templateId: currentTemplateId,
+    },
+  ];
   const result = await promoteRunpodCandidate({
     endpointId: "endpoint_staging",
     environment: "staging",
@@ -406,11 +501,11 @@ test("allows provider-retained terminal worker records", async () => {
       }
       if (arguments_[0] === "template") return template("template_new");
       if (arguments_[0] === "serverless" && arguments_[1] === "get") {
-        return endpoint(currentTemplateId, terminalWorkers);
+        return endpoint(currentTemplateId, terminalWorkers());
       }
       if (arguments_[0] === "serverless" && arguments_[1] === "update") {
         currentTemplateId = arguments_[4];
-        return endpoint(currentTemplateId, terminalWorkers);
+        return endpoint(currentTemplateId, terminalWorkers());
       }
       throw new Error("Unexpected fake CLI call");
     },
@@ -418,6 +513,48 @@ test("allows provider-retained terminal worker records", async () => {
 
   assert.equal(result.changed, true);
   assert.equal(currentTemplateId, "template_new");
+});
+
+test("drains a stale terminal worker even when the endpoint already uses the candidate", async () => {
+  const workerMaximums = [];
+  let staleWorkerPresent = true;
+  const result = await promoteRunpodCandidate({
+    endpointId: "endpoint_staging",
+    environment: "staging",
+    plan,
+    async setEndpointWorkersMax({ workersMax }) {
+      workerMaximums.push(workersMax);
+      if (workersMax === 0) {
+        staleWorkerPresent = false;
+      }
+    },
+    runCli(arguments_) {
+      if (arguments_[0] === "user") return { id: "user" };
+      if (arguments_[0] === "template" && arguments_[1] === "list") {
+        return [{ id: "template_new", name: plan.template.name }];
+      }
+      if (arguments_[0] === "template") return template("template_new");
+      if (arguments_[0] === "serverless" && arguments_[1] === "get") {
+        return endpoint("template_new", [
+          staleWorkerPresent
+            ? {
+                desiredStatus: "EXITED",
+                imageName: `ghcr.io/example/scribe-drop-runpod-worker@sha256:${"a".repeat(64)}`,
+                templateId: "template_old",
+              }
+            : {
+                desiredStatus: "EXITED",
+                imageName: plan.template.image,
+                templateId: "template_new",
+              },
+        ]);
+      }
+      throw new Error("Unexpected mutating CLI call");
+    },
+  });
+
+  assert.equal(result.changed, true);
+  assert.deepEqual(workerMaximums, [0, 1]);
 });
 
 test("refuses promotion while a running worker exists", async () => {
@@ -490,7 +627,7 @@ test("rolls back the template switch when read-back verification fails", async (
               promotedReadback = true;
               return {
                 ...endpoint(currentTemplateId),
-                workersMax: 2,
+                scalerValue: 2,
               };
             }
             return endpoint(currentTemplateId);

@@ -24,14 +24,15 @@ FFmpeg packageでcontainer、codec、duration、top-level JSON fieldを再現す
 
 RunPod image revisionまたはprivate registry credentialを切り替える場合、実jobの投入前に
 workerが追跡外plan/stateと同じtemplate、image、registry credentialを使っていることを
-確認する。endpoint切替後もOutdated workerが旧imageを処理し、credential更新前に失敗した
-Unhealthy workerが残る場合がある。全jobがterminalであることをD1で確認してから対象
-workerだけをConsoleでterminateし、新workerの3項目一致を確認する。
+確認する。endpoint切替後も`EXITED` workerが旧imageを処理し得るため、
+[ADR 0047](./adr/0047-drain-stale-runpod-workers-before-promotion.md)のpromotionは
+worker上限を0にして全recordをdrainし、template切替後に上限を復旧する。Consoleでの
+手動terminateを通常手順にせず、復旧後の全workerについてtemplateとimageを照合する。
 
 `runpodctl serverless get --include-workers`はConsoleに実workerがない場合でも終了済み
-recordを返すことがある。[ADR 0026](./adr/0026-classify-runpod-terminal-worker-records.md)に
-従い、`desiredStatus`が`EXITED`または`TERMINATED`のrecordだけを非稼働として扱う。
-`RUNNING`、未知値、欠落値はpromotionを停止し、配列の長さだけでactive数を判断しない。
+recordを返すことがある。`desiredStatus`が`EXITED`または`TERMINATED`ならactiveではないが、
+candidateとのtemplate/image不一致を許可しない。`RUNNING`、未知値、欠落値はdrain前に
+promotionを停止し、配列の長さやterminal statusだけで安全と判断しない。
 
 staging smokeのためにactive workerを1へ上げた場合、完了後は0へ戻す。固定
 `runpodctl` 2.7.2は`--workers-min 0`を成功扱いにしても値を更新しないため、

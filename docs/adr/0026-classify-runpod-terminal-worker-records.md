@@ -36,7 +36,7 @@ stagingでworkerを終了し、Consoleに実workerが存在しない状態でも
 
 ## Status
 
-Accepted
+Superseded by [ADR 0047](./0047-drain-stale-runpod-workers-before-promotion.md)
 
 ## References
 

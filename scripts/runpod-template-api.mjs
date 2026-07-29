@@ -209,3 +209,42 @@ export async function clearRunpodTemplatePorts(input, dependencies = {}) {
     throw new Error("RunPod template port update was rejected");
   }
 }
+
+export async function setRunpodEndpointWorkersMax(input, dependencies = {}) {
+  if (!resourceIdPattern.test(String(input.endpointId ?? ""))) {
+    throw new Error("RunPod endpoint ID is missing or invalid");
+  }
+  if (!Number.isSafeInteger(input.workersMax) || input.workersMax < 0 || input.workersMax > 100) {
+    throw new Error("RunPod endpoint worker maximum is missing or invalid");
+  }
+  const apiKey = requireApiKey(input.apiKey);
+  const fetchImplementation = dependencies.fetchImplementation ?? globalThis.fetch;
+  const createTimeoutSignal =
+    dependencies.createTimeoutSignal ?? ((milliseconds) => AbortSignal.timeout(milliseconds));
+  const url = new URL(
+    `/v1/endpoints/${encodeURIComponent(input.endpointId)}`,
+    runpodTemplateApiOrigin,
+  );
+  let response;
+  try {
+    response = await fetchImplementation(url, {
+      body: JSON.stringify({ workersMax: input.workersMax }),
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      method: "PATCH",
+      redirect: "error",
+      signal: createTimeoutSignal(60_000),
+    });
+  } catch {
+    throw new Error("RunPod endpoint worker update outcome is unknown");
+  }
+  if (typeof response !== "object" || response === null || typeof response.ok !== "boolean") {
+    throw new Error("RunPod endpoint worker update returned an invalid response");
+  }
+  await cancelResponseBody(response);
+  if (!response.ok) {
+    throw new Error("RunPod endpoint worker update was rejected");
+  }
+}

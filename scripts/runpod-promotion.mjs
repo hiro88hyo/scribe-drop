@@ -29,9 +29,13 @@ function requireArray(value, name) {
   return value;
 }
 
+function requireWorkers(value) {
+  return value === undefined ? [] : requireArray(value, "RunPod endpoint workers");
+}
+
 function validateNoActiveWorkers(untrustedWorkers) {
   const terminalStatuses = new Set(["EXITED", "TERMINATED"]);
-  const workers = requireArray(untrustedWorkers, "RunPod endpoint workers");
+  const workers = requireWorkers(untrustedWorkers);
   if (
     workers.some((untrustedWorker) => {
       const worker = requireRecord(untrustedWorker, "RunPod endpoint worker");
@@ -40,6 +44,28 @@ function validateNoActiveWorkers(untrustedWorkers) {
   ) {
     throw new Error("RunPod endpoint has active or unrecognized workers and cannot be promoted");
   }
+  return workers;
+}
+
+function candidateWorkersMatch(untrustedWorkers, templateId, image) {
+  const workers = validateNoActiveWorkers(untrustedWorkers);
+  return workers.every((untrustedWorker) => {
+    const worker = requireRecord(untrustedWorker, "RunPod endpoint worker");
+    return worker.templateId === templateId && worker.imageName === image;
+  });
+}
+
+function validateCandidateWorkers(untrustedWorkers, templateId, image) {
+  const workers = validateNoActiveWorkers(untrustedWorkers);
+  if (
+    workers.some((untrustedWorker) => {
+      const worker = requireRecord(untrustedWorker, "RunPod endpoint worker");
+      return worker.templateId !== templateId || worker.imageName !== image;
+    })
+  ) {
+    throw new Error("RunPod endpoint retains a worker from a different template or image");
+  }
+  return workers;
 }
 
 function validateIdleEndpoint(untrustedEndpoint, plan, effectiveTemplateId) {
@@ -52,6 +78,46 @@ function validateIdleEndpoint(untrustedEndpoint, plan, effectiveTemplateId) {
     effectiveTemplateId,
   );
   return currentTemplateId;
+}
+
+function validateDrainedEndpoint(untrustedEndpoint, plan, effectiveTemplateId) {
+  const endpoint = requireRecord(untrustedEndpoint, "RunPod endpoint response");
+  const workers = requireWorkers(endpoint.workers);
+  if (
+    (endpoint.workersMin ?? 0) !== 0 ||
+    (endpoint.workersMax ?? 0) !== 0 ||
+    workers.length !== 0
+  ) {
+    throw new Error("RunPod endpoint did not drain all workers");
+  }
+  validateCreatedRunpodEndpoint(
+    {
+      ...endpoint,
+      templateId: effectiveTemplateId,
+      workersMax: plan.endpoint.workersMax,
+    },
+    plan,
+    effectiveTemplateId,
+  );
+  return requireResourceId(endpoint.templateId, "RunPod current template ID");
+}
+
+async function setWorkersMaxAndReadBack(input, workersMax, getEndpoint, validate) {
+  if (typeof input.setEndpointWorkersMax !== "function") {
+    throw new Error("RunPod endpoint worker drain is unavailable");
+  }
+  try {
+    await input.setEndpointWorkersMax({
+      endpointId: input.endpointId,
+      workersMax,
+    });
+  } catch {
+    // A lost mutation response has an unknown outcome. The exact read-back
+    // below is authoritative, so the mutation itself is never retried.
+  }
+  const endpoint = getEndpoint();
+  validate(endpoint);
+  return endpoint;
 }
 
 function matchingTemplates(templates, name) {
@@ -125,6 +191,20 @@ export async function verifyRunpodPromotionPreflight(input) {
     "RunPod current template ID",
   );
   validateIdleEndpoint(endpoint, plan, candidateTemplateId ?? currentTemplateId);
+  const candidateIsAttached =
+    candidateTemplateId !== undefined && currentTemplateId === candidateTemplateId;
+  if (candidateIsAttached) {
+    const workers = validateCandidateWorkers(
+      endpoint.workers,
+      candidateTemplateId,
+      plan.template.image,
+    );
+    if (input.requireCandidateWorker === true && workers.length === 0) {
+      throw new Error("RunPod candidate worker evidence is missing");
+    }
+  } else if (input.requireCandidateWorker === true) {
+    throw new Error("RunPod candidate template is not attached");
+  }
   if (candidateTemplatePortsRequireNormalization && currentTemplateId === candidateTemplateId) {
     throw new Error("RunPod candidate template with default ports is already attached");
   }
@@ -181,26 +261,91 @@ export async function promoteRunpodCandidate(input) {
   }
   const before = getEndpoint();
   const previousTemplateId = validateIdleEndpoint(before, plan, templateId);
-  if (previousTemplateId === templateId) {
+  const candidateWorkersAreCurrent =
+    previousTemplateId === templateId &&
+    candidateWorkersMatch(before.workers, templateId, plan.template.image);
+  if (previousTemplateId === templateId && candidateWorkersAreCurrent) {
     validateCreatedRunpodEndpoint(before, plan, templateId);
     return { changed: false, endpointId, templateId };
   }
+  if (typeof input.setEndpointWorkersMax !== "function") {
+    throw new Error("RunPod endpoint worker drain is unavailable");
+  }
 
-  input.runCli(["serverless", "update", endpointId, "--template-id", templateId]);
+  const validateDrainedTemplate = (endpoint, expectedTemplateId) => {
+    const actualTemplateId = validateDrainedEndpoint(endpoint, plan, expectedTemplateId);
+    if (actualTemplateId !== expectedTemplateId) {
+      throw new Error("RunPod endpoint template update read-back did not match");
+    }
+  };
+  const restorePreviousEndpoint = async () => {
+    let current = getEndpoint();
+    validateNoActiveWorkers(requireRecord(current, "RunPod endpoint response").workers);
+    let currentTemplateId = requireResourceId(current.templateId, "RunPod current template ID");
+    const currentWorkersMax = current.workersMax ?? 0;
+    if (
+      currentTemplateId === previousTemplateId &&
+      currentWorkersMax === plan.endpoint.workersMax
+    ) {
+      validateIdleEndpoint(current, plan, previousTemplateId);
+      return;
+    }
+    if (currentWorkersMax !== 0) {
+      current = await setWorkersMaxAndReadBack(input, 0, getEndpoint, (endpoint) => {
+        const actualTemplateId = requireResourceId(
+          requireRecord(endpoint, "RunPod endpoint response").templateId,
+          "RunPod current template ID",
+        );
+        validateDrainedTemplate(endpoint, actualTemplateId);
+      });
+      currentTemplateId = requireResourceId(
+        requireRecord(current, "RunPod endpoint response").templateId,
+        "RunPod current template ID",
+      );
+    } else {
+      validateDrainedTemplate(current, currentTemplateId);
+    }
+    if (currentTemplateId !== previousTemplateId) {
+      try {
+        input.runCli(["serverless", "update", endpointId, "--template-id", previousTemplateId]);
+      } catch {
+        // The exact read-back below decides whether rollback took effect.
+      }
+      const restoredTemplate = getEndpoint();
+      validateDrainedTemplate(restoredTemplate, previousTemplateId);
+    }
+    await setWorkersMaxAndReadBack(input, plan.endpoint.workersMax, getEndpoint, (endpoint) => {
+      const actualTemplateId = validateIdleEndpoint(endpoint, plan, previousTemplateId);
+      if (actualTemplateId !== previousTemplateId) {
+        throw new Error("RunPod endpoint rollback did not restore the previous template");
+      }
+    });
+  };
+
   try {
-    const after = getEndpoint();
-    validateIdleEndpoint(after, plan, templateId);
-    validateCreatedRunpodEndpoint(after, plan, templateId);
+    await setWorkersMaxAndReadBack(input, 0, getEndpoint, (endpoint) => {
+      validateDrainedTemplate(endpoint, previousTemplateId);
+    });
+    if (previousTemplateId !== templateId) {
+      try {
+        input.runCli(["serverless", "update", endpointId, "--template-id", templateId]);
+      } catch {
+        // The exact read-back below decides whether promotion took effect.
+      }
+      const switched = getEndpoint();
+      validateDrainedTemplate(switched, templateId);
+    }
+    await setWorkersMaxAndReadBack(input, plan.endpoint.workersMax, getEndpoint, (endpoint) => {
+      const actualTemplateId = validateIdleEndpoint(endpoint, plan, templateId);
+      if (actualTemplateId !== templateId) {
+        throw new Error("RunPod endpoint template update read-back did not match");
+      }
+      validateCreatedRunpodEndpoint(endpoint, plan, templateId);
+      validateCandidateWorkers(endpoint.workers, templateId, plan.template.image);
+    });
   } catch (error) {
     try {
-      input.runCli(["serverless", "update", endpointId, "--template-id", previousTemplateId]);
-      const rolledBack = getEndpoint();
-      validateIdleEndpoint(rolledBack, plan, previousTemplateId);
-      if (requireRecord(rolledBack, "RunPod rollback response").templateId !== previousTemplateId) {
-        throw new Error("RunPod endpoint rollback did not restore the previous template", {
-          cause: error,
-        });
-      }
+      await restorePreviousEndpoint();
     } catch (rollbackError) {
       throw new Error("RunPod promotion verification and rollback both failed", {
         cause: rollbackError,

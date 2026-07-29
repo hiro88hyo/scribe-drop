@@ -335,7 +335,9 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
           SCRIBE_DROP_PRODUCTION_PAGES_PROJECT: ${{ vars.SCRIBE_DROP_PRODUCTION_PAGES_PROJECT }}
+          SCRIBE_DROP_PRODUCTION_RUNPOD_ENDPOINT_ID: ${{ secrets.SCRIBE_DROP_PRODUCTION_RUNPOD_ENDPOINT_ID }}
           STAGING_RUN_ID: ${{ inputs.staging_run_id }}
         run: |
           EXPECTED_CANDIDATE_RUN_ID="${CANDIDATE_RUN_ID}" \
@@ -346,3 +348,4 @@ jobs:
           pnpm run candidate:verify "${RELEASE_CANDIDATE_DIRECTORY}"
           pnpm run cloudflare:readback:production
           pnpm run cloudflare:access:verify:production
+          pnpm run runpod:preflight:production

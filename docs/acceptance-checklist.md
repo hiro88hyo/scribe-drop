@@ -5,7 +5,7 @@
 - 評価日: 2026-07-29 UTC
 - 対象: Phase 1からPhase 7のlocal、CI、staging checkpoint
 - 結果: Phase 7までのbaselineは確認済み。Pixel M4Aの補助stream修正は新candidateで
-  staging再検証待ち
+  staging再検証したが、旧RunPod worker再利用を検出したためpromotion保証の修正待ち
 - 対象外: production promotionの合格判定とAndroid Share Target。過去のproduction試験
   deployは無効な証跡であり、Share Targetは仕様どおり別PRとする
 
@@ -17,6 +17,12 @@ acceptanceとproduction promotionを通過した。しかしPixel実機のproduc
 AAC音声に付随する`codec_name`なしのdata streamをWorkerのffprobe response schemaが
 拒否した。実録音をfixtureへ保存せず同じstream構造の回帰テストを追加し、修正前の
 `INVALID_MEDIA`と修正後の受理を同一Worker image上で再現した。
+修正candidateのsynthetic staging acceptanceは成功したが、補助実媒体のstaging確認では
+endpointに残った前candidateの`EXITED` workerが再利用され、同じ`INVALID_MEDIA`となった。
+candidateのimmutable image自体は実媒体を受理し、live templateもcandidateと一致したため、
+原因はterminal workerを非稼働として残したpromotion read-backの不足と確定した。
+[ADR 0047](./adr/0047-drain-stale-runpod-workers-before-promotion.md)のdrainとE2E前後の
+worker image照合を追加し、従来のstaging acceptance evidenceはrelease判定に使用しない。
 [ADR 0023](./adr/0023-promote-only-staging-verified-artifacts.md)に従い、修正を含む新しい
 release candidateで実service staging acceptanceと対象実機production smokeを完了するまで
 release判断をBlockedとする。
@@ -26,7 +32,7 @@ release判断をBlockedとする。
 | 受け入れ条件                              | 状態    | 主な証跡                                                                                                                                                                                  |
 | ----------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | PCでdrag-and-dropできる                   | Pass    | `apps/e2e/tests/input-accessibility.spec.ts`                                                                                                                                              |
-| Android相当環境でfile chooserを使用できる | Pending | Pixel実機で選択とupload受付、Playwrightで`.m4a` media type、Workerで補助data streamの回帰を確認。修正後candidateの実service staging acceptanceとproduction完了を待つ                      |
+| Android相当環境でfile chooserを使用できる | Pending | Pixel実機で選択とupload受付、Playwrightで`.m4a` media type、Workerで補助data streamの回帰を確認。旧workerをdrainする新candidateの実service staging acceptanceとproduction完了を待つ       |
 | upload進捗を表示する                      | Pass    | `apps/e2e/tests/job-lifecycle.spec.ts`、`apps/web/src/client/multipart-uploader.test.ts`                                                                                                  |
 | 通信失敗から再試行できる                  | Pass    | `apps/e2e/tests/job-lifecycle.spec.ts`                                                                                                                                                    |
 | upload後に画面を閉じても処理が継続する    | Pass    | page close後に新pageの履歴・詳細から待機、実行、完了を復元する`apps/e2e/tests/job-lifecycle.spec.ts`、Queue/RunPodの[Phase 5 staging record](./deployments/2026-07-26-phase-5-staging.md) |

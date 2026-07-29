@@ -814,6 +814,40 @@ requireTextOrder(
   "deploy-staging-candidate.yml acceptance job",
   "browser installation before the acceptance data-plane gate",
 );
+requireTextCount(
+  stagingWorkflowContents,
+  "pnpm run runpod:preflight:staging",
+  2,
+  "deploy-staging-candidate.yml",
+  "RunPod preflight and pre-lifecycle read-back",
+);
+requireTextCount(
+  stagingWorkflowContents,
+  "pnpm run runpod:verify-worker:staging",
+  1,
+  "deploy-staging-candidate.yml",
+  "post-lifecycle candidate worker evidence",
+);
+requireText(
+  packageManifestContents,
+  '"runpod:verify-worker:staging": "node scripts/promote-runpod-candidate.mjs staging .runpod/deploy/staging-plan.json --preflight-only --require-candidate-worker"',
+  "package.json",
+  "post-lifecycle candidate worker verification script",
+);
+requireTextOrder(
+  stagingAcceptanceJob,
+  "Verify authenticated data plane, then run real staging M4A lifecycle",
+  "Verify the candidate RunPod worker handled the lifecycle",
+  "deploy-staging-candidate.yml acceptance job",
+  "candidate worker read-back after real staging E2E",
+);
+requireTextCount(
+  productionWorkflowContents,
+  "pnpm run runpod:preflight:production",
+  2,
+  "deploy-production-candidate.yml",
+  "RunPod preflight and post-promotion read-back",
+);
 
 for (const [description, expected] of Object.entries({
   "fixed Cloudflare Pages API": "https://api.cloudflare.com/client/v4/accounts/",
@@ -1247,6 +1281,12 @@ requireText(
 );
 requireText(
   runpodPromotionScriptContents,
+  "setRunpodEndpointWorkersMax({",
+  "promote-runpod-candidate.mjs",
+  "fixed endpoint worker drain",
+);
+requireText(
+  runpodPromotionScriptContents,
   "listRunpodTemplates(",
   "promote-runpod-candidate.mjs",
   "official REST template-list read",
@@ -1262,6 +1302,12 @@ requireText(
   "JSON.stringify({ ports: [] })",
   "runpod-template-api.mjs",
   "automatic empty-port normalization",
+);
+requireText(
+  runpodTemplateApiScriptContents,
+  "JSON.stringify({ workersMax: input.workersMax })",
+  "runpod-template-api.mjs",
+  "bounded endpoint worker drain mutation",
 );
 requireText(
   runpodTemplateApiScriptContents,

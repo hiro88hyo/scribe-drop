@@ -322,6 +322,14 @@ commitまたはartifact digestが異なる場合、acceptance後にcode、depend
 deployment設定が変更された場合、実resource parity checkが失敗した場合は停止する。
 mock E2Eやlocal testは実service staging acceptanceの代替にしない。
 
+RunPod promotionは
+[ADR 0047](./adr/0047-drain-stale-runpod-workers-before-promotion.md)に従い、旧terminal
+workerを残したままtemplateだけを切り替えない。worker上限0のexact read-back、worker
+0件、candidate template切替、上限復旧、全workerのcandidate template/image一致を一つの
+rollback可能な手順として実行する。staging acceptanceは実M4A lifecycleの前後に同じ
+read-only preflightを実行し、後段照合が成功するまでevidenceを発行しない。productionも
+全resource deploy後にRunPodを再照合する。
+
 RunPod publication workflowはapplication artifactをcandidateごとに一度だけbuildし、
 Worker imageは新規buildまたはADR 0038の固定digest再利用の一方だけを選ぶ。environment別
 buildとproduction deploy jobを持たない。candidate manifest、staging/production
