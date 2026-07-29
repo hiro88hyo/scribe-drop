@@ -422,6 +422,7 @@ for (const [description, value] of Object.entries({
   "serialized release candidate execution": "group: release-candidate-${{ github.ref }}",
   "stale candidate cancellation": "cancel-in-progress: true",
   "staging-scoped readiness credential": "environment: staging",
+  "fixed runpodctl install before readiness": "pnpm run runpodctl:install",
   "read-only readiness before costly work": "pnpm run runpod:release-readiness:staging",
   "Pages upload permission before costly work":
     "pnpm run cloudflare:pages:upload-permission:verify:staging",
@@ -464,9 +465,23 @@ requireTextOrder(
 requireTextOrder(
   publicationPreflightJob,
   "pnpm run cloudflare:pages:upload-permission:verify:staging",
+  "pnpm run runpodctl:install",
+  "publish-runpod-worker.yml preflight job",
+  "Pages upload permission before runpodctl install",
+);
+requireTextOrder(
+  publicationPreflightJob,
+  "pnpm run runpodctl:install",
   "pnpm run runpod:release-readiness:staging",
   "publish-runpod-worker.yml preflight job",
-  "Pages upload permission before RunPod readiness",
+  "fixed runpodctl install before RunPod readiness",
+);
+requireTextOrder(
+  publicationPreflightJob,
+  "pnpm run runpod:release-readiness:staging",
+  "Verify reusable unchanged RunPod Worker candidate",
+  "publish-runpod-worker.yml preflight job",
+  "RunPod capacity readiness before reusable candidate download",
 );
 
 requireTextCount(
@@ -1356,6 +1371,24 @@ requireText(
   "verifyRunpodReleaseReadiness(",
   "verify-runpod-release-readiness.mjs",
   "official REST readiness boundary",
+);
+requireText(
+  runpodReleaseReadinessScriptContents,
+  '["gpu", "list", "--include-unavailable"]',
+  "verify-runpod-release-readiness.mjs",
+  "GPU inventory before costly candidate work",
+);
+requireText(
+  runpodReleaseReadinessScriptContents,
+  "validateRunpodGpuInventoryConfiguration(",
+  "verify-runpod-release-readiness.mjs",
+  "Secure-only candidate inventory policy",
+);
+requireText(
+  publicationPreflightJob,
+  "SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS: ${{ vars.SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS }}",
+  "publish-runpod-worker.yml preflight job",
+  "staging GPU fallback policy input",
 );
 for (const [contents, location, prefix] of [
   [stagingWorkflowContents, "deploy-staging-candidate.yml", "STAGING"],

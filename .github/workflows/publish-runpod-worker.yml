@@ -67,6 +67,16 @@ jobs:
           SCRIBE_DROP_STAGING_PAGES_PROJECT: ${{ vars.SCRIBE_DROP_STAGING_PAGES_PROJECT }}
         run: pnpm run cloudflare:pages:upload-permission:verify:staging
 
+      - name: Install fixed runpodctl
+        run: pnpm run runpodctl:install
+
+      - name: Verify read-only staging RunPod readiness before costly work
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID: ${{ secrets.SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID }}
+          SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS: ${{ vars.SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS }}
+        run: pnpm run runpod:release-readiness:staging
+
       - name: Verify reusable unchanged RunPod Worker candidate
         id: reusable-worker
         if: ${{ inputs.reusable_worker_candidate_run_id != '' }}
@@ -118,12 +128,6 @@ jobs:
             printf 'source_run_id=%s\n' "${SOURCE_CANDIDATE_RUN_ID}"
             printf 'source_sha=%s\n' "${source_sha}"
           } >>"${GITHUB_OUTPUT}"
-
-      - name: Verify read-only staging RunPod readiness before costly work
-        env:
-          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-          SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID: ${{ secrets.SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID }}
-        run: pnpm run runpod:release-readiness:staging
 
   application:
     name: Assemble candidate application artifacts

@@ -441,13 +441,12 @@ export function validateRunpodEndpointCapacity(untrustedEndpoint, untrustedPlan)
   };
 }
 
-export function validateRunpodGpuInventory(untrustedInventory, untrustedPlan) {
-  const plan = validateRunpodPlan(untrustedPlan);
+function validateGpuInventory(untrustedInventory, gpuTypeIds) {
   if (!Array.isArray(untrustedInventory)) {
     throw new Error("RunPod GPU inventory is missing or invalid");
   }
   let availableCount = 0;
-  for (const [index, gpuTypeId] of plan.endpoint.gpuTypeIds.entries()) {
+  for (const [index, gpuTypeId] of gpuTypeIds.entries()) {
     const matches = untrustedInventory.filter(
       (entry) =>
         typeof entry === "object" &&
@@ -477,6 +476,21 @@ export function validateRunpodGpuInventory(untrustedInventory, untrustedPlan) {
   }
   return {
     availableCount,
-    configuredCount: plan.endpoint.gpuTypeIds.length,
+    configuredCount: gpuTypeIds.length,
   };
+}
+
+export function validateRunpodGpuInventoryConfiguration(
+  untrustedInventory,
+  untrustedGpuTypeIds,
+  untrustedEnvironment,
+) {
+  const environment = requireEnvironment(untrustedEnvironment);
+  const gpuTypeIds = requireGpuTypeIds(untrustedGpuTypeIds, environment);
+  return validateGpuInventory(untrustedInventory, gpuTypeIds);
+}
+
+export function validateRunpodGpuInventory(untrustedInventory, untrustedPlan) {
+  const plan = validateRunpodPlan(untrustedPlan);
+  return validateGpuInventory(untrustedInventory, plan.endpoint.gpuTypeIds);
 }

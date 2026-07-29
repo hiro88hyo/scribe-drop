@@ -10,6 +10,7 @@ import {
   validateCreatedRunpodTemplate,
   validateRunpodEndpointCapacity,
   validateRunpodGpuInventory,
+  validateRunpodGpuInventoryConfiguration,
   validateRunpodProductionPlan,
   validateRunpodStagingPlan,
 } from "./runpod-environment-config.mjs";
@@ -353,6 +354,13 @@ test("requires at least two available Secure-only GPU fallbacks and a healthy pr
     availableCount: 3,
     configuredCount: 3,
   });
+  assert.deepEqual(
+    validateRunpodGpuInventoryConfiguration(inventory, validInput.gpuTypeIds, "staging"),
+    {
+      availableCount: 3,
+      configuredCount: 3,
+    },
+  );
   assert.throws(
     () =>
       validateRunpodGpuInventory(
