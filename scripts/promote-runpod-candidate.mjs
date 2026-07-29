@@ -172,7 +172,7 @@ try {
     setEndpointCapacity({ dataCenterIds, endpointId: targetEndpointId, gpuTypeIds }) {
       return setRunpodEndpointCapacity({
         apiKey: process.env["RUNPOD_API_KEY"],
-        dataCenterIds,
+        ...(dataCenterIds === undefined ? {} : { dataCenterIds }),
         endpointId: targetEndpointId,
         gpuTypeIds,
       });

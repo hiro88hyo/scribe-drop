@@ -82,10 +82,11 @@ FAILEDへCAS遷移し、記録済みのexact provider jobだけをcancelする�
 FAILEDをSUBMITTINGへ戻さず、Cronがcancelを再試行する。
 
 単一GPUの供給不足をCIだけの問題として扱わない。
-[ADR 0048](./adr/0048-use-secure-only-runpod-gpu-fallbacks.md)に従い、stagingとproductionは
-同じSecure-only GPU候補とdata center allowlistを使用し、promotion時に公式REST APIで
-完全一致をread-backする。全候補が不足した場合も開始SLO、FAILEDへのCAS、exact cancelを
-維持し、無期限待機や同じattemptの自動再投入は行わない。
+[ADR 0049](./adr/0049-pin-observed-runpod-capacity.md)に従い、stagingとproductionは
+実APIで保持を確認した同じSecure-only GPU候補を使用し、promotion時に公式REST APIで
+GPU順序の完全一致をread-backする。検証不能なdata center固定は行わない。全候補が
+不足した場合も開始SLO、FAILEDへのCAS、exact cancelを維持し、無期限待機や同じattemptの
+自動再投入は行わない。
 
 ## 削除と保持期限
 

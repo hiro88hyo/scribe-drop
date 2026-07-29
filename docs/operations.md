@@ -10,7 +10,7 @@ Ready、期限切れclaim拒否を確認した。Phase 5では5分Cronによるs
 status poll、finalize、cancelとnotification outboxを実装し、stagingの実browser smokeで
 RunPod terminal、manifest、Markdown・JSON・SRT、job完了とDiscord受信まで確認した。
 この単一GPU確認は過去checkpointであり、現行releaseのcapacity運用は
-[ADR 0048](./adr/0048-use-secure-only-runpod-gpu-fallbacks.md)を正とする。
+[ADR 0049](./adr/0049-pin-observed-runpod-capacity.md)を正とする。
 Phase 7では認証済みPWA offline fallback、明示削除、capability安全期限までの延期、
 source・result・監査情報の独立retention、次回Cronでの物理削除を固定dummy dataだけで
 staging確認し、試験dataをD1/R2から全件清掃した。
@@ -198,11 +198,10 @@ terminal status、artifact、cancel request、notification outboxを同じservic
 - `job.submission_start_slo_exceeded`はGPU供給またはendpoint構成のrelease blockerである。
   claim tokenを15分より延長したり、workflowを自動retryしたりして回避しない。
 - 同eventはproductionでも利用者影響として扱う。RunPod `/health`の`inQueue`または
-  `throttled`増加と、`ready=0`かつ`running=0`を照合する。endpointのGPU候補、data
-  center、templateを公式REST APIでread-backし、固定planと不一致なら新規submissionを
-  増やさない。
+  `throttled`増加と、`ready=0`かつ`running=0`を照合する。endpointのGPU候補とtemplateを
+  公式APIでread-backし、固定planと不一致なら新規submissionを増やさない。
 - inventory preflightは固定GPU候補がすべてSecure Cloud専用であること、第1候補のstockが
-  HighまたはMediumであること、2候補以上がavailableであることを確認する。条件を満たさない
+  HighまたはMediumであること、両候補がavailableであることを確認する。条件を満たさない
   場合はworkflowを開始せず、同じjobやworkflowを繰り返して供給待ちを隠さない。
 - 全候補が一時的に不足しても、利用者画面は`SUBMITTING`を「GPU起動中」と表示し、開始SLO
   超過後は`FAILED`と手動retryを提供する。同じattemptの自動再投入やclaim TTL延長はしない。

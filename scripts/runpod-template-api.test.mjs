@@ -357,18 +357,13 @@ test("classifies endpoint worker update response loss without retrying", async (
   assert.equal(requests, 1);
 });
 
-test("sets ordered GPU fallbacks and data centers through the fixed REST boundary", async () => {
+test("sets ordered GPU fallbacks without inventing an unknown data-center policy", async () => {
   const endpointId = "endpoint_test";
-  const dataCenterIds = ["EU-RO-1", "EU-CZ-1"];
-  const gpuTypeIds = [
-    "NVIDIA RTX PRO 4500 Blackwell",
-    "NVIDIA RTX PRO 4000 Blackwell",
-    "NVIDIA L4",
-  ];
+  const gpuTypeIds = ["NVIDIA A40", "NVIDIA L4"];
   const signal = {};
   let bodyCancelled = false;
   await setRunpodEndpointCapacity(
-    { apiKey, dataCenterIds, endpointId, gpuTypeIds },
+    { apiKey, endpointId, gpuTypeIds },
     {
       createTimeoutSignal(milliseconds) {
         assert.equal(milliseconds, 60_000);
@@ -377,7 +372,7 @@ test("sets ordered GPU fallbacks and data centers through the fixed REST boundar
       async fetchImplementation(url, init) {
         assert.equal(url.href, `https://rest.runpod.io/v1/endpoints/${endpointId}`);
         assert.deepEqual(init, {
-          body: JSON.stringify({ dataCenterIds, gpuTypeIds }),
+          body: JSON.stringify({ gpuTypeIds }),
           headers: {
             Authorization: `Bearer ${apiKey}`,
             "Content-Type": "application/json",
@@ -400,23 +395,43 @@ test("sets ordered GPU fallbacks and data centers through the fixed REST boundar
   assert.equal(bodyCancelled, true);
 });
 
+test("preserves an explicitly known data-center snapshot during rollback", async () => {
+  const endpointId = "endpoint_test";
+  const dataCenterIds = ["EU-RO-1"];
+  const gpuTypeIds = ["NVIDIA GeForce RTX 4090"];
+  await setRunpodEndpointCapacity(
+    { apiKey, dataCenterIds, endpointId, gpuTypeIds },
+    {
+      async fetchImplementation(_url, init) {
+        assert.equal(init.body, JSON.stringify({ dataCenterIds, gpuTypeIds }));
+        return {
+          body: { async cancel() {} },
+          ok: true,
+        };
+      },
+    },
+  );
+});
+
 test("validates endpoint capacity before sending a mutation", async () => {
   let requests = 0;
   for (const input of [
     {
-      dataCenterIds: ["EU-RO-1"],
       endpointId: "../unsafe",
       gpuTypeIds: ["NVIDIA L4"],
     },
     {
-      dataCenterIds: ["EU-RO-1"],
       endpointId: "endpoint_test",
       gpuTypeIds: [],
     },
     {
-      dataCenterIds: ["EU-RO-1"],
       endpointId: "endpoint_test",
       gpuTypeIds: ["NVIDIA L4", "NVIDIA L4"],
+    },
+    {
+      dataCenterIds: null,
+      endpointId: "endpoint_test",
+      gpuTypeIds: ["NVIDIA L4"],
     },
     {
       dataCenterIds: [],
@@ -451,7 +466,6 @@ test("classifies endpoint capacity response loss without retrying", async () => 
     setRunpodEndpointCapacity(
       {
         apiKey,
-        dataCenterIds: ["EU-RO-1"],
         endpointId: "endpoint_test",
         gpuTypeIds: ["NVIDIA L4"],
       },

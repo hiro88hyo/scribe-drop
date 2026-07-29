@@ -38,7 +38,7 @@ function providerCapacity(untrustedEndpoint) {
   const gpuTypeIds = requireArray(endpoint.gpuTypeIds, "RunPod endpoint GPU types");
   const dataCenterIds =
     endpoint.dataCenterIds === undefined
-      ? null
+      ? undefined
       : typeof endpoint.dataCenterIds === "string"
         ? endpoint.dataCenterIds.split(",").map((candidate) => candidate.trim())
         : endpoint.dataCenterIds;
@@ -47,7 +47,7 @@ function providerCapacity(untrustedEndpoint) {
     gpuTypeIds.length > 3 ||
     gpuTypeIds.some((value) => typeof value !== "string" || value.length === 0) ||
     new Set(gpuTypeIds).size !== gpuTypeIds.length ||
-    (dataCenterIds !== null &&
+    (dataCenterIds !== undefined &&
       (!Array.isArray(dataCenterIds) ||
         dataCenterIds.some((value) => typeof value !== "string" || value.length === 0) ||
         new Set(dataCenterIds).size !== dataCenterIds.length))
@@ -55,7 +55,7 @@ function providerCapacity(untrustedEndpoint) {
     throw new Error("RunPod endpoint capacity response is missing or invalid");
   }
   return {
-    dataCenterIds: dataCenterIds === null ? null : [...dataCenterIds].sort(),
+    ...(dataCenterIds === undefined ? {} : { dataCenterIds: [...dataCenterIds].sort() }),
     gpuTypeIds: [...gpuTypeIds],
   };
 }
@@ -365,7 +365,9 @@ export async function promoteRunpodCandidate(input) {
       throw new Error("RunPod endpoint template update read-back did not match");
     }
   };
+  let rollbackStage = "initial read-back";
   const restorePreviousEndpoint = async () => {
+    rollbackStage = "initial read-back";
     let current = getEndpoint();
     validateNoActiveWorkers(requireRecord(current, "RunPod endpoint response").workers);
     let currentTemplateId = requireResourceId(current.templateId, "RunPod current template ID");
@@ -379,6 +381,7 @@ export async function promoteRunpodCandidate(input) {
       return;
     }
     if (currentWorkersMax !== 0) {
+      rollbackStage = "worker drain";
       current = await setWorkersMaxAndReadBack(input, 0, getEndpoint, (endpoint) => {
         const actualTemplateId = requireResourceId(
           requireRecord(endpoint, "RunPod endpoint response").templateId,
@@ -395,6 +398,7 @@ export async function promoteRunpodCandidate(input) {
     }
     const currentCapacity = providerCapacity(await getCapacityEndpoint(input));
     if (!isDeepStrictEqual(currentCapacity, previousCapacity)) {
+      rollbackStage = "capacity restore";
       await setCapacityAndReadBack(input, previousCapacity, plan, (endpoint) => {
         const restored = providerCapacity(endpoint);
         if (!isDeepStrictEqual(restored, previousCapacity)) {
@@ -403,6 +407,7 @@ export async function promoteRunpodCandidate(input) {
       });
     }
     if (currentTemplateId !== previousTemplateId) {
+      rollbackStage = "template restore";
       try {
         input.runCli(["serverless", "update", endpointId, "--template-id", previousTemplateId]);
       } catch {
@@ -411,6 +416,7 @@ export async function promoteRunpodCandidate(input) {
       const restoredTemplate = getEndpoint();
       validateDrainedTemplate(restoredTemplate, previousTemplateId);
     }
+    rollbackStage = "worker limit restore";
     await setWorkersMaxAndReadBack(input, plan.endpoint.workersMax, getEndpoint, (endpoint) => {
       const actualTemplateId = validateIdleEndpoint(endpoint, plan, previousTemplateId);
       if (actualTemplateId !== previousTemplateId) {
@@ -419,15 +425,16 @@ export async function promoteRunpodCandidate(input) {
     });
   };
 
+  let promotionStage = "worker drain";
   try {
     await setWorkersMaxAndReadBack(input, 0, getEndpoint, (endpoint) => {
       validateDrainedTemplate(endpoint, previousTemplateId);
     });
     if (!candidateCapacityIsCurrent) {
+      promotionStage = "capacity update";
       await setCapacityAndReadBack(
         input,
         {
-          dataCenterIds: plan.endpoint.dataCenterIds,
           gpuTypeIds: plan.endpoint.gpuTypeIds,
         },
         plan,
@@ -437,6 +444,7 @@ export async function promoteRunpodCandidate(input) {
       );
     }
     if (previousTemplateId !== templateId) {
+      promotionStage = "template update";
       try {
         input.runCli(["serverless", "update", endpointId, "--template-id", templateId]);
       } catch {
@@ -445,6 +453,7 @@ export async function promoteRunpodCandidate(input) {
       const switched = getEndpoint();
       validateDrainedTemplate(switched, templateId);
     }
+    promotionStage = "worker limit restore";
     await setWorkersMaxAndReadBack(input, plan.endpoint.workersMax, getEndpoint, (endpoint) => {
       const actualTemplateId = validateIdleEndpoint(endpoint, plan, templateId);
       if (actualTemplateId !== templateId) {
@@ -453,14 +462,18 @@ export async function promoteRunpodCandidate(input) {
       validateCreatedRunpodEndpoint(endpoint, plan, templateId);
       validateCandidateWorkers(endpoint.workers, templateId, plan.template.image);
     });
+    promotionStage = "final capacity read-back";
     validateRunpodEndpointCapacity(await getCapacityEndpoint(input), plan);
   } catch (error) {
     try {
       await restorePreviousEndpoint();
     } catch (rollbackError) {
-      throw new Error("RunPod promotion verification and rollback both failed", {
-        cause: rollbackError,
-      });
+      throw new Error(
+        `RunPod promotion failed during ${promotionStage}; rollback failed during ${rollbackStage}`,
+        {
+          cause: rollbackError,
+        },
+      );
     }
     throw error;
   }

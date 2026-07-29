@@ -238,7 +238,6 @@ async function main() {
     try {
       await setRunpodEndpointCapacity({
         apiKey,
-        dataCenterIds: plan.endpoint.dataCenterIds,
         endpointId,
         gpuTypeIds: plan.endpoint.gpuTypeIds,
       });

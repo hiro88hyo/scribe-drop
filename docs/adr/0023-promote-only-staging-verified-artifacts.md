@@ -54,7 +54,7 @@ staging evidenceが参照するcandidateだけを受け付ける。次の場合�
 
 staging evidenceは、実ID、origin、credentialを含めずにenvironment固有値をmarkerへ
 正規化したconfiguration policyのSHA-256も保持する。少なくともretention、R2 CORSと
-lifecycle、RunPod image visibility、GPU、data center、runtime、scaling、timeoutを
+lifecycle、RunPod image visibility、GPU、runtime、scaling、timeoutを
 正規化対象とする。account、origin、resource名、D1/endpoint/registry credential ID、
 staging専用Access service principalだけを許可された差分とし、production workflowは
 最初のremote mutationより前に同じpolicy hashを再計算して一致を要求する。
@@ -69,7 +69,7 @@ candidate照合、deploy前後のread-backを通る唯一の通常deploy経路�
 `workflow_dispatch`をrelease branchから実行できるよう、production workflowの同一pathを
 release freezeより前にGitHubのdefault branchである`develop`へ登録しておく。dispatch前に
 default branch上のworkflow path、required reviewer、custom `release/*` branch policy、
-15件の非secret変数名、4件のsecret名をread-only APIで一括検証し、どれか一つでも不足または
+14件の非secret変数名、4件のsecret名をread-only APIで一括検証し、どれか一つでも不足または
 余分ならcandidate workflowを開始しない。検査では変数値とsecret値を出力しない。
 
 緊急のsecurityまたはavailability対応で通常gateを省略する場合はbreak-glassとして扱う。

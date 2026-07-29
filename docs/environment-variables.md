@@ -47,14 +47,12 @@ R2 CORSは`pnpm cloudflare:config:staging:r2-cors`、R2 lifecycleは
 - `SCRIBE_DROP_STAGING_RUNPOD_IMAGE`: GHCRのdigest付きstaging image参照
 - `SCRIBE_DROP_STAGING_RUNPOD_IMAGE_VISIBILITY`: `private`または`public`
 - `SCRIBE_DROP_STAGING_RUNPOD_REGISTRY_AUTH_ID`: private image用のRunPod registry auth ID
-- `SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS`: 優先順位順のRunPod GPU ID（カンマ区切り、最大3件）
-- `SCRIBE_DROP_STAGING_RUNPOD_DATACENTER_IDS`: 許可するRunPod data center ID（カンマ区切り）
+- `SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS`: `NVIDIA A40,NVIDIA L4`の固定順
 
-GPU候補は[ADR 0048](./adr/0048-use-secure-only-runpod-gpu-fallbacks.md)で承認した
-Secure Cloud専用の3件を順序も含めて指定する。stagingとproductionで同じ候補とdata
-center allowlistを使用し、release preflightで第1候補の在庫と2候補以上の利用可能性を
-確認する。promotionは公式REST APIの`gpuTypeIds`と`dataCenterIds`を完全一致でread-back
-し、固定`runpodctl`が省略した値から一致を推定しない。
+GPU候補は[ADR 0049](./adr/0049-pin-observed-runpod-capacity.md)で実API検証した
+Secure Cloud専用の2件を順序も含めて指定する。stagingとproductionで同じ候補を使用し、
+release preflightで第1候補の在庫と両候補の利用可能性を確認する。promotionは公式REST
+APIの`gpuTypeIds`を完全一致でread-backする。検証不能なdata center変数は持たない。
 
 実originはCloudflareとgit ignoredの生成設定だけに保持し、追跡対象ファイルやdeployment
 記録へ保存しない。
@@ -89,7 +87,6 @@ production RunPod planは次を`pnpm runpod:config:production`へ渡して
 - `SCRIBE_DROP_PRODUCTION_RUNPOD_IMAGE_VISIBILITY`
 - `SCRIBE_DROP_PRODUCTION_RUNPOD_REGISTRY_AUTH_ID`
 - `SCRIBE_DROP_PRODUCTION_RUNPOD_GPU_IDS`
-- `SCRIBE_DROP_PRODUCTION_RUNPOD_DATACENTER_IDS`
 
 imageはrelease commitのpublication evidenceにあるdigest付き参照だけを許可する。
 production planはstaging plan/stateとfile名、template名、endpoint名を共有せず、
@@ -232,7 +229,7 @@ SNIだけを元hostnameに保つ。proxyとredirectは使用しない。
 
 promotion workflowのcredentialと非secret設定はrepository共通へ置かず、`staging`と
 `production`のGitHub Environmentへ分離する。値はこの文書やdeployment recordへ転記しない。
-4件のretention値とRunPodのimage visibility、GPU、data centerはstagingとproductionで
+4件のretention値とRunPodのimage visibility、GPUはstagingとproductionで
 一致させる。workflowは実IDとoriginを除外してこれらを正規化したpolicy hashを比較し、
 差異があればproductionの最初のremote mutation前に失敗する。
 
@@ -244,7 +241,7 @@ promotion workflowのcredentialと非secret設定はrepository共通へ置かず
   `SCRIBE_DROP_STAGING_PAGES_ACCESS_AUDIENCE`、
   `SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME`、
   `SCRIBE_DROP_STAGING_PAGES_PROJECT`、staging RunPodのvisibility、registry auth、GPU、
-  data center、4件のretention値
+  4件のretention値
 - Secrets: `CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_PAGES_API_TOKEN`、`RUNPOD_API_KEY`、
   `SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID`、`CF_ACCESS_CLIENT_ID`、
   `CF_ACCESS_CLIENT_SECRET`

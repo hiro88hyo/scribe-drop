@@ -56,6 +56,11 @@ const runpodPromotionScriptPath = path.join(
   "scripts",
   "promote-runpod-candidate.mjs",
 );
+const runpodEnvironmentConfigScriptPath = path.join(
+  repositoryRoot,
+  "scripts",
+  "runpod-environment-config.mjs",
+);
 const runpodTemplateApiScriptPath = path.join(repositoryRoot, "scripts", "runpod-template-api.mjs");
 const runpodReleaseReadinessScriptPath = path.join(
   repositoryRoot,
@@ -201,6 +206,10 @@ const accessVerifierContents = readFileSync(accessVerifierPath, "utf8");
 const releaseCandidateScriptContents = readFileSync(releaseCandidateScriptPath, "utf8");
 const runpodDeploymentScriptContents = readFileSync(runpodDeploymentScriptPath, "utf8");
 const runpodPromotionScriptContents = readFileSync(runpodPromotionScriptPath, "utf8");
+const runpodEnvironmentConfigScriptContents = readFileSync(
+  runpodEnvironmentConfigScriptPath,
+  "utf8",
+);
 const runpodTemplateApiScriptContents = readFileSync(runpodTemplateApiScriptPath, "utf8");
 const runpodReleaseReadinessScriptContents = readFileSync(runpodReleaseReadinessScriptPath, "utf8");
 const pagesPromotionScriptContents = readFileSync(pagesPromotionScriptPath, "utf8");
@@ -1307,6 +1316,18 @@ requireText(
   "exact endpoint capacity promotion",
 );
 requireText(
+  runpodEnvironmentConfigScriptContents,
+  'const fixedGpuTypeIds = ["NVIDIA A40", "NVIDIA L4"];',
+  "runpod-environment-config.mjs",
+  "staging-proven Secure-only GPU policy",
+);
+forbidText(
+  workflowContents,
+  "RUNPOD_DATACENTER_IDS",
+  ".github/workflows",
+  "unverifiable RunPod data-center policy",
+);
+requireText(
   runpodPromotionScriptContents,
   "getRunpodEndpoint({",
   "promote-runpod-candidate.mjs",
@@ -1344,9 +1365,9 @@ requireText(
 );
 requireText(
   runpodTemplateApiScriptContents,
-  "dataCenterIds: input.dataCenterIds",
+  "input.dataCenterIds === undefined ? {} : { dataCenterIds: input.dataCenterIds }",
   "runpod-template-api.mjs",
-  "exact endpoint data center mutation",
+  "omitted provider data-center preservation",
 );
 requireText(
   runpodTemplateApiScriptContents,

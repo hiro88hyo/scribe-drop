@@ -9,8 +9,7 @@ import { createRunpodStagingPlan } from "./runpod-environment-config.mjs";
 
 const plan = createRunpodStagingPlan({
   accountId: "a".repeat(32),
-  dataCenterIds: "EU-RO-1,EU-CZ-1",
-  gpuTypeIds: "NVIDIA RTX PRO 4500 Blackwell,NVIDIA RTX PRO 4000 Blackwell,NVIDIA L4",
+  gpuTypeIds: "NVIDIA A40,NVIDIA L4",
   image: `ghcr.io/example/scribe-drop-runpod-worker@sha256:${"b".repeat(64)}`,
   imageVisibility: "private",
   orchestratorOrigin: "https://orchestrator-staging.example.invalid",
@@ -24,7 +23,6 @@ function withTemplateList(input) {
       input.getEndpoint ??
       (() =>
         Promise.resolve({
-          dataCenterIds: plan.endpoint.dataCenterIds,
           gpuTypeIds: plan.endpoint.gpuTypeIds,
           id: input.endpointId,
         })),
@@ -51,7 +49,7 @@ function verifyRunpodPromotionPreflight(input) {
 
 function promoteRunpodCandidate(input) {
   let workersMax = plan.endpoint.workersMax;
-  let dataCenterIds = input.initialDataCenterIds ?? plan.endpoint.dataCenterIds;
+  let dataCenterIds = input.initialDataCenterIds;
   let gpuTypeIds = input.initialGpuTypeIds ?? plan.endpoint.gpuTypeIds;
   const runCli = input.runCli;
   return promoteRunpodCandidateWithInputs(
@@ -61,7 +59,7 @@ function promoteRunpodCandidate(input) {
         input.getEndpoint ??
         (() =>
           Promise.resolve({
-            dataCenterIds,
+            ...(dataCenterIds === undefined ? {} : { dataCenterIds }),
             gpuTypeIds,
             id: input.endpointId,
           })),
@@ -86,7 +84,9 @@ function promoteRunpodCandidate(input) {
         if (input.setEndpointCapacity !== undefined) {
           await input.setEndpointCapacity(request);
         }
-        dataCenterIds = request.dataCenterIds;
+        if (Object.hasOwn(request, "dataCenterIds")) {
+          dataCenterIds = request.dataCenterIds;
+        }
         gpuTypeIds = request.gpuTypeIds;
       },
     }),
@@ -276,7 +276,6 @@ test("post-lifecycle preflight rejects capacity that does not match the candidat
       environment: "staging",
       getEndpoint() {
         return Promise.resolve({
-          dataCenterIds: ["EU-RO-1"],
           gpuTypeIds: ["NVIDIA GeForce RTX 4090"],
           id: "endpoint_staging",
         });
@@ -582,14 +581,10 @@ test("drains and replaces legacy single-GPU capacity even when the template is c
   const result = await promoteRunpodCandidate({
     endpointId: "endpoint_staging",
     environment: "staging",
-    initialDataCenterIds: ["EU-RO-1"],
     initialGpuTypeIds: ["NVIDIA GeForce RTX 4090"],
     plan,
     async setEndpointCapacity(request) {
-      capacityUpdates.push({
-        dataCenterIds: request.dataCenterIds,
-        gpuTypeIds: request.gpuTypeIds,
-      });
+      capacityUpdates.push(request);
     },
     async setEndpointWorkersMax({ workersMax }) {
       workerMaximums.push(workersMax);
@@ -610,7 +605,7 @@ test("drains and replaces legacy single-GPU capacity even when the template is c
   assert.deepEqual(workerMaximums, [0, 1]);
   assert.deepEqual(capacityUpdates, [
     {
-      dataCenterIds: plan.endpoint.dataCenterIds,
+      endpointId: "endpoint_staging",
       gpuTypeIds: plan.endpoint.gpuTypeIds,
     },
   ]);
@@ -778,26 +773,21 @@ test("rolls back the template switch when read-back verification fails", async (
   assert.equal(currentTemplateId, "template_old");
 });
 
-test("rolls back capacity when a later promotion verification fails", async () => {
+test("rolls back capacity without inventing an omitted data-center field", async () => {
   let currentTemplateId = "template_old";
   let promotedReadback = false;
   const capacityUpdates = [];
   const previousCapacity = {
-    dataCenterIds: ["EU-RO-1"],
     gpuTypeIds: ["NVIDIA GeForce RTX 4090"],
   };
   await assert.rejects(
     promoteRunpodCandidate({
       endpointId: "endpoint_staging",
       environment: "staging",
-      initialDataCenterIds: previousCapacity.dataCenterIds,
       initialGpuTypeIds: previousCapacity.gpuTypeIds,
       plan,
       async setEndpointCapacity(request) {
-        capacityUpdates.push({
-          dataCenterIds: request.dataCenterIds,
-          gpuTypeIds: request.gpuTypeIds,
-        });
+        capacityUpdates.push(request);
       },
       runCli(arguments_) {
         if (arguments_[0] === "template" && arguments_[1] === "list") {
@@ -823,10 +813,13 @@ test("rolls back capacity when a later promotion verification fails", async () =
 
   assert.deepEqual(capacityUpdates, [
     {
-      dataCenterIds: plan.endpoint.dataCenterIds,
+      endpointId: "endpoint_staging",
       gpuTypeIds: plan.endpoint.gpuTypeIds,
     },
-    previousCapacity,
+    {
+      endpointId: "endpoint_staging",
+      ...previousCapacity,
+    },
   ]);
   assert.equal(currentTemplateId, "template_old");
 });

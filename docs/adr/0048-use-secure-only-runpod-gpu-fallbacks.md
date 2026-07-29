@@ -1,6 +1,6 @@
 # ADR 0048: Secure-onlyのRunPod GPU fallbackを固定する
 
-- Status: Accepted
+- Status: Superseded by ADR 0049
 - Date: 2026-07-29
 - Supersedes: ADR 0043の単一GPU供給を前提としたrelease readiness、ADR 0012の
   GPU/data center省略時の補償制御
@@ -65,3 +65,9 @@ D1をcascade削除し、provider queueだけを残す経路も判明した。D1�
   表示する。
 - Blackwellの第1候補はCUDA 12.8固定imageをstaging実E2Eで検証してからproductionへ昇格
   する。candidateと異なるimageをGPUごとにbuildしない。
+
+## Superseded
+
+stagingで公式REST APIの実動作を検証した結果、Blackwell候補とdata centerはread-back可能な
+固定policyとして成立しなかった。現行判断は
+[ADR 0049](./0049-pin-observed-runpod-capacity.md)を正とする。

@@ -9,8 +9,8 @@
 - candidate/promotionのtemplate listと高コスト処理前のreadinessは
   [ADR 0034](./0034-fail-before-release-candidate-cost.md)の公式REST境界で補足する。
 - GPU候補とdata centerをCLI応答が省略した場合の扱いは
-  [ADR 0048](./0048-use-secure-only-runpod-gpu-fallbacks.md)で置き換える。現在は公式REST
-  APIの完全一致read-backを必須とし、省略を一致とはみなさない。
+  [ADR 0049](./0049-pin-observed-runpod-capacity.md)で置き換える。現在は公式REST APIで
+  GPU順序の完全一致read-backを必須とし、検証不能なdata center固定は行わない。
 
 ## Context
 
@@ -47,7 +47,7 @@ ADR 0034で、hostと操作を固定した公式REST API例外を定める。
 ## Decision
 
 - 追跡外の固定planを検証してから、`runpodctl serverless create`へ渡す引数列を生成する。
-  compute type、GPU、GPU数、data center、worker数、timeout、scaler、FlashBootを含む
+  compute type、GPU、GPU数、worker数、timeout、scaler、FlashBootを含む
   引数列全体を回帰テストで固定する。
 - endpoint作成前に、plan digestと検証済みtemplate IDを持つpending stateを0600で保存する。
   作成応答を失った場合、同名endpoint、同一template、同一pending stateが一意に揃う場合

@@ -1,7 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 
 const accountIdPattern = /^[0-9a-f]{32}$/u;
-const dataCenterIdPattern = /^[A-Z]{2,3}-[A-Z]{2,3}-[0-9]+$/u;
 const gpuIdPattern = /^[A-Za-z0-9][A-Za-z0-9 ._-]{1,126}[A-Za-z0-9]$/u;
 const imagePattern =
   /^ghcr\.io\/[a-z0-9]+(?:[._-][a-z0-9]+)*\/scribe-drop-runpod-worker@sha256:[0-9a-f]{64}$/u;
@@ -16,6 +15,7 @@ const idleTimeoutSeconds = 5;
 const maxDurationSeconds = 8 * 60 * 60;
 const maxSourceBytes = 2 * 1024 * 1024 * 1024;
 const minimumAvailableGpuFallbacks = 2;
+const fixedGpuTypeIds = ["NVIDIA A40", "NVIDIA L4"];
 
 function requirePattern(value, pattern, name) {
   if (typeof value !== "string" || !pattern.test(value)) {
@@ -72,22 +72,6 @@ function rejectMixedEnvironment(value, environment, name) {
   }
 }
 
-function requireDataCenterIds(value, environment) {
-  const name = `${environmentVariablePrefix(environment)}_DATACENTER_IDS`;
-  if (typeof value !== "string") {
-    throw new Error(`${name} is missing or invalid`);
-  }
-  const values = value.split(",").map((candidate) => candidate.trim());
-  if (
-    values.length === 0 ||
-    values.some((candidate) => !dataCenterIdPattern.test(candidate)) ||
-    new Set(values).size !== values.length
-  ) {
-    throw new Error(`${name} is missing or invalid`);
-  }
-  return values.sort();
-}
-
 function requireGpuTypeIds(value, environment) {
   const name = `${environmentVariablePrefix(environment)}_GPU_IDS`;
   if (typeof value !== "string") {
@@ -98,7 +82,8 @@ function requireGpuTypeIds(value, environment) {
     values.length === 0 ||
     values.length > 3 ||
     values.some((candidate) => !gpuIdPattern.test(candidate)) ||
-    new Set(values).size !== values.length
+    new Set(values).size !== values.length ||
+    !isDeepStrictEqual(values, fixedGpuTypeIds)
   ) {
     throw new Error(`${name} is missing or invalid`);
   }
@@ -172,7 +157,6 @@ export function createRunpodPlan(input, untrustedEnvironment) {
       computeType: "GPU",
       gpuTypeIds: requireGpuTypeIds(input.gpuTypeIds, environment),
       gpuCount: 1,
-      dataCenterIds: requireDataCenterIds(input.dataCenterIds, environment),
       workersMin: 0,
       workersMax: 1,
       idleTimeoutSeconds,
@@ -217,12 +201,6 @@ export function validateRunpodPlan(untrustedPlan, expectedEnvironment) {
     throw new Error(`RunPod ${planEnvironment} plan contains an invalid R2 host`);
   }
   if (
-    !Array.isArray(endpoint.dataCenterIds) ||
-    endpoint.dataCenterIds.some((value) => typeof value !== "string")
-  ) {
-    throw new Error(`RunPod ${planEnvironment} plan contains invalid data center IDs`);
-  }
-  if (
     !Array.isArray(endpoint.gpuTypeIds) ||
     endpoint.gpuTypeIds.some((value) => typeof value !== "string")
   ) {
@@ -232,7 +210,6 @@ export function validateRunpodPlan(untrustedPlan, expectedEnvironment) {
   const expected = createRunpodPlan(
     {
       accountId: sourceHostMatch[1],
-      dataCenterIds: endpoint.dataCenterIds.join(","),
       gpuTypeIds: endpoint.gpuTypeIds.join(","),
       image: template.image,
       imageVisibility: plan.imageVisibility,
@@ -296,8 +273,6 @@ export function createRunpodEndpointArguments(untrustedPlan, templateId) {
     String(plan.endpoint.workersMin),
     "--workers-max",
     String(plan.endpoint.workersMax),
-    "--data-center-ids",
-    plan.endpoint.dataCenterIds.join(","),
     "--min-cuda-version",
     plan.endpoint.minCudaVersion,
     "--scale-by",
@@ -374,7 +349,7 @@ export function validateCreatedRunpodEndpoint(untrustedEndpoint, untrustedPlan, 
   const modelReferences = endpoint.modelReferences ?? [];
   const flashBootDisabled = endpoint.flashBootType === "OFF" || endpoint.flashboot === false;
   // runpodctl 2.7.2 omits placement fields from read responses and endpoint
-  // bootstrap only sends the first prioritized GPU. Placement is therefore
+  // bootstrap only sends the first prioritized GPU. GPU placement is therefore
   // schema-checked here and matched exactly through the official REST API.
   const computeTypeMatches =
     endpoint.computeType === undefined || endpoint.computeType === plan.endpoint.computeType;
@@ -422,21 +397,14 @@ export function validateCreatedRunpodEndpoint(untrustedEndpoint, untrustedPlan, 
 export function validateRunpodEndpointCapacity(untrustedEndpoint, untrustedPlan) {
   const plan = validateRunpodPlan(untrustedPlan);
   const endpoint = requireRecord(untrustedEndpoint, "RunPod endpoint capacity response");
-  const dataCenterIds =
-    typeof endpoint.dataCenterIds === "string"
-      ? endpoint.dataCenterIds.split(",").map((candidate) => candidate.trim())
-      : endpoint.dataCenterIds;
   if (
     !resourceIdPattern.test(String(endpoint.id ?? "")) ||
     !Array.isArray(endpoint.gpuTypeIds) ||
-    !isDeepStrictEqual(endpoint.gpuTypeIds, plan.endpoint.gpuTypeIds) ||
-    !Array.isArray(dataCenterIds) ||
-    !isDeepStrictEqual([...dataCenterIds].sort(), plan.endpoint.dataCenterIds)
+    !isDeepStrictEqual(endpoint.gpuTypeIds, plan.endpoint.gpuTypeIds)
   ) {
     throw new Error("RunPod endpoint capacity does not match the fixed plan");
   }
   return {
-    dataCenterIds: [...dataCenterIds].sort(),
     gpuTypeIds: [...endpoint.gpuTypeIds],
   };
 }

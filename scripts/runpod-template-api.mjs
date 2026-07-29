@@ -265,7 +265,7 @@ export async function setRunpodEndpointCapacity(input, dependencies = {}) {
     throw new Error("RunPod endpoint GPU types are missing or invalid");
   }
   if (
-    input.dataCenterIds !== null &&
+    input.dataCenterIds !== undefined &&
     (!Array.isArray(input.dataCenterIds) ||
       input.dataCenterIds.length === 0 ||
       input.dataCenterIds.some(
@@ -283,13 +283,14 @@ export async function setRunpodEndpointCapacity(input, dependencies = {}) {
     `/v1/endpoints/${encodeURIComponent(input.endpointId)}`,
     runpodTemplateApiOrigin,
   );
+  const body = {
+    ...(input.dataCenterIds === undefined ? {} : { dataCenterIds: input.dataCenterIds }),
+    gpuTypeIds: input.gpuTypeIds,
+  };
   let response;
   try {
     response = await fetchImplementation(url, {
-      body: JSON.stringify({
-        dataCenterIds: input.dataCenterIds,
-        gpuTypeIds: input.gpuTypeIds,
-      }),
+      body: JSON.stringify(body),
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",

@@ -13,9 +13,9 @@ max workerは1へ復元した。実ID、image参照、originは追跡対象へ�
 
 上記のRTX 4090単一構成は過去checkpointである。release acceptanceで同GPUの供給待ちが
 再現し、productionでも同じ単一構成だったため、現在のrelease policyは
-[ADR 0048](./adr/0048-use-secure-only-runpod-gpu-fallbacks.md)のSecure-only優先順位付き
-GPU候補へ更新した。stagingの実GPU E2Eとexact endpoint read-backを通すまでは
-production-readyとしない。
+[ADR 0049](./adr/0049-pin-observed-runpod-capacity.md)に従い、実APIが保持した
+`NVIDIA A40`、`NVIDIA L4`のSecure-only優先順位付きGPU候補へ更新した。stagingの
+実GPU E2Eとexact endpoint read-backを通すまではproduction-readyとしない。
 
 ## Image supply chain
 
@@ -87,9 +87,9 @@ stagingとproductionは別endpoint、別template、別credentialを使用する�
 - active workers 0
 - max workers 1
 - GPU 1
-- 優先順位付きGPU候補は最大3件で、すべてSecure Cloud専用
-- 第1候補はinventoryのstockがHighまたはMediumで、2候補以上がavailable
-- data centerは環境間で同一の明示的allowlist
+- 優先順位付きGPU候補は`NVIDIA A40`、`NVIDIA L4`の順で固定し、両方ともSecure Cloud専用
+- 第1候補はinventoryのstockがHighまたはMediumで、両候補がavailable
+- 検証不能なdata center固定を行わず、特定regionで動くとは保証しない
 - Network Volumeなし
 - 永続diskなし
 - FlashBoot無効
@@ -119,9 +119,9 @@ RunPod consoleのsecret入力で登録してから`runpodctl registry list`で�
 だけを確認する。publicへ変更する場合はregistry credentialが不要になるが、GitHub上で
 privateへ戻せない操作なので明示的に選択する。
 
-image visibility、candidateの共通digest、environment別registry auth ID、優先順位付きGPU
-候補、data centerと同じenvironmentのCloudflare値をcredential storeまたはCI evidence
-から読み込み、追跡外planを生成する。
+image visibility、candidateの共通digest、environment別registry auth ID、固定GPU候補と
+同じenvironmentのCloudflare値をcredential storeまたはCI evidenceから読み込み、
+追跡外planを生成する。
 
 ```bash
 pnpm run runpod:config:staging
@@ -148,7 +148,7 @@ promotion中のRunPod API一時障害は
 再試行する。template作成とendpoint更新は結果不明時に再送せず、厳格なread-backと
 rollbackを維持する。retry logへAPI応答と実IDを出さない。
 candidate workflowではRESTのtemplate listとendpoint getを高コスト処理前に並列実行し、
-その前に固定`runpodctl`のGPU inventoryでADR 0048のSecure-only候補と在庫条件を検証する。
+その前に固定`runpodctl`のGPU inventoryでADR 0049のSecure-only候補と在庫条件を検証する。
 staging promotionではcandidate固有planを再検証する。
 最初のremote mutationより前に`runpod:preflight:<environment>`を実行し、認証、templateの
 一意性、endpoint invariant、workerがidleであることをread-onlyで検証する。
@@ -187,12 +187,12 @@ smokeで一時的にactive workerを1へ上げた場合は、全jobのterminal�
 戻っていた場合はcredential IDだけをCLIで再適用する。最後にtemplateとendpointの標準
 deploy verifierを通す。
 
-同versionの`serverless get`はcompute type、GPU、data centerを省略することがある。
-その省略を一致とはみなさない。作成時は第1GPU候補でendpointをbootstrapした後、workerが
-0件であることを確認して公式REST APIへ候補配列とdata center allowlistを一度だけ適用し、
-直後のREST read-backが順序を含めてplanと完全一致した場合だけstateを確定する。
-legacy endpointのREST応答が`dataCenterIds`自体を省略する場合は、移行前rollback用の
-provider-defaultとしてだけ保持し、candidate planへの一致とはみなさない。
+同versionの`serverless get`はcompute typeとGPUを省略することがある。その省略を一致とは
+みなさない。作成時は第1GPU候補でendpointをbootstrapした後、workerが0件であることを
+確認して公式REST APIへ固定GPU候補を一度だけ適用し、直後のREST read-backが順序を含めて
+完全一致した場合だけstateを確定する。`dataCenterIds`はPATCHへ指定しても応答とGETから
+省略されるため通常policyでは送らず、特定regionを保証しない。provider応答に既知値が
+存在する場合だけrollback snapshotへ保持し、省略を`null`や既定値へ変換しない。
 promotion時も`workersMax=0`でdrainしてから同じ更新とread-backを行い、失敗時は旧capacity、
 旧template、旧worker上限へ戻す。さらに実job前後のworkerがcandidate template/imageと
 一致し、Secure-only inventory gateを満たすまでproduction-readyとしない。

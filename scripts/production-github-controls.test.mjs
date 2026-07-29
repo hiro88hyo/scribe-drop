@@ -72,7 +72,7 @@ test("accepts exact fail-fast production controls without reading values", () =>
   assert.deepEqual(verifyProductionGithubControls(controls()), {
     branchProtectionCount: 3,
     secretCount: 4,
-    variableCount: 15,
+    variableCount: 14,
   });
 });
 

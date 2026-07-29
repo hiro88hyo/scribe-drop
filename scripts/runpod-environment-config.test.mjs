@@ -17,8 +17,7 @@ import {
 
 const validInput = {
   accountId: "a".repeat(32),
-  dataCenterIds: "AP-JP-1,EU-SE-1",
-  gpuTypeIds: "NVIDIA RTX PRO 4500 Blackwell,NVIDIA RTX PRO 4000 Blackwell,NVIDIA L4",
+  gpuTypeIds: "NVIDIA A40,NVIDIA L4",
   image: "ghcr.io/example/scribe-drop-runpod-worker@sha256:" + "b".repeat(64),
   imageVisibility: "private",
   orchestratorOrigin: "https://orchestrator-staging.example.invalid",
@@ -33,12 +32,7 @@ test("creates a fixed staging plan without persistent storage or secrets", () =>
   assert.equal(plan.template.containerDiskInGb, 30);
   assert.equal(plan.template.volumeInGb, 0);
   assert.deepEqual(plan.template.ports, []);
-  assert.deepEqual(plan.endpoint.dataCenterIds, ["AP-JP-1", "EU-SE-1"]);
-  assert.deepEqual(plan.endpoint.gpuTypeIds, [
-    "NVIDIA RTX PRO 4500 Blackwell",
-    "NVIDIA RTX PRO 4000 Blackwell",
-    "NVIDIA L4",
-  ]);
+  assert.deepEqual(plan.endpoint.gpuTypeIds, ["NVIDIA A40", "NVIDIA L4"]);
   assert.equal(plan.endpoint.workersMin, 0);
   assert.equal(plan.endpoint.workersMax, 1);
   assert.equal(plan.endpoint.gpuCount, 1);
@@ -85,15 +79,13 @@ test("generates minimal template and endpoint CLI arguments", () => {
     "--compute-type",
     "GPU",
     "--gpu-id",
-    "NVIDIA RTX PRO 4500 Blackwell",
+    "NVIDIA A40",
     "--gpu-count",
     "1",
     "--workers-min",
     "0",
     "--workers-max",
     "1",
-    "--data-center-ids",
-    "AP-JP-1,EU-SE-1",
     "--min-cuda-version",
     "12.8",
     "--scale-by",
@@ -149,13 +141,11 @@ test("validates template and endpoint create responses", () => {
     validateRunpodEndpointCapacity(
       {
         id: endpointId,
-        dataCenterIds: ["EU-SE-1", "AP-JP-1"],
         gpuTypeIds: plan.endpoint.gpuTypeIds,
       },
       plan,
     ),
     {
-      dataCenterIds: ["AP-JP-1", "EU-SE-1"],
       gpuTypeIds: plan.endpoint.gpuTypeIds,
     },
   );
@@ -215,7 +205,6 @@ test("requires official REST read-back for exact endpoint capacity", () => {
       validateRunpodEndpointCapacity(
         {
           id: "endpoint_staging",
-          dataCenterIds: ["AP-JP-1", "EU-SE-1"],
           gpuTypeIds: ["NVIDIA GeForce RTX 4090"],
         },
         plan,
@@ -226,7 +215,7 @@ test("requires official REST read-back for exact endpoint capacity", () => {
     validateCreatedRunpodEndpoint(
       {
         ...endpoint,
-        gpuTypeIds: ["NVIDIA RTX PRO 4500 Blackwell"],
+        gpuTypeIds: ["NVIDIA A40"],
         locations: "US-TX-1",
       },
       plan,
@@ -297,7 +286,7 @@ test("rejects a modified generated plan", () => {
   );
 });
 
-test("rejects ambiguous registry and placement configuration", () => {
+test("rejects ambiguous registry and GPU configuration", () => {
   assert.throws(
     () =>
       createRunpodStagingPlan({
@@ -318,14 +307,6 @@ test("rejects ambiguous registry and placement configuration", () => {
     () =>
       createRunpodStagingPlan({
         ...validInput,
-        dataCenterIds: "AP-JP-1,AP-JP-1",
-      }),
-    /SCRIBE_DROP_STAGING_RUNPOD_DATACENTER_IDS/u,
-  );
-  assert.throws(
-    () =>
-      createRunpodStagingPlan({
-        ...validInput,
         gpuTypeIds: "NVIDIA L4,NVIDIA RTX A5000,NVIDIA GeForce RTX 4090,NVIDIA GeForce RTX 5090",
       }),
     /SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS/u,
@@ -335,6 +316,14 @@ test("rejects ambiguous registry and placement configuration", () => {
       createRunpodStagingPlan({
         ...validInput,
         gpuTypeIds: "NVIDIA L4,NVIDIA L4",
+      }),
+    /SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS/u,
+  );
+  assert.throws(
+    () =>
+      createRunpodStagingPlan({
+        ...validInput,
+        gpuTypeIds: "NVIDIA RTX PRO 4500 Blackwell,NVIDIA L4",
       }),
     /SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS/u,
   );
@@ -351,14 +340,14 @@ test("requires at least two available Secure-only GPU fallbacks and a healthy pr
   }));
 
   assert.deepEqual(validateRunpodGpuInventory(inventory, plan), {
-    availableCount: 3,
-    configuredCount: 3,
+    availableCount: 2,
+    configuredCount: 2,
   });
   assert.deepEqual(
     validateRunpodGpuInventoryConfiguration(inventory, validInput.gpuTypeIds, "staging"),
     {
-      availableCount: 3,
-      configuredCount: 3,
+      availableCount: 2,
+      configuredCount: 2,
     },
   );
   assert.throws(

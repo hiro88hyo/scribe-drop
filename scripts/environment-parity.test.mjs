@@ -14,10 +14,7 @@ function runpodPlan(environment, overrides = {}) {
     environment === "staging" ? createRunpodStagingPlan : createRunpodProductionPlan;
   return createPlan({
     accountId: environment === "staging" ? "a".repeat(32) : "b".repeat(32),
-    dataCenterIds: overrides.dataCenterIds ?? "EU-RO-1,CA-MTL-1",
-    gpuTypeIds:
-      overrides.gpuTypeIds ??
-      "NVIDIA RTX PRO 4500 Blackwell,NVIDIA RTX PRO 4000 Blackwell,NVIDIA L4",
+    gpuTypeIds: overrides.gpuTypeIds ?? "NVIDIA A40,NVIDIA L4",
     image,
     imageVisibility: "private",
     orchestratorOrigin: `https://orchestrator-${environment}.example.invalid`,
@@ -77,19 +74,15 @@ test("allows only normalized environment-specific identifiers to differ", () => 
   assert.equal(environmentPolicyId(input("staging")), environmentPolicyId(input("production")));
 });
 
-test("detects operational retention, GPU, and location drift", () => {
+test("detects operational retention drift and rejects unreviewed GPU drift", () => {
   const stagingPolicy = environmentPolicyId(input("staging"));
   assert.notEqual(
     stagingPolicy,
     environmentPolicyId(input("production", { resultRetentionDays: "91" })),
   );
-  assert.notEqual(
-    stagingPolicy,
-    environmentPolicyId(input("production", { gpuTypeIds: "NVIDIA L40S,NVIDIA L4" })),
-  );
-  assert.notEqual(
-    stagingPolicy,
-    environmentPolicyId(input("production", { dataCenterIds: "EU-RO-1" })),
+  assert.throws(
+    () => environmentPolicyId(input("production", { gpuTypeIds: "NVIDIA L40S,NVIDIA L4" })),
+    /RUNPOD_GPU_IDS/u,
   );
 });
 
