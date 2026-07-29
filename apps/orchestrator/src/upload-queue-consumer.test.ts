@@ -72,7 +72,7 @@ function environment(): UploadQueueEnvironment {
     RECORDINGS: {} as R2Bucket,
     R2_BUCKET_NAME: EVENT.bucket,
     R2_SECRET_ACCESS_KEY: "0000000000000000",
-    RUNPOD_ALLOWED_GPU_IDS: "NVIDIA A40,NVIDIA L4",
+    RUNPOD_ALLOWED_GPU_IDS: "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090",
     RUNPOD_API_KEY: "runpod-api-key-placeholder",
     RUNPOD_ENDPOINT_ID: "endpoint-placeholder",
     RUNPOD_INTERNAL_BASE_URL: "https://orchestrator.example.invalid",

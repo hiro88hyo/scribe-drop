@@ -84,11 +84,13 @@ FAILEDへCAS遷移し、記録済みのexact provider jobだけをcancelする�
 FAILEDをSUBMITTINGへ戻さず、Cronがcancelを再試行する。
 
 単一GPUの供給不足をCIだけの問題として扱わない。
-[ADR 0049](./adr/0049-pin-observed-runpod-capacity.md)に従い、stagingとproductionは
-実APIで保持を確認した同じSecure-only GPU候補を使用し、promotion時に公式REST APIで
-GPU順序の完全一致をread-backする。検証不能なdata center固定は行わない。全候補が
-不足した場合も開始SLO、FAILEDへのCAS、exact cancelを維持し、無期限待機や同じattemptの
-自動再投入は行わない。
+[ADR 0053](./adr/0053-use-mixed-availability-gpus-with-runtime-attestation.md)に従い、
+stagingとproductionは`RTX 5090`、`RTX 4090`の固定順を使用し、promotion時に公式REST
+APIでGPU順序の完全一致と両候補のSecure Cloud提供・利用可能性を確認する。両GPU種別は
+Community Cloudにも提供されるため、各claimではADR 0052の配置attestationによって
+実Workerの`secureCloud=true`を必須とする。検証不能なdata center固定は行わない。
+全候補が不足した場合も開始SLO、FAILEDへのCAS、exact cancelを維持し、無期限待機や
+同じattemptの自動再投入は行わない。
 
 staging release gateでは[ADR 0051](./adr/0051-prewarm-staging-before-job-creation.md)に従い、
 一時的に`workersMin=1`としてcandidate Workerの実割り当てとreadinessを確認してから

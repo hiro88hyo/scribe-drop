@@ -47,10 +47,11 @@ volumeなし、FlashBoot無効のendpoint invariantと、期限切れclaimを拒
 確認した。実ID、image参照、originは追跡対象へ保存していない。
 
 これは初期checkpointの単一GPU構成である。現行releaseでは
-[ADR 0049](./adr/0049-pin-observed-runpod-capacity.md)に従い、stagingとproductionで
-実API検証済みの同じSecure-only GPU候補を使用する。固定CLIがGPUを省略しても一致と
-みなさず、公式REST APIのexact GPU read-backと実staging GPU E2Eを必須とする。
-data centerはproviderがread-backしないため固定せず、特定regionを保証しない。
+[ADR 0053](./adr/0053-use-mixed-availability-gpus-with-runtime-attestation.md)に従い、
+stagingとproductionで`RTX 5090`、`RTX 4090`の固定順を使用する。固定CLIがGPUを省略しても
+一致とみなさず、公式REST APIのexact GPU read-backと実staging GPU E2Eを必須とする。
+各claimでは実WorkerのSecure Cloud配置をR2 capability発行前に検証する。data centerは
+providerがread-backしないため固定せず、特定regionを保証しない。
 
 Phase 5のlocal実装では、5分Cron、RunPod status poll、terminal状態のD1保存、
 manifest/artifact検証、原子的finalize、notification outbox、Discord再送、所有者限定
@@ -150,9 +151,9 @@ end-to-end smokeを実施する。
 8. [ADR 0012](./adr/0012-runpodctl-staging-verification-boundary.md)に従い、
    `runpodctl`で取得できるactive workers 0、max workers 1、GPU 1、Network Volumeなし、
    FlashBoot無効、timeoutを確認する。固定GPU候補は公式REST APIで順序まで完全一致を
-   read-backし、inventoryでSecure-onlyかつ両候補availableを確認する。stock tierは
-   release invariantにしない。
-   candidate imageのGPU実行とworkerのSecure Cloudはstaging E2Eで確認する。
+   read-backし、inventoryで両候補のSecure Cloud提供とavailableを確認する。stock tierは
+   release invariantにしない。candidate imageのGPU実行と実Workerの
+   `secureCloud=true`はstaging E2Eのclaim前attestationで確認する。
    [ADR 0052](./adr/0052-attest-runpod-placement-before-claim.md)に従い、
    `RUNPOD_WORKER_IMAGE`と`RUNPOD_ALLOWED_GPU_IDS`はcandidate manifestとRunPod planから
    Orchestrator設定へ自動生成し、deploy後のWorker bindingでも完全一致を確認する。

@@ -502,7 +502,7 @@ test("classifies active worker update response loss without retrying", async () 
 
 test("sets ordered GPU fallbacks without inventing an unknown data-center policy", async () => {
   const endpointId = "endpoint_test";
-  const gpuTypeIds = ["NVIDIA A40", "NVIDIA L4"];
+  const gpuTypeIds = ["NVIDIA GeForce RTX 5090", "NVIDIA GeForce RTX 4090"];
   const signal = {};
   let bodyCancelled = false;
   await setRunpodEndpointCapacity(

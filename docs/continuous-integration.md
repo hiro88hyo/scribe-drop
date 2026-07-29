@@ -42,7 +42,7 @@ promotion入口とEnvironmentも検証する。
 
 candidate workflowのpreflightはPages権限の確認後、checksum固定`runpodctl`を導入し、
 GPU inventoryが[ADR 0050](./adr/0050-treat-runpod-stock-as-a-signal.md)の
-Secure-only候補属性を満たすことと、REST endpoint/templateのreadinessを確認する。
+Secure Cloud提供候補属性を満たすことと、REST endpoint/templateのreadinessを確認する。
 瞬間的なavailable/stockはGPU処理を行わないcandidate publicationの合否に使わない。
 このgateより前にcandidate artifactのdownload、build、container scanを開始しない。
 

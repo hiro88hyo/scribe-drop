@@ -13,9 +13,11 @@ max workerは1へ復元した。実ID、image参照、originは追跡対象へ�
 
 上記のRTX 4090単一構成は過去checkpointである。release acceptanceで同GPUの供給待ちが
 再現し、productionでも同じ単一構成だったため、現在のrelease policyは
-[ADR 0049](./adr/0049-pin-observed-runpod-capacity.md)に従い、実APIが保持した
-`NVIDIA A40`、`NVIDIA L4`のSecure-only優先順位付きGPU候補へ更新した。stagingの
-実GPU E2Eとexact endpoint read-backを通すまではproduction-readyとしない。
+[ADR 0053](./adr/0053-use-mixed-availability-gpus-with-runtime-attestation.md)に従い、
+`NVIDIA GeForce RTX 5090`、`NVIDIA GeForce RTX 4090`の優先順位付きGPU候補へ更新した。
+両GPU種別はCommunity Cloudにも提供されるため、個々の実Workerが
+`secureCloud=true`であることをclaim前に検証する。stagingの実GPU E2Eとexact endpoint
+read-backを通すまではproduction-readyとしない。
 
 ## Image supply chain
 
@@ -87,8 +89,11 @@ stagingとproductionは別endpoint、別template、別credentialを使用する�
 - active workers 0
 - max workers 1
 - GPU 1
-- 優先順位付きGPU候補は`NVIDIA A40`、`NVIDIA L4`の順で固定し、両方ともSecure Cloud専用
-- 両候補がinventoryでavailable。stock tierはrelease invariantにしない
+- 優先順位付きGPU候補は`NVIDIA GeForce RTX 5090`、
+  `NVIDIA GeForce RTX 4090`の順で固定する
+- 両候補がinventoryでSecure Cloud提供かつavailable。Community Cloudでの提供と
+  stock tierはrelease invariantにしない
+- 各claimで実Workerの`secureCloud=true`をR2 capability発行前に検証する
 - 検証不能なdata center固定を行わず、特定regionで動くとは保証しない
 - Network Volumeなし
 - 永続diskなし
@@ -148,7 +153,7 @@ promotion中のRunPod API一時障害は
 再試行する。template作成とendpoint更新は結果不明時に再送せず、厳格なread-backと
 rollbackを維持する。retry logへAPI応答と実IDを出さない。
 candidate workflowではRESTのtemplate listとendpoint getを高コスト処理前に並列実行し、
-その前に固定`runpodctl`のGPU inventoryでADR 0050のSecure-only候補属性を検証する。
+その前に固定`runpodctl`のGPU inventoryでADR 0053のSecure Cloud提供属性を検証する。
 candidate publicationは瞬間的な在庫を合否にせず、staging/production promotionでは
 両候補availableを必須とする。staging promotionではcandidate固有planを再検証する。
 最初のremote mutationより前に`runpod:preflight:<environment>`を実行し、認証、templateの
@@ -196,7 +201,8 @@ deploy verifierを通す。
 存在する場合だけrollback snapshotへ保持し、省略を`null`や既定値へ変換しない。
 promotion時も`workersMax=0`でdrainしてから同じ更新とread-backを行い、失敗時は旧capacity、
 旧template、旧worker上限へ戻す。さらに実job前後のworkerがcandidate template/imageと
-一致し、Secure-only inventory gateを満たすまでproduction-readyとしない。
+一致し、Secure Cloud提供・promotion availability・実Worker配置attestationを満たすまで
+production-readyとしない。
 
 digest付きimageから`--serverless` templateを新規作成する。Serverless templateは1 endpoint
 にだけ関連付けられ、persistent volumeをサポートしない。初期container diskは30 GiB、

@@ -24,9 +24,11 @@ endpoint invariant確認を完了した。実音声の完了、artifact、通知
 smokeと処理時間の計測は、後述するPhase 5のstaging検証で完了した。
 
 このRTX 4090単一構成は当時のcheckpointであり、release acceptanceで供給待ちが再現した。
-[ADR 0049](./adr/0049-pin-observed-runpod-capacity.md)に従い、現行releaseは
-staging/production共通の実API検証済みSecure-only GPU候補`A40`、`L4`、inventory gate、
-公式REST APIのexact GPU read-backへ更新する。検証不能なdata center固定は行わない。
+[ADR 0053](./adr/0053-use-mixed-availability-gpus-with-runtime-attestation.md)に従い、
+現行releaseはstaging/production共通の固定GPU候補`RTX 5090`、`RTX 4090`、
+Secure-capable inventory gate、公式REST APIのexact GPU read-backへ更新する。
+両GPU種別はCommunity Cloudにも提供されるため、実Workerの`secureCloud=true`をclaim前に
+照合する。検証不能なdata center固定は行わない。
 全候補不足時も10分開始SLO、次の5分Cron境界でのFAILED収束、exact cancelを維持し、
 CIだけでなく実利用時の無期限待機と孤児provider jobを防ぐ。さらに
 [ADR 0051](./adr/0051-prewarm-staging-before-job-creation.md)に従い、staging acceptanceは
@@ -338,10 +340,11 @@ temporary credentialのexact-object multipart/abort成功とaction/object拒否�
 
 - Python 3.12、Pydantic、httpx、固定したRunPod SDK、faster-whisper、CTranslate2を用いる。
 - non-rootのmulti-stage Docker imageを作り、modelとrevisionをbuild時に固定してimageへ含める。base imageはdigestで固定し、runtimeのmodel/code/package downloadをoffline testで拒否する。
-- production endpointはSecure Cloud専用の固定GPU候補`A40`、`L4`を順に使い、Flex、
+- production endpointは固定GPU候補`RTX 5090`、`RTX 4090`を順に使い、Flex、
   active workers 0、max workers 1、GPU 1、Network Volumeなし、永続diskなし、
-  FlashBoot無効とする。両候補がavailableで
-  なければdeployせず、例外は別ADRなしに認めない。
+  FlashBoot無効とする。両候補がSecure Cloudで提供され、availableでなければdeployせず、
+  実Workerが`secureCloud=true`でなければclaimとR2 capability発行を拒否する。
+  例外は別ADRなしに認めない。
 - handlerは入力検証とclaim成功前にmodelのmemory load、source download、R2 URL取得、GPU推論を開始しない。
 - claim/heartbeat originはdeployment allowlistから構成する。受信URLはHTTPS、host、port、userinfo、解決後IPを検証し、localhost、private、link-local、metadata、許可外hostを拒否してredirectを無効化する。
 - sourceをtask固有`/tmp`へstreaming downloadし、途中でも2 GiB上限を強制する。

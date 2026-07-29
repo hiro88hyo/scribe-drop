@@ -18,7 +18,7 @@ import {
 
 const validInput = {
   accountId: "a".repeat(32),
-  gpuTypeIds: "NVIDIA A40,NVIDIA L4",
+  gpuTypeIds: "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090",
   image: "ghcr.io/example/scribe-drop-runpod-worker@sha256:" + "b".repeat(64),
   imageVisibility: "private",
   orchestratorOrigin: "https://orchestrator-staging.example.invalid",
@@ -33,7 +33,10 @@ test("creates a fixed staging plan without persistent storage or secrets", () =>
   assert.equal(plan.template.containerDiskInGb, 30);
   assert.equal(plan.template.volumeInGb, 0);
   assert.deepEqual(plan.template.ports, []);
-  assert.deepEqual(plan.endpoint.gpuTypeIds, ["NVIDIA A40", "NVIDIA L4"]);
+  assert.deepEqual(plan.endpoint.gpuTypeIds, [
+    "NVIDIA GeForce RTX 5090",
+    "NVIDIA GeForce RTX 4090",
+  ]);
   assert.equal(plan.endpoint.workersMin, 0);
   assert.equal(plan.endpoint.workersMax, 1);
   assert.equal(plan.endpoint.gpuCount, 1);
@@ -80,7 +83,7 @@ test("generates minimal template and endpoint CLI arguments", () => {
     "--compute-type",
     "GPU",
     "--gpu-id",
-    "NVIDIA A40",
+    "NVIDIA GeForce RTX 5090",
     "--gpu-count",
     "1",
     "--workers-min",
@@ -316,7 +319,7 @@ test("rejects ambiguous registry and GPU configuration", () => {
     () =>
       createRunpodStagingPlan({
         ...validInput,
-        gpuTypeIds: "NVIDIA L4,NVIDIA L4",
+        gpuTypeIds: "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 5090",
       }),
     /SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS/u,
   );
@@ -330,11 +333,11 @@ test("rejects ambiguous registry and GPU configuration", () => {
   );
 });
 
-test("requires both fixed GPU fallbacks to be available and Secure-only", () => {
+test("requires both fixed GPU fallbacks to have Secure capacity available", () => {
   const plan = createRunpodStagingPlan(validInput);
   const inventory = plan.endpoint.gpuTypeIds.map((gpuId, index) => ({
     available: true,
-    communityCloud: false,
+    communityCloud: true,
     gpuId,
     secureCloud: true,
     stockStatus: index === 0 ? "Low" : "High",
@@ -364,10 +367,10 @@ test("requires both fixed GPU fallbacks to be available and Secure-only", () => 
   assert.throws(
     () =>
       validateRunpodGpuInventory(
-        inventory.map((entry, index) => (index === 1 ? { ...entry, communityCloud: true } : entry)),
+        inventory.map((entry, index) => (index === 1 ? { ...entry, secureCloud: false } : entry)),
         plan,
       ),
-    /restricted to Secure Cloud/u,
+    /does not offer Secure Cloud/u,
   );
   assert.throws(
     () =>

@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-07-29
+- Refined by: ADR 0053の混在提供GPU候補
 
 ## Context
 

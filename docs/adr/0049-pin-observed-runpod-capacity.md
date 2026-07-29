@@ -1,6 +1,6 @@
 # ADR 0049: 実 API で検証したRunPod capacityだけを固定する
 
-- Status: Accepted（stock tier条件はADR 0050で置き換え）
+- Status: Superseded by ADR 0053（stock tier条件はADR 0050で置き換え）
 - Date: 2026-07-29
 - Supersedes: ADR 0048のBlackwell GPU候補とdata center固定
 
@@ -47,3 +47,10 @@ field省略を`null`へ変換してrollbackへ送ったため、GPU検証失敗�
   exact provider cancelを維持し、無期限待機や同じattemptの自動再投入は行わない。
 - providerのschemaと実動作の差は完全には事前推定できない。固定候補以外を拒否し、
   stagingをproduction前のmutation境界として残す。
+
+## Superseded
+
+2026-07-29に`A40`と`L4`のprewarmで割当を得られない状態が継続したため、候補の選定と
+Secure Cloud保証方法を[ADR 0053](./0053-use-mixed-availability-gpus-with-runtime-attestation.md)
+で置き換えた。provider fieldを推定しないこと、順序を含むexact read-back、固定候補以外を
+拒否すること、stagingをproduction前の検証境界とすることは維持する。

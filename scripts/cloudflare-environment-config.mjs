@@ -29,7 +29,7 @@ const retentionDefaults = {
   resultRetentionDays: 90,
   sourceRetentionDays: 7,
 };
-const runpodGpuIdsPlaceholder = "NVIDIA A40,NVIDIA L4";
+const runpodGpuIdsPlaceholder = "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090";
 const runpodWorkerImagePlaceholder =
   "ghcr.io/example/scribe-drop-runpod-worker@sha256:" + "0".repeat(64);
 

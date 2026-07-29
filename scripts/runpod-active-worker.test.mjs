@@ -12,7 +12,7 @@ const endpointId = "endpoint_staging";
 const templateId = "template_candidate";
 const plan = createRunpodStagingPlan({
   accountId: "a".repeat(32),
-  gpuTypeIds: "NVIDIA A40,NVIDIA L4",
+  gpuTypeIds: "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090",
   image: `ghcr.io/example/scribe-drop-runpod-worker@sha256:${"b".repeat(64)}`,
   imageVisibility: "private",
   orchestratorOrigin: "https://orchestrator-staging.example.invalid",

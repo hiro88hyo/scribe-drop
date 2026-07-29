@@ -1370,9 +1370,9 @@ requireText(
 );
 requireText(
   runpodEnvironmentConfigScriptContents,
-  'const fixedGpuTypeIds = ["NVIDIA A40", "NVIDIA L4"];',
+  'const fixedGpuTypeIds = ["NVIDIA GeForce RTX 5090", "NVIDIA GeForce RTX 4090"];',
   "runpod-environment-config.mjs",
-  "staging-proven Secure-only GPU policy",
+  "runtime-attested Secure GPU policy",
 );
 forbidText(
   workflowContents,
@@ -1456,7 +1456,7 @@ requireText(
   runpodReleaseReadinessScriptContents,
   "validateRunpodGpuInventoryPolicyConfiguration(",
   "verify-runpod-release-readiness.mjs",
-  "publication-safe Secure-only candidate inventory policy",
+  "publication-safe Secure-capable candidate inventory policy",
 );
 requireText(
   publicationPreflightJob,

@@ -15,7 +15,7 @@ const idleTimeoutSeconds = 5;
 const maxDurationSeconds = 8 * 60 * 60;
 const maxSourceBytes = 2 * 1024 * 1024 * 1024;
 const minimumAvailableGpuFallbacks = 2;
-const fixedGpuTypeIds = ["NVIDIA A40", "NVIDIA L4"];
+const fixedGpuTypeIds = ["NVIDIA GeForce RTX 5090", "NVIDIA GeForce RTX 4090"];
 
 function requirePattern(value, pattern, name) {
   if (typeof value !== "string" || !pattern.test(value)) {
@@ -425,8 +425,8 @@ function requireGpuInventoryEntries(untrustedInventory, gpuTypeIds) {
       throw new Error("RunPod GPU inventory does not uniquely contain the fixed plan");
     }
     const [entry] = matches;
-    if (entry.secureCloud !== true || entry.communityCloud !== false) {
-      throw new Error("RunPod GPU fallback is not restricted to Secure Cloud");
+    if (entry.secureCloud !== true) {
+      throw new Error("RunPod GPU fallback does not offer Secure Cloud");
     }
     return entry;
   });
