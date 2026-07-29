@@ -47,6 +47,13 @@ available表示の`RTX 3090`もendpoint read-backが指定と一致しなかっ�
 5090または4090の隔離candidate prewarmでReadyを再確認するまでworkflowを再実行せず、
 production promotionをBlockedとする。
 
+2026-07-29の追加確認では、inventoryが5090と4090を`available/Low`と返した状態で
+5090のcandidate imageを使う隔離prewarmを1回だけ実施した。endpoint構成は完全一致し、
+`initializing=1`まで進んだが、8分間machineは割り当てられなかった。録音、job、
+R2 capabilityは作成せず、scale-to-zeroへの復元、隔離endpoint削除、staging active
+Worker 0を独立read-backした。candidate publicationとstaging workflowは開始せず、
+Blockedを維持する。
+
 Phase 5では[ADR 0013](./adr/0013-reconciliation-and-fresh-attempt-retry.md)に従い、
 5分Cron、RunPod status観測、terminal状態の先行保存、manifest/artifact検証、
 原子的finalize、notification outbox、Discord再送、所有者限定artifact URL、
