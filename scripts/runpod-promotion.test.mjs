@@ -189,7 +189,6 @@ test("preflight reports legacy single-GPU capacity without mutating", async () =
     environment: "staging",
     getEndpoint() {
       return Promise.resolve({
-        dataCenterIds: ["EU-RO-1"],
         gpuTypeIds: ["NVIDIA GeForce RTX 4090"],
         id: "endpoint_staging",
       });

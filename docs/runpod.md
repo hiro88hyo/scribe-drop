@@ -191,6 +191,8 @@ deploy verifierを通す。
 その省略を一致とはみなさない。作成時は第1GPU候補でendpointをbootstrapした後、workerが
 0件であることを確認して公式REST APIへ候補配列とdata center allowlistを一度だけ適用し、
 直後のREST read-backが順序を含めてplanと完全一致した場合だけstateを確定する。
+legacy endpointのREST応答が`dataCenterIds`自体を省略する場合は、移行前rollback用の
+provider-defaultとしてだけ保持し、candidate planへの一致とはみなさない。
 promotion時も`workersMax=0`でdrainしてから同じ更新とread-backを行い、失敗時は旧capacity、
 旧template、旧worker上限へ戻す。さらに実job前後のworkerがcandidate template/imageと
 一致し、Secure-only inventory gateを満たすまでproduction-readyとしない。

@@ -38,6 +38,9 @@ D1をcascade削除し、provider queueだけを残す経路も判明した。D1�
 - data centerはEurope内の明示的allowlistをstagingとproductionで一致させ、公式RESTの
   `dataCenterIds` read-backと完全一致させる。追跡外planの値を正とし、CLIが省略した値を
   一致と推定しない。
+- 既存のprovider-default endpointは公式RESTでも`dataCenterIds` fieldを省略する。この
+  省略は移行前capacityのsnapshotに限り`null`へ正規化し、rollback入力として保持する。
+  candidate planへの一致またはpromotion完了の証拠には使用しない。
 - GPUまたはdata centerを変更するときは、ADR 0047と同じく`workersMax=0`でWorkerを
   0件までdrainする。公式RESTへmutationを1回だけ送り、exact read-back後にWorker上限を
   1へ戻す。応答喪失時もmutationを再送しない。後続検証に失敗した場合は、旧template、

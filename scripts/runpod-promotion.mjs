@@ -37,9 +37,11 @@ function providerCapacity(untrustedEndpoint) {
   const endpoint = requireRecord(untrustedEndpoint, "RunPod endpoint capacity response");
   const gpuTypeIds = requireArray(endpoint.gpuTypeIds, "RunPod endpoint GPU types");
   const dataCenterIds =
-    typeof endpoint.dataCenterIds === "string"
-      ? endpoint.dataCenterIds.split(",").map((candidate) => candidate.trim())
-      : endpoint.dataCenterIds;
+    endpoint.dataCenterIds === undefined
+      ? null
+      : typeof endpoint.dataCenterIds === "string"
+        ? endpoint.dataCenterIds.split(",").map((candidate) => candidate.trim())
+        : endpoint.dataCenterIds;
   if (
     gpuTypeIds.length === 0 ||
     gpuTypeIds.length > 3 ||
