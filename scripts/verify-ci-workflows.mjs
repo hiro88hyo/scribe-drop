@@ -1401,9 +1401,9 @@ requireText(
 );
 requireText(
   runpodReleaseReadinessScriptContents,
-  "validateRunpodGpuInventoryConfiguration(",
+  "validateRunpodGpuInventoryPolicyConfiguration(",
   "verify-runpod-release-readiness.mjs",
-  "Secure-only candidate inventory policy",
+  "publication-safe Secure-only candidate inventory policy",
 );
 requireText(
   publicationPreflightJob,

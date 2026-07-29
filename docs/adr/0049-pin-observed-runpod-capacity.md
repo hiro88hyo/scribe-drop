@@ -1,6 +1,6 @@
 # ADR 0049: 実 API で検証したRunPod capacityだけを固定する
 
-- Status: Accepted
+- Status: Accepted（stock tier条件はADR 0050で置き換え）
 - Date: 2026-07-29
 - Supersedes: ADR 0048のBlackwell GPU候補とdata center固定
 
@@ -26,8 +26,8 @@ field省略を`null`へ変換してrollbackへ送ったため、GPU検証失敗�
   GPU変更は変数だけで行わず、新しいADR、回帰test、停止中stagingでのmutation/read-back
   evidenceを必要とする。
 - release前のinventory gateは、両候補が`secureCloud=true`、
-  `communityCloud=false`かつavailable、第1候補がstock HighまたはMediumであることを
-  remote mutation前に検証する。
+  `communityCloud=false`かつavailableであることをremote mutation前に検証する。
+  stock tierの扱いは[ADR 0050](./0050-treat-runpod-stock-as-a-signal.md)を正とする。
 - 検証不能なdata center固定をrelease policyから除外する。新規endpoint作成と通常promotion
   ではdata center fieldを送らず、特定regionで動くとは記録しない。provider read-backに
   fieldが存在する場合だけ既知の旧値としてrollback時に保持する。

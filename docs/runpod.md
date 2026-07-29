@@ -88,7 +88,7 @@ stagingとproductionは別endpoint、別template、別credentialを使用する�
 - max workers 1
 - GPU 1
 - 優先順位付きGPU候補は`NVIDIA A40`、`NVIDIA L4`の順で固定し、両方ともSecure Cloud専用
-- 第1候補はinventoryのstockがHighまたはMediumで、両候補がavailable
+- 両候補がinventoryでavailable。stock tierはrelease invariantにしない
 - 検証不能なdata center固定を行わず、特定regionで動くとは保証しない
 - Network Volumeなし
 - 永続diskなし
@@ -148,8 +148,9 @@ promotion中のRunPod API一時障害は
 再試行する。template作成とendpoint更新は結果不明時に再送せず、厳格なread-backと
 rollbackを維持する。retry logへAPI応答と実IDを出さない。
 candidate workflowではRESTのtemplate listとendpoint getを高コスト処理前に並列実行し、
-その前に固定`runpodctl`のGPU inventoryでADR 0049のSecure-only候補と在庫条件を検証する。
-staging promotionではcandidate固有planを再検証する。
+その前に固定`runpodctl`のGPU inventoryでADR 0050のSecure-only候補属性を検証する。
+candidate publicationは瞬間的な在庫を合否にせず、staging/production promotionでは
+両候補availableを必須とする。staging promotionではcandidate固有planを再検証する。
 最初のremote mutationより前に`runpod:preflight:<environment>`を実行し、認証、templateの
 一意性、endpoint invariant、workerがidleであることをread-onlyで検証する。
 

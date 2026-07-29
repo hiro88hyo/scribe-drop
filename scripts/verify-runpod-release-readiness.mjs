@@ -3,7 +3,7 @@ import path from "node:path";
 import process from "node:process";
 
 import { runRunpodCliWithReadRetry } from "./runpod-cli-retry.mjs";
-import { validateRunpodGpuInventoryConfiguration } from "./runpod-environment-config.mjs";
+import { validateRunpodGpuInventoryPolicyConfiguration } from "./runpod-environment-config.mjs";
 import { verifyRunpodReleaseReadiness } from "./runpod-template-api.mjs";
 
 const environment = process.argv[2];
@@ -57,7 +57,7 @@ try {
       onRetry: cliRetryLogger,
     },
   );
-  validateRunpodGpuInventoryConfiguration(
+  validateRunpodGpuInventoryPolicyConfiguration(
     gpuInventory,
     process.env["SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS"],
     "staging",

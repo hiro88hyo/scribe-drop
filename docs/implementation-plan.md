@@ -332,7 +332,7 @@ temporary credentialのexact-object multipart/abort成功とaction/object拒否�
 - non-rootのmulti-stage Docker imageを作り、modelとrevisionをbuild時に固定してimageへ含める。base imageはdigestで固定し、runtimeのmodel/code/package downloadをoffline testで拒否する。
 - production endpointはSecure Cloud専用の固定GPU候補`A40`、`L4`を順に使い、Flex、
   active workers 0、max workers 1、GPU 1、Network Volumeなし、永続diskなし、
-  FlashBoot無効とする。第1候補のstockがHighまたはMediumかつ両候補がavailableで
+  FlashBoot無効とする。両候補がavailableで
   なければdeployせず、例外は別ADRなしに認めない。
 - handlerは入力検証とclaim成功前にmodelのmemory load、source download、R2 URL取得、GPU推論を開始しない。
 - claim/heartbeat originはdeployment allowlistから構成する。受信URLはHTTPS、host、port、userinfo、解決後IPを検証し、localhost、private、link-local、metadata、許可外hostを拒否してredirectを無効化する。

@@ -51,8 +51,9 @@ R2 CORSは`pnpm cloudflare:config:staging:r2-cors`、R2 lifecycleは
 
 GPU候補は[ADR 0049](./adr/0049-pin-observed-runpod-capacity.md)で実API検証した
 Secure Cloud専用の2件を順序も含めて指定する。stagingとproductionで同じ候補を使用し、
-release preflightで第1候補の在庫と両候補の利用可能性を確認する。promotionは公式REST
-APIの`gpuTypeIds`を完全一致でread-backする。検証不能なdata center変数は持たない。
+candidate publicationはSecure-only属性、promotion preflightはさらに両候補の利用可能性を
+確認する。promotionは公式REST APIの`gpuTypeIds`を完全一致でread-backする。検証不能な
+data center変数は持たない。
 
 実originはCloudflareとgit ignoredの生成設定だけに保持し、追跡対象ファイルやdeployment
 記録へ保存しない。

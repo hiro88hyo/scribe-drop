@@ -200,8 +200,8 @@ terminal status、artifact、cancel request、notification outboxを同じservic
 - 同eventはproductionでも利用者影響として扱う。RunPod `/health`の`inQueue`または
   `throttled`増加と、`ready=0`かつ`running=0`を照合する。endpointのGPU候補とtemplateを
   公式APIでread-backし、固定planと不一致なら新規submissionを増やさない。
-- inventory preflightは固定GPU候補がすべてSecure Cloud専用であること、第1候補のstockが
-  HighまたはMediumであること、両候補がavailableであることを確認する。条件を満たさない
+- inventory preflightは固定GPU候補がすべてSecure Cloud専用かつavailableであることを
+  確認する。stock tierは運用シグナルでありreleaseの合否には使わない。条件を満たさない
   場合はworkflowを開始せず、同じjobやworkflowを繰り返して供給待ちを隠さない。
 - 全候補が一時的に不足しても、利用者画面は`SUBMITTING`を「GPU起動中」と表示し、開始SLO
   超過後は`FAILED`と手動retryを提供する。同じattemptの自動再投入やclaim TTL延長はしない。

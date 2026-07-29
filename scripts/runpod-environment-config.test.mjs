@@ -11,6 +11,7 @@ import {
   validateRunpodEndpointCapacity,
   validateRunpodGpuInventory,
   validateRunpodGpuInventoryConfiguration,
+  validateRunpodGpuInventoryPolicyConfiguration,
   validateRunpodProductionPlan,
   validateRunpodStagingPlan,
 } from "./runpod-environment-config.mjs";
@@ -329,14 +330,14 @@ test("rejects ambiguous registry and GPU configuration", () => {
   );
 });
 
-test("requires at least two available Secure-only GPU fallbacks and a healthy primary", () => {
+test("requires both fixed GPU fallbacks to be available and Secure-only", () => {
   const plan = createRunpodStagingPlan(validInput);
   const inventory = plan.endpoint.gpuTypeIds.map((gpuId, index) => ({
     available: true,
     communityCloud: false,
     gpuId,
     secureCloud: true,
-    stockStatus: index === 0 ? "High" : "Low",
+    stockStatus: index === 0 ? "Low" : "High",
   }));
 
   assert.deepEqual(validateRunpodGpuInventory(inventory, plan), {
@@ -350,6 +351,16 @@ test("requires at least two available Secure-only GPU fallbacks and a healthy pr
       configuredCount: 2,
     },
   );
+  assert.deepEqual(
+    validateRunpodGpuInventoryPolicyConfiguration(
+      inventory.map((entry) => ({ ...entry, available: false })),
+      validInput.gpuTypeIds,
+      "staging",
+    ),
+    {
+      configuredCount: 2,
+    },
+  );
   assert.throws(
     () =>
       validateRunpodGpuInventory(
@@ -357,14 +368,6 @@ test("requires at least two available Secure-only GPU fallbacks and a healthy pr
         plan,
       ),
     /restricted to Secure Cloud/u,
-  );
-  assert.throws(
-    () =>
-      validateRunpodGpuInventory(
-        inventory.map((entry, index) => (index === 0 ? { ...entry, stockStatus: "Low" } : entry)),
-        plan,
-      ),
-    /primary GPU capacity is not release-ready/u,
   );
   assert.throws(
     () =>

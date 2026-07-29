@@ -150,7 +150,8 @@ end-to-end smokeを実施する。
 8. [ADR 0012](./adr/0012-runpodctl-staging-verification-boundary.md)に従い、
    `runpodctl`で取得できるactive workers 0、max workers 1、GPU 1、Network Volumeなし、
    FlashBoot無効、timeoutを確認する。固定GPU候補は公式REST APIで順序まで完全一致を
-   read-backし、inventoryでSecure-only、第1候補High/Medium、両候補availableを確認する。
+   read-backし、inventoryでSecure-onlyかつ両候補availableを確認する。stock tierは
+   release invariantにしない。
    candidate imageのGPU実行とworkerのSecure Cloudはstaging E2Eで確認する。
    APIが保持する終了済みworker recordは
    [ADR 0026](./adr/0026-classify-runpod-terminal-worker-records.md)に従って分類し、

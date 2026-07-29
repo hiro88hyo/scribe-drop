@@ -409,12 +409,11 @@ export function validateRunpodEndpointCapacity(untrustedEndpoint, untrustedPlan)
   };
 }
 
-function validateGpuInventory(untrustedInventory, gpuTypeIds) {
+function requireGpuInventoryEntries(untrustedInventory, gpuTypeIds) {
   if (!Array.isArray(untrustedInventory)) {
     throw new Error("RunPod GPU inventory is missing or invalid");
   }
-  let availableCount = 0;
-  for (const [index, gpuTypeId] of gpuTypeIds.entries()) {
+  return gpuTypeIds.map((gpuTypeId) => {
     const matches = untrustedInventory.filter(
       (entry) =>
         typeof entry === "object" &&
@@ -429,16 +428,20 @@ function validateGpuInventory(untrustedInventory, gpuTypeIds) {
     if (entry.secureCloud !== true || entry.communityCloud !== false) {
       throw new Error("RunPod GPU fallback is not restricted to Secure Cloud");
     }
-    if (entry.available === true) {
-      availableCount += 1;
-    }
-    if (
-      index === 0 &&
-      (entry.available !== true || (entry.stockStatus !== "High" && entry.stockStatus !== "Medium"))
-    ) {
-      throw new Error("RunPod primary GPU capacity is not release-ready");
-    }
-  }
+    return entry;
+  });
+}
+
+function validateGpuInventoryPolicy(untrustedInventory, gpuTypeIds) {
+  requireGpuInventoryEntries(untrustedInventory, gpuTypeIds);
+  return {
+    configuredCount: gpuTypeIds.length,
+  };
+}
+
+function validateGpuInventory(untrustedInventory, gpuTypeIds) {
+  const entries = requireGpuInventoryEntries(untrustedInventory, gpuTypeIds);
+  const availableCount = entries.filter((entry) => entry.available === true).length;
   if (availableCount < minimumAvailableGpuFallbacks) {
     throw new Error("RunPod GPU fallback capacity is not release-ready");
   }
@@ -446,6 +449,16 @@ function validateGpuInventory(untrustedInventory, gpuTypeIds) {
     availableCount,
     configuredCount: gpuTypeIds.length,
   };
+}
+
+export function validateRunpodGpuInventoryPolicyConfiguration(
+  untrustedInventory,
+  untrustedGpuTypeIds,
+  untrustedEnvironment,
+) {
+  const environment = requireEnvironment(untrustedEnvironment);
+  const gpuTypeIds = requireGpuTypeIds(untrustedGpuTypeIds, environment);
+  return validateGpuInventoryPolicy(untrustedInventory, gpuTypeIds);
 }
 
 export function validateRunpodGpuInventoryConfiguration(
