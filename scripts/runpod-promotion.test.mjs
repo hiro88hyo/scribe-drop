@@ -9,8 +9,8 @@ import { createRunpodStagingPlan } from "./runpod-environment-config.mjs";
 
 const plan = createRunpodStagingPlan({
   accountId: "a".repeat(32),
-  dataCenterIds: "EU-RO-1",
-  gpuId: "NVIDIA GeForce RTX 4090",
+  dataCenterIds: "EU-RO-1,EU-CZ-1",
+  gpuTypeIds: "NVIDIA RTX PRO 4500 Blackwell,NVIDIA RTX PRO 4000 Blackwell,NVIDIA L4",
   image: `ghcr.io/example/scribe-drop-runpod-worker@sha256:${"b".repeat(64)}`,
   imageVisibility: "private",
   orchestratorOrigin: "https://orchestrator-staging.example.invalid",
@@ -20,8 +20,28 @@ const plan = createRunpodStagingPlan({
 function withTemplateList(input) {
   return {
     ...input,
+    getEndpoint:
+      input.getEndpoint ??
+      (() =>
+        Promise.resolve({
+          dataCenterIds: plan.endpoint.dataCenterIds,
+          gpuTypeIds: plan.endpoint.gpuTypeIds,
+          id: input.endpointId,
+        })),
     listTemplates:
       input.listTemplates ?? (() => input.runCli(["template", "list", "--type", "user"])),
+    listGpus:
+      input.listGpus ??
+      (() =>
+        Promise.resolve(
+          plan.endpoint.gpuTypeIds.map((gpuId, index) => ({
+            available: true,
+            communityCloud: false,
+            gpuId,
+            secureCloud: true,
+            stockStatus: index === 0 ? "High" : "Low",
+          })),
+        )),
   };
 }
 
@@ -31,10 +51,20 @@ function verifyRunpodPromotionPreflight(input) {
 
 function promoteRunpodCandidate(input) {
   let workersMax = plan.endpoint.workersMax;
+  let dataCenterIds = input.initialDataCenterIds ?? plan.endpoint.dataCenterIds;
+  let gpuTypeIds = input.initialGpuTypeIds ?? plan.endpoint.gpuTypeIds;
   const runCli = input.runCli;
   return promoteRunpodCandidateWithInputs(
     withTemplateList({
       ...input,
+      getEndpoint:
+        input.getEndpoint ??
+        (() =>
+          Promise.resolve({
+            dataCenterIds,
+            gpuTypeIds,
+            id: input.endpointId,
+          })),
       runCli(arguments_) {
         const result = runCli(arguments_);
         if (arguments_[0] === "serverless" && arguments_[1] === "get") {
@@ -51,6 +81,13 @@ function promoteRunpodCandidate(input) {
           await input.setEndpointWorkersMax(request);
         }
         workersMax = request.workersMax;
+      },
+      async setEndpointCapacity(request) {
+        if (input.setEndpointCapacity !== undefined) {
+          await input.setEndpointCapacity(request);
+        }
+        dataCenterIds = request.dataCenterIds;
+        gpuTypeIds = request.gpuTypeIds;
       },
     }),
   );
@@ -108,6 +145,7 @@ test("preflights an idle endpoint without mutating when the candidate template i
   });
 
   assert.deepEqual(result, {
+    capacityUpdateRequired: false,
     candidateTemplateExists: false,
     candidateTemplatePortsRequireNormalization: false,
     endpointId: "endpoint_staging",
@@ -143,6 +181,30 @@ test("preflight validates an existing candidate template before any mutation", a
   });
 
   assert.equal(result.candidateTemplateExists, true);
+});
+
+test("preflight reports legacy single-GPU capacity without mutating", async () => {
+  const result = await verifyRunpodPromotionPreflight({
+    endpointId: "endpoint_staging",
+    environment: "staging",
+    getEndpoint() {
+      return Promise.resolve({
+        dataCenterIds: ["EU-RO-1"],
+        gpuTypeIds: ["NVIDIA GeForce RTX 4090"],
+        id: "endpoint_staging",
+      });
+    },
+    plan,
+    runCli(arguments_) {
+      if (arguments_[0] === "template" && arguments_[1] === "list") return [];
+      if (arguments_[0] === "serverless" && arguments_[1] === "get") {
+        return endpoint("template_old");
+      }
+      throw new Error("Unexpected fake CLI call");
+    },
+  });
+
+  assert.equal(result.capacityUpdateRequired, true);
 });
 
 test("preflight rejects a stale worker when the candidate template is already attached", async () => {
@@ -206,6 +268,43 @@ test("post-lifecycle preflight requires a candidate worker record", async () => 
     },
   ]);
   assert.equal(result.candidateTemplateExists, true);
+});
+
+test("post-lifecycle preflight rejects capacity that does not match the candidate", async () => {
+  await assert.rejects(
+    verifyRunpodPromotionPreflight({
+      endpointId: "endpoint_staging",
+      environment: "staging",
+      getEndpoint() {
+        return Promise.resolve({
+          dataCenterIds: ["EU-RO-1"],
+          gpuTypeIds: ["NVIDIA GeForce RTX 4090"],
+          id: "endpoint_staging",
+        });
+      },
+      plan,
+      requireCandidateWorker: true,
+      runCli(arguments_) {
+        if (arguments_[0] === "template" && arguments_[1] === "list") {
+          return [{ id: "template_new", name: plan.template.name }];
+        }
+        if (arguments_[0] === "template" && arguments_[1] === "get") {
+          return template("template_new");
+        }
+        if (arguments_[0] === "serverless" && arguments_[1] === "get") {
+          return endpoint("template_new", [
+            {
+              desiredStatus: "EXITED",
+              imageName: plan.template.image,
+              templateId: "template_new",
+            },
+          ]);
+        }
+        throw new Error("Unexpected fake CLI call");
+      },
+    }),
+    /capacity evidence does not match/u,
+  );
 });
 
 test("preflight classifies known provider-added ports without mutating", async () => {
@@ -478,6 +577,46 @@ test("does not mutate an endpoint that already uses the candidate template", asy
   assert.equal(result.changed, false);
 });
 
+test("drains and replaces legacy single-GPU capacity even when the template is current", async () => {
+  const workerMaximums = [];
+  const capacityUpdates = [];
+  const result = await promoteRunpodCandidate({
+    endpointId: "endpoint_staging",
+    environment: "staging",
+    initialDataCenterIds: ["EU-RO-1"],
+    initialGpuTypeIds: ["NVIDIA GeForce RTX 4090"],
+    plan,
+    async setEndpointCapacity(request) {
+      capacityUpdates.push({
+        dataCenterIds: request.dataCenterIds,
+        gpuTypeIds: request.gpuTypeIds,
+      });
+    },
+    async setEndpointWorkersMax({ workersMax }) {
+      workerMaximums.push(workersMax);
+    },
+    runCli(arguments_) {
+      if (arguments_[0] === "template" && arguments_[1] === "list") {
+        return [{ id: "template_new", name: plan.template.name }];
+      }
+      if (arguments_[0] === "template") return template("template_new");
+      if (arguments_[0] === "serverless" && arguments_[1] === "get") {
+        return endpoint("template_new");
+      }
+      throw new Error("Unexpected mutating CLI call");
+    },
+  });
+
+  assert.equal(result.changed, true);
+  assert.deepEqual(workerMaximums, [0, 1]);
+  assert.deepEqual(capacityUpdates, [
+    {
+      dataCenterIds: plan.endpoint.dataCenterIds,
+      gpuTypeIds: plan.endpoint.gpuTypeIds,
+    },
+  ]);
+});
+
 test("drains provider-retained terminal worker records before promotion", async () => {
   let currentTemplateId = "template_old";
   const terminalWorkers = () => [
@@ -637,5 +776,58 @@ test("rolls back the template switch when read-back verification fails", async (
       }),
     /does not match/u,
   );
+  assert.equal(currentTemplateId, "template_old");
+});
+
+test("rolls back capacity when a later promotion verification fails", async () => {
+  let currentTemplateId = "template_old";
+  let promotedReadback = false;
+  const capacityUpdates = [];
+  const previousCapacity = {
+    dataCenterIds: ["EU-RO-1"],
+    gpuTypeIds: ["NVIDIA GeForce RTX 4090"],
+  };
+  await assert.rejects(
+    promoteRunpodCandidate({
+      endpointId: "endpoint_staging",
+      environment: "staging",
+      initialDataCenterIds: previousCapacity.dataCenterIds,
+      initialGpuTypeIds: previousCapacity.gpuTypeIds,
+      plan,
+      async setEndpointCapacity(request) {
+        capacityUpdates.push({
+          dataCenterIds: request.dataCenterIds,
+          gpuTypeIds: request.gpuTypeIds,
+        });
+      },
+      runCli(arguments_) {
+        if (arguments_[0] === "template" && arguments_[1] === "list") {
+          return [{ id: "template_new", name: plan.template.name }];
+        }
+        if (arguments_[0] === "template") return template("template_new");
+        if (arguments_[0] === "serverless" && arguments_[1] === "update") {
+          currentTemplateId = arguments_[4];
+          return endpoint(currentTemplateId);
+        }
+        if (arguments_[0] === "serverless" && arguments_[1] === "get") {
+          if (currentTemplateId === "template_new" && !promotedReadback) {
+            promotedReadback = true;
+            return { ...endpoint(currentTemplateId), scalerValue: 2 };
+          }
+          return endpoint(currentTemplateId);
+        }
+        throw new Error("Unexpected fake CLI call");
+      },
+    }),
+    /does not match/u,
+  );
+
+  assert.deepEqual(capacityUpdates, [
+    {
+      dataCenterIds: plan.endpoint.dataCenterIds,
+      gpuTypeIds: plan.endpoint.gpuTypeIds,
+    },
+    previousCapacity,
+  ]);
   assert.equal(currentTemplateId, "template_old");
 });

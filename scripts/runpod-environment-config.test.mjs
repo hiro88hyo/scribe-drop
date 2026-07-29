@@ -8,6 +8,8 @@ import {
   createRunpodTemplateArguments,
   validateCreatedRunpodEndpoint,
   validateCreatedRunpodTemplate,
+  validateRunpodEndpointCapacity,
+  validateRunpodGpuInventory,
   validateRunpodProductionPlan,
   validateRunpodStagingPlan,
 } from "./runpod-environment-config.mjs";
@@ -15,7 +17,7 @@ import {
 const validInput = {
   accountId: "a".repeat(32),
   dataCenterIds: "AP-JP-1,EU-SE-1",
-  gpuId: "NVIDIA L4",
+  gpuTypeIds: "NVIDIA RTX PRO 4500 Blackwell,NVIDIA RTX PRO 4000 Blackwell,NVIDIA L4",
   image: "ghcr.io/example/scribe-drop-runpod-worker@sha256:" + "b".repeat(64),
   imageVisibility: "private",
   orchestratorOrigin: "https://orchestrator-staging.example.invalid",
@@ -31,6 +33,11 @@ test("creates a fixed staging plan without persistent storage or secrets", () =>
   assert.equal(plan.template.volumeInGb, 0);
   assert.deepEqual(plan.template.ports, []);
   assert.deepEqual(plan.endpoint.dataCenterIds, ["AP-JP-1", "EU-SE-1"]);
+  assert.deepEqual(plan.endpoint.gpuTypeIds, [
+    "NVIDIA RTX PRO 4500 Blackwell",
+    "NVIDIA RTX PRO 4000 Blackwell",
+    "NVIDIA L4",
+  ]);
   assert.equal(plan.endpoint.workersMin, 0);
   assert.equal(plan.endpoint.workersMax, 1);
   assert.equal(plan.endpoint.gpuCount, 1);
@@ -77,7 +84,7 @@ test("generates minimal template and endpoint CLI arguments", () => {
     "--compute-type",
     "GPU",
     "--gpu-id",
-    "NVIDIA L4",
+    "NVIDIA RTX PRO 4500 Blackwell",
     "--gpu-count",
     "1",
     "--workers-min",
@@ -137,6 +144,20 @@ test("validates template and endpoint create responses", () => {
 
   assert.equal(templateId, "template_staging");
   assert.equal(endpointId, "endpoint_staging");
+  assert.deepEqual(
+    validateRunpodEndpointCapacity(
+      {
+        id: endpointId,
+        dataCenterIds: ["EU-SE-1", "AP-JP-1"],
+        gpuTypeIds: plan.endpoint.gpuTypeIds,
+      },
+      plan,
+    ),
+    {
+      dataCenterIds: ["AP-JP-1", "EU-SE-1"],
+      gpuTypeIds: plan.endpoint.gpuTypeIds,
+    },
+  );
 });
 
 test("accepts runpodctl read responses that omit create-only placement fields", () => {
@@ -164,7 +185,7 @@ test("accepts runpodctl read responses that omit create-only placement fields", 
   );
 });
 
-test("rejects provider-reported placement fields that contradict the plan", () => {
+test("requires official REST read-back for exact endpoint capacity", () => {
   const plan = createRunpodStagingPlan(validInput);
   const endpoint = {
     id: "endpoint_staging",
@@ -190,12 +211,27 @@ test("rejects provider-reported placement fields that contradict the plan", () =
   );
   assert.throws(
     () =>
-      validateCreatedRunpodEndpoint(
-        { ...endpoint, locations: "US-TX-1" },
+      validateRunpodEndpointCapacity(
+        {
+          id: "endpoint_staging",
+          dataCenterIds: ["AP-JP-1", "EU-SE-1"],
+          gpuTypeIds: ["NVIDIA GeForce RTX 4090"],
+        },
         plan,
-        "template_staging",
       ),
-    /does not match/u,
+    /capacity does not match/u,
+  );
+  assert.equal(
+    validateCreatedRunpodEndpoint(
+      {
+        ...endpoint,
+        gpuTypeIds: ["NVIDIA RTX PRO 4500 Blackwell"],
+        locations: "US-TX-1",
+      },
+      plan,
+      "template_staging",
+    ),
+    "endpoint_staging",
   );
 });
 
@@ -284,6 +320,62 @@ test("rejects ambiguous registry and placement configuration", () => {
         dataCenterIds: "AP-JP-1,AP-JP-1",
       }),
     /SCRIBE_DROP_STAGING_RUNPOD_DATACENTER_IDS/u,
+  );
+  assert.throws(
+    () =>
+      createRunpodStagingPlan({
+        ...validInput,
+        gpuTypeIds: "NVIDIA L4,NVIDIA RTX A5000,NVIDIA GeForce RTX 4090,NVIDIA GeForce RTX 5090",
+      }),
+    /SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS/u,
+  );
+  assert.throws(
+    () =>
+      createRunpodStagingPlan({
+        ...validInput,
+        gpuTypeIds: "NVIDIA L4,NVIDIA L4",
+      }),
+    /SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS/u,
+  );
+});
+
+test("requires at least two available Secure-only GPU fallbacks and a healthy primary", () => {
+  const plan = createRunpodStagingPlan(validInput);
+  const inventory = plan.endpoint.gpuTypeIds.map((gpuId, index) => ({
+    available: true,
+    communityCloud: false,
+    gpuId,
+    secureCloud: true,
+    stockStatus: index === 0 ? "High" : "Low",
+  }));
+
+  assert.deepEqual(validateRunpodGpuInventory(inventory, plan), {
+    availableCount: 3,
+    configuredCount: 3,
+  });
+  assert.throws(
+    () =>
+      validateRunpodGpuInventory(
+        inventory.map((entry, index) => (index === 1 ? { ...entry, communityCloud: true } : entry)),
+        plan,
+      ),
+    /restricted to Secure Cloud/u,
+  );
+  assert.throws(
+    () =>
+      validateRunpodGpuInventory(
+        inventory.map((entry, index) => (index === 0 ? { ...entry, stockStatus: "Low" } : entry)),
+        plan,
+      ),
+    /primary GPU capacity is not release-ready/u,
+  );
+  assert.throws(
+    () =>
+      validateRunpodGpuInventory(
+        inventory.map((entry, index) => (index > 0 ? { ...entry, available: false } : entry)),
+        plan,
+      ),
+    /fallback capacity is not release-ready/u,
   );
 });
 

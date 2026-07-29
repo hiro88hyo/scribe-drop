@@ -8,6 +8,9 @@ function expectedReadResponseKind(arguments_) {
   if (command === "template get" || command === "serverless get") {
     return "record";
   }
+  if (command === "gpu list") {
+    return "array";
+  }
   return undefined;
 }
 
@@ -20,7 +23,10 @@ function isProviderErrorEnvelope(value) {
 }
 
 function matchesExpectedKind(value, expectedKind) {
-  return expectedKind === "record" && isRecord(value);
+  return (
+    (expectedKind === "record" && isRecord(value)) ||
+    (expectedKind === "array" && Array.isArray(value))
+  );
 }
 
 function defaultSleep(milliseconds) {

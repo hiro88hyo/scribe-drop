@@ -47,8 +47,14 @@ R2 CORSは`pnpm cloudflare:config:staging:r2-cors`、R2 lifecycleは
 - `SCRIBE_DROP_STAGING_RUNPOD_IMAGE`: GHCRのdigest付きstaging image参照
 - `SCRIBE_DROP_STAGING_RUNPOD_IMAGE_VISIBILITY`: `private`または`public`
 - `SCRIBE_DROP_STAGING_RUNPOD_REGISTRY_AUTH_ID`: private image用のRunPod registry auth ID
-- `SCRIBE_DROP_STAGING_RUNPOD_GPU_ID`: staging benchmark対象のRunPod GPU ID
-- `SCRIBE_DROP_STAGING_RUNPOD_DATACENTER_IDS`: 許可するRunPod data center IDのリスト
+- `SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS`: 優先順位順のRunPod GPU ID（カンマ区切り、最大3件）
+- `SCRIBE_DROP_STAGING_RUNPOD_DATACENTER_IDS`: 許可するRunPod data center ID（カンマ区切り）
+
+GPU候補は[ADR 0048](./adr/0048-use-secure-only-runpod-gpu-fallbacks.md)で承認した
+Secure Cloud専用の3件を順序も含めて指定する。stagingとproductionで同じ候補とdata
+center allowlistを使用し、release preflightで第1候補の在庫と2候補以上の利用可能性を
+確認する。promotionは公式REST APIの`gpuTypeIds`と`dataCenterIds`を完全一致でread-back
+し、固定`runpodctl`が省略した値から一致を推定しない。
 
 実originはCloudflareとgit ignoredの生成設定だけに保持し、追跡対象ファイルやdeployment
 記録へ保存しない。
@@ -82,7 +88,7 @@ production RunPod planは次を`pnpm runpod:config:production`へ渡して
 - `SCRIBE_DROP_PRODUCTION_RUNPOD_IMAGE`
 - `SCRIBE_DROP_PRODUCTION_RUNPOD_IMAGE_VISIBILITY`
 - `SCRIBE_DROP_PRODUCTION_RUNPOD_REGISTRY_AUTH_ID`
-- `SCRIBE_DROP_PRODUCTION_RUNPOD_GPU_ID`
+- `SCRIBE_DROP_PRODUCTION_RUNPOD_GPU_IDS`
 - `SCRIBE_DROP_PRODUCTION_RUNPOD_DATACENTER_IDS`
 
 imageはrelease commitのpublication evidenceにあるdigest付き参照だけを許可する。

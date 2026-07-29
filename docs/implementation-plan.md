@@ -23,6 +23,12 @@ GPU配置とSecure Cloudを確認し、最小jobがclaim期限切れを安全に
 endpoint invariant確認を完了した。実音声の完了、artifact、通知を含むend-to-end
 smokeと処理時間の計測は、後述するPhase 5のstaging検証で完了した。
 
+このRTX 4090単一構成は当時のcheckpointであり、release acceptanceで供給待ちが再現した。
+[ADR 0048](./adr/0048-use-secure-only-runpod-gpu-fallbacks.md)に従い、現行releaseは
+staging/production共通のSecure-only GPU候補を最大3件、明示的data center allowlist、
+inventory gate、公式REST APIのexact read-backへ更新する。全候補不足時も10分開始SLOと
+exact cancelを維持し、CIだけでなく実利用時の無期限待機と孤児provider jobを防ぐ。
+
 Phase 5では[ADR 0013](./adr/0013-reconciliation-and-fresh-attempt-retry.md)に従い、
 5分Cron、RunPod status観測、terminal状態の先行保存、manifest/artifact検証、
 原子的finalize、notification outbox、Discord再送、所有者限定artifact URL、
@@ -323,7 +329,10 @@ temporary credentialのexact-object multipart/abort成功とaction/object拒否�
 
 - Python 3.12、Pydantic、httpx、固定したRunPod SDK、faster-whisper、CTranslate2を用いる。
 - non-rootのmulti-stage Docker imageを作り、modelとrevisionをbuild時に固定してimageへ含める。base imageはdigestで固定し、runtimeのmodel/code/package downloadをoffline testで拒否する。
-- production endpointはSecure Cloudを優先し、Flex、active workers 0、max workers 1、GPU 1、Network Volumeなし、永続diskなし、FlashBoot無効とする。例外は別ADRなしにdeployしない。
+- production endpointはSecure Cloud専用の優先順位付きGPU候補を最大3件使い、Flex、
+  active workers 0、max workers 1、GPU 1、Network Volumeなし、永続diskなし、
+  FlashBoot無効とする。第1候補のstockがHighまたはMediumかつ2候補以上がavailableで
+  なければdeployせず、例外は別ADRなしに認めない。
 - handlerは入力検証とclaim成功前にmodelのmemory load、source download、R2 URL取得、GPU推論を開始しない。
 - claim/heartbeat originはdeployment allowlistから構成する。受信URLはHTTPS、host、port、userinfo、解決後IPを検証し、localhost、private、link-local、metadata、許可外hostを拒否してredirectを無効化する。
 - sourceをtask固有`/tmp`へstreaming downloadし、途中でも2 GiB上限を強制する。
@@ -476,6 +485,8 @@ owner、CSRF、Origin、JSON content typeを確認した後で即時に通常API
 [ADR 0018](./adr/0018-asynchronous-user-deletion.md)に従ってheartbeatを失効させる。
 Orchestrator Cronは既知RunPod jobをcancelし、最後のR2 capability失効後にD1所有の
 source keyと全attempt prefixを冪等に削除してから、CAS付きでD1親rowを物理削除する。
+cancelは`deletion_not_before`の前後にかかわらずD1削除前に確認し、不確定時はD1を保持して
+bounded backoffする。
 R2/D1/RunPod failureの分類、backoff、partial artifact、foreign owner、重複request、
 unrelated object保護をunit testとWorkers integration testで検証済みである。
 [ADR 0019](./adr/0019-layer-application-and-r2-retention.md)に従うretentionのlocal

@@ -15,7 +15,9 @@ function runpodPlan(environment, overrides = {}) {
   return createPlan({
     accountId: environment === "staging" ? "a".repeat(32) : "b".repeat(32),
     dataCenterIds: overrides.dataCenterIds ?? "EU-RO-1,CA-MTL-1",
-    gpuId: overrides.gpuId ?? "NVIDIA GeForce RTX 4090",
+    gpuTypeIds:
+      overrides.gpuTypeIds ??
+      "NVIDIA RTX PRO 4500 Blackwell,NVIDIA RTX PRO 4000 Blackwell,NVIDIA L4",
     image,
     imageVisibility: "private",
     orchestratorOrigin: `https://orchestrator-${environment}.example.invalid`,
@@ -83,7 +85,7 @@ test("detects operational retention, GPU, and location drift", () => {
   );
   assert.notEqual(
     stagingPolicy,
-    environmentPolicyId(input("production", { gpuId: "NVIDIA L40S" })),
+    environmentPolicyId(input("production", { gpuTypeIds: "NVIDIA L40S,NVIDIA L4" })),
   );
   assert.notEqual(
     stagingPolicy,

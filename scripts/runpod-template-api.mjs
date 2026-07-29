@@ -1,5 +1,7 @@
 const resourceIdPattern = /^[A-Za-z0-9_-]{3,128}$/u;
 const apiKeyPattern = /^\S{16,512}$/u;
+const dataCenterIdPattern = /^[A-Z]{2,3}-[A-Z]{2,3}-[0-9]+$/u;
+const gpuTypeIdPattern = /^[A-Za-z0-9][A-Za-z0-9 ._-]{1,126}[A-Za-z0-9]$/u;
 const runpodTemplateApiOrigin = "https://rest.runpod.io";
 const maximumReadResponseBytes = 2 * 1024 * 1024;
 const readRetryDelaysMilliseconds = [1_000, 2_000];
@@ -246,5 +248,64 @@ export async function setRunpodEndpointWorkersMax(input, dependencies = {}) {
   await cancelResponseBody(response);
   if (!response.ok) {
     throw new Error("RunPod endpoint worker update was rejected");
+  }
+}
+
+export async function setRunpodEndpointCapacity(input, dependencies = {}) {
+  if (!resourceIdPattern.test(String(input.endpointId ?? ""))) {
+    throw new Error("RunPod endpoint ID is missing or invalid");
+  }
+  if (
+    !Array.isArray(input.gpuTypeIds) ||
+    input.gpuTypeIds.length === 0 ||
+    input.gpuTypeIds.length > 3 ||
+    input.gpuTypeIds.some((value) => typeof value !== "string" || !gpuTypeIdPattern.test(value)) ||
+    new Set(input.gpuTypeIds).size !== input.gpuTypeIds.length
+  ) {
+    throw new Error("RunPod endpoint GPU types are missing or invalid");
+  }
+  if (
+    input.dataCenterIds !== null &&
+    (!Array.isArray(input.dataCenterIds) ||
+      input.dataCenterIds.length === 0 ||
+      input.dataCenterIds.some(
+        (value) => typeof value !== "string" || !dataCenterIdPattern.test(value),
+      ) ||
+      new Set(input.dataCenterIds).size !== input.dataCenterIds.length)
+  ) {
+    throw new Error("RunPod endpoint data centers are missing or invalid");
+  }
+  const apiKey = requireApiKey(input.apiKey);
+  const fetchImplementation = dependencies.fetchImplementation ?? globalThis.fetch;
+  const createTimeoutSignal =
+    dependencies.createTimeoutSignal ?? ((milliseconds) => AbortSignal.timeout(milliseconds));
+  const url = new URL(
+    `/v1/endpoints/${encodeURIComponent(input.endpointId)}`,
+    runpodTemplateApiOrigin,
+  );
+  let response;
+  try {
+    response = await fetchImplementation(url, {
+      body: JSON.stringify({
+        dataCenterIds: input.dataCenterIds,
+        gpuTypeIds: input.gpuTypeIds,
+      }),
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      method: "PATCH",
+      redirect: "error",
+      signal: createTimeoutSignal(60_000),
+    });
+  } catch {
+    throw new Error("RunPod endpoint capacity update outcome is unknown");
+  }
+  if (typeof response !== "object" || response === null || typeof response.ok !== "boolean") {
+    throw new Error("RunPod endpoint capacity update returned an invalid response");
+  }
+  await cancelResponseBody(response);
+  if (!response.ok) {
+    throw new Error("RunPod endpoint capacity update was rejected");
   }
 }

@@ -11,6 +11,12 @@ uploadからproduction media probe、GPU推論、manifest-last、Markdown・JSON
 terminal保存、finalize、Discord通知までstaging smokeを完了した。active workerは0、
 max workerは1へ復元した。実ID、image参照、originは追跡対象へ保存しない。
 
+上記のRTX 4090単一構成は過去checkpointである。release acceptanceで同GPUの供給待ちが
+再現し、productionでも同じ単一構成だったため、現在のrelease policyは
+[ADR 0048](./adr/0048-use-secure-only-runpod-gpu-fallbacks.md)のSecure-only優先順位付き
+GPU候補へ更新した。stagingの実GPU E2Eとexact endpoint read-backを通すまでは
+production-readyとしない。
+
 ## Image supply chain
 
 imageは`linux/amd64`専用のmulti-stage buildとする。選択値は
@@ -81,6 +87,9 @@ stagingとproductionは別endpoint、別template、別credentialを使用する�
 - active workers 0
 - max workers 1
 - GPU 1
+- 優先順位付きGPU候補は最大3件で、すべてSecure Cloud専用
+- 第1候補はinventoryのstockがHighまたはMediumで、2候補以上がavailable
+- data centerは環境間で同一の明示的allowlist
 - Network Volumeなし
 - 永続diskなし
 - FlashBoot無効
@@ -110,9 +119,9 @@ RunPod consoleのsecret入力で登録してから`runpodctl registry list`で�
 だけを確認する。publicへ変更する場合はregistry credentialが不要になるが、GitHub上で
 privateへ戻せない操作なので明示的に選択する。
 
-image visibility、candidateの共通digest、environment別registry auth ID、GPU、data centerと
-同じenvironmentのCloudflare値をcredential storeまたはCI evidenceから読み込み、追跡外planを
-生成する。
+image visibility、candidateの共通digest、environment別registry auth ID、優先順位付きGPU
+候補、data centerと同じenvironmentのCloudflare値をcredential storeまたはCI evidence
+から読み込み、追跡外planを生成する。
 
 ```bash
 pnpm run runpod:config:staging
@@ -178,9 +187,12 @@ smokeで一時的にactive workerを1へ上げた場合は、全jobのterminal�
 deploy verifierを通す。
 
 同versionの`serverless get`はcompute type、GPU、data centerを省略することがある。
-scriptはplanから生成する作成引数全体をテストで固定し、取得できるendpoint invariantを
-厳格照合する。省略項目は同一pending stateとtemplateがある場合だけ回復を許可し、初回
-worker起動後にGPUとSecure Cloudを`runpodctl`で確認するまでproduction-readyとしない。
+その省略を一致とはみなさない。作成時は第1GPU候補でendpointをbootstrapした後、workerが
+0件であることを確認して公式REST APIへ候補配列とdata center allowlistを一度だけ適用し、
+直後のREST read-backが順序を含めてplanと完全一致した場合だけstateを確定する。
+promotion時も`workersMax=0`でdrainしてから同じ更新とread-backを行い、失敗時は旧capacity、
+旧template、旧worker上限へ戻す。さらに実job前後のworkerがcandidate template/imageと
+一致し、Secure-only inventory gateを満たすまでproduction-readyとしない。
 
 digest付きimageから`--serverless` templateを新規作成する。Serverless templateは1 endpoint
 にだけ関連付けられ、persistent volumeをサポートしない。初期container diskは30 GiB、

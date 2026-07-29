@@ -1,8 +1,12 @@
+import { isDeepStrictEqual } from "node:util";
+
 import {
   createRunpodTemplateArguments,
   hasOnlyKnownRunpodDefaultPortDrift,
   validateCreatedRunpodEndpoint,
   validateCreatedRunpodTemplate,
+  validateRunpodEndpointCapacity,
+  validateRunpodGpuInventory,
   validateRunpodPlan,
 } from "./runpod-environment-config.mjs";
 
@@ -27,6 +31,64 @@ function requireArray(value, name) {
     throw new Error(`${name} is missing or invalid`);
   }
   return value;
+}
+
+function providerCapacity(untrustedEndpoint) {
+  const endpoint = requireRecord(untrustedEndpoint, "RunPod endpoint capacity response");
+  const gpuTypeIds = requireArray(endpoint.gpuTypeIds, "RunPod endpoint GPU types");
+  const dataCenterIds =
+    typeof endpoint.dataCenterIds === "string"
+      ? endpoint.dataCenterIds.split(",").map((candidate) => candidate.trim())
+      : endpoint.dataCenterIds;
+  if (
+    gpuTypeIds.length === 0 ||
+    gpuTypeIds.length > 3 ||
+    gpuTypeIds.some((value) => typeof value !== "string" || value.length === 0) ||
+    new Set(gpuTypeIds).size !== gpuTypeIds.length ||
+    (dataCenterIds !== null &&
+      (!Array.isArray(dataCenterIds) ||
+        dataCenterIds.some((value) => typeof value !== "string" || value.length === 0) ||
+        new Set(dataCenterIds).size !== dataCenterIds.length))
+  ) {
+    throw new Error("RunPod endpoint capacity response is missing or invalid");
+  }
+  return {
+    dataCenterIds: dataCenterIds === null ? null : [...dataCenterIds].sort(),
+    gpuTypeIds: [...gpuTypeIds],
+  };
+}
+
+async function getCapacityEndpoint(input) {
+  if (typeof input.getEndpoint !== "function") {
+    throw new Error("RunPod endpoint capacity read-back is unavailable");
+  }
+  return input.getEndpoint({ endpointId: input.endpointId });
+}
+
+function capacityMatchesPlan(untrustedEndpoint, plan) {
+  try {
+    validateRunpodEndpointCapacity(untrustedEndpoint, plan);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function setCapacityAndReadBack(input, capacity, plan, validate) {
+  if (typeof input.setEndpointCapacity !== "function") {
+    throw new Error("RunPod endpoint capacity update is unavailable");
+  }
+  try {
+    await input.setEndpointCapacity({
+      endpointId: input.endpointId,
+      ...capacity,
+    });
+  } catch {
+    // Mutation responses are never retried. Exact read-back is authoritative.
+  }
+  const endpoint = await getCapacityEndpoint(input);
+  validate(endpoint, plan);
+  return endpoint;
 }
 
 function requireWorkers(value) {
@@ -134,6 +196,13 @@ async function listTemplates(input) {
   return input.listTemplates();
 }
 
+async function verifyGpuCapacity(input, plan) {
+  if (typeof input.listGpus !== "function") {
+    throw new Error("RunPod GPU inventory is unavailable");
+  }
+  validateRunpodGpuInventory(await input.listGpus(), plan);
+}
+
 async function getOrCreateTemplateResponse(plan, input) {
   const matches = matchingTemplates(
     requireArray(await listTemplates(input), "RunPod template list"),
@@ -153,6 +222,7 @@ async function getOrCreateTemplateResponse(plan, input) {
 
 export async function verifyRunpodPromotionPreflight(input) {
   const plan = validateRunpodPlan(input.plan, input.environment);
+  await verifyGpuCapacity(input, plan);
   const endpointId = requireResourceId(input.endpointId, "RunPod endpoint ID");
   const matches = matchingTemplates(
     requireArray(await listTemplates(input), "RunPod template list"),
@@ -191,6 +261,9 @@ export async function verifyRunpodPromotionPreflight(input) {
     "RunPod current template ID",
   );
   validateIdleEndpoint(endpoint, plan, candidateTemplateId ?? currentTemplateId);
+  const capacityEndpoint = await getCapacityEndpoint(input);
+  providerCapacity(capacityEndpoint);
+  const capacityUpdateRequired = !capacityMatchesPlan(capacityEndpoint, plan);
   const candidateIsAttached =
     candidateTemplateId !== undefined && currentTemplateId === candidateTemplateId;
   if (candidateIsAttached) {
@@ -202,6 +275,9 @@ export async function verifyRunpodPromotionPreflight(input) {
     if (input.requireCandidateWorker === true && workers.length === 0) {
       throw new Error("RunPod candidate worker evidence is missing");
     }
+    if (input.requireCandidateWorker === true && capacityUpdateRequired) {
+      throw new Error("RunPod candidate capacity evidence does not match the fixed plan");
+    }
   } else if (input.requireCandidateWorker === true) {
     throw new Error("RunPod candidate template is not attached");
   }
@@ -209,6 +285,7 @@ export async function verifyRunpodPromotionPreflight(input) {
     throw new Error("RunPod candidate template with default ports is already attached");
   }
   return {
+    capacityUpdateRequired,
     candidateTemplateExists: candidateTemplateId !== undefined,
     candidateTemplatePortsRequireNormalization,
     endpointId,
@@ -217,6 +294,7 @@ export async function verifyRunpodPromotionPreflight(input) {
 
 export async function promoteRunpodCandidate(input) {
   const plan = validateRunpodPlan(input.plan, input.environment);
+  await verifyGpuCapacity(input, plan);
   const endpointId = requireResourceId(input.endpointId, "RunPod endpoint ID");
   const getEndpoint = () =>
     input.runCli(["serverless", "get", endpointId, "--include-template", "--include-workers"]);
@@ -261,10 +339,17 @@ export async function promoteRunpodCandidate(input) {
   }
   const before = getEndpoint();
   const previousTemplateId = validateIdleEndpoint(before, plan, templateId);
+  const capacityBefore = await getCapacityEndpoint(input);
+  const previousCapacity = providerCapacity(capacityBefore);
+  const candidateCapacityIsCurrent = capacityMatchesPlan(capacityBefore, plan);
   const candidateWorkersAreCurrent =
     previousTemplateId === templateId &&
     candidateWorkersMatch(before.workers, templateId, plan.template.image);
-  if (previousTemplateId === templateId && candidateWorkersAreCurrent) {
+  if (
+    previousTemplateId === templateId &&
+    candidateWorkersAreCurrent &&
+    candidateCapacityIsCurrent
+  ) {
     validateCreatedRunpodEndpoint(before, plan, templateId);
     return { changed: false, endpointId, templateId };
   }
@@ -285,7 +370,8 @@ export async function promoteRunpodCandidate(input) {
     const currentWorkersMax = current.workersMax ?? 0;
     if (
       currentTemplateId === previousTemplateId &&
-      currentWorkersMax === plan.endpoint.workersMax
+      currentWorkersMax === plan.endpoint.workersMax &&
+      isDeepStrictEqual(providerCapacity(await getCapacityEndpoint(input)), previousCapacity)
     ) {
       validateIdleEndpoint(current, plan, previousTemplateId);
       return;
@@ -304,6 +390,15 @@ export async function promoteRunpodCandidate(input) {
       );
     } else {
       validateDrainedTemplate(current, currentTemplateId);
+    }
+    const currentCapacity = providerCapacity(await getCapacityEndpoint(input));
+    if (!isDeepStrictEqual(currentCapacity, previousCapacity)) {
+      await setCapacityAndReadBack(input, previousCapacity, plan, (endpoint) => {
+        const restored = providerCapacity(endpoint);
+        if (!isDeepStrictEqual(restored, previousCapacity)) {
+          throw new Error("RunPod endpoint rollback did not restore the previous capacity");
+        }
+      });
     }
     if (currentTemplateId !== previousTemplateId) {
       try {
@@ -326,6 +421,19 @@ export async function promoteRunpodCandidate(input) {
     await setWorkersMaxAndReadBack(input, 0, getEndpoint, (endpoint) => {
       validateDrainedTemplate(endpoint, previousTemplateId);
     });
+    if (!candidateCapacityIsCurrent) {
+      await setCapacityAndReadBack(
+        input,
+        {
+          dataCenterIds: plan.endpoint.dataCenterIds,
+          gpuTypeIds: plan.endpoint.gpuTypeIds,
+        },
+        plan,
+        (endpoint, expectedPlan) => {
+          validateRunpodEndpointCapacity(endpoint, expectedPlan);
+        },
+      );
+    }
     if (previousTemplateId !== templateId) {
       try {
         input.runCli(["serverless", "update", endpointId, "--template-id", templateId]);
@@ -343,6 +451,7 @@ export async function promoteRunpodCandidate(input) {
       validateCreatedRunpodEndpoint(endpoint, plan, templateId);
       validateCandidateWorkers(endpoint.workers, templateId, plan.template.image);
     });
+    validateRunpodEndpointCapacity(await getCapacityEndpoint(input), plan);
   } catch (error) {
     try {
       await restorePreviousEndpoint();

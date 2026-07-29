@@ -81,11 +81,18 @@ RunPodがsubmissionを受理しても10分以内にwinner claimへ進まない�
 FAILEDへCAS遷移し、記録済みのexact provider jobだけをcancelする。cancel不確定時も
 FAILEDをSUBMITTINGへ戻さず、Cronがcancelを再試行する。
 
+単一GPUの供給不足をCIだけの問題として扱わない。
+[ADR 0048](./adr/0048-use-secure-only-runpod-gpu-fallbacks.md)に従い、stagingとproductionは
+同じSecure-only GPU候補とdata center allowlistを使用し、promotion時に公式REST APIで
+完全一致をread-backする。全候補が不足した場合も開始SLO、FAILEDへのCAS、exact cancelを
+維持し、無期限待機や同じattemptの自動再投入は行わない。
+
 ## 削除と保持期限
 
 ユーザー削除はowner/CSRF検証後に`deleted_at`をCAS更新し、通常APIから直ちに隠す。
-heartbeatを失効させ、既知RunPod jobをcancelし、最後のR2 capabilityの最大寿命とgraceが
-過ぎてからD1由来のexact source keyと全attempt prefixだけを削除する。R2不存在は成功扱い、
+heartbeatを失効させ、`deletion_not_before`の前後にかかわらず既知RunPod jobのcancelを
+確認する。最後のR2 capabilityの最大寿命とgraceが過ぎてからD1由来のexact source keyと
+全attempt prefixだけを削除する。R2不存在は成功扱い、
 失敗は上限付きbackoffで再試行し、すべてのobject不存在を確認してからD1親rowをcascade
 物理削除する。長期tombstoneは残さない。詳細は
 [ADR 0018](./adr/0018-asynchronous-user-deletion.md)を参照する。

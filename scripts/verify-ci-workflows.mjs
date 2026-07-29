@@ -1287,6 +1287,24 @@ requireText(
 );
 requireText(
   runpodPromotionScriptContents,
+  "setRunpodEndpointCapacity({",
+  "promote-runpod-candidate.mjs",
+  "exact endpoint capacity promotion",
+);
+requireText(
+  runpodPromotionScriptContents,
+  "getRunpodEndpoint({",
+  "promote-runpod-candidate.mjs",
+  "exact endpoint capacity read-back",
+);
+requireText(
+  runpodPromotionScriptContents,
+  'runCli(["gpu", "list", "--include-unavailable"])',
+  "promote-runpod-candidate.mjs",
+  "dynamic RunPod GPU inventory gate",
+);
+requireText(
+  runpodPromotionScriptContents,
   "listRunpodTemplates(",
   "promote-runpod-candidate.mjs",
   "official REST template-list read",
@@ -1311,6 +1329,18 @@ requireText(
 );
 requireText(
   runpodTemplateApiScriptContents,
+  "dataCenterIds: input.dataCenterIds",
+  "runpod-template-api.mjs",
+  "exact endpoint data center mutation",
+);
+requireText(
+  runpodTemplateApiScriptContents,
+  "gpuTypeIds: input.gpuTypeIds",
+  "runpod-template-api.mjs",
+  "ordered endpoint GPU fallback mutation",
+);
+requireText(
+  runpodTemplateApiScriptContents,
   'query: { includeEndpointBoundTemplates: "true" }',
   "runpod-template-api.mjs",
   "endpoint-bound template enumeration",
@@ -1327,6 +1357,23 @@ requireText(
   "verify-runpod-release-readiness.mjs",
   "official REST readiness boundary",
 );
+for (const [contents, location, prefix] of [
+  [stagingWorkflowContents, "deploy-staging-candidate.yml", "STAGING"],
+  [productionWorkflowContents, "deploy-production-candidate.yml", "PRODUCTION"],
+]) {
+  requireText(
+    contents,
+    `SCRIBE_DROP_${prefix}_RUNPOD_GPU_IDS:`,
+    location,
+    "ordered RunPod GPU fallback variable",
+  );
+  forbidText(
+    contents,
+    `SCRIBE_DROP_${prefix}_RUNPOD_GPU_ID:`,
+    location,
+    "legacy single RunPod GPU variable",
+  );
+}
 
 if (failures.length > 0) {
   console.error("CI workflow verification failed:");

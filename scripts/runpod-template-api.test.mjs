@@ -5,6 +5,7 @@ import {
   clearRunpodTemplatePorts,
   getRunpodEndpoint,
   listRunpodTemplates,
+  setRunpodEndpointCapacity,
   setRunpodEndpointWorkersMax,
   verifyRunpodReleaseReadiness,
 } from "./runpod-template-api.mjs";
@@ -350,6 +351,119 @@ test("classifies endpoint worker update response loss without retrying", async (
     ),
     (error) => {
       assert.equal(error.message, "RunPod endpoint worker update outcome is unknown");
+      return true;
+    },
+  );
+  assert.equal(requests, 1);
+});
+
+test("sets ordered GPU fallbacks and data centers through the fixed REST boundary", async () => {
+  const endpointId = "endpoint_test";
+  const dataCenterIds = ["EU-RO-1", "EU-CZ-1"];
+  const gpuTypeIds = [
+    "NVIDIA RTX PRO 4500 Blackwell",
+    "NVIDIA RTX PRO 4000 Blackwell",
+    "NVIDIA L4",
+  ];
+  const signal = {};
+  let bodyCancelled = false;
+  await setRunpodEndpointCapacity(
+    { apiKey, dataCenterIds, endpointId, gpuTypeIds },
+    {
+      createTimeoutSignal(milliseconds) {
+        assert.equal(milliseconds, 60_000);
+        return signal;
+      },
+      async fetchImplementation(url, init) {
+        assert.equal(url.href, `https://rest.runpod.io/v1/endpoints/${endpointId}`);
+        assert.deepEqual(init, {
+          body: JSON.stringify({ dataCenterIds, gpuTypeIds }),
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          method: "PATCH",
+          redirect: "error",
+          signal,
+        });
+        return {
+          body: {
+            async cancel() {
+              bodyCancelled = true;
+            },
+          },
+          ok: true,
+        };
+      },
+    },
+  );
+  assert.equal(bodyCancelled, true);
+});
+
+test("validates endpoint capacity before sending a mutation", async () => {
+  let requests = 0;
+  for (const input of [
+    {
+      dataCenterIds: ["EU-RO-1"],
+      endpointId: "../unsafe",
+      gpuTypeIds: ["NVIDIA L4"],
+    },
+    {
+      dataCenterIds: ["EU-RO-1"],
+      endpointId: "endpoint_test",
+      gpuTypeIds: [],
+    },
+    {
+      dataCenterIds: ["EU-RO-1"],
+      endpointId: "endpoint_test",
+      gpuTypeIds: ["NVIDIA L4", "NVIDIA L4"],
+    },
+    {
+      dataCenterIds: [],
+      endpointId: "endpoint_test",
+      gpuTypeIds: ["NVIDIA L4"],
+    },
+    {
+      dataCenterIds: ["EU-RO-1", "EU-RO-1"],
+      endpointId: "endpoint_test",
+      gpuTypeIds: ["NVIDIA L4"],
+    },
+  ]) {
+    await assert.rejects(
+      setRunpodEndpointCapacity(
+        { apiKey, ...input },
+        {
+          async fetchImplementation() {
+            requests += 1;
+            return { ok: true };
+          },
+        },
+      ),
+      /missing or invalid/u,
+    );
+  }
+  assert.equal(requests, 0);
+});
+
+test("classifies endpoint capacity response loss without retrying", async () => {
+  let requests = 0;
+  await assert.rejects(
+    setRunpodEndpointCapacity(
+      {
+        apiKey,
+        dataCenterIds: ["EU-RO-1"],
+        endpointId: "endpoint_test",
+        gpuTypeIds: ["NVIDIA L4"],
+      },
+      {
+        async fetchImplementation() {
+          requests += 1;
+          throw new Error("provider response containing sensitive data");
+        },
+      },
+    ),
+    (error) => {
+      assert.equal(error.message, "RunPod endpoint capacity update outcome is unknown");
       return true;
     },
   );

@@ -42,7 +42,7 @@ try {
   const plan = createPlan({
     accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
     dataCenterIds: process.env[`${prefix}_RUNPOD_DATACENTER_IDS`],
-    gpuId: process.env[`${prefix}_RUNPOD_GPU_ID`],
+    gpuTypeIds: process.env[`${prefix}_RUNPOD_GPU_IDS`],
     image: candidateImage ?? configuredImage,
     imageVisibility: process.env[`${prefix}_RUNPOD_IMAGE_VISIBILITY`],
     orchestratorOrigin: process.env[`${prefix}_ORCHESTRATOR_ORIGIN`],

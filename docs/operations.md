@@ -9,6 +9,8 @@ Phase 4ではstaging RunPod endpointを作成し、初回workerのRTX 4090配置
 Ready、期限切れclaim拒否を確認した。Phase 5では5分Cronによるsubmission回収、
 status poll、finalize、cancelとnotification outboxを実装し、stagingの実browser smokeで
 RunPod terminal、manifest、Markdown・JSON・SRT、job完了とDiscord受信まで確認した。
+この単一GPU確認は過去checkpointであり、現行releaseのcapacity運用は
+[ADR 0048](./adr/0048-use-secure-only-runpod-gpu-fallbacks.md)を正とする。
 Phase 7では認証済みPWA offline fallback、明示削除、capability安全期限までの延期、
 source・result・監査情報の独立retention、次回Cronでの物理削除を固定dummy dataだけで
 staging確認し、試験dataをD1/R2から全件清掃した。
@@ -195,14 +197,24 @@ terminal status、artifact、cancel request、notification outboxを同じservic
   `job.submission_cancel_deferred`を記録し、FAILEDを戻さず次回Cronで再試行する。
 - `job.submission_start_slo_exceeded`はGPU供給またはendpoint構成のrelease blockerである。
   claim tokenを15分より延長したり、workflowを自動retryしたりして回避しない。
+- 同eventはproductionでも利用者影響として扱う。RunPod `/health`の`inQueue`または
+  `throttled`増加と、`ready=0`かつ`running=0`を照合する。endpointのGPU候補、data
+  center、templateを公式REST APIでread-backし、固定planと不一致なら新規submissionを
+  増やさない。
+- inventory preflightは固定GPU候補がすべてSecure Cloud専用であること、第1候補のstockが
+  HighまたはMediumであること、2候補以上がavailableであることを確認する。条件を満たさない
+  場合はworkflowを開始せず、同じjobやworkflowを繰り返して供給待ちを隠さない。
+- 全候補が一時的に不足しても、利用者画面は`SUBMITTING`を「GPU起動中」と表示し、開始SLO
+  超過後は`FAILED`と手動retryを提供する。同じattemptの自動再投入やclaim TTL延長はしない。
 - 利用者のretryは`FAILED` jobに新しいgeneration、attempt、token、result prefixを作る。
   RunPod Consoleのprovider-side retryは使わない。
 - cancelはWeb APIが`CANCEL_REQUESTED`を記録し、Cronがwinnerを再確認してRunPod
   `/cancel`を呼ぶ。RunPod API keyをWebへ複製しない。
 - deleteはWeb APIがowner条件とversion CASで即時に論理削除し、heartbeatを失効させる。
-  Cronは既知RunPod jobをcancelし、最後のR2 capabilityの2時間と5分graceが過ぎるまで
-  sourceやresultを消さない。期限後はD1由来のexact source keyと全attempt prefixを
-  繰り返しlist/deleteし、R2不存在を確認してからD1親rowを物理削除する。
+  Cronは`deletion_not_before`の前後にかかわらず既知RunPod jobを先にcancelする。cancelが
+  acceptedまたはnot-foundでなければD1を保持してbackoffする。最後のR2 capabilityの2時間と
+  5分graceが過ぎるまでsourceやresultを消さない。期限後はD1由来のexact source keyと
+  全attempt prefixを繰り返しlist/deleteし、R2不存在を確認してからD1親rowを物理削除する。
 - retentionはterminal jobだけを対象に、source、attempt result、監査情報を7日、90日、
   180日の独立したcutoffで回収する。値はenvironment変数で変更できるが、
   `source <= result <= audit`を崩さない。監査期限はuser deletionと同じ物理削除へ渡す。
@@ -228,6 +240,11 @@ terminal status、artifact、cancel request、notification outboxを同じservic
    行わない。
 5. `job.deletion_completed`後にD1親子rowがなく、対象exact key/prefixがなく、
    unrelated objectが残ることを固定dummy dataだけで確認する。
+
+D1親rowが残っている限り、provider job IDを失うRunPod queue全体の手動purgeは行わない。
+過去の不具合ですでにD1だけが消えた孤児jobを回収する場合に限り、対象environmentで
+`inQueue=1`、`inProgress=0`、active worker 0、active D1 job 0をread-onlyで確認し、
+別reviewを経た一回限りの回復操作として扱う。通常運用や再試行手順には含めない。
 
 R2 lifecycleはapplication cleanupが長期間失敗した場合の最終防衛であり、利用者deleteの
 完了判定には使わない。incomplete multipartはWorkers bindingから列挙できないため、

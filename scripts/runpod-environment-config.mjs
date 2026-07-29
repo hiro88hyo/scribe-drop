@@ -15,6 +15,7 @@ const heartbeatIntervalSeconds = 120;
 const idleTimeoutSeconds = 5;
 const maxDurationSeconds = 8 * 60 * 60;
 const maxSourceBytes = 2 * 1024 * 1024 * 1024;
+const minimumAvailableGpuFallbacks = 2;
 
 function requirePattern(value, pattern, name) {
   if (typeof value !== "string" || !pattern.test(value)) {
@@ -80,6 +81,23 @@ function requireDataCenterIds(value, environment) {
   if (
     values.length === 0 ||
     values.some((candidate) => !dataCenterIdPattern.test(candidate)) ||
+    new Set(values).size !== values.length
+  ) {
+    throw new Error(`${name} is missing or invalid`);
+  }
+  return values.sort();
+}
+
+function requireGpuTypeIds(value, environment) {
+  const name = `${environmentVariablePrefix(environment)}_GPU_IDS`;
+  if (typeof value !== "string") {
+    throw new Error(`${name} is missing or invalid`);
+  }
+  const values = value.split(",").map((candidate) => candidate.trim());
+  if (
+    values.length === 0 ||
+    values.length > 3 ||
+    values.some((candidate) => !gpuIdPattern.test(candidate)) ||
     new Set(values).size !== values.length
   ) {
     throw new Error(`${name} is missing or invalid`);
@@ -152,7 +170,7 @@ export function createRunpodPlan(input, untrustedEnvironment) {
     endpoint: {
       name: `scribe-drop-${environment}`,
       computeType: "GPU",
-      gpuId: requirePattern(input.gpuId, gpuIdPattern, `${prefix}_GPU_ID`),
+      gpuTypeIds: requireGpuTypeIds(input.gpuTypeIds, environment),
       gpuCount: 1,
       dataCenterIds: requireDataCenterIds(input.dataCenterIds, environment),
       workersMin: 0,
@@ -204,12 +222,18 @@ export function validateRunpodPlan(untrustedPlan, expectedEnvironment) {
   ) {
     throw new Error(`RunPod ${planEnvironment} plan contains invalid data center IDs`);
   }
+  if (
+    !Array.isArray(endpoint.gpuTypeIds) ||
+    endpoint.gpuTypeIds.some((value) => typeof value !== "string")
+  ) {
+    throw new Error(`RunPod ${planEnvironment} plan contains invalid GPU type IDs`);
+  }
 
   const expected = createRunpodPlan(
     {
       accountId: sourceHostMatch[1],
       dataCenterIds: endpoint.dataCenterIds.join(","),
-      gpuId: endpoint.gpuId,
+      gpuTypeIds: endpoint.gpuTypeIds.join(","),
       image: template.image,
       imageVisibility: plan.imageVisibility,
       orchestratorOrigin: environment.ORCHESTRATOR_ORIGIN,
@@ -265,7 +289,7 @@ export function createRunpodEndpointArguments(untrustedPlan, templateId) {
     "--compute-type",
     plan.endpoint.computeType,
     "--gpu-id",
-    plan.endpoint.gpuId,
+    plan.endpoint.gpuTypeIds[0],
     "--gpu-count",
     String(plan.endpoint.gpuCount),
     "--workers-min",
@@ -349,27 +373,35 @@ export function validateCreatedRunpodEndpoint(untrustedEndpoint, untrustedPlan, 
   const networkVolumeIds = endpoint.networkVolumeIds ?? [];
   const modelReferences = endpoint.modelReferences ?? [];
   const flashBootDisabled = endpoint.flashBootType === "OFF" || endpoint.flashboot === false;
-  // runpodctl 2.7.2 omits these fields from REST read responses even though it
-  // accepts and sends them during create. Validate them whenever the provider
-  // reports them; the exact create arguments are covered separately.
+  // runpodctl 2.7.2 omits placement fields from read responses and endpoint
+  // bootstrap only sends the first prioritized GPU. Placement is therefore
+  // schema-checked here and matched exactly through the official REST API.
   const computeTypeMatches =
     endpoint.computeType === undefined || endpoint.computeType === plan.endpoint.computeType;
-  const gpuIdsMatch =
-    endpoint.gpuIds === undefined ||
-    (typeof endpoint.gpuIds === "string" && endpoint.gpuIds.length > 0);
-  const locationsMatch =
+  const gpuPlacementIsValid =
+    endpoint.gpuTypeIds === undefined
+      ? endpoint.gpuIds === undefined ||
+        (typeof endpoint.gpuIds === "string" && endpoint.gpuIds.length > 0)
+      : Array.isArray(endpoint.gpuTypeIds) &&
+        endpoint.gpuTypeIds.length > 0 &&
+        endpoint.gpuTypeIds.length <= 3 &&
+        endpoint.gpuTypeIds.every(
+          (value) => typeof value === "string" && gpuIdPattern.test(value),
+        ) &&
+        new Set(endpoint.gpuTypeIds).size === endpoint.gpuTypeIds.length;
+  const locationsAreValid =
     endpoint.locations === undefined ||
-    endpoint.locations === plan.endpoint.dataCenterIds.join(",");
+    (typeof endpoint.locations === "string" && endpoint.locations.length > 0);
   if (
     !resourceIdPattern.test(String(endpoint.id ?? "")) ||
     endpoint.name !== plan.endpoint.name ||
     endpoint.templateId !== templateId ||
     !computeTypeMatches ||
-    !gpuIdsMatch ||
+    !gpuPlacementIsValid ||
     endpoint.gpuCount !== plan.endpoint.gpuCount ||
     (endpoint.workersMin ?? 0) !== plan.endpoint.workersMin ||
     endpoint.workersMax !== plan.endpoint.workersMax ||
-    !locationsMatch ||
+    !locationsAreValid ||
     endpoint.idleTimeout !== plan.endpoint.idleTimeoutSeconds ||
     endpoint.executionTimeoutMs !== plan.endpoint.executionTimeoutSeconds * 1_000 ||
     endpoint.minCudaVersion !== plan.endpoint.minCudaVersion ||
@@ -385,4 +417,66 @@ export function validateCreatedRunpodEndpoint(untrustedEndpoint, untrustedPlan, 
     throw new Error("RunPod endpoint response does not match the fixed plan");
   }
   return endpoint.id;
+}
+
+export function validateRunpodEndpointCapacity(untrustedEndpoint, untrustedPlan) {
+  const plan = validateRunpodPlan(untrustedPlan);
+  const endpoint = requireRecord(untrustedEndpoint, "RunPod endpoint capacity response");
+  const dataCenterIds =
+    typeof endpoint.dataCenterIds === "string"
+      ? endpoint.dataCenterIds.split(",").map((candidate) => candidate.trim())
+      : endpoint.dataCenterIds;
+  if (
+    !resourceIdPattern.test(String(endpoint.id ?? "")) ||
+    !Array.isArray(endpoint.gpuTypeIds) ||
+    !isDeepStrictEqual(endpoint.gpuTypeIds, plan.endpoint.gpuTypeIds) ||
+    !Array.isArray(dataCenterIds) ||
+    !isDeepStrictEqual([...dataCenterIds].sort(), plan.endpoint.dataCenterIds)
+  ) {
+    throw new Error("RunPod endpoint capacity does not match the fixed plan");
+  }
+  return {
+    dataCenterIds: [...dataCenterIds].sort(),
+    gpuTypeIds: [...endpoint.gpuTypeIds],
+  };
+}
+
+export function validateRunpodGpuInventory(untrustedInventory, untrustedPlan) {
+  const plan = validateRunpodPlan(untrustedPlan);
+  if (!Array.isArray(untrustedInventory)) {
+    throw new Error("RunPod GPU inventory is missing or invalid");
+  }
+  let availableCount = 0;
+  for (const [index, gpuTypeId] of plan.endpoint.gpuTypeIds.entries()) {
+    const matches = untrustedInventory.filter(
+      (entry) =>
+        typeof entry === "object" &&
+        entry !== null &&
+        !Array.isArray(entry) &&
+        entry.gpuId === gpuTypeId,
+    );
+    if (matches.length !== 1) {
+      throw new Error("RunPod GPU inventory does not uniquely contain the fixed plan");
+    }
+    const [entry] = matches;
+    if (entry.secureCloud !== true || entry.communityCloud !== false) {
+      throw new Error("RunPod GPU fallback is not restricted to Secure Cloud");
+    }
+    if (entry.available === true) {
+      availableCount += 1;
+    }
+    if (
+      index === 0 &&
+      (entry.available !== true || (entry.stockStatus !== "High" && entry.stockStatus !== "Medium"))
+    ) {
+      throw new Error("RunPod primary GPU capacity is not release-ready");
+    }
+  }
+  if (availableCount < minimumAvailableGpuFallbacks) {
+    throw new Error("RunPod GPU fallback capacity is not release-ready");
+  }
+  return {
+    availableCount,
+    configuredCount: plan.endpoint.gpuTypeIds.length,
+  };
 }

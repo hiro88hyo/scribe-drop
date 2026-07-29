@@ -46,6 +46,11 @@ workerがReadyになるまで起動した。RTX 4090のGPU配置、Secure Cloud�
 volumeなし、FlashBoot無効のendpoint invariantと、期限切れclaimを拒否する最小jobを
 確認した。実ID、image参照、originは追跡対象へ保存していない。
 
+これは初期checkpointの単一GPU構成である。現行releaseでは
+[ADR 0048](./adr/0048-use-secure-only-runpod-gpu-fallbacks.md)に従い、stagingとproductionで
+同じSecure-only GPU候補とdata center allowlistを使用する。固定CLIがGPU/data centerを
+省略しても一致とみなさず、公式REST APIのexact read-backと実staging GPU E2Eを必須とする。
+
 Phase 5のlocal実装では、5分Cron、RunPod status poll、terminal状態のD1保存、
 manifest/artifact検証、原子的finalize、notification outbox、Discord再送、所有者限定
 artifact URL、cancel、新しいattemptによるretryを追加している。stagingへは
@@ -143,7 +148,9 @@ end-to-end smokeを実施する。
 7. staging endpoint IDとRunPod API keyをOrchestrator secretへ登録する。
 8. [ADR 0012](./adr/0012-runpodctl-staging-verification-boundary.md)に従い、
    `runpodctl`で取得できるactive workers 0、max workers 1、GPU 1、Network Volumeなし、
-   FlashBoot無効、timeoutを確認する。GPU配置とSecure Cloudは初回worker起動後に確認する。
+   FlashBoot無効、timeoutを確認する。GPU候補とdata centerは公式REST APIで完全一致を
+   read-backし、inventoryでSecure-only、第1候補High/Medium、2候補以上availableを確認する。
+   candidate imageのGPU実行とworkerのSecure Cloudはstaging E2Eで確認する。
    APIが保持する終了済みworker recordは
    [ADR 0026](./adr/0026-classify-runpod-terminal-worker-records.md)に従って分類し、
    `RUNNING`または未認識recordが0件であることを確認する。

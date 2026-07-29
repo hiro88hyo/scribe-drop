@@ -12,7 +12,9 @@ import { promoteRunpodCandidate, verifyRunpodPromotionPreflight } from "./runpod
 import { validateRunpodPlan } from "./runpod-environment-config.mjs";
 import {
   clearRunpodTemplatePorts,
+  getRunpodEndpoint,
   listRunpodTemplates,
+  setRunpodEndpointCapacity,
   setRunpodEndpointWorkersMax,
 } from "./runpod-template-api.mjs";
 
@@ -60,6 +62,10 @@ function listTemplates() {
       },
     },
   );
+}
+
+function listGpus() {
+  return runCli(["gpu", "list", "--include-unavailable"]);
 }
 
 try {
@@ -120,7 +126,14 @@ try {
     const result = await verifyRunpodPromotionPreflight({
       endpointId,
       environment,
+      getEndpoint({ endpointId: targetEndpointId }) {
+        return getRunpodEndpoint({
+          apiKey: process.env["RUNPOD_API_KEY"],
+          endpointId: targetEndpointId,
+        });
+      },
       listTemplates,
+      listGpus,
       plan,
       requireCandidateWorker,
       runCli,
@@ -132,7 +145,7 @@ try {
           : result.candidateTemplateExists
             ? "candidate template ready"
             : "candidate template pending"
-      }).`,
+      }; ${result.capacityUpdateRequired ? "capacity update pending" : "capacity ready"}).`,
     );
     process.exit(0);
   }
@@ -150,9 +163,24 @@ try {
         workersMax,
       });
     },
+    getEndpoint({ endpointId: targetEndpointId }) {
+      return getRunpodEndpoint({
+        apiKey: process.env["RUNPOD_API_KEY"],
+        endpointId: targetEndpointId,
+      });
+    },
+    setEndpointCapacity({ dataCenterIds, endpointId: targetEndpointId, gpuTypeIds }) {
+      return setRunpodEndpointCapacity({
+        apiKey: process.env["RUNPOD_API_KEY"],
+        dataCenterIds,
+        endpointId: targetEndpointId,
+        gpuTypeIds,
+      });
+    },
     endpointId,
     environment,
     listTemplates,
+    listGpus,
     plan,
     runCli,
   });
