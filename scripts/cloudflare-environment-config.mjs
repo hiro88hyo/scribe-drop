@@ -4,6 +4,9 @@ const serviceTokenCommonNamePattern = /^[A-Za-z0-9._-]{3,512}$/u;
 const accessTeamDomainPattern =
   /^https:\/\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.cloudflareaccess\.com$/u;
 const d1DatabaseIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+const runpodGpuIdPattern = /^[A-Za-z0-9][A-Za-z0-9 ._-]{1,126}[A-Za-z0-9]$/u;
+const runpodImagePattern =
+  /^ghcr\.io\/[a-z0-9]+(?:[._-][a-z0-9]+)*\/scribe-drop-runpod-worker@sha256:[0-9a-f]{64}$/u;
 
 const accountIdPlaceholder = "0".repeat(32);
 const accessAudiencePlaceholder = "replace-with-access-audience";
@@ -26,6 +29,9 @@ const retentionDefaults = {
   resultRetentionDays: 90,
   sourceRetentionDays: 7,
 };
+const runpodGpuIdsPlaceholder = "NVIDIA A40,NVIDIA L4";
+const runpodWorkerImagePlaceholder =
+  "ghcr.io/example/scribe-drop-runpod-worker@sha256:" + "0".repeat(64);
 
 function requireIdentifier(value, pattern, name) {
   if (typeof value !== "string" || !pattern.test(value)) {
@@ -153,9 +159,37 @@ function validatedRetentionIdentifiers(identifiers) {
   return values;
 }
 
+function validatedRunpodPlacementPolicy(identifiers, environment) {
+  const prefix = `SCRIBE_DROP_${environment.toUpperCase()}_RUNPOD`;
+  const image = requireIdentifier(
+    identifiers.runpodWorkerImage,
+    runpodImagePattern,
+    `${prefix}_IMAGE`,
+  );
+  if (typeof identifiers.runpodAllowedGpuTypeIds !== "string") {
+    throw new Error(`${prefix}_GPU_IDS is missing or has an invalid format`);
+  }
+  const gpuTypeIds = identifiers.runpodAllowedGpuTypeIds
+    .split(",")
+    .map((candidate) => candidate.trim());
+  if (
+    gpuTypeIds.length === 0 ||
+    gpuTypeIds.length > 3 ||
+    gpuTypeIds.some((candidate) => !runpodGpuIdPattern.test(candidate)) ||
+    new Set(gpuTypeIds).size !== gpuTypeIds.length
+  ) {
+    throw new Error(`${prefix}_GPU_IDS is missing or has an invalid format`);
+  }
+  return {
+    gpuTypeIds: gpuTypeIds.join(","),
+    image,
+  };
+}
+
 export function renderOrchestratorStagingConfig(template, identifiers) {
   const { accountId, d1DatabaseId } = validatedResourceIdentifiers(identifiers);
   const retention = validatedRetentionIdentifiers(identifiers);
+  const runpodPlacement = validatedRunpodPlacementPolicy(identifiers, "staging");
   const orchestratorOrigin = requireExactHttpsOrigin(
     identifiers.orchestratorOrigin,
     "SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN",
@@ -200,6 +234,18 @@ export function renderOrchestratorStagingConfig(template, identifiers) {
     `RUNPOD_INTERNAL_BASE_URL = "${stagingOrchestratorOriginPlaceholder}"`,
     `RUNPOD_INTERNAL_BASE_URL = "${orchestratorOrigin}"`,
     "orchestrator staging internal origin",
+  );
+  stagingConfig = replaceOnce(
+    stagingConfig,
+    `RUNPOD_ALLOWED_GPU_IDS = "${runpodGpuIdsPlaceholder}"`,
+    `RUNPOD_ALLOWED_GPU_IDS = "${runpodPlacement.gpuTypeIds}"`,
+    "orchestrator staging RunPod GPU policy",
+  );
+  stagingConfig = replaceOnce(
+    stagingConfig,
+    `RUNPOD_WORKER_IMAGE = "${runpodWorkerImagePlaceholder}"`,
+    `RUNPOD_WORKER_IMAGE = "${runpodPlacement.image}"`,
+    "orchestrator staging RunPod worker image",
   );
   stagingConfig = replaceOnce(
     stagingConfig,
@@ -376,6 +422,7 @@ function validatedProductionResourceIdentifiers(identifiers) {
 export function renderOrchestratorProductionConfig(template, identifiers) {
   const { accountId, d1DatabaseId } = validatedProductionResourceIdentifiers(identifiers);
   const retention = validatedRetentionIdentifiers(identifiers);
+  const runpodPlacement = validatedRunpodPlacementPolicy(identifiers, "production");
   const orchestratorOrigin = requireExactHttpsOrigin(
     identifiers.orchestratorOrigin,
     "SCRIBE_DROP_PRODUCTION_ORCHESTRATOR_ORIGIN",
@@ -424,6 +471,18 @@ export function renderOrchestratorProductionConfig(template, identifiers) {
     `RUNPOD_INTERNAL_BASE_URL = "${productionOrchestratorOriginPlaceholder}"`,
     `RUNPOD_INTERNAL_BASE_URL = "${orchestratorOrigin}"`,
     "orchestrator production internal origin",
+  );
+  productionConfig = replaceOnce(
+    productionConfig,
+    `RUNPOD_ALLOWED_GPU_IDS = "${runpodGpuIdsPlaceholder}"`,
+    `RUNPOD_ALLOWED_GPU_IDS = "${runpodPlacement.gpuTypeIds}"`,
+    "orchestrator production RunPod GPU policy",
+  );
+  productionConfig = replaceOnce(
+    productionConfig,
+    `RUNPOD_WORKER_IMAGE = "${runpodWorkerImagePlaceholder}"`,
+    `RUNPOD_WORKER_IMAGE = "${runpodPlacement.image}"`,
+    "orchestrator production RunPod worker image",
   );
   productionConfig = replaceOnce(
     productionConfig,

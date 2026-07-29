@@ -153,6 +153,9 @@ end-to-end smokeを実施する。
    read-backし、inventoryでSecure-onlyかつ両候補availableを確認する。stock tierは
    release invariantにしない。
    candidate imageのGPU実行とworkerのSecure Cloudはstaging E2Eで確認する。
+   [ADR 0052](./adr/0052-attest-runpod-placement-before-claim.md)に従い、
+   `RUNPOD_WORKER_IMAGE`と`RUNPOD_ALLOWED_GPU_IDS`はcandidate manifestとRunPod planから
+   Orchestrator設定へ自動生成し、deploy後のWorker bindingでも完全一致を確認する。
    APIが保持する終了済みworker recordは
    [ADR 0026](./adr/0026-classify-runpod-terminal-worker-records.md)に従って分類し、
    `RUNNING`または未認識recordが0件であることを確認する。
@@ -338,6 +341,8 @@ workerを残したままtemplateだけを切り替えない。worker上限0のex
 rollback可能な手順として実行する。staging acceptanceは実M4A lifecycleの前後に同じ
 read-only preflightを実行し、後段照合が成功するまでevidenceを発行しない。productionも
 全resource deploy後にRunPodを再照合する。
+この照合にはRunPod endpointだけでなく、Orchestratorの`RUNPOD_WORKER_IMAGE`と
+`RUNPOD_ALLOWED_GPU_IDS`が同じ生成済みRunPod planと一致することを含む。
 
 RunPod publication workflowはapplication artifactをcandidateごとに一度だけbuildし、
 Worker imageは新規buildまたはADR 0038の固定digest再利用の一方だけを選ぶ。environment別

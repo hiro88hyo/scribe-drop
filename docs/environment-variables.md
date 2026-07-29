@@ -154,6 +154,8 @@ localでは`apps/orchestrator/.dev.vars.example`を`apps/orchestrator/.dev.vars`
 | `APP_ENV`                   |   no   | 実行環境                          |
 | `WEB_BASE_URL`              |   no   | Access保護済みジョブ詳細URLのbase |
 | `RUNPOD_INTERNAL_BASE_URL`  |   no   | claim、heartbeat内部APIの固定base |
+| `RUNPOD_WORKER_IMAGE`       |   no   | claim前に照合するimmutable image  |
+| `RUNPOD_ALLOWED_GPU_IDS`    |   no   | claim前に照合するGPU候補          |
 | `RUNPOD_ENDPOINT_ID`        |  yes   | 環境別RunPod Serverless endpoint  |
 | `RUNPOD_API_KEY`            |  yes   | RunPod API認証                    |
 | `CLOUDFLARE_ACCOUNT_ID`     |   no   | R2 S3 endpointのaccount           |
@@ -183,6 +185,8 @@ production専用Custom Domainを生成し、staging originを共有しない。
 `R2_SECRET_ACCESS_KEY`はOrchestrator Workerのenvironment別encrypted secretとして登録
 する。R2 keyは対象bucketのobject read/writeだけに限定し、Orchestratorがexact object・
 method・2時間のpresigned URLを発行する用途だけに使う。
+`RUNPOD_WORKER_IMAGE`と`RUNPOD_ALLOWED_GPU_IDS`はdashboardで編集せず、検証済みcandidate
+manifestとRunPod planから追跡外Wrangler設定へ生成し、deploy後のbindingをread-backする。
 productionでは`DISCORD_WEBHOOK_URL`を含む必須5件を
 `pnpm cloudflare:secrets:verify:production:orchestrator`で名前だけ検証する。CLIのJSON
 応答にvalue fieldが含まれる場合はfail closedとし、値をlogへ出さない。

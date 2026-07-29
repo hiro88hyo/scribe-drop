@@ -32,6 +32,9 @@ CIだけでなく実利用時の無期限待機と孤児provider jobを防ぐ。
 [ADR 0051](./adr/0051-prewarm-staging-before-job-creation.md)に従い、staging acceptanceは
 一時的なActive workerがcandidate imageでreadyになった後にだけsynthetic jobを作成し、
 成功・失敗後は`workersMin=0`をexact read-backする。
+さらに[ADR 0052](./adr/0052-attest-runpod-placement-before-claim.md)に従い、claim前に
+job status由来のworker IDとPod詳細を照合し、対象endpoint、RUNNING、candidate image、
+許可GPU、Secure Cloudの完全一致が取れないWorkerへR2 capabilityを発行しない。
 
 Phase 5では[ADR 0013](./adr/0013-reconciliation-and-fresh-attempt-retry.md)に従い、
 5分Cron、RunPod status観測、terminal状態の先行保存、manifest/artifact検証、
@@ -320,6 +323,8 @@ temporary credentialのexact-object multipart/abort成功とaction/object拒否�
 - claim API を実装する。
   - token hashの定時間比較、expiry、consumptionを確認
   - current active attempt、generation、cancel状態を確認
+  - job status由来のworker IDとPod詳細からendpoint、RUNNING、immutable image、許可GPU、
+    Secure Cloudをwinner CAS前に照合し、timeout・不正応答・不一致をfail closedにする
   - winner未確定時だけ原子的にRunPod job IDを設定
   - claim成功時にtokenを消費し、同じwinnerからの再送を含む全再利用を拒否
   - 別job ID、loser、古いgenerationを拒否
@@ -353,6 +358,8 @@ temporary credentialのexact-object multipart/abort成功とaction/object拒否�
 
 - 二つの RunPod job が同じ attempt を claim しても winner は一つだけである。
 - claim tokenの再利用を同じwinnerの完全一致再送も含めて拒否し、別attempt、別RunPod job ID、期限切れ、cancel済みattemptも拒否する。
+- Community Cloud、別GPU・image・endpoint、停止Pod、worker ID欠落、status/Pod API障害では
+  winner CAS、heartbeat生成、R2 capability発行を行わない。
 - claim response喪失時は古いwinnerへcapabilityを再発行せず、新しいgenerationだけが回復処理を続行できる。
 - `/run` contractはpresigned URL、R2 key、PII、options、webhook、未知fieldを拒否する。
 - loserとstale attemptはURL発行、download、model load、Whisper、artifact PUTを呼ばない。

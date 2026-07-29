@@ -17,6 +17,7 @@ import {
   renderR2LifecycleProductionConfig,
   renderWebProductionConfig,
 } from "./cloudflare-environment-config.mjs";
+import { verifyReleaseCandidate } from "./release-candidate.mjs";
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(scriptDirectory, "..");
@@ -33,6 +34,17 @@ const allowedTargets = new Set(["all", "orchestrator", "r2-cors", "r2-lifecycle"
 if (target === undefined || !allowedTargets.has(target)) {
   throw new Error("Expected config target: all, orchestrator, r2-cors, r2-lifecycle, or web");
 }
+const requiresOrchestratorPolicy = target === "all" || target === "orchestrator";
+const candidateDirectory = process.env.RELEASE_CANDIDATE_DIRECTORY;
+const runpodWorkerImage = requiresOrchestratorPolicy
+  ? candidateDirectory === undefined
+    ? process.env.SCRIBE_DROP_PRODUCTION_RUNPOD_IMAGE
+    : verifyReleaseCandidate({
+        candidateDirectory: path.resolve(candidateDirectory),
+        expectedCommitSha: process.env.EXPECTED_COMMIT_SHA,
+        expectedReleaseVersion: process.env.EXPECTED_RELEASE_VERSION,
+      }).runpodWorker.image
+  : undefined;
 const identifiers = {
   accessAudience: process.env.SCRIBE_DROP_PRODUCTION_ACCESS_AUDIENCE,
   accessTeamDomain: process.env.SCRIBE_DROP_PRODUCTION_ACCESS_TEAM_DOMAIN,
@@ -43,6 +55,8 @@ const identifiers = {
   multipartRetentionHours: process.env.MULTIPART_RETENTION_HOURS,
   orchestratorOrigin: process.env.SCRIBE_DROP_PRODUCTION_ORCHESTRATOR_ORIGIN,
   resultRetentionDays: process.env.RESULT_RETENTION_DAYS,
+  runpodAllowedGpuTypeIds: process.env.SCRIBE_DROP_PRODUCTION_RUNPOD_GPU_IDS,
+  runpodWorkerImage,
   sourceRetentionDays: process.env.SOURCE_RETENTION_DAYS,
   webOrigin: process.env.SCRIBE_DROP_PRODUCTION_WEB_ORIGIN,
 };

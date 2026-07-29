@@ -14,6 +14,23 @@ const orchestratorConfigSchema = z
   .strict();
 
 const runpodEndpointIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,200}$/u);
+const runpodGpuTypeIdSchema = z
+  .string()
+  .min(3)
+  .max(128)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9 ._-]*[A-Za-z0-9]$/u);
+const runpodGpuTypeIdsSchema = z
+  .string()
+  .transform((value) => value.split(",").map((candidate) => candidate.trim()))
+  .pipe(z.array(runpodGpuTypeIdSchema).min(1).max(3))
+  .refine((values) => new Set(values).size === values.length, {
+    message: "RunPod GPU type IDs must be unique",
+  });
+const runpodWorkerImageSchema = z
+  .string()
+  .regex(
+    /^ghcr\.io\/[a-z0-9]+(?:[._-][a-z0-9]+)*\/scribe-drop-runpod-worker@sha256:[0-9a-f]{64}$/u,
+  );
 const secretValueSchema = z.string().min(16).max(512);
 const retentionIntegerSchema = z
   .string()
@@ -53,9 +70,11 @@ const runpodConfigSchema = orchestratorConfigSchema
   .extend({
     r2AccessKeyId: secretValueSchema,
     r2SecretAccessKey: secretValueSchema,
+    runpodAllowedGpuTypeIds: runpodGpuTypeIdsSchema,
     runpodApiKey: secretValueSchema,
     runpodEndpointId: runpodEndpointIdSchema,
     runpodInternalBaseUrl: z.url(),
+    runpodWorkerImage: runpodWorkerImageSchema,
   })
   .strict()
   .refine(({ runpodInternalBaseUrl }) => isAllowedInternalBaseUrl(runpodInternalBaseUrl), {
@@ -137,9 +156,11 @@ export interface OrchestratorConfigEnvironment {
 export interface RunpodConfigEnvironment extends OrchestratorConfigEnvironment {
   readonly R2_ACCESS_KEY_ID: string;
   readonly R2_SECRET_ACCESS_KEY: string;
+  readonly RUNPOD_ALLOWED_GPU_IDS: string;
   readonly RUNPOD_API_KEY: string;
   readonly RUNPOD_ENDPOINT_ID: string;
   readonly RUNPOD_INTERNAL_BASE_URL: string;
+  readonly RUNPOD_WORKER_IMAGE: string;
 }
 
 export interface NotificationConfigEnvironment {
@@ -164,9 +185,11 @@ export interface OrchestratorConfig {
 export interface RunpodConfig extends OrchestratorConfig {
   readonly r2AccessKeyId: string;
   readonly r2SecretAccessKey: string;
+  readonly runpodAllowedGpuTypeIds: readonly string[];
   readonly runpodApiKey: string;
   readonly runpodEndpointId: string;
   readonly runpodInternalBaseUrl: string;
+  readonly runpodWorkerImage: string;
 }
 
 export interface NotificationConfig {
@@ -199,9 +222,11 @@ export function parseRunpodConfig(environment: RunpodConfigEnvironment): RunpodC
     r2AccessKeyId: environment.R2_ACCESS_KEY_ID,
     r2BucketName: environment.R2_BUCKET_NAME,
     r2SecretAccessKey: environment.R2_SECRET_ACCESS_KEY,
+    runpodAllowedGpuTypeIds: environment.RUNPOD_ALLOWED_GPU_IDS,
     runpodApiKey: environment.RUNPOD_API_KEY,
     runpodEndpointId: environment.RUNPOD_ENDPOINT_ID,
     runpodInternalBaseUrl: environment.RUNPOD_INTERNAL_BASE_URL,
+    runpodWorkerImage: environment.RUNPOD_WORKER_IMAGE,
   });
   return result.success ? result.data : undefined;
 }

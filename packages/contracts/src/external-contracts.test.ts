@@ -6,6 +6,7 @@ import {
   resultManifestSchema,
   runpodClaimRequestSchema,
   runpodClaimResponseSchema,
+  runpodPlacementStatusResponseSchema,
   runpodRunRequestSchema,
   runpodStatusResponseSchema,
   type RunpodRunRequest,
@@ -231,6 +232,30 @@ describe("RunPod schemas", () => {
       expect("error" in result.data).toBe(false);
       expect("input" in result.data).toBe(false);
       expect("workerId" in result.data).toBe(false);
+    }
+  });
+
+  it("retains only the provider worker binding needed for placement attestation", () => {
+    const result = runpodPlacementStatusResponseSchema.safeParse({
+      id: "runpod-job-id",
+      input: {
+        attemptId: ATTEMPT_ID,
+        claimToken: "A".repeat(43),
+        jobId: JOB_ID,
+        schemaVersion: 1,
+      },
+      status: "IN_PROGRESS",
+      workerId: "worker-id",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({
+        id: "runpod-job-id",
+        status: "IN_PROGRESS",
+        workerId: "worker-id",
+      });
+      expect("input" in result.data).toBe(false);
     }
   });
 });

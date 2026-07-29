@@ -24,6 +24,7 @@ try {
       "deploy",
       environment === "staging" ? "wrangler.toml" : "wrangler-production.toml",
     ),
+    runpodPlanPath: path.resolve(".runpod", "deploy", `${environment}-plan.json`),
   });
   console.log(`Verified Cloudflare ${environment} resource read-back.`);
 } catch (error) {

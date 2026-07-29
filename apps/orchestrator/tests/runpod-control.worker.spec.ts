@@ -1,5 +1,5 @@
 import { applyD1Migrations } from "cloudflare:test";
-import { env, exports } from "cloudflare:workers";
+import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { runpodClaimResponseSchema } from "@scribe-drop/contracts";
@@ -7,6 +7,7 @@ import { createStructuredLogger } from "@scribe-drop/observability";
 import { DeterministicFaultPlan, inspectStructuredLogs } from "@scribe-drop/test-support";
 
 import { hashCapabilityToken } from "../src/capability-token.js";
+import { handleRunpodHttpRequest } from "../src/runpod-http-handler.js";
 import {
   createD1RunpodControlRepository,
   type RunpodControlRepository,
@@ -625,8 +626,16 @@ describe("D1 RunPod control repository", () => {
       jobId: JOB_ID,
       runpodJobId: "winner-job-id",
     };
+    const handleControlRequest = (request: Request): Promise<Response> =>
+      handleRunpodHttpRequest(request, env, {
+        claimDependencies: {
+          createRunpodPlacementVerifier: () => ({
+            verify: () => Promise.resolve({ outcome: "verified" }),
+          }),
+        },
+      });
 
-    const claimResponse = await exports.default.fetch(
+    const claimResponse = await handleControlRequest(
       new Request("https://orchestrator.example.invalid/internal/runpod/claim", {
         body: JSON.stringify(claimBody),
         headers: { "content-type": "application/json" },
@@ -646,7 +655,7 @@ describe("D1 RunPod control repository", () => {
       throw new Error("Expected a granted claim");
     }
 
-    const replayResponse = await exports.default.fetch(
+    const replayResponse = await handleControlRequest(
       new Request("https://orchestrator.example.invalid/internal/runpod/claim", {
         body: JSON.stringify(claimBody),
         headers: { "content-type": "application/json" },
@@ -655,7 +664,7 @@ describe("D1 RunPod control repository", () => {
     );
     expect(replayResponse.status).toBe(403);
 
-    const loserResponse = await exports.default.fetch(
+    const loserResponse = await handleControlRequest(
       new Request("https://orchestrator.example.invalid/internal/runpod/claim", {
         body: JSON.stringify({
           ...claimBody,
@@ -668,7 +677,7 @@ describe("D1 RunPod control repository", () => {
     expect(loserResponse.status).toBe(200);
     await expect(loserResponse.json()).resolves.toEqual({ deduplicated: true });
 
-    const heartbeatResponse = await exports.default.fetch(
+    const heartbeatResponse = await handleControlRequest(
       new Request("https://orchestrator.example.invalid/internal/runpod/heartbeat", {
         body: JSON.stringify({
           attemptId: ATTEMPT_ID,

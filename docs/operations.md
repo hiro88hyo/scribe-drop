@@ -204,6 +204,10 @@ timeoutでは「10分ちょうどでprovider queueから消える」と扱わな
 - 同eventはproductionでも利用者影響として扱う。RunPod `/health`の`inQueue`または
   `throttled`増加と、`ready=0`かつ`running=0`を照合する。endpointのGPU候補とtemplateを
   公式APIでread-backし、固定planと不一致なら新規submissionを増やさない。
+- claimはjob statusのworker IDとPod詳細を使い、endpoint、RUNNING、candidate image、
+  許可GPU、Secure Cloudをwinner CAS前に照合する。照合不能または不一致は通常の
+  `CLAIM_REJECTED`としてfail closedにし、R2 URLを発行しない。provider body、worker ID、
+  Pod IDをlogへ追加して調査しない。RunPod planとCloudflare bindingのread-backを先に確認する。
 - inventory preflightは固定GPU候補がすべてSecure Cloud専用かつavailableであることを
   確認する。stock tierは運用シグナルでありreleaseの合否には使わない。条件を満たさない
   場合はworkflowを開始せず、同じjobやworkflowを繰り返して供給待ちを隠さない。

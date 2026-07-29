@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { hashCapabilityToken } from "./capability-token.js";
 import type { R2CapabilityIssuer } from "./r2-capability-issuer.js";
+import type { RunpodPlacementVerifier } from "./runpod-placement-verifier.js";
 import {
   claimRunpodExecution,
   recordRunpodHeartbeat,
@@ -16,6 +17,7 @@ const ATTEMPT_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAW";
 const EVENT_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAX";
 const CLAIM_TOKEN = "c".repeat(43);
 const HEARTBEAT_TOKEN = "h".repeat(43);
+const WORKER_IMAGE = "ghcr.io/example/scribe-drop-runpod-worker@sha256:" + "a".repeat(64);
 
 function logger(): StructuredLogger {
   return createStructuredLogger({
@@ -31,7 +33,11 @@ function environment(): RunpodClaimEnvironment {
     CLOUDFLARE_ACCOUNT_ID: "0".repeat(32),
     R2_ACCESS_KEY_ID: "r2-access-key-placeholder",
     R2_SECRET_ACCESS_KEY: "0000000000000000",
+    RUNPOD_ALLOWED_GPU_IDS: "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090",
+    RUNPOD_API_KEY: "runpod-api-key-placeholder",
+    RUNPOD_ENDPOINT_ID: "endpoint-placeholder",
     RUNPOD_INTERNAL_BASE_URL: "https://orchestrator.example.invalid",
+    RUNPOD_WORKER_IMAGE: WORKER_IMAGE,
     SCRIBE_DROP_DB: {} as D1Database,
   };
 }
@@ -99,10 +105,22 @@ function issuer(): R2CapabilityIssuer {
   };
 }
 
+function placementVerifier(
+  outcome: "rejected" | "unavailable" | "verified" = "verified",
+): RunpodPlacementVerifier {
+  return {
+    verify: () => Promise.resolve({ outcome }),
+  };
+}
+
 describe("RunPod claim service", () => {
-  it("atomically selects a winner before issuing R2 and heartbeat capabilities", async () => {
+  it("verifies placement before atomically selecting a winner and issuing capabilities", async () => {
     const context = await claimContext();
     const order: string[] = [];
+    const verify = vi.fn<RunpodPlacementVerifier["verify"]>(() => {
+      order.push("attest");
+      return Promise.resolve({ outcome: "verified" });
+    });
     const claimWinner = vi.fn<RunpodControlRepository["claimWinner"]>(() => {
       order.push("claim");
       return Promise.resolve(true);
@@ -129,6 +147,7 @@ describe("RunPod claim service", () => {
       environment(),
       {
         createEventId: () => EVENT_ID,
+        createRunpodPlacementVerifier: () => ({ verify }),
         createR2CapabilityIssuer: () => capabilityIssuer,
         createRepository: () =>
           fakeRepository({
@@ -144,7 +163,7 @@ describe("RunPod claim service", () => {
     if (result.kind !== "granted") {
       throw new Error("Expected a granted claim");
     }
-    expect(order).toEqual(["claim", "issue"]);
+    expect(order).toEqual(["attest", "claim", "issue"]);
     expect(result.response).toMatchObject({
       expiresAt: "2026-07-25T02:00:00.000Z",
       granted: true,
@@ -159,6 +178,40 @@ describe("RunPod claim service", () => {
     expect(result.response.heartbeat.token).toMatch(/^[A-Za-z0-9_-]{43}$/u);
     expect(JSON.stringify(result)).not.toContain(CLAIM_TOKEN);
   });
+
+  it.each(["rejected", "unavailable"] as const)(
+    "rejects %s placement before winner CAS and capability issuance",
+    async (outcome) => {
+      const context = await claimContext();
+      const claimWinner = vi.fn<RunpodControlRepository["claimWinner"]>();
+      const issue = vi.fn<R2CapabilityIssuer["issue"]>();
+
+      const result = await claimRunpodExecution(
+        {
+          attemptId: ATTEMPT_ID,
+          claimToken: CLAIM_TOKEN,
+          jobId: JOB_ID,
+          runpodJobId: "runpod-job-id",
+        },
+        environment(),
+        {
+          createR2CapabilityIssuer: () => ({ issue }),
+          createRepository: () =>
+            fakeRepository({
+              claimWinner,
+              findClaimContext: () => Promise.resolve(context),
+            }),
+          createRunpodPlacementVerifier: () => placementVerifier(outcome),
+          logger: logger(),
+          now: () => NOW,
+        },
+      );
+
+      expect(result).toEqual({ kind: "rejected" });
+      expect(claimWinner).not.toHaveBeenCalled();
+      expect(issue).not.toHaveBeenCalled();
+    },
+  );
 
   it("rejects same-winner replay without reissuing capabilities", async () => {
     const context = await claimContext({

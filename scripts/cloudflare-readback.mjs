@@ -4,6 +4,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
+import { validateRunpodPlan } from "./runpod-environment-config.mjs";
+
 function countOccurrences(value, needle) {
   let count = 0;
   let offset = 0;
@@ -375,6 +377,10 @@ export async function runCloudflareReadback(input) {
     ]);
   }
   const environmentPrefix = `SCRIBE_DROP_${input.environment.toUpperCase()}`;
+  const runpodPlan = validateRunpodPlan(
+    JSON.parse(readFileSync(input.runpodPlanPath, "utf8")),
+    input.environment,
+  );
   const retentionValue = (name, fallback) => {
     const value = process.env[name];
     return value === undefined || value === "" ? fallback : value;
@@ -409,6 +415,10 @@ export async function runCloudflareReadback(input) {
       },
     ],
     ["RUNPOD_API_KEY", { type: "secret_text" }],
+    [
+      "RUNPOD_ALLOWED_GPU_IDS",
+      { text: runpodPlan.endpoint.gpuTypeIds.join(","), type: "plain_text" },
+    ],
     ["RUNPOD_ENDPOINT_ID", { type: "secret_text" }],
     [
       "RUNPOD_INTERNAL_BASE_URL",
@@ -417,6 +427,7 @@ export async function runCloudflareReadback(input) {
         type: "plain_text",
       },
     ],
+    ["RUNPOD_WORKER_IMAGE", { text: runpodPlan.template.image, type: "plain_text" }],
     ["SCRIBE_DROP_DB", { databaseId: input.d1DatabaseId, type: "d1" }],
     [
       "SOURCE_RETENTION_DAYS",

@@ -209,6 +209,14 @@ export const runpodStatusResponseSchema = runpodStatusWireResponseSchema.transfo
   },
 );
 
+export const runpodPlacementStatusResponseSchema = runpodStatusWireResponseSchema.transform(
+  ({ id, status, workerId }) => ({
+    id,
+    status,
+    workerId,
+  }),
+);
+
 export type RunpodWorkerInput = z.infer<typeof runpodWorkerInputSchema>;
 export type RunpodRunRequest = z.infer<typeof runpodRunRequestSchema>;
 export type RunpodClaimRequest = z.infer<typeof runpodClaimRequestSchema>;
@@ -217,5 +225,6 @@ export type RunpodHeartbeatRequest = z.infer<typeof runpodHeartbeatRequestSchema
 export type RunpodHeartbeatResponse = z.infer<typeof runpodHeartbeatResponseSchema>;
 export type RunpodStatus = z.infer<typeof runpodStatusValueSchema>;
 export type RunpodStatusResponse = z.infer<typeof runpodStatusResponseSchema>;
+export type RunpodPlacementStatusResponse = z.infer<typeof runpodPlacementStatusResponseSchema>;
 export type RunpodWorkerErrorCode = z.infer<typeof runpodWorkerErrorCodeSchema>;
 export type RunpodWorkerOutput = z.infer<typeof runpodWorkerOutputSchema>;

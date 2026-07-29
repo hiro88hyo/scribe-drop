@@ -50,7 +50,9 @@ AWS SDK、React、HTTP clientはdomainから外し、時刻、乱数、外部API
    content type、ETagをD1の期待値と照合してから`UPLOADED`へ遷移する。
 3. R2 eventをQueue consumerが再検証し、同じjobを二重投入せず`PENDING` attemptを作る。
 4. OrchestratorがRunPodへ投入する。HTTP timeoutは失敗確定にせず`SUBMISSION_UNKNOWN`として
-   reconciliationへ渡す。RunPod workerはclaimを獲得したwinnerだけが処理を開始する。
+   reconciliationへ渡す。claim時は[ADR 0052](./adr/0052-attest-runpod-placement-before-claim.md)
+   に従い、job status由来のworker IDとPod詳細からendpoint、実行状態、immutable image、
+   許可GPU、Secure Cloudを照合する。照合済みWorkerだけがwinnerとなり処理を開始する。
 5. RunPod workerはsourceを`/tmp`へstreaming downloadし、byte count、ffprobe、durationを
    再検証する。成果物とcomplete manifestをattempt固有prefixへ書き、一時領域を必ず消す。
 6. CronがRunPod terminal statusをD1へ保存し、manifest schemaと各artifactのR2 HEADを
