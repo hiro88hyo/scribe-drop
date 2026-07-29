@@ -60,6 +60,12 @@ Blockedを維持する。
 active Worker 0を独立read-backした。staging health APIの`throttled=1`表示は残るため、
 供給回復とは判定せず、candidate publicationとworkflowを開始しない。
 
+同日の`A100-SXM4-80GB`隔離検査は、inventoryが`available/Medium`を返した状態で実施した。
+providerはendpoint作成を受理したが、scale-to-zero構成の直後read-backで指定GPUを
+完全一致で保持しなかったため、prewarm前にfail closedした。Worker、録音、job、
+R2 capabilityは作成せず、隔離endpoint削除とstaging無変更を独立read-backした。
+A100をfallbackへ追加せず、Blockedを維持する。
+
 Phase 5では[ADR 0013](./adr/0013-reconciliation-and-fresh-attempt-retry.md)に従い、
 5分Cron、RunPod status観測、terminal状態の先行保存、manifest/artifact検証、
 原子的finalize、notification outbox、Discord再送、所有者限定artifact URL、
