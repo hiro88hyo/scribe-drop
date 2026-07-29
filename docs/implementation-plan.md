@@ -38,6 +38,15 @@ CIだけでなく実利用時の無期限待機と孤児provider jobを防ぐ。
 job status由来のworker IDとPod詳細を照合し、対象endpoint、RUNNING、candidate image、
 許可GPU、Secure Cloudの完全一致が取れないWorkerへR2 capabilityを発行しない。
 
+commit `9f04f3d`のcandidateは全gateとartifact再検証に成功し、stagingではD1、Pages、
+R2、RunPod、Orchestratorのpromotionとlive read-backまで成功した。endpointは
+`RTX 5090`、`RTX 4090`を完全一致で保持したが、job作成前prewarmは8分間割当を得られず
+安全停止した。synthetic jobは作成されず、scale-to-zero、空queue、active D1/provider
+job 0を確認した。inventory上Highの`RTX PRO 4500 Blackwell`は隔離endpoint作成を拒否され、
+available表示の`RTX 3090`もendpoint read-backが指定と一致しなかったため追加しない。
+5090または4090の隔離candidate prewarmでReadyを再確認するまでworkflowを再実行せず、
+production promotionをBlockedとする。
+
 Phase 5では[ADR 0013](./adr/0013-reconciliation-and-fresh-attempt-retry.md)に従い、
 5分Cron、RunPod status観測、terminal状態の先行保存、manifest/artifact検証、
 原子的finalize、notification outbox、Discord再送、所有者限定artifact URL、
