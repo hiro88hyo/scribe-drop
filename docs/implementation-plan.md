@@ -54,6 +54,12 @@ R2 capabilityは作成せず、scale-to-zeroへの復元、隔離endpoint削除�
 Worker 0を独立read-backした。candidate publicationとstaging workflowは開始せず、
 Blockedを維持する。
 
+同日の4090隔離prewarmも別の1回として実施した。endpoint構成は完全一致し、
+`initializing=1`まで進んだ後に0へ戻ったが、8分間machineは割り当てられなかった。
+録音、job、R2 capabilityは作成していない。隔離endpoint 0、staging `workersMin=0`、
+active Worker 0を独立read-backした。staging health APIの`throttled=1`表示は残るため、
+供給回復とは判定せず、candidate publicationとworkflowを開始しない。
+
 Phase 5では[ADR 0013](./adr/0013-reconciliation-and-fresh-attempt-retry.md)に従い、
 5分Cron、RunPod status観測、terminal状態の先行保存、manifest/artifact検証、
 原子的finalize、notification outbox、Discord再送、所有者限定artifact URL、
