@@ -66,6 +66,13 @@ providerはendpoint作成を受理したが、scale-to-zero構成の直後read-b
 R2 capabilityは作成せず、隔離endpoint削除とstaging無変更を独立read-backした。
 A100をfallbackへ追加せず、Blockedを維持する。
 
+2026-07-30に5090のinventoryが`available/Medium`へ改善したため、隔離prewarmを1回だけ
+再実施した。endpointは5090とcandidate構成を完全一致で保持し、health APIは一時
+`ready=2`、その後`ready=1`を返したが、8分間対応するactive WorkerとPod配置詳細を
+read-backできなかった。検証不能なReadyを成功扱いせず、録音、job、R2 capability、
+candidate publication、workflowを開始していない。scale-to-zeroへの復元、隔離endpoint
+削除、staging active Worker 0を独立read-backし、Blockedを維持する。
+
 Phase 5では[ADR 0013](./adr/0013-reconciliation-and-fresh-attempt-retry.md)に従い、
 5分Cron、RunPod status観測、terminal状態の先行保存、manifest/artifact検証、
 原子的finalize、notification outbox、Discord再送、所有者限定artifact URL、
