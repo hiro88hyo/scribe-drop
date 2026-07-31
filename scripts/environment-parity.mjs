@@ -103,6 +103,8 @@ function normalizedRunpodPlan(untrustedPlan, environment) {
     },
     endpoint: {
       computeType: plan.endpoint.computeType,
+      compliance: [...plan.endpoint.compliance],
+      dataCenterIds: [...plan.endpoint.dataCenterIds],
       gpuTypeIds: [...plan.endpoint.gpuTypeIds],
       gpuCount: plan.endpoint.gpuCount,
       workersMin: plan.endpoint.workersMin,

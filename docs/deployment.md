@@ -50,12 +50,12 @@ volumeなし、FlashBoot無効のendpoint invariantと、期限切れclaimを拒
 [ADR 0053](./adr/0053-use-mixed-availability-gpus-with-runtime-attestation.md)に従い、
 stagingとproductionで`RTX 5090`、`RTX 4090`の固定順を使用する。固定CLIがGPUを省略しても
 一致とみなさず、公式REST APIのexact GPU read-backと実staging GPU E2Eを必須とする。
-各claimでは実WorkerのSecure Cloud配置をR2 capability発行前に検証する。通常promotionは
-providerがdata centerをread-backできないため固定せず、特定regionを保証しない。
-[ADR 0054](./adr/0054-use-explicit-datacenters-for-staging-recovery.md)のstaging recoveryだけは
-2 data centerを作成時に明示し、Consoleで手動read-backした。Compliance filterは
-Secure Cloud切替ではないため`Any`を維持し、claim時attestationを省略しない。この例外は
-source of truth化と自動検証が完了するまでproductionへ適用しない。
+各claimでは実WorkerのSecure Cloud配置をR2 capability発行前に検証する。
+[ADR 0054](./adr/0054-use-explicit-datacenters-for-staging-recovery.md)の2 data centerを
+追跡対象planへ固定し、Compliance filterは`Any`を維持する。GPUは公式REST API、
+data centerとcomplianceはConsole-equivalent GraphQLでread-backし、結合したcapacityを
+完全一致で検証する。Compliance filterはSecure Cloud切替ではないため、claim時attestationを
+省略しない。
 
 Phase 5のlocal実装では、5分Cron、RunPod status poll、terminal状態のD1保存、
 manifest/artifact検証、原子的finalize、notification outbox、Discord再送、所有者限定

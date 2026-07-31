@@ -37,6 +37,8 @@ test("creates a fixed staging plan without persistent storage or secrets", () =>
     "NVIDIA GeForce RTX 5090",
     "NVIDIA GeForce RTX 4090",
   ]);
+  assert.deepEqual(plan.endpoint.dataCenterIds, ["EUR-IS-1", "EU-RO-1"]);
+  assert.deepEqual(plan.endpoint.compliance, []);
   assert.equal(plan.endpoint.workersMin, 0);
   assert.equal(plan.endpoint.workersMax, 1);
   assert.equal(plan.endpoint.gpuCount, 1);
@@ -86,6 +88,8 @@ test("generates minimal template and endpoint CLI arguments", () => {
     "NVIDIA GeForce RTX 5090",
     "--gpu-count",
     "1",
+    "--data-center-ids",
+    "EUR-IS-1,EU-RO-1",
     "--workers-min",
     "0",
     "--workers-max",
@@ -144,12 +148,16 @@ test("validates template and endpoint create responses", () => {
   assert.deepEqual(
     validateRunpodEndpointCapacity(
       {
+        compliance: plan.endpoint.compliance,
+        dataCenterIds: plan.endpoint.dataCenterIds,
         id: endpointId,
         gpuTypeIds: plan.endpoint.gpuTypeIds,
       },
       plan,
     ),
     {
+      compliance: plan.endpoint.compliance,
+      dataCenterIds: plan.endpoint.dataCenterIds,
       gpuTypeIds: plan.endpoint.gpuTypeIds,
     },
   );
@@ -208,6 +216,8 @@ test("requires official REST read-back for exact endpoint capacity", () => {
     () =>
       validateRunpodEndpointCapacity(
         {
+          compliance: plan.endpoint.compliance,
+          dataCenterIds: plan.endpoint.dataCenterIds,
           id: "endpoint_staging",
           gpuTypeIds: ["NVIDIA GeForce RTX 4090"],
         },

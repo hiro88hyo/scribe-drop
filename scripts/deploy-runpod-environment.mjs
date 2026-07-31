@@ -10,10 +10,10 @@ import {
   createRunpodTemplateArguments,
   validateCreatedRunpodEndpoint,
   validateCreatedRunpodTemplate,
-  validateRunpodEndpointCapacity,
   validateRunpodPlan,
 } from "./runpod-environment-config.mjs";
-import { getRunpodEndpoint, setRunpodEndpointCapacity } from "./runpod-template-api.mjs";
+import { reconcileRunpodEndpointCapacity } from "./runpod-promotion.mjs";
+import { getRunpodEndpointCapacity, setRunpodEndpointCapacity } from "./runpod-template-api.mjs";
 
 const resourceIdPattern = /^[A-Za-z0-9_-]{3,128}$/u;
 const environment = process.argv[2];
@@ -227,25 +227,25 @@ async function main() {
     throw new Error("RunPod endpoint capacity cannot change while a worker is active");
   }
   const apiKey = process.env["RUNPOD_API_KEY"];
-  let capacityMatches;
-  try {
-    validateRunpodEndpointCapacity(await getRunpodEndpoint({ apiKey, endpointId }), plan);
-    capacityMatches = true;
-  } catch {
-    capacityMatches = false;
-  }
-  if (!capacityMatches) {
-    try {
-      await setRunpodEndpointCapacity({
+  await reconcileRunpodEndpointCapacity({
+    endpointId,
+    environment,
+    getEndpoint({ endpointId: targetEndpointId }) {
+      return getRunpodEndpointCapacity({
         apiKey,
-        endpointId,
-        gpuTypeIds: plan.endpoint.gpuTypeIds,
+        endpointId: targetEndpointId,
       });
-    } catch {
-      // Exact read-back below decides whether the single mutation took effect.
-    }
-    validateRunpodEndpointCapacity(await getRunpodEndpoint({ apiKey, endpointId }), plan);
-  }
+    },
+    plan,
+    setEndpointCapacity({ dataCenterIds, endpointId: targetEndpointId, gpuTypeIds }) {
+      return setRunpodEndpointCapacity({
+        apiKey,
+        dataCenterIds,
+        endpointId: targetEndpointId,
+        gpuTypeIds,
+      });
+    },
+  });
   writeState({
     schemaVersion: 1,
     environment,

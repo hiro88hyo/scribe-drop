@@ -4,7 +4,9 @@ import { test } from "node:test";
 import {
   clearRunpodTemplatePorts,
   getRunpodEndpoint,
+  getRunpodEndpointCapacity,
   getRunpodEndpointHealth,
+  getRunpodEndpointPlacement,
   listRunpodTemplates,
   setRunpodEndpointCapacity,
   setRunpodEndpointWorkersMax,
@@ -157,6 +159,122 @@ test("rejects an endpoint response for a different resource", async () => {
   );
 });
 
+test("reads endpoint placement through the fixed Console-equivalent GraphQL boundary", async () => {
+  const endpointId = "endpoint_test";
+  const signal = {};
+  const result = await getRunpodEndpointPlacement(
+    { apiKey, endpointId },
+    {
+      createTimeoutSignal(milliseconds) {
+        assert.equal(milliseconds, 15_000);
+        return signal;
+      },
+      async fetchImplementation(url, init) {
+        assert.equal(url.href, "https://api.runpod.io/graphql");
+        assert.deepEqual(init, {
+          body: JSON.stringify({
+            query: `query ScribeDropEndpointPlacement($id: String!) {
+  myself {
+    endpoint(id: $id) {
+      id
+      locations
+      compliance
+    }
+  }
+}`,
+            variables: { id: endpointId },
+          }),
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          method: "POST",
+          redirect: "error",
+          signal,
+        });
+        return jsonResponse({
+          data: {
+            myself: {
+              endpoint: {
+                compliance: [],
+                id: endpointId,
+                locations: "EUR-IS-1,EU-RO-1",
+              },
+            },
+          },
+        });
+      },
+    },
+  );
+  assert.deepEqual(result, {
+    compliance: [],
+    dataCenterIds: ["EUR-IS-1", "EU-RO-1"],
+    id: endpointId,
+  });
+});
+
+test("combines REST GPU capacity with exact GraphQL placement", async () => {
+  const endpointId = "endpoint_test";
+  const result = await getRunpodEndpointCapacity(
+    { apiKey, endpointId },
+    {
+      createTimeoutSignal: () => ({}),
+      async fetchImplementation(url) {
+        if (url.origin === "https://rest.runpod.io") {
+          return jsonResponse({
+            gpuTypeIds: ["NVIDIA GeForce RTX 5090", "NVIDIA GeForce RTX 4090"],
+            id: endpointId,
+          });
+        }
+        return jsonResponse({
+          data: {
+            myself: {
+              endpoint: {
+                compliance: [],
+                id: endpointId,
+                locations: "EUR-IS-1,EU-RO-1",
+              },
+            },
+          },
+        });
+      },
+    },
+  );
+  assert.deepEqual(result, {
+    compliance: [],
+    dataCenterIds: ["EUR-IS-1", "EU-RO-1"],
+    gpuTypeIds: ["NVIDIA GeForce RTX 5090", "NVIDIA GeForce RTX 4090"],
+    id: endpointId,
+  });
+});
+
+test("rejects missing, malformed, or contradictory endpoint placement", async () => {
+  for (const endpoint of [
+    { compliance: [], id: "endpoint_test", locations: null },
+    { compliance: ["Any"], id: "endpoint_test", locations: "EUR-IS-1" },
+    { compliance: [], id: "endpoint_other", locations: "EUR-IS-1" },
+    { compliance: [], id: "endpoint_test", locations: "unsafe" },
+  ]) {
+    const result = getRunpodEndpointPlacement(
+      { apiKey, endpointId: "endpoint_test" },
+      {
+        createTimeoutSignal: () => ({}),
+        async fetchImplementation() {
+          return jsonResponse({
+            data: { myself: { endpoint } },
+          });
+        },
+        async sleep() {},
+      },
+    );
+    if (endpoint.locations === null) {
+      assert.deepEqual(await result, { compliance: [], id: "endpoint_test" });
+    } else {
+      await assert.rejects(result, /failed after bounded retries/u);
+    }
+  }
+});
+
 test("reads only bounded worker counters from endpoint health", async () => {
   const endpointId = "endpoint_test";
   const signal = {};
@@ -232,12 +350,27 @@ test("starts template and endpoint readiness reads in parallel", async () => {
   );
 
   await Promise.resolve();
-  assert.equal(pending.length, 2);
+  assert.equal(pending.length, 3);
   for (const request of pending) {
     request.resolve(
       request.url.pathname === "/v1/templates"
         ? jsonResponse([])
-        : jsonResponse({ id: "endpoint_test" }),
+        : request.url.origin === "https://rest.runpod.io"
+          ? jsonResponse({
+              gpuTypeIds: ["NVIDIA GeForce RTX 5090"],
+              id: "endpoint_test",
+            })
+          : jsonResponse({
+              data: {
+                myself: {
+                  endpoint: {
+                    compliance: [],
+                    id: "endpoint_test",
+                    locations: "EUR-IS-1",
+                  },
+                },
+              },
+            }),
     );
   }
   await readiness;
@@ -500,13 +633,14 @@ test("classifies active worker update response loss without retrying", async () 
   assert.equal(requests, 1);
 });
 
-test("sets ordered GPU fallbacks without inventing an unknown data-center policy", async () => {
+test("sets ordered GPU fallbacks and exact data-center policy together", async () => {
   const endpointId = "endpoint_test";
+  const dataCenterIds = ["EUR-IS-1", "EU-RO-1"];
   const gpuTypeIds = ["NVIDIA GeForce RTX 5090", "NVIDIA GeForce RTX 4090"];
   const signal = {};
   let bodyCancelled = false;
   await setRunpodEndpointCapacity(
-    { apiKey, endpointId, gpuTypeIds },
+    { apiKey, dataCenterIds, endpointId, gpuTypeIds },
     {
       createTimeoutSignal(milliseconds) {
         assert.equal(milliseconds, 60_000);
@@ -515,7 +649,7 @@ test("sets ordered GPU fallbacks without inventing an unknown data-center policy
       async fetchImplementation(url, init) {
         assert.equal(url.href, `https://rest.runpod.io/v1/endpoints/${endpointId}`);
         assert.deepEqual(init, {
-          body: JSON.stringify({ gpuTypeIds }),
+          body: JSON.stringify({ dataCenterIds, gpuTypeIds }),
           headers: {
             Authorization: `Bearer ${apiKey}`,
             "Content-Type": "application/json",
@@ -609,6 +743,7 @@ test("classifies endpoint capacity response loss without retrying", async () => 
     setRunpodEndpointCapacity(
       {
         apiKey,
+        dataCenterIds: ["EU-RO-1"],
         endpointId: "endpoint_test",
         gpuTypeIds: ["NVIDIA L4"],
       },

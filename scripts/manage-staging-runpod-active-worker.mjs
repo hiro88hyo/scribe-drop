@@ -9,7 +9,7 @@ import {
 } from "./runpod-active-worker.mjs";
 import { validateCreatedRunpodTemplate, validateRunpodPlan } from "./runpod-environment-config.mjs";
 import {
-  getRunpodEndpoint,
+  getRunpodEndpointCapacity,
   getRunpodEndpointHealth,
   listRunpodTemplates,
   setRunpodEndpointWorkersMin,
@@ -75,7 +75,7 @@ try {
   );
   const dependencies = {
     getCapacity({ endpointId: targetEndpointId }) {
-      return getRunpodEndpoint({
+      return getRunpodEndpointCapacity({
         apiKey,
         endpointId: targetEndpointId,
       });

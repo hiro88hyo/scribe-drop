@@ -66,6 +66,8 @@ function health(state) {
 
 function capacity(gpuTypeIds = plan.endpoint.gpuTypeIds) {
   return {
+    compliance: plan.endpoint.compliance,
+    dataCenterIds: plan.endpoint.dataCenterIds,
     gpuTypeIds,
     id: endpointId,
   };

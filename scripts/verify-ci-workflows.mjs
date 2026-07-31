@@ -1345,6 +1345,12 @@ requireText(
   "fail-closed production promotion guard",
 );
 requireText(
+  runpodDeploymentScriptContents,
+  "reconcileRunpodEndpointCapacity({",
+  "deploy-runpod-environment.mjs",
+  "tested endpoint capacity reconciliation",
+);
+requireText(
   runpodPromotionScriptContents,
   "runRunpodCliWithReadRetry(arguments_, runCliOnce",
   "promote-runpod-candidate.mjs",
@@ -1374,6 +1380,18 @@ requireText(
   "runpod-environment-config.mjs",
   "runtime-attested Secure GPU policy",
 );
+requireText(
+  runpodEnvironmentConfigScriptContents,
+  'const fixedDataCenterIds = ["EUR-IS-1", "EU-RO-1"];',
+  "runpod-environment-config.mjs",
+  "fixed RunPod data-center policy",
+);
+requireText(
+  runpodEnvironmentConfigScriptContents,
+  "const fixedCompliance = [];",
+  "runpod-environment-config.mjs",
+  "capacity-preserving RunPod compliance policy",
+);
 forbidText(
   workflowContents,
   "RUNPOD_DATACENTER_IDS",
@@ -1382,7 +1400,7 @@ forbidText(
 );
 requireText(
   runpodPromotionScriptContents,
-  "getRunpodEndpoint({",
+  "getRunpodEndpointCapacity({",
   "promote-runpod-candidate.mjs",
   "exact endpoint capacity read-back",
 );
@@ -1418,9 +1436,9 @@ requireText(
 );
 requireText(
   runpodTemplateApiScriptContents,
-  "input.dataCenterIds === undefined ? {} : { dataCenterIds: input.dataCenterIds }",
+  "dataCenterIds: input.dataCenterIds",
   "runpod-template-api.mjs",
-  "omitted provider data-center preservation",
+  "exact endpoint data-center mutation",
 );
 requireText(
   runpodTemplateApiScriptContents,
@@ -1433,6 +1451,18 @@ requireText(
   'query: { includeEndpointBoundTemplates: "true" }',
   "runpod-template-api.mjs",
   "endpoint-bound template enumeration",
+);
+requireText(
+  runpodTemplateApiScriptContents,
+  "query ScribeDropEndpointPlacement($id: String!)",
+  "runpod-template-api.mjs",
+  "Console-equivalent endpoint placement read-back",
+);
+requireText(
+  runpodTemplateApiScriptContents,
+  "getRunpodEndpointCapacity(input, dependencies",
+  "runpod-template-api.mjs",
+  "combined REST and GraphQL capacity boundary",
 );
 requireText(
   runpodTemplateApiScriptContents,

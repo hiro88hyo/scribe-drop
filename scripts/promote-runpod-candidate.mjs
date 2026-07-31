@@ -12,7 +12,7 @@ import { promoteRunpodCandidate, verifyRunpodPromotionPreflight } from "./runpod
 import { validateRunpodPlan } from "./runpod-environment-config.mjs";
 import {
   clearRunpodTemplatePorts,
-  getRunpodEndpoint,
+  getRunpodEndpointCapacity,
   listRunpodTemplates,
   setRunpodEndpointCapacity,
   setRunpodEndpointWorkersMax,
@@ -127,7 +127,7 @@ try {
       endpointId,
       environment,
       getEndpoint({ endpointId: targetEndpointId }) {
-        return getRunpodEndpoint({
+        return getRunpodEndpointCapacity({
           apiKey: process.env["RUNPOD_API_KEY"],
           endpointId: targetEndpointId,
         });
@@ -164,7 +164,7 @@ try {
       });
     },
     getEndpoint({ endpointId: targetEndpointId }) {
-      return getRunpodEndpoint({
+      return getRunpodEndpointCapacity({
         apiKey: process.env["RUNPOD_API_KEY"],
         endpointId: targetEndpointId,
       });
@@ -172,7 +172,7 @@ try {
     setEndpointCapacity({ dataCenterIds, endpointId: targetEndpointId, gpuTypeIds }) {
       return setRunpodEndpointCapacity({
         apiKey: process.env["RUNPOD_API_KEY"],
-        ...(dataCenterIds === undefined ? {} : { dataCenterIds }),
+        dataCenterIds,
         endpointId: targetEndpointId,
         gpuTypeIds,
       });

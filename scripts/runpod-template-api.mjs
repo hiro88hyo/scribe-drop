@@ -2,7 +2,9 @@ const resourceIdPattern = /^[A-Za-z0-9_-]{3,128}$/u;
 const apiKeyPattern = /^\S{16,512}$/u;
 const dataCenterIdPattern = /^[A-Z]{2,3}-[A-Z]{2,3}-[0-9]+$/u;
 const gpuTypeIdPattern = /^[A-Za-z0-9][A-Za-z0-9 ._-]{1,126}[A-Za-z0-9]$/u;
+const compliancePattern = /^[A-Z][A-Z0-9_]{1,63}$/u;
 const runpodTemplateApiOrigin = "https://rest.runpod.io";
+const runpodGraphqlApiOrigin = "https://api.runpod.io";
 const runpodJobApiOrigin = "https://api.runpod.ai";
 const maximumReadResponseBytes = 2 * 1024 * 1024;
 const readRetryDelaysMilliseconds = [1_000, 2_000];
@@ -84,8 +86,12 @@ async function readRunpodJson(input, dependencies) {
   for (let attempt = 0; attempt <= readRetryDelaysMilliseconds.length; attempt += 1) {
     try {
       const response = await fetchImplementation(url, {
-        headers: { Authorization: `Bearer ${apiKey}` },
-        method: "GET",
+        ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          ...(input.body === undefined ? {} : { "Content-Type": "application/json" }),
+        },
+        method: input.method ?? "GET",
         redirect: "error",
         signal: createTimeoutSignal(15_000),
       });
@@ -164,6 +170,93 @@ export function getRunpodEndpoint(input, dependencies = {}) {
   );
 }
 
+export function getRunpodEndpointPlacement(input, dependencies = {}) {
+  if (!resourceIdPattern.test(String(input.endpointId ?? ""))) {
+    throw new Error("RunPod endpoint ID is missing or invalid");
+  }
+  return readRunpodJson(
+    {
+      apiKey: input.apiKey,
+      body: {
+        query: `query ScribeDropEndpointPlacement($id: String!) {
+  myself {
+    endpoint(id: $id) {
+      id
+      locations
+      compliance
+    }
+  }
+}`,
+        variables: { id: input.endpointId },
+      },
+      command: "endpoint placement",
+      method: "POST",
+      origin: runpodGraphqlApiOrigin,
+      pathname: "/graphql",
+      validate(value) {
+        const endpoint = value?.data?.myself?.endpoint;
+        if (
+          typeof value !== "object" ||
+          value === null ||
+          Array.isArray(value) ||
+          !Array.isArray(value.errors ?? []) ||
+          (value.errors ?? []).length !== 0 ||
+          typeof endpoint !== "object" ||
+          endpoint === null ||
+          Array.isArray(endpoint) ||
+          endpoint.id !== input.endpointId ||
+          !Array.isArray(endpoint.compliance) ||
+          endpoint.compliance.some(
+            (entry) => typeof entry !== "string" || !compliancePattern.test(entry),
+          ) ||
+          new Set(endpoint.compliance).size !== endpoint.compliance.length
+        ) {
+          throw new Error("RunPod endpoint placement response is missing or invalid");
+        }
+        const locations =
+          endpoint.locations === undefined ||
+          endpoint.locations === null ||
+          endpoint.locations === ""
+            ? undefined
+            : typeof endpoint.locations === "string"
+              ? endpoint.locations.split(",").map((candidate) => candidate.trim())
+              : null;
+        if (
+          locations === null ||
+          (locations !== undefined &&
+            (locations.length === 0 ||
+              locations.some((entry) => !dataCenterIdPattern.test(entry)) ||
+              new Set(locations).size !== locations.length))
+        ) {
+          throw new Error("RunPod endpoint placement response is missing or invalid");
+        }
+        return {
+          compliance: [...endpoint.compliance],
+          ...(locations === undefined ? {} : { dataCenterIds: locations }),
+          id: endpoint.id,
+        };
+      },
+    },
+    dependencies,
+  );
+}
+
+export async function getRunpodEndpointCapacity(input, dependencies = {}) {
+  const [endpoint, placement] = await Promise.all([
+    getRunpodEndpoint(input, dependencies),
+    getRunpodEndpointPlacement(input, dependencies),
+  ]);
+  if (endpoint.id !== placement.id) {
+    throw new Error("RunPod endpoint capacity response is missing or invalid");
+  }
+  return {
+    compliance: placement.compliance,
+    ...(placement.dataCenterIds === undefined ? {} : { dataCenterIds: placement.dataCenterIds }),
+    gpuTypeIds: endpoint.gpuTypeIds,
+    id: endpoint.id,
+  };
+}
+
 function requireNonnegativeInteger(value, name) {
   if (!Number.isSafeInteger(value) || value < 0) {
     throw new Error(`RunPod health ${name} is missing or invalid`);
@@ -214,7 +307,7 @@ export function getRunpodEndpointHealth(input, dependencies = {}) {
 export async function verifyRunpodReleaseReadiness(input, dependencies = {}) {
   await Promise.all([
     listRunpodTemplates({ apiKey: input.apiKey }, dependencies),
-    getRunpodEndpoint(
+    getRunpodEndpointCapacity(
       {
         apiKey: input.apiKey,
         endpointId: input.endpointId,
@@ -352,13 +445,12 @@ export async function setRunpodEndpointCapacity(input, dependencies = {}) {
     throw new Error("RunPod endpoint GPU types are missing or invalid");
   }
   if (
-    input.dataCenterIds !== undefined &&
-    (!Array.isArray(input.dataCenterIds) ||
-      input.dataCenterIds.length === 0 ||
-      input.dataCenterIds.some(
-        (value) => typeof value !== "string" || !dataCenterIdPattern.test(value),
-      ) ||
-      new Set(input.dataCenterIds).size !== input.dataCenterIds.length)
+    !Array.isArray(input.dataCenterIds) ||
+    input.dataCenterIds.length === 0 ||
+    input.dataCenterIds.some(
+      (value) => typeof value !== "string" || !dataCenterIdPattern.test(value),
+    ) ||
+    new Set(input.dataCenterIds).size !== input.dataCenterIds.length
   ) {
     throw new Error("RunPod endpoint data centers are missing or invalid");
   }
@@ -371,7 +463,7 @@ export async function setRunpodEndpointCapacity(input, dependencies = {}) {
     runpodTemplateApiOrigin,
   );
   const body = {
-    ...(input.dataCenterIds === undefined ? {} : { dataCenterIds: input.dataCenterIds }),
+    dataCenterIds: input.dataCenterIds,
     gpuTypeIds: input.gpuTypeIds,
   };
   let response;

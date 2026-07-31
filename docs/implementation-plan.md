@@ -28,8 +28,8 @@ smokeと処理時間の計測は、後述するPhase 5のstaging検証で完了�
 現行releaseはstaging/production共通の固定GPU候補`RTX 5090`、`RTX 4090`、
 Secure-capable inventory gate、公式REST APIのexact GPU read-backへ更新する。
 両GPU種別はCommunity Cloudにも提供されるため、実Workerの`secureCloud=true`をclaim前に
-照合する。通常promotionでは検証不能なdata center固定を行わない。ADR 0054のstaging
-recoveryだけは明示した2 data centerを手動read-backする期限付き例外とする。
+照合する。ADR 0054の2 data centerとCompliance `Any`をplanへ固定し、RESTのGPU情報と
+Console-equivalent GraphQLの配置情報を結合して自動read-backする。
 全候補不足時も10分開始SLO、次の5分Cron境界でのFAILED収束、exact cancelを維持し、
 CIだけでなく実利用時の無期限待機と孤児provider jobを防ぐ。さらに
 [ADR 0051](./adr/0051-prewarm-staging-before-job-creation.md)に従い、staging acceptanceは
@@ -86,11 +86,11 @@ claim前配置attestation、manifest、3形式のartifact、D1 finalize、利用
 正常な文字起こし確認まで成功した。処理後はactive D1/provider job 0、
 `workersMin=0`へ収束した。
 
-この結果でstagingの利用経路は回復したが、recovery endpointはsource of truthへ未統合で、
-GitHub staging Environmentも旧endpointを参照している。data center selectionと空の
-compliance filterをplan、deployment、rollback、drift testへ実装し、staging設定を同期して
-同一candidateの自動acceptanceを完了するまでproduction promotionとrelease workflowを
-開始しない。
+この結果でstagingの利用経路は回復した。data center selectionと空のcompliance filterは
+plan、deployment、rollback、drift testへ実装し、RESTのGPU情報とConsole-equivalent
+GraphQLのdata center/compliance情報を結合してexact read-backする。現時点ではGitHub
+staging Environmentが旧endpointを参照しているため、staging設定を同期し、同一candidateの
+自動acceptanceを完了するまでproduction promotionとrelease workflowを開始しない。
 
 Phase 5では[ADR 0013](./adr/0013-reconciliation-and-fresh-attempt-retry.md)に従い、
 5分Cron、RunPod status観測、terminal状態の先行保存、manifest/artifact検証、
@@ -698,10 +698,10 @@ candidate 1本とstaging 1本に限定する。その後、同じPRをreopenし�
 
 [ADR 0054](./adr/0054-use-explicit-datacenters-for-staging-recovery.md)の手動staging
 recoveryは、実利用経路の回復確認であり、上記のcandidate acceptanceを代替しない。
-production promotionより前にdata center selectionと空のcompliance filterを追跡対象planと
-deployment codeへ実装し、GitHub staging EnvironmentとCloudflare staging runtimeの
-endpoint設定を同期する。provider APIでdata centerとcomplianceをexact read-backできない
-間は、自動検証可能な代替境界を確立できなければproductionをBlockedのままにする。
+data center selectionと空のcompliance filterは追跡対象planとdeployment codeへ実装し、
+GPUの公式REST read-backとdata center/complianceのConsole-equivalent GraphQL read-backを
+結合する。次にGitHub staging EnvironmentとCloudflare staging runtimeのendpoint設定を
+同期する。GraphQL境界でexact read-backできなければproductionをBlockedのままにする。
 
 初回production bootstrapではOrchestratorの必須secretであるRunPod endpoint IDを先に
 確定する必要があるため、

@@ -16,6 +16,8 @@ const maxDurationSeconds = 8 * 60 * 60;
 const maxSourceBytes = 2 * 1024 * 1024 * 1024;
 const minimumAvailableGpuFallbacks = 2;
 const fixedGpuTypeIds = ["NVIDIA GeForce RTX 5090", "NVIDIA GeForce RTX 4090"];
+const fixedDataCenterIds = ["EUR-IS-1", "EU-RO-1"];
+const fixedCompliance = [];
 
 function requirePattern(value, pattern, name) {
   if (typeof value !== "string" || !pattern.test(value)) {
@@ -156,6 +158,8 @@ export function createRunpodPlan(input, untrustedEnvironment) {
       name: `scribe-drop-${environment}`,
       computeType: "GPU",
       gpuTypeIds: requireGpuTypeIds(input.gpuTypeIds, environment),
+      dataCenterIds: [...fixedDataCenterIds],
+      compliance: [...fixedCompliance],
       gpuCount: 1,
       workersMin: 0,
       workersMax: 1,
@@ -269,6 +273,8 @@ export function createRunpodEndpointArguments(untrustedPlan, templateId) {
     plan.endpoint.gpuTypeIds[0],
     "--gpu-count",
     String(plan.endpoint.gpuCount),
+    "--data-center-ids",
+    plan.endpoint.dataCenterIds.join(","),
     "--workers-min",
     String(plan.endpoint.workersMin),
     "--workers-max",
@@ -400,11 +406,20 @@ export function validateRunpodEndpointCapacity(untrustedEndpoint, untrustedPlan)
   if (
     !resourceIdPattern.test(String(endpoint.id ?? "")) ||
     !Array.isArray(endpoint.gpuTypeIds) ||
-    !isDeepStrictEqual(endpoint.gpuTypeIds, plan.endpoint.gpuTypeIds)
+    !isDeepStrictEqual(endpoint.gpuTypeIds, plan.endpoint.gpuTypeIds) ||
+    !Array.isArray(endpoint.dataCenterIds) ||
+    !isDeepStrictEqual(
+      [...endpoint.dataCenterIds].sort(),
+      [...plan.endpoint.dataCenterIds].sort(),
+    ) ||
+    !Array.isArray(endpoint.compliance) ||
+    !isDeepStrictEqual([...endpoint.compliance].sort(), [...plan.endpoint.compliance].sort())
   ) {
     throw new Error("RunPod endpoint capacity does not match the fixed plan");
   }
   return {
+    compliance: [...endpoint.compliance],
+    dataCenterIds: [...endpoint.dataCenterIds],
     gpuTypeIds: [...endpoint.gpuTypeIds],
   };
 }

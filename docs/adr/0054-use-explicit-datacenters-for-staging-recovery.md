@@ -55,10 +55,11 @@ resource ID、image参照、録音、文字起こし本文は記録しない。
 - 旧staging endpointは`workersMin=0`かつjobなしを維持し、provider supportがimage pullと
   health/Worker不整合の調査を完了するまで証跡として保持する。調査中に新しいjobや
   prewarmを行わない。
-- production promotionより前に、data center selectionと`compliance=[]`をRunPod plan
-  schema、renderer、create/update/rollback、drift検査、testへ実装する。provider APIで
-  exact read-backできない場合は、自動検証可能な代替APIをproviderに確認するか、
-  productionをBlockedのままにする。
+- data center selectionと`compliance=[]`をRunPod plan、renderer、create/update/rollback、
+  drift検査、testへ実装する。GPUは公式REST API、data centerとcomplianceはConsoleと同じ
+  GraphQL endpoint queryから取得し、結合したcapacityを完全一致で検証する。complianceは
+  対応する公開REST mutationがないため自動変更せず、不一致ならmutation前にfail closedする。
+  更新前のdata centerをread-backできない場合もrollback証跡不足としてmutationしない。
 - source of truthの実装後にGitHub staging Environmentを同じcanonical endpointへ同期し、
   local gateを通してからcandidate publicationと実service staging acceptanceをそれぞれ
   1回だけ実行する。成功した同一candidateだけをproductionへ昇格できる。
@@ -67,8 +68,9 @@ resource ID、image参照、録音、文字起こし本文は記録しない。
 
 - stagingの実利用経路は回復し、Android系のaudio/mp4 uploadから文字起こしとdownloadまで
   完了した。
-- data centerがREST read-backできないprovider制約を隠さず、手動確認を期限付きの
-  staging例外として扱える。
+- data centerがREST read-backできないprovider制約を隠さず、Consoleと同じGraphQL
+  read-backを恒久境界として追加した。GraphQL schemaまたは認可が変化した場合は
+  provider設定を推測せずfail closedする。
 - compliance filterとSecure Cloudを混同せず、実Workerの`secureCloud=true`
   attestationをsecurity boundaryとして維持する。
 - Cloudflare staging runtimeとGitHub staging Environmentのendpoint設定は一時的に異なる。
@@ -76,6 +78,7 @@ resource ID、image参照、録音、文字起こし本文は記録しない。
   昇格しない。
 - 旧endpointとrecovery endpointの2件を一時保持する。いずれも`workersMin=0`を維持するが、
   provider側の孤児Workerや課金表示はsupport回答まで監視対象とする。
-- 本例外の除去条件は、data center設定のsource of truth化、staging設定の同期、旧endpointの
-  support調査完了、同一candidateによる自動staging acceptance成功である。これらが
-  `v0.1.0` production promotionまでに満たせなければ、releaseはBlockedを維持する。
+- data center設定のsource of truth化は追跡対象コードへ実装した。本例外の残る除去条件は、
+  staging設定の同期、旧endpointのsupport調査完了、同一candidateによる自動staging
+  acceptance成功である。これらが`v0.1.0` production promotionまでに満たせなければ、
+  releaseはBlockedを維持する。

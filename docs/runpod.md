@@ -104,10 +104,8 @@ stagingとproductionは別endpoint、別template、別credentialを使用する�
 - 両候補がinventoryでSecure Cloud提供かつavailable。Community Cloudでの提供と
   stock tierはrelease invariantにしない
 - 各claimで実Workerの`secureCloud=true`をR2 capability発行前に検証する
-- 通常promotionでは、source of truthと自動read-backで検証できないdata center固定を
-  行わず、特定regionで動くとは保証しない
-- ADR 0054のstaging recoveryだけは`EUR-IS-1`と`EU-RO-1`を明示し、Consoleの
-  exact selectionを手動確認する。この例外をproductionへ適用しない
+- data centerは`EUR-IS-1`と`EU-RO-1`の2件へ固定し、Console-equivalent GraphQLで
+  exact selectionを自動read-backする
 - compliance filterは`Any`とする。特定certification要件は別ADRなしに追加せず、
   Secure Cloudの代替条件として扱わない
 - Network Volumeなし
@@ -211,22 +209,29 @@ deploy verifierを通す。
 同versionの`serverless get`はcompute typeとGPUを省略することがある。その省略を一致とは
 みなさない。作成時は第1GPU候補でendpointをbootstrapした後、workerが0件であることを
 確認して公式REST APIへ固定GPU候補を一度だけ適用し、直後のREST read-backが順序を含めて
-完全一致した場合だけstateを確定する。`dataCenterIds`はPATCHへ指定しても応答とGETから
-省略されるため通常policyでは送らず、特定regionを保証しない。provider応答に既知値が
-存在する場合だけrollback snapshotへ保持し、省略を`null`や既定値へ変換しない。
-promotion時も`workersMax=0`でdrainしてから同じ更新とread-backを行い、失敗時は旧capacity、
-旧template、旧worker上限へ戻す。さらに実job前後のworkerがcandidate template/imageと
-一致し、Secure Cloud提供・promotion availability・実Worker配置attestationを満たすまで
-production-readyとしない。
+完全一致した場合だけstateを確定する。`dataCenterIds`はPATCH応答とREST GETから
+省略されるため、Consoleと同じGraphQL queryで`locations`と`compliance`をread-backする。
+公式RESTのGPU情報と結合し、固定planへ完全一致した場合だけ続行する。promotion時は
+更新前のdata center、GPU、complianceを取得し、data centerを取得できない場合や自動変更
+できないcomplianceが不一致の場合はmutation前に停止する。`workersMax=0`でdrainしてから
+GPUとdata centerを同じPATCHで更新し、失敗時は旧capacity、旧template、旧worker上限へ
+戻す。さらに実job前後のworkerがcandidate template/imageと一致し、Secure Cloud提供・
+promotion availability・実Worker配置attestationを満たすまでproduction-readyとしない。
 
 ADR 0054のstaging recoveryでは、固定CLIの作成引数へ2 data centerを明示し、Consoleで
 exact selectionを手動確認した。作成応答とGETはfieldを省略したため、これは通常promotion
 手順ではなく期限付きの運用例外である。`Security & compliance`は`Any`であり、
 data center metadata上は両方がGDPRとHIPAA、片方がISO/IEC 27001とISO 14001にも対応する。
-これらはSecure Cloudの代替証跡にしない。production promotionより前にdata centerと
-空のcompliance filterをplan schema、renderer、create/update/rollback、drift testへ
-追加し、自動read-back可能なprovider境界を確立する。確立できない場合はproductionを
+これらはSecure Cloudの代替証跡にしない。data centerと空のcompliance filterはplan
+schema、renderer、create/update/rollback、drift testへ追加し、RESTと
+Console-equivalent GraphQLを結合する自動read-back境界を確立した。次にstaging endpoint
+設定を同期し、formal acceptanceを完了する。read-backが成立しない場合はproductionを
 Blockedのままにする。
+
+このschema変更より前に生成したgit-ignoredのstaging/production planは再利用しない。
+remote preflightやmutationより前に固定rendererで再生成し、旧planが新しいvalidatorに
+拒否された場合は手でfieldを追記しない。再生成したplan、Cloudflare runtime、GitHub
+Environmentが同じendpointを参照することをread-backしてからworkflowへ進む。
 
 digest付きimageから`--serverless` templateを新規作成する。Serverless templateは1 endpoint
 にだけ関連付けられ、persistent volumeをサポートしない。初期container diskは30 GiB、
