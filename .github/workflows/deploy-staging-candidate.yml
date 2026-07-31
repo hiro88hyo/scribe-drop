@@ -449,6 +449,7 @@ jobs:
         env:
           RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
           SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID: ${{ secrets.SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID }}
+          STAGING_RUNPOD_WORKER_EVIDENCE_PATH: ${{ runner.temp }}/staging-runpod-worker-evidence.json
         run: pnpm run runpod:prewarm:staging
 
       - name: Verify authenticated data plane, then run real staging M4A lifecycle
@@ -467,7 +468,8 @@ jobs:
         env:
           RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
           SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID: ${{ secrets.SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID }}
-        run: pnpm run runpod:prewarm:staging
+          STAGING_RUNPOD_WORKER_EVIDENCE_PATH: ${{ runner.temp }}/staging-runpod-worker-evidence.json
+        run: pnpm run runpod:prewarm-after-refresh:staging
 
       - name: Run real staging failure notification lifecycle
         env:
@@ -501,6 +503,7 @@ jobs:
         env:
           RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
           SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID: ${{ secrets.SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID }}
+          STAGING_RUNPOD_WORKER_EVIDENCE_PATH: ${{ runner.temp }}/staging-runpod-worker-evidence.json
         run: pnpm run runpod:cooldown:staging
 
       - name: Issue short-lived staging acceptance

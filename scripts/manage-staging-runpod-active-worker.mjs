@@ -15,6 +15,13 @@ import {
   setRunpodEndpointWorkersMin,
 } from "./runpod-template-api.mjs";
 import { runRunpodCliWithReadRetry } from "./runpod-cli-retry.mjs";
+import {
+  assertStagingRunpodWorkerEvidenceAbsent,
+  deleteStagingRunpodWorkerEvidence,
+  readStagingRunpodWorkerEvidence,
+  requireStagingRunpodWorkerEvidencePath,
+  writeStagingRunpodWorkerEvidence,
+} from "./runpod-worker-evidence.mjs";
 
 const [operation] = process.argv.slice(2);
 const resourceIdPattern = /^[A-Za-z0-9_-]{3,128}$/u;
@@ -55,8 +62,15 @@ function runCli(arguments_) {
 }
 
 try {
-  if ((operation !== "prewarm" && operation !== "cooldown") || process.argv.length !== 3) {
-    throw new Error("Usage: manage-staging-runpod-active-worker <prewarm|cooldown>");
+  if (
+    (operation !== "prewarm" &&
+      operation !== "prewarm-after-refresh" &&
+      operation !== "cooldown") ||
+    process.argv.length !== 3
+  ) {
+    throw new Error(
+      "Usage: manage-staging-runpod-active-worker <prewarm|prewarm-after-refresh|cooldown>",
+    );
   }
   if (
     process.env["GITHUB_ACTIONS"] !== "true" ||
@@ -73,6 +87,10 @@ try {
     JSON.parse(readFileSync(path.resolve(".runpod", "deploy", "staging-plan.json"), "utf8")),
     "staging",
   );
+  const workerEvidencePath = requireStagingRunpodWorkerEvidencePath({
+    configuredPath: process.env["STAGING_RUNPOD_WORKER_EVIDENCE_PATH"],
+    runnerTemp: process.env["RUNNER_TEMP"],
+  });
   const dependencies = {
     getCapacity({ endpointId: targetEndpointId }) {
       return getRunpodEndpointCapacity({
@@ -99,7 +117,7 @@ try {
       });
     },
   };
-  if (operation === "prewarm") {
+  if (operation === "prewarm" || operation === "prewarm-after-refresh") {
     const templates = await listRunpodTemplates({ apiKey });
     const matches = templates.filter(
       (entry) =>
@@ -113,12 +131,32 @@ try {
     }
     const templateId = requireResourceId(matches[0].id, "RunPod candidate template ID");
     validateCreatedRunpodTemplate(runCli(["template", "get", templateId]), plan);
-    const input = { endpointId, plan, templateId };
-    await prewarmStagingRunpodCandidate(input, dependencies);
+    if (operation === "prewarm") {
+      assertStagingRunpodWorkerEvidenceAbsent(workerEvidencePath);
+      const evidence = await prewarmStagingRunpodCandidate(
+        { endpointId, plan, templateId },
+        dependencies,
+      );
+      try {
+        writeStagingRunpodWorkerEvidence(workerEvidencePath, evidence);
+      } catch (error) {
+        await cooldownStagingRunpodCandidate({ endpointId, plan }, dependencies);
+        throw new Error("RunPod staging worker evidence could not be persisted", {
+          cause: error,
+        });
+      }
+    } else {
+      const previousWorker = readStagingRunpodWorkerEvidence(workerEvidencePath);
+      await prewarmStagingRunpodCandidate(
+        { endpointId, plan, previousWorker, templateId },
+        dependencies,
+      );
+    }
     console.log("Verified the staging candidate worker is ready before job creation.");
   } else {
     const input = { endpointId, plan };
     await cooldownStagingRunpodCandidate(input, dependencies);
+    deleteStagingRunpodWorkerEvidence(workerEvidencePath);
     console.log("Restored staging RunPod scale-to-zero.");
   }
 } catch (error) {

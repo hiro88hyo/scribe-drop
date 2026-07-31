@@ -184,11 +184,14 @@ SOURCE_MUTATEDは即時失敗とし、COMPLETEDだけを長時間待たない。
 自動retryせず、原因と供給状況を確認するまで次のworkflowを起動しない。
 [ADR 0051](./adr/0051-prewarm-staging-before-job-creation.md)に従い、upload前に
 `workersMin=1`を一時設定し、candidate template/imageのWorkerとhealth readinessを最大8分
-だけ待つ。provider queue/in-progress/runningは0、idleまたはready Workerは1件以上を
-必須とする。成功jobのWorker refresh後、失敗fixture前にも同じprewarmを再実行する。
+だけ待つ。初回はprovider queue/in-progress/running 0、idleまたはready Worker 1件以上を
+必須とする。成功jobのWorker refresh後、失敗fixture前には[ADR 0061](./adr/0061-bind-post-refresh-prewarm-to-worker-restart-evidence.md)の
+専用prewarmを実行する。初回Worker IDと`lastStartedAt`はmode `0600`のrunner一時fileだけに
+保持し、同じWorker ID、再起動時刻の前進、candidate完全一致、provider job 0、異常state 0を必須にする。
+この条件が揃う二回目だけ、staleな`running=1`をready相当として受理できる。
 Worker refreshはhandler outputの`stopPod`要求に加え、固定SDKの起動設定でresult送信後に
 job取得loopをローカル終了する。entrypoint testで設定keyとboolean値を完全一致検証する。
-idleにならなければsynthetic jobを作らず失敗し、prewarm内部とworkflowの
+いずれのready条件も満たさなければsynthetic jobを作らず失敗し、prewarm内部とworkflowの
 `always()` cleanupの両方で`workersMin=0`をexact read-backする。candidate Workerの
 post-lifecycle evidenceとscale-to-zero復元が成功した後だけacceptanceを発行する。
 [ADR 0059](./adr/0059-require-real-staging-failure-notification-acceptance.md)のfailure

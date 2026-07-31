@@ -661,8 +661,10 @@ terminal失敗通知を変更したcandidateでは
 [ADR 0059](./adr/0059-require-real-staging-failure-notification-acceptance.md)に従い、
 正常な合成M4Aだけでなく、合成破損M4Aのexact `FAILED`、現在versionのoutbox `SENT`、
 fixture削除、scale-to-zero復元をformal stagingの同じacceptance jobで必須にする。
-各job直前にqueue/in-progress/running 0とidle/ready candidate Workerを再確認し、成功job
-後のWorker refresh中に失敗fixtureを投入しない。
+最初のjob直前はqueue/in-progress/running 0とidle/ready candidate Workerを再確認する。
+成功job後は[ADR 0061](./adr/0061-bind-post-refresh-prewarm-to-worker-restart-evidence.md)の
+runner一時証拠でWorker process再起動を確認し、job 0と異常state 0が揃う場合だけstaleな
+`running=1`を受理する。再起動未確認のまま失敗fixtureを投入しない。
 schema version 3の短命acceptanceに3 checkがない場合はproductionへ進めない。
 Orchestrator artifactは
 [ADR 0027](./adr/0027-store-raw-orchestrator-module.md)のraw ES module条件をcandidate作成時と
@@ -745,6 +747,14 @@ bounded convergence待ちへ含める回帰testを追加し、再度全local gat
 に従い、事前作業はGraphQL `locations`更新、中間GPU保持read-back、REST `gpuTypeIds`更新、
 最終完全一致へ分割する。各mutationを1回だけ送り、逆順rollbackを検証してからproductionへ
 適用する。
+
+[ADR 0061](./adr/0061-bind-post-refresh-prewarm-to-worker-restart-evidence.md)に従い、
+正常M4A後の二回目prewarmは初回と同じhealth条件を無条件に再利用しない。SDK job loopの
+終了と同じWorker枠でのcontainer再起動はWorker ID一致と`lastStartedAt`の前進で証明し、IDと時刻は
+mode `0600`のrunner一時fileだけでstep間連携する。candidate完全一致、単一active Worker、
+provider job 0、initializing/throttled/unhealthy 0が揃う二回目だけ、RunPod healthのstale
+`running=1`を許容する。初回prewarm、再起動未確認、busy/unknown状態ではfail closedし、
+全結果でevidence削除とscale-to-zeroを行う。
 
 初回production bootstrapではOrchestratorの必須secretであるRunPod endpoint IDを先に
 確定する必要があるため、

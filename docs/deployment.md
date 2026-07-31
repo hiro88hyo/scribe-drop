@@ -350,8 +350,10 @@ terminal失敗通知を含むcandidateでは
 正常な合成M4Aに続けて合成破損M4Aを通常経路へ投入する。exact `FAILED`、現在versionの
 outbox `SENT`、job/outbox送信時刻、failure fixture削除、scale-to-zero復元が成功した
 schema version 3のacceptanceだけをproduction入力にする。job IDはrunner一時fileだけで
-受け渡し、workflow log、artifact、deployment文書へ残さない。二つのjobの各作成前に
-queue/in-progress/running 0とidle/ready candidate Workerを確認する。remote D1の通知
+受け渡し、workflow log、artifact、deployment文書へ残さない。最初のjob前は
+queue/in-progress/running 0とidle/ready candidate Workerを確認する。二回目は
+[ADR 0061](./adr/0061-bind-post-refresh-prewarm-to-worker-restart-evidence.md)の
+refresh証拠を必須にし、限定条件下のstale `running=1`だけを受理する。remote D1の通知
 read-backは固定Wranglerの`--command --json`だけを使い、D1 ingestion用`--file`を使わない。
 
 RunPod promotionは

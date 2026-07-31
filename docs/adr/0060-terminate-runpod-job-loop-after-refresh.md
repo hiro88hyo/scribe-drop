@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-07-31
 - Refines: ADR 0006、ADR 0051、ADR 0059
+- Refined by: [ADR 0061](./0061-bind-post-refresh-prewarm-to-worker-restart-evidence.md)
 
 ## Context
 
@@ -33,7 +34,8 @@ closeしている。processをresult送信前に強制終了するとjob完了�
   `true`であることを必須にする。handler testはoutput側のrefresh要求とruntime closeを
   引き続き検証する。
 - stagingは最初のjob後も交換candidate Workerのidle/readyを確認してから次のfixtureを
-  作成する。queue-only条件へ弱めず、交換GPUが割り当たらない場合は自動retryしない。
+  作成する。ADR 0061以降はWorker process再起動証拠とjob 0を必須にした専用判定を使い、
+  queue-only条件へ弱めない。交換GPUが割り当たらない場合は自動retryしない。
 - この変更はWorker image inputを変更するため、既存image digest、candidate、staging
   acceptanceを再利用しない。新imageをbuild、offline check、SBOM生成、scanした後に同じ
   formal stagingを1回実行する。

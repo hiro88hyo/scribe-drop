@@ -208,8 +208,10 @@ formal stagingでは[ADR 0059](./adr/0059-require-real-staging-failure-notificat
 job/outbox送信時刻を固定Wranglerのread-only remote D1 queryで確認する。job IDを
 consoleやartifactへ出さず、mode `0600`のrunner一時fileだけでE2E、検証、明示削除の間を
 受け渡す。D1 read-backは`--command --json`だけを使い、進捗行とquery結果を混在させる
-ingestion用`--file`を使用しない。正常/失敗jobの各作成前に
-queue/in-progress/running 0とidle/ready candidate Workerを確認する。検証失敗時も
+ingestion用`--file`を使用しない。正常job前はqueue/in-progress/running 0とidle/ready
+candidate Workerを確認する。失敗job前は[ADR 0061](./adr/0061-bind-post-refresh-prewarm-to-worker-restart-evidence.md)に従い、
+runner一時evidenceから同じWorker IDでのprocess再起動を確認する。job 0、candidate完全一致、異常state 0が
+揃う場合だけstale `running=1`を許容し、初回prewarmや再起動未確認では許容しない。検証失敗時も
 fixture削除と`workersMin=0`復元を`always()`で行う。本番でこのfailure fixtureや手動SQLを
 使わない。job完了後はhandler outputの停止要求とSDK起動設定の両方でWorkerをrefreshし、
 旧Workerが残る場合は次fixtureを投入せずscale-to-zeroへ戻す。

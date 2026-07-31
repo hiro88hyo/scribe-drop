@@ -941,6 +941,12 @@ requireText(
 );
 requireText(
   packageManifestContents,
+  '"runpod:prewarm-after-refresh:staging": "node scripts/manage-staging-runpod-active-worker.mjs prewarm-after-refresh"',
+  "package.json",
+  "post-refresh staging candidate worker prewarm script",
+);
+requireText(
+  packageManifestContents,
   '"runpod:cooldown:staging": "node scripts/manage-staging-runpod-active-worker.mjs cooldown"',
   "package.json",
   "staging scale-to-zero restoration script",
@@ -954,9 +960,23 @@ requireText(
 requireTextCount(
   stagingAcceptanceJob,
   "pnpm run runpod:prewarm:staging",
-  2,
+  1,
   "deploy-staging-candidate.yml acceptance job",
-  "idle candidate worker gate before both real jobs",
+  "initial candidate worker gate before the first real job",
+);
+requireTextCount(
+  stagingAcceptanceJob,
+  "pnpm run runpod:prewarm-after-refresh:staging",
+  1,
+  "deploy-staging-candidate.yml acceptance job",
+  "refresh-evidenced candidate worker gate before the failure fixture",
+);
+requireTextCount(
+  stagingAcceptanceJob,
+  "STAGING_RUNPOD_WORKER_EVIDENCE_PATH: ${{ runner.temp }}/staging-runpod-worker-evidence.json",
+  3,
+  "deploy-staging-candidate.yml acceptance job",
+  "runner-temporary worker refresh evidence path",
 );
 requireTextCount(
   stagingAcceptanceJob,

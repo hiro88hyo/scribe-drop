@@ -9,6 +9,7 @@ export const STAGING_RUNPOD_PREWARM_POLL_INTERVAL_MS = 15_000;
 
 const terminalWorkerStatuses = new Set(["EXITED", "TERMINATED"]);
 const resourceIdPattern = /^[A-Za-z0-9_-]{3,128}$/u;
+const runpodWorkerStartPattern = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{1,9} [+-]\d{4} UTC$/u;
 
 function requireRecord(value, name) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -22,6 +23,38 @@ function requireCounter(value, name) {
     throw new Error(`${name} is missing or invalid`);
   }
   return value;
+}
+
+function requireWorkerEvidence(untrustedWorker) {
+  const worker = requireRecord(untrustedWorker, "RunPod active worker");
+  if (typeof worker.id !== "string" || !resourceIdPattern.test(worker.id)) {
+    throw new Error("RunPod active worker ID is missing or invalid");
+  }
+  if (
+    typeof worker.lastStartedAt !== "string" ||
+    !runpodWorkerStartPattern.test(worker.lastStartedAt)
+  ) {
+    throw new Error("RunPod active worker start time is missing or invalid");
+  }
+  const lastStartedAtMs = Date.parse(worker.lastStartedAt);
+  if (!Number.isSafeInteger(lastStartedAtMs) || lastStartedAtMs < 0) {
+    throw new Error("RunPod active worker start time is missing or invalid");
+  }
+  return { id: worker.id, lastStartedAtMs };
+}
+
+export function validateRunpodWorkerEvidence(untrustedEvidence) {
+  const evidence = requireRecord(untrustedEvidence, "RunPod worker evidence");
+  if (
+    typeof evidence.id !== "string" ||
+    !resourceIdPattern.test(evidence.id) ||
+    !Number.isSafeInteger(evidence.lastStartedAtMs) ||
+    evidence.lastStartedAtMs < 0 ||
+    Object.keys(evidence).some((key) => key !== "id" && key !== "lastStartedAtMs")
+  ) {
+    throw new Error("RunPod worker evidence is missing or invalid");
+  }
+  return { id: evidence.id, lastStartedAtMs: evidence.lastStartedAtMs };
 }
 
 function validateActiveWorkerEndpoint(
@@ -66,7 +99,7 @@ function validateActiveWorkerEndpoint(
   ) {
     throw new Error("RunPod active worker does not match the release candidate");
   }
-  return activeWorkers.length;
+  return activeWorkers;
 }
 
 function validateCooldownEndpoint(untrustedEndpoint, input, plan) {
@@ -155,6 +188,10 @@ export async function cooldownStagingRunpodCandidate(input, dependencies) {
 export async function prewarmStagingRunpodCandidate(input, dependencies) {
   const plan = validateInputs(input, true);
   validateDependencies(dependencies, true);
+  const previousWorker =
+    input.previousWorker === undefined
+      ? undefined
+      : validateRunpodWorkerEvidence(input.previousWorker);
   const now = dependencies.now ?? Date.now;
   const sleep =
     dependencies.sleep ??
@@ -184,7 +221,7 @@ export async function prewarmStagingRunpodCandidate(input, dependencies) {
         readEndpoint(input, dependencies),
         dependencies.getHealth({ endpointId: input.endpointId }),
       ]);
-      const activeWorkerCount = validateActiveWorkerEndpoint(
+      const activeWorkers = validateActiveWorkerEndpoint(
         currentEndpoint,
         plan,
         input.endpointId,
@@ -217,13 +254,25 @@ export async function prewarmStagingRunpodCandidate(input, dependencies) {
         workers.unhealthy,
         "RunPod unhealthy worker count",
       );
+      const normalReadyState = readyWorkerCount >= 1 && runningWorkerCount === 0;
+      const refreshedRunningState =
+        previousWorker !== undefined && readyWorkerCount === 0 && runningWorkerCount === 1;
+      const workerEvidence =
+        activeWorkers.length === 1 && (normalReadyState || refreshedRunningState)
+          ? requireWorkerEvidence(activeWorkers[0])
+          : undefined;
+      const refreshConfirmed =
+        previousWorker === undefined ||
+        (workerEvidence !== undefined &&
+          workerEvidence.id === previousWorker.id &&
+          workerEvidence.lastStartedAtMs > previousWorker.lastStartedAtMs);
       if (
-        activeWorkerCount === 1 &&
-        readyWorkerCount >= 1 &&
+        activeWorkers.length === 1 &&
+        (normalReadyState || refreshedRunningState) &&
+        refreshConfirmed &&
         inProgressJobCount === 0 &&
         initializingWorkerCount === 0 &&
         queuedJobCount === 0 &&
-        runningWorkerCount === 0 &&
         throttledWorkerCount === 0 &&
         unhealthyWorkerCount === 0
       ) {
@@ -231,7 +280,7 @@ export async function prewarmStagingRunpodCandidate(input, dependencies) {
           await dependencies.getCapacity({ endpointId: input.endpointId }),
           plan,
         );
-        return;
+        return workerEvidence;
       }
 
       const currentTime = now();

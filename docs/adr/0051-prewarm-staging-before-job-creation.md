@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-07-29
 - Refines: ADR 0043、ADR 0050のstaging release gate
-- Refined by: [ADR 0059](./0059-require-real-staging-failure-notification-acceptance.md)、[ADR 0060](./0060-terminate-runpod-job-loop-after-refresh.md)
+- Refined by: [ADR 0059](./0059-require-real-staging-failure-notification-acceptance.md)、[ADR 0060](./0060-terminate-runpod-job-loop-after-refresh.md)、[ADR 0061](./0061-bind-post-refresh-prewarm-to-worker-restart-evidence.md)
 
 ## Context
 
@@ -50,11 +50,14 @@ cleanup後にprovider queueからも消えた。ADR 0043の開始SLOは10分だ�
 - ADR 0043の10分開始SLO、FAILEDへのCAS、exact provider job cancelは維持する。ただし
   5分Cron境界により収束完了は10分を超え得ることを運用文書と利用者表示で明示する。
 
-ADR 0059以降は`ready/running`条件を厳格化し、各synthetic job直前にprovider queueと
+ADR 0059以降は`ready/running`条件を厳格化し、最初のsynthetic job直前にprovider queueと
 in-progress jobが0、running Workerが0、idleまたはready Workerが1件以上であることを
-必須とする。成功job後のWorker refreshを考慮し、失敗fixture前にも同じprewarmを再実行する。
+必須とする。成功job後のWorker refreshを考慮し、失敗fixture前にもprewarmを再実行する。
 ADR 0060以降はhandler outputの停止要求だけでなく、SDK起動設定でもrefreshを固定し、
 result送信後にjob取得loopをローカル終了する。交換Workerのreadiness条件は緩めない。
+ADR 0061以降の二回目prewarmは初回Worker IDと起動時刻をrunner一時fileへ保持し、
+`lastStartedAt`の前進を必須にする。このrefresh証拠とjob 0、candidate完全一致、異常state 0が
+揃う場合だけ、RunPod healthのstale `running=1`をready相当として限定的に受理する。
 
 ## Consequences
 

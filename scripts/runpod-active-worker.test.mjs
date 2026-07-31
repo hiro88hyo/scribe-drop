@@ -20,7 +20,7 @@ const plan = createRunpodStagingPlan({
 });
 const input = { endpointId, plan, templateId };
 
-function endpoint(workersMin, workerReady = false) {
+function endpoint(workersMin, workerOverrides = {}) {
   return {
     executionTimeoutMs: plan.endpoint.executionTimeoutSeconds * 1_000,
     flashBootType: "OFF",
@@ -42,7 +42,9 @@ function endpoint(workersMin, workerReady = false) {
               desiredStatus: "RUNNING",
               imageName: plan.template.image,
               templateId,
-              ...(workerReady ? { id: "worker_candidate" } : {}),
+              id: "worker_candidate",
+              lastStartedAt: "2026-07-31 11:45:25.960 +0000 UTC",
+              ...workerOverrides,
             },
           ]
         : [],
@@ -83,7 +85,7 @@ test("prewarms the exact candidate before returning", async () => {
       return Promise.resolve(capacity());
     },
     getEndpoint() {
-      return Promise.resolve(endpoint(workersMin, healthReads > 1));
+      return Promise.resolve(endpoint(workersMin));
     },
     getHealth() {
       healthReads += 1;
@@ -110,7 +112,7 @@ test("waits for queued and running work to clear before returning", async () => 
       return Promise.resolve(capacity());
     },
     getEndpoint() {
-      return Promise.resolve(endpoint(1, true));
+      return Promise.resolve(endpoint(1));
     },
     getHealth() {
       healthReads += 1;
@@ -132,6 +134,230 @@ test("waits for queued and running work to clear before returning", async () => 
   assert.equal(healthReads, 3);
 });
 
+test("accepts stale running health only after an evidenced worker restart", async () => {
+  let currentTime = 0;
+  let workersMin = 1;
+  const previousWorker = {
+    id: "worker_candidate",
+    lastStartedAtMs: Date.parse("2026-07-31 11:45:25.960 +0000 UTC"),
+  };
+  const result = await prewarmStagingRunpodCandidate(
+    { ...input, previousWorker },
+    {
+      getCapacity() {
+        return Promise.resolve(capacity());
+      },
+      getEndpoint() {
+        return Promise.resolve(
+          endpoint(workersMin, {
+            lastStartedAt: "2026-07-31 11:46:56.648 +0000 UTC",
+          }),
+        );
+      },
+      getHealth() {
+        return Promise.resolve(health("running"));
+      },
+      now: () => currentTime,
+      setWorkersMin(request) {
+        workersMin = request.workersMin;
+        return Promise.resolve();
+      },
+      sleep(milliseconds) {
+        currentTime += milliseconds;
+        return Promise.resolve();
+      },
+    },
+  );
+
+  assert.equal(result.id, "worker_candidate");
+  assert.equal(result.lastStartedAtMs, Date.parse("2026-07-31 11:46:56.648 +0000 UTC"));
+});
+
+test("rejects stale running health when the worker process did not restart", async () => {
+  let currentTime = 0;
+  let workersMin = 1;
+  await assert.rejects(
+    prewarmStagingRunpodCandidate(
+      {
+        ...input,
+        previousWorker: {
+          id: "worker_candidate",
+          lastStartedAtMs: Date.parse("2026-07-31 11:45:25.960 +0000 UTC"),
+        },
+      },
+      {
+        getCapacity() {
+          return Promise.resolve(capacity());
+        },
+        getEndpoint() {
+          return Promise.resolve(endpoint(workersMin));
+        },
+        getHealth() {
+          return Promise.resolve(health("running"));
+        },
+        now: () => currentTime,
+        setWorkersMin(request) {
+          workersMin = request.workersMin;
+          return Promise.resolve();
+        },
+        sleep(milliseconds) {
+          currentTime += milliseconds;
+          return Promise.resolve();
+        },
+      },
+    ),
+    /prewarm failed; scale-to-zero was restored/u,
+  );
+  assert.equal(workersMin, 0);
+});
+
+test("rejects stale running health from a different worker slot", async () => {
+  let currentTime = 0;
+  let workersMin = 1;
+  await assert.rejects(
+    prewarmStagingRunpodCandidate(
+      {
+        ...input,
+        previousWorker: {
+          id: "worker_candidate",
+          lastStartedAtMs: Date.parse("2026-07-31 11:45:25.960 +0000 UTC"),
+        },
+      },
+      {
+        getCapacity() {
+          return Promise.resolve(capacity());
+        },
+        getEndpoint() {
+          return Promise.resolve(
+            endpoint(workersMin, {
+              id: "worker_replacement",
+              lastStartedAt: "2026-07-31 11:46:56.648 +0000 UTC",
+            }),
+          );
+        },
+        getHealth() {
+          return Promise.resolve(health("running"));
+        },
+        now: () => currentTime,
+        setWorkersMin(request) {
+          workersMin = request.workersMin;
+          return Promise.resolve();
+        },
+        sleep(milliseconds) {
+          currentTime += milliseconds;
+          return Promise.resolve();
+        },
+      },
+    ),
+    /prewarm failed; scale-to-zero was restored/u,
+  );
+  assert.equal(workersMin, 0);
+});
+
+test("does not accept running health without prior worker evidence", async () => {
+  let currentTime = 0;
+  let workersMin = 1;
+  await assert.rejects(
+    prewarmStagingRunpodCandidate(input, {
+      getCapacity() {
+        return Promise.resolve(capacity());
+      },
+      getEndpoint() {
+        return Promise.resolve(endpoint(workersMin));
+      },
+      getHealth() {
+        return Promise.resolve(health("running"));
+      },
+      now: () => currentTime,
+      setWorkersMin(request) {
+        workersMin = request.workersMin;
+        return Promise.resolve();
+      },
+      sleep(milliseconds) {
+        currentTime += milliseconds;
+        return Promise.resolve();
+      },
+    }),
+    /prewarm failed; scale-to-zero was restored/u,
+  );
+  assert.equal(workersMin, 0);
+});
+
+test("does not accept refreshed running health while provider jobs remain active", async () => {
+  let currentTime = 0;
+  let workersMin = 1;
+  await assert.rejects(
+    prewarmStagingRunpodCandidate(
+      {
+        ...input,
+        previousWorker: {
+          id: "worker_candidate",
+          lastStartedAtMs: Date.parse("2026-07-31 11:45:25.960 +0000 UTC"),
+        },
+      },
+      {
+        getCapacity() {
+          return Promise.resolve(capacity());
+        },
+        getEndpoint() {
+          return Promise.resolve(
+            endpoint(workersMin, {
+              lastStartedAt: "2026-07-31 11:46:56.648 +0000 UTC",
+            }),
+          );
+        },
+        getHealth() {
+          return Promise.resolve(health("running", { inProgress: 1, inQueue: 0 }));
+        },
+        now: () => currentTime,
+        setWorkersMin(request) {
+          workersMin = request.workersMin;
+          return Promise.resolve();
+        },
+        sleep(milliseconds) {
+          currentTime += milliseconds;
+          return Promise.resolve();
+        },
+      },
+    ),
+    /prewarm failed; scale-to-zero was restored/u,
+  );
+  assert.equal(workersMin, 0);
+});
+
+test("rejects malformed prior worker evidence before mutating", async () => {
+  let mutations = 0;
+  await assert.rejects(
+    prewarmStagingRunpodCandidate(
+      {
+        ...input,
+        previousWorker: {
+          id: "worker_candidate",
+          lastStartedAtMs: 1,
+          unexpected: true,
+        },
+      },
+      {
+        getCapacity() {
+          throw new Error("Capacity must not be read for malformed evidence");
+        },
+        getEndpoint() {
+          throw new Error("Endpoint must not be read for malformed evidence");
+        },
+        getHealth() {
+          throw new Error("Health must not be read for malformed evidence");
+        },
+        setWorkersMin() {
+          mutations += 1;
+          return Promise.resolve();
+        },
+      },
+    ),
+    /worker evidence is missing or invalid/u,
+  );
+  assert.equal(mutations, 0);
+});
+
 test("uses exact read-back when the prewarm mutation response is lost", async () => {
   let workersMin = 0;
   let requests = 0;
@@ -140,7 +366,7 @@ test("uses exact read-back when the prewarm mutation response is lost", async ()
       return Promise.resolve(capacity());
     },
     getEndpoint() {
-      return Promise.resolve(endpoint(workersMin, workersMin === 1));
+      return Promise.resolve(endpoint(workersMin));
     },
     getHealth() {
       return Promise.resolve(health("ready"));
@@ -265,7 +491,7 @@ test("cooldown restores and verifies the active worker minimum", async () => {
   let workersMin = 1;
   await cooldownStagingRunpodCandidate(input, {
     getEndpoint() {
-      return Promise.resolve(endpoint(workersMin, true));
+      return Promise.resolve(endpoint(workersMin));
     },
     setWorkersMin(request) {
       workersMin = request.workersMin;
@@ -280,7 +506,7 @@ test("cooldown is not blocked by candidate template drift", async () => {
   await cooldownStagingRunpodCandidate(input, {
     getEndpoint() {
       return Promise.resolve({
-        ...endpoint(workersMin, true),
+        ...endpoint(workersMin),
         templateId: "template_drifted",
         workers: [
           {
@@ -305,7 +531,7 @@ test("cooldown refuses to mutate a mismatched endpoint identity", async () => {
     cooldownStagingRunpodCandidate(input, {
       getEndpoint() {
         return Promise.resolve({
-          ...endpoint(1, true),
+          ...endpoint(1),
           id: "endpoint_other",
         });
       },
@@ -325,7 +551,7 @@ test("cooldown rejects a lost mutation that was not applied", async () => {
     cooldownStagingRunpodCandidate(input, {
       getEndpoint() {
         reads += 1;
-        return Promise.resolve(endpoint(1, true));
+        return Promise.resolve(endpoint(1));
       },
       setWorkersMin() {
         return Promise.reject(new Error("provider response containing sensitive data"));
