@@ -725,6 +725,9 @@ workflowをdispatchしない。
 health APIは5秒のidle timeout後もready/idleを返した。terminal履歴をdrain失敗とせず、
 worker上限0の後にhealthが完全に0へ収束したことをcapacity mutation前に検証する回帰testと
 実装を追加する。この修正の全local gateが成功するまで事前移行を再実行しない。
+最初の修正後の事前移行では、上限0のread-back後にhealthがidle/readyからinitializingへ
+遷移し、capacity mutation前に停止して上限を復元した。drain後のinitializingも即時失敗せず
+bounded convergence待ちへ含める回帰testを追加し、再度全local gateを通す。
 
 初回production bootstrapではOrchestratorの必須secretであるRunPod endpoint IDを先に
 確定する必要があるため、

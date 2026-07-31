@@ -685,6 +685,29 @@ test("production capacity preparation drains an idle ready worker before capacit
   assert.equal(harness.capacityRequests.length, 1);
 });
 
+test("production capacity preparation waits for an initializing worker after drain", async () => {
+  const harness = productionPreparationHarness({
+    getHealth({ attempt }) {
+      if (attempt === 1) {
+        return productionHealth({
+          workers: { idle: 1, initializing: 0, ready: 1, running: 0 },
+        });
+      }
+      return attempt === 2
+        ? productionHealth({
+            workers: { idle: 0, initializing: 1, ready: 0, running: 0 },
+          })
+        : productionHealth();
+    },
+  });
+  const result = await prepareRunpodProductionCapacity(harness.input);
+
+  assert.equal(result.changed, true);
+  assert.deepEqual(harness.sleepDelays, [1_000]);
+  assert.deepEqual(harness.workerMaximums, [0, 1]);
+  assert.equal(harness.capacityRequests.length, 1);
+});
+
 test("production capacity preparation accepts provider-retained terminal worker history", async () => {
   const harness = productionPreparationHarness({
     workers: [{ desiredStatus: "EXITED" }],

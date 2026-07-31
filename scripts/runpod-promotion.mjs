@@ -183,12 +183,21 @@ function validateNoJobsOrBusyWorkersHealth(untrustedHealth) {
   return health;
 }
 
+function validateNoActiveJobsHealth(untrustedHealth) {
+  const health = requireRecord(untrustedHealth, "RunPod endpoint health response");
+  const jobs = requireRecord(health.jobs, "RunPod endpoint job health");
+  if (jobs.inProgress !== 0 || jobs.inQueue !== 0) {
+    throw new Error("RunPod production endpoint has active jobs or workers");
+  }
+  return health;
+}
+
 async function waitForDrainedHealth(input, endpointId) {
   const sleep = input.sleep ?? defaultSleep;
   let lastError;
   for (let attempt = 0; attempt <= capacityReadBackDelaysMilliseconds.length; attempt += 1) {
     const health = await input.getHealth({ endpointId });
-    validateNoJobsOrBusyWorkersHealth(health);
+    validateNoActiveJobsHealth(health);
     try {
       return validateNoActiveJobsOrWorkersHealth(health);
     } catch (error) {

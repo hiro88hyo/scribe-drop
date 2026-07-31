@@ -32,6 +32,12 @@ health由来のactive状態が遅延または不整合になり得ることを�
 terminal履歴の存在をdrain失敗とみなす一方、health未収束のままcapacityを更新する実装は、
 どちらも安全な事前移行にならない。
 
+terminal履歴を許容する修正後の事前移行では、Worker上限0のread-back後にhealthが
+idle/readyからinitializingへ遷移した。capacity mutation前に停止してWorker上限を復元したが、
+drain後のinitializingをbounded convergence待ちではなく即時失敗にしていたことが判明した。
+drain後はjobだけを即時拒否し、idle/initializing/ready/runningのすべてを同じbounded
+read-backで0へ収束させる必要がある。
+
 ## Decision
 
 - productionのread-only promotion preflightはcapacity driftを「更新予定」として成功させない。
