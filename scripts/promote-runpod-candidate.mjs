@@ -8,7 +8,11 @@ import {
   verifyStagingAcceptance,
 } from "./release-acceptance.mjs";
 import { runRunpodCliWithReadRetry } from "./runpod-cli-retry.mjs";
-import { promoteRunpodCandidate, verifyRunpodPromotionPreflight } from "./runpod-promotion.mjs";
+import {
+  promoteRunpodCandidate,
+  verifyRunpodCandidateWorkerEvidence,
+  verifyRunpodPromotionPreflight,
+} from "./runpod-promotion.mjs";
 import { validateRunpodPlan } from "./runpod-environment-config.mjs";
 import {
   clearRunpodTemplatePorts,
@@ -75,7 +79,7 @@ try {
     flags.some((flag) => flag !== "--preflight-only" && flag !== "--require-candidate-worker") ||
     flags.length !== new Set(flags).size ||
     (!preflightOnly && flags.length !== 0) ||
-    (requireCandidateWorker && !preflightOnly)
+    (requireCandidateWorker && (!preflightOnly || environment !== "staging"))
   ) {
     throw new Error(
       "Usage: promote-runpod-candidate <staging|production> <plan-path> [--preflight-only [--require-candidate-worker]]",
@@ -123,7 +127,7 @@ try {
     environment,
   );
   if (preflightOnly) {
-    const result = await verifyRunpodPromotionPreflight({
+    const preflightInput = {
       endpointId,
       environment,
       getEndpoint({ endpointId: targetEndpointId }) {
@@ -135,9 +139,14 @@ try {
       listTemplates,
       listGpus,
       plan,
-      requireCandidateWorker,
       runCli,
-    });
+    };
+    if (requireCandidateWorker) {
+      await verifyRunpodCandidateWorkerEvidence(preflightInput);
+      console.log("Verified RunPod staging candidate worker lifecycle evidence.");
+      process.exit(0);
+    }
+    const result = await verifyRunpodPromotionPreflight(preflightInput);
     console.log(
       `Verified RunPod ${environment} control-plane preflight (${
         result.candidateTemplatePortsRequireNormalization

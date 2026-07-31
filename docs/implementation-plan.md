@@ -705,6 +705,15 @@ GPUの公式REST read-backとdata center/complianceのConsole-equivalent GraphQL
 canonical endpointへ同期済みである。次のcandidate workflowでもGraphQL境界をexact
 read-backできなければproductionをBlockedのままにする。
 
+[ADR 0055](./adr/0055-separate-worker-evidence-from-idle-promotion-preflight.md)に従い、
+promotion前のRunPod preflightはactive Workerを必ず拒否する。実M4A lifecycle後は同じ
+preflightを再利用せず、candidate template/image、許可status、単一active Worker、
+endpoint invariant、GPU/data center/complianceを検証する専用read-only verifierを使う。
+2026-07-31の最初のformal staging runは実M4A lifecycleまで成功したが、この境界の誤りで
+worker証跡stepが失敗した。`always()` cleanupとscale-to-zero read-backは成功し、
+acceptanceは発行していない。専用test、CI構造検査、全local gateが成功するまで再dispatch
+しない。
+
 初回production bootstrapではOrchestratorの必須secretであるRunPod endpoint IDを先に
 確定する必要があるため、
 [ADR 0022](./adr/0022-bootstrap-production-dependencies-before-applications.md)に従って

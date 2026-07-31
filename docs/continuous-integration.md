@@ -179,6 +179,12 @@ SOURCE_MUTATEDは即時失敗とし、COMPLETEDだけを長時間待たない。
 だけ待つ。readyにならなければsynthetic jobを作らず失敗し、prewarm内部とworkflowの
 `always()` cleanupの両方で`workersMin=0`をexact read-backする。candidate Workerの
 post-lifecycle evidenceとscale-to-zero復元が成功した後だけacceptanceを発行する。
+[ADR 0055](./adr/0055-separate-worker-evidence-from-idle-promotion-preflight.md)に従い、
+post-lifecycle evidenceはpromotion前のidle-only preflightを再利用しない。専用のread-only
+verifierがcandidate template/image、`RUNNING`・`EXITED`・`TERMINATED`だけのstatus、
+最大1件のactive Worker、endpoint invariant、GPU/data center/complianceの完全一致を
+確認する。通常preflightは`RUNNING`と未知statusを引き続き拒否する。専用verifierの成否に
+かかわらずcleanupを実行し、失敗時はacceptanceを発行しない。
 Access service tokenは[ADR 0041](./adr/0041-authenticate-both-staging-access-layers.md)に
 従い、browser requestをhopごとにinterceptする。exact application originだけへ外側用
 標準2 headerと内側用JSON `Authorization`を同時送信する。routeはexact application

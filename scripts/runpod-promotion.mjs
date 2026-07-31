@@ -157,6 +157,35 @@ function validateCandidateWorkers(untrustedWorkers, templateId, image) {
   return workers;
 }
 
+function validateCandidateWorkerEvidence(untrustedWorkers, templateId, image) {
+  const allowedStatuses = new Set(["RUNNING", "EXITED", "TERMINATED"]);
+  const workers = requireWorkers(untrustedWorkers);
+  if (workers.length === 0) {
+    throw new Error("RunPod candidate worker evidence is missing");
+  }
+  if (
+    workers.some((untrustedWorker) => {
+      const worker = requireRecord(untrustedWorker, "RunPod endpoint worker");
+      return (
+        !allowedStatuses.has(worker.desiredStatus) ||
+        worker.templateId !== templateId ||
+        worker.imageName !== image
+      );
+    })
+  ) {
+    throw new Error("RunPod candidate worker evidence does not match the release candidate");
+  }
+  if (
+    workers.filter(
+      (untrustedWorker) =>
+        requireRecord(untrustedWorker, "RunPod endpoint worker").desiredStatus === "RUNNING",
+    ).length > 1
+  ) {
+    throw new Error("RunPod candidate worker evidence contains multiple active workers");
+  }
+  return workers;
+}
+
 function validateIdleEndpoint(untrustedEndpoint, plan, effectiveTemplateId) {
   const endpoint = requireRecord(untrustedEndpoint, "RunPod endpoint response");
   const currentTemplateId = requireResourceId(endpoint.templateId, "RunPod current template ID");
@@ -298,19 +327,7 @@ export async function verifyRunpodPromotionPreflight(input) {
   const candidateIsAttached =
     candidateTemplateId !== undefined && currentTemplateId === candidateTemplateId;
   if (candidateIsAttached) {
-    const workers = validateCandidateWorkers(
-      endpoint.workers,
-      candidateTemplateId,
-      plan.template.image,
-    );
-    if (input.requireCandidateWorker === true && workers.length === 0) {
-      throw new Error("RunPod candidate worker evidence is missing");
-    }
-    if (input.requireCandidateWorker === true && capacityUpdateRequired) {
-      throw new Error("RunPod candidate capacity evidence does not match the fixed plan");
-    }
-  } else if (input.requireCandidateWorker === true) {
-    throw new Error("RunPod candidate template is not attached");
+    validateCandidateWorkers(endpoint.workers, candidateTemplateId, plan.template.image);
   }
   if (candidateTemplatePortsRequireNormalization && currentTemplateId === candidateTemplateId) {
     throw new Error("RunPod candidate template with default ports is already attached");
@@ -321,6 +338,49 @@ export async function verifyRunpodPromotionPreflight(input) {
     candidateTemplatePortsRequireNormalization,
     endpointId,
   };
+}
+
+export async function verifyRunpodCandidateWorkerEvidence(input) {
+  if (input.environment !== "staging") {
+    throw new Error("RunPod candidate worker evidence verification is restricted to staging");
+  }
+  const plan = validateRunpodPlan(input.plan, "staging");
+  const endpointId = requireResourceId(input.endpointId, "RunPod endpoint ID");
+  const matches = matchingTemplates(
+    requireArray(await listTemplates(input), "RunPod template list"),
+    plan.template.name,
+  );
+  if (matches.length !== 1) {
+    throw new Error("RunPod candidate template identity is ambiguous");
+  }
+  const summary = requireRecord(matches[0], "RunPod template summary");
+  const templateId = requireResourceId(summary.id, "RunPod template ID");
+  validateCreatedRunpodTemplate(input.runCli(["template", "get", templateId]), plan);
+
+  const endpoint = requireRecord(
+    input.runCli(["serverless", "get", endpointId, "--include-template", "--include-workers"]),
+    "RunPod endpoint response",
+  );
+  const currentTemplateId = requireResourceId(endpoint.templateId, "RunPod current template ID");
+  if (currentTemplateId !== templateId) {
+    throw new Error("RunPod candidate template is not attached");
+  }
+  const workersMin = endpoint.workersMin ?? 0;
+  if (workersMin !== 0 && workersMin !== 1) {
+    throw new Error("RunPod candidate worker minimum is missing or invalid");
+  }
+  validateCreatedRunpodEndpoint(
+    {
+      ...endpoint,
+      workersMin: plan.endpoint.workersMin,
+    },
+    plan,
+    templateId,
+  );
+  validateCandidateWorkerEvidence(endpoint.workers, templateId, plan.template.image);
+  validateRunpodEndpointCapacity(await getCapacityEndpoint(input), plan);
+
+  return { endpointId, templateId };
 }
 
 export async function reconcileRunpodEndpointCapacity(input) {

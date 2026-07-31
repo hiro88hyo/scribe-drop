@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   promoteRunpodCandidate as promoteRunpodCandidateWithInputs,
   reconcileRunpodEndpointCapacity,
+  verifyRunpodCandidateWorkerEvidence as verifyRunpodCandidateWorkerEvidenceWithInputs,
   verifyRunpodPromotionPreflight as verifyRunpodPromotionPreflightWithInputs,
 } from "./runpod-promotion.mjs";
 import { createRunpodStagingPlan } from "./runpod-environment-config.mjs";
@@ -48,6 +49,10 @@ function withTemplateList(input) {
 
 function verifyRunpodPromotionPreflight(input) {
   return verifyRunpodPromotionPreflightWithInputs(withTemplateList(input));
+}
+
+function verifyRunpodCandidateWorkerEvidence(input) {
+  return verifyRunpodCandidateWorkerEvidenceWithInputs(withTemplateList(input));
 }
 
 function promoteRunpodCandidate(input) {
@@ -386,13 +391,44 @@ test("preflight rejects a stale worker when the candidate template is already at
   );
 });
 
-test("post-lifecycle preflight requires a candidate worker record", async () => {
-  const runPreflight = (workers) =>
+test("preflight remains idle-only when the candidate worker is running", async () => {
+  await assert.rejects(
     verifyRunpodPromotionPreflight({
       endpointId: "endpoint_staging",
       environment: "staging",
       plan,
-      requireCandidateWorker: true,
+      runCli(arguments_) {
+        if (arguments_[0] === "template" && arguments_[1] === "list") {
+          return [{ id: "template_new", name: plan.template.name }];
+        }
+        if (arguments_[0] === "template" && arguments_[1] === "get") {
+          return template("template_new");
+        }
+        if (arguments_[0] === "serverless" && arguments_[1] === "get") {
+          return {
+            ...endpoint("template_new", [
+              {
+                desiredStatus: "RUNNING",
+                imageName: plan.template.image,
+                templateId: "template_new",
+              },
+            ]),
+            workersMin: 1,
+          };
+        }
+        throw new Error("Unexpected fake CLI call");
+      },
+    }),
+    /active or unrecognized workers/u,
+  );
+});
+
+test("post-lifecycle verification requires a candidate worker record", async () => {
+  const runVerification = (workers, workersMin = 0) =>
+    verifyRunpodCandidateWorkerEvidence({
+      endpointId: "endpoint_staging",
+      environment: "staging",
+      plan,
       runCli(arguments_) {
         if (arguments_[0] === "user") return { id: "user" };
         if (arguments_[0] === "template" && arguments_[1] === "list") {
@@ -402,26 +438,61 @@ test("post-lifecycle preflight requires a candidate worker record", async () => 
           return template("template_new");
         }
         if (arguments_[0] === "serverless" && arguments_[1] === "get") {
-          return endpoint("template_new", workers);
+          return {
+            ...endpoint("template_new", workers),
+            workersMin,
+          };
         }
         throw new Error("Unexpected fake CLI call");
       },
     });
 
-  await assert.rejects(runPreflight([]), /worker evidence is missing/u);
-  const result = await runPreflight([
+  await assert.rejects(runVerification([]), /worker evidence is missing/u);
+  const terminalResult = await runVerification([
     {
       desiredStatus: "EXITED",
       imageName: plan.template.image,
       templateId: "template_new",
     },
   ]);
-  assert.equal(result.candidateTemplateExists, true);
+  assert.equal(terminalResult.templateId, "template_new");
+  const activeResult = await runVerification(
+    [
+      {
+        desiredStatus: "RUNNING",
+        imageName: plan.template.image,
+        templateId: "template_new",
+      },
+    ],
+    1,
+  );
+  assert.equal(activeResult.templateId, "template_new");
 });
 
-test("post-lifecycle preflight rejects capacity that does not match the candidate", async () => {
+test("post-lifecycle verification is restricted to staging before provider access", async () => {
+  let providerAccessed = false;
   await assert.rejects(
-    verifyRunpodPromotionPreflight({
+    verifyRunpodCandidateWorkerEvidenceWithInputs({
+      endpointId: "endpoint_production",
+      environment: "production",
+      listTemplates() {
+        providerAccessed = true;
+        return [];
+      },
+      plan,
+      runCli() {
+        providerAccessed = true;
+        return {};
+      },
+    }),
+    /restricted to staging/u,
+  );
+  assert.equal(providerAccessed, false);
+});
+
+test("post-lifecycle verification rejects capacity that does not match the candidate", async () => {
+  await assert.rejects(
+    verifyRunpodCandidateWorkerEvidence({
       endpointId: "endpoint_staging",
       environment: "staging",
       getEndpoint() {
@@ -433,7 +504,6 @@ test("post-lifecycle preflight rejects capacity that does not match the candidat
         });
       },
       plan,
-      requireCandidateWorker: true,
       runCli(arguments_) {
         if (arguments_[0] === "template" && arguments_[1] === "list") {
           return [{ id: "template_new", name: plan.template.name }];
@@ -453,7 +523,67 @@ test("post-lifecycle preflight rejects capacity that does not match the candidat
         throw new Error("Unexpected fake CLI call");
       },
     }),
-    /capacity evidence does not match/u,
+    /capacity does not match/u,
+  );
+});
+
+test("post-lifecycle verification rejects mismatched or multiple active workers", async () => {
+  const verifyWorkers = (workers) =>
+    verifyRunpodCandidateWorkerEvidence({
+      endpointId: "endpoint_staging",
+      environment: "staging",
+      plan,
+      runCli(arguments_) {
+        if (arguments_[0] === "template" && arguments_[1] === "list") {
+          return [{ id: "template_new", name: plan.template.name }];
+        }
+        if (arguments_[0] === "template" && arguments_[1] === "get") {
+          return template("template_new");
+        }
+        if (arguments_[0] === "serverless" && arguments_[1] === "get") {
+          return {
+            ...endpoint("template_new", workers),
+            workersMin: 1,
+          };
+        }
+        throw new Error("Unexpected fake CLI call");
+      },
+    });
+
+  await assert.rejects(
+    verifyWorkers([
+      {
+        desiredStatus: "RUNNING",
+        imageName: plan.template.image,
+        templateId: "template_other",
+      },
+    ]),
+    /does not match the release candidate/u,
+  );
+  await assert.rejects(
+    verifyWorkers([
+      {
+        desiredStatus: "INITIALIZING",
+        imageName: plan.template.image,
+        templateId: "template_new",
+      },
+    ]),
+    /does not match the release candidate/u,
+  );
+  await assert.rejects(
+    verifyWorkers([
+      {
+        desiredStatus: "RUNNING",
+        imageName: plan.template.image,
+        templateId: "template_new",
+      },
+      {
+        desiredStatus: "RUNNING",
+        imageName: plan.template.image,
+        templateId: "template_new",
+      },
+    ]),
+    /multiple active workers/u,
   );
 });
 

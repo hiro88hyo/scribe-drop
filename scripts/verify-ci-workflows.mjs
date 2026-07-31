@@ -1406,6 +1406,12 @@ requireText(
 );
 requireText(
   runpodPromotionScriptContents,
+  "await verifyRunpodCandidateWorkerEvidence(preflightInput);",
+  "promote-runpod-candidate.mjs",
+  "dedicated read-only post-lifecycle candidate worker evidence verification",
+);
+requireText(
+  runpodPromotionScriptContents,
   'runCli(["gpu", "list", "--include-unavailable"])',
   "promote-runpod-candidate.mjs",
   "dynamic RunPod GPU inventory gate",

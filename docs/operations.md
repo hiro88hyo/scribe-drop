@@ -36,6 +36,13 @@ recordを返すことがある。`desiredStatus`が`EXITED`または`TERMINATED`
 candidateとのtemplate/image不一致を許可しない。`RUNNING`、未知値、欠落値はdrain前に
 promotionを停止し、配列の長さやterminal statusだけで安全と判断しない。
 
+実staging lifecycle後のworker証跡では、promotion前のidle-only判定を使わない。
+[ADR 0055](./adr/0055-separate-worker-evidence-from-idle-promotion-preflight.md)の専用
+read-only verifierだけが、candidateと一致する最大1件の`RUNNING` Workerを許可する。
+未知status、candidateと異なるtemplate/image、複数の`RUNNING`、capacity driftは停止条件で
+ある。この検査はWorkerをterminateせず、成功・失敗にかかわらず後続の`always()` cleanupで
+`workersMin=0`を確認する。cleanup失敗時はacceptanceを発行せず、課金継続として扱う。
+
 staging smokeのためにactive workerを1へ上げた場合、完了後は0へ戻す。固定
 `runpodctl` 2.7.2は`--workers-min 0`を成功扱いにしても値を更新しないため、
 [ADR 0012](./adr/0012-runpodctl-staging-verification-boundary.md)のdashboard補償を使う。

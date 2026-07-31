@@ -240,6 +240,15 @@ scale-to-zeroとrecovery capacityを再確認し、GitHub staging Environmentの
 Cloudflare runtimeと同じIDへ同期した。値やresource IDは記録せず、workflowと同じread-only
 readinessとpromotion preflightの成功だけを記録する。
 
+promotion前のpreflightと、実lifecycle後のWorker証跡は目的が異なる。
+[ADR 0055](./adr/0055-separate-worker-evidence-from-idle-promotion-preflight.md)に従い、
+前者はactiveまたは未知statusのWorkerを拒否するidle-only検査とする。後者はmutationを
+行わない専用verifierとし、candidateと一致するWorker recordが1件以上、`RUNNING`は最大
+1件、全recordが`RUNNING`・`EXITED`・`TERMINATED`のいずれかであることを要求する。
+template/imageだけでなく、endpoint invariantとREST、Console-equivalent GraphQLを結合した
+GPU/data center/complianceも再検証する。専用verifierはscale-to-zero cleanupの代替ではなく、
+成否にかかわらず最後に`workersMin=0`をexact read-backする。
+
 digest付きimageから`--serverless` templateを新規作成する。Serverless templateは1 endpoint
 にだけ関連付けられ、persistent volumeをサポートしない。初期container diskは30 GiB、
 port公開なし、secretなしとし、次の非secret環境変数だけを渡す。
