@@ -26,8 +26,10 @@ staging Access境界の結合をproduction promotion前に証明できない。
   staging acceptance、文書へjob ID、URL、録音・文字起こし本文を保存しない。
 - 固定Wranglerのremote D1 queryを引数配列で実行し、対象jobが`FAILED`、現在のjob
   versionとoutbox `job_version`が一致、outboxが`SENT`、jobとoutboxの送信時刻が存在する
-  場合だけ実配送成功とする。query fileは検証後に必ず削除し、query結果はallowlist field
-  だけをparseする。
+  場合だけ実配送成功とする。厳格検証済みULIDを固定SQLへ埋め込み、Wranglerの
+  `--command --json`へshellを介さない単一引数として渡す。`--file`はD1 ingestion経路と
+  進捗出力を使うためread-only queryには使用しない。query結果はallowlist fieldだけを
+  parseし、SQLやjob IDをconsoleへ出さない。
 - failure fixtureはstaging Access service principalで明示削除する。通知検証やE2Eが失敗
   してもcleanupを`always()`で実行し、その後にRunPod `workersMin=0`とactive Worker 0を
   exact read-backする。

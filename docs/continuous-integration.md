@@ -191,8 +191,9 @@ idleにならなければsynthetic jobを作らず失敗し、prewarm内部とwo
 post-lifecycle evidenceとscale-to-zero復元が成功した後だけacceptanceを発行する。
 [ADR 0059](./adr/0059-require-real-staging-failure-notification-acceptance.md)のfailure
 notification確認またはfixture cleanupが失敗した場合も、`always()` cleanupで
-failure fixture削除とscale-to-zeroを試みる。実録音、job ID、D1 query fileをartifactへ
-保存しない。
+failure fixture削除とscale-to-zeroを試みる。remote D1 read-backは固定Wranglerの
+`--command --json`を引数配列で実行し、D1 ingestion用`--file`を使用しない。実録音、
+job ID、SQL、query結果をartifactへ保存しない。
 [ADR 0055](./adr/0055-separate-worker-evidence-from-idle-promotion-preflight.md)に従い、
 post-lifecycle evidenceはpromotion前のidle-only preflightを再利用しない。専用のread-only
 verifierがcandidate template/image、`RUNNING`・`EXITED`・`TERMINATED`だけのstatus、

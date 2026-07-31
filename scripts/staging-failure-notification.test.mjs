@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  createWranglerD1Arguments,
   parseStagingFailureEvidence,
   parseWranglerD1Observation,
   waitForStagingFailureNotification,
@@ -55,6 +56,27 @@ test("parses only the allowlisted D1 observation", () => {
   assert.throws(
     () => parseWranglerD1Observation(wranglerResult({ transcript: "forbidden" })),
     /unexpected or missing fields/u,
+  );
+});
+
+test("uses the direct JSON query path without Wrangler file ingestion", () => {
+  const configPath = "/workspace/.wrangler/deploy/orchestrator-staging.toml";
+  const arguments_ = createWranglerD1Arguments({ configPath, jobId });
+  assert.deepEqual(arguments_.slice(0, 5), ["exec", "wrangler", "d1", "execute", "SCRIBE_DROP_DB"]);
+  assert.equal(arguments_.includes("--command"), true);
+  assert.equal(arguments_.includes("--file"), false);
+  assert.equal(arguments_.includes("--json"), true);
+  assert.equal(arguments_[arguments_.indexOf("--config") + 1], configPath);
+  const query = arguments_[arguments_.indexOf("--command") + 1];
+  assert.equal(typeof query, "string");
+  assert.match(query, new RegExp(`WHERE jobs\\.id = '${jobId}'`, "u"));
+  assert.throws(
+    () => createWranglerD1Arguments({ configPath: "relative.toml", jobId }),
+    /configuration path is invalid/u,
+  );
+  assert.throws(
+    () => createWranglerD1Arguments({ configPath, jobId: "invalid" }),
+    /job ID is invalid/u,
   );
 });
 

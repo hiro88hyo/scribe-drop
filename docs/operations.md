@@ -207,9 +207,11 @@ formal stagingでは[ADR 0059](./adr/0059-require-real-staging-failure-notificat
 の合成破損M4Aを通常経路へ1件だけ投入する。exact `FAILED`、現在versionのoutbox `SENT`、
 job/outbox送信時刻を固定Wranglerのread-only remote D1 queryで確認する。job IDを
 consoleやartifactへ出さず、mode `0600`のrunner一時fileだけでE2E、検証、明示削除の間を
-受け渡す。正常/失敗jobの各作成前にqueue/in-progress/running 0とidle/ready candidate
-Workerを確認する。検証失敗時もfixture削除と`workersMin=0`復元を`always()`で行う。
-本番でこのfailure fixtureや手動SQLを使わない。
+受け渡す。D1 read-backは`--command --json`だけを使い、進捗行とquery結果を混在させる
+ingestion用`--file`を使用しない。正常/失敗jobの各作成前に
+queue/in-progress/running 0とidle/ready candidate Workerを確認する。検証失敗時も
+fixture削除と`workersMin=0`復元を`always()`で行う。本番でこのfailure fixtureや手動SQLを
+使わない。
 
 10分開始SLOはsubmissionをstaleと判定する境界であり、provider cancel完了時刻ではない。
 実際のFAILED遷移とcancel開始は次の5分Cron境界になり得る。利用者表示、alert、staging

@@ -1,6 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 
 const ulidPattern = /^[0-9A-HJKMNP-TV-Z]{26}$/u;
@@ -153,49 +152,45 @@ function failureQuery(jobId) {
   `;
 }
 
-export function readRemoteStagingFailureObservation(input) {
-  const directory = mkdtempSync(path.join(tmpdir(), "scribe-drop-staging-notification-"));
-  const queryPath = path.join(directory, "query.sql");
-  try {
-    writeFileSync(queryPath, failureQuery(input.jobId), {
-      encoding: "utf8",
-      mode: 0o600,
-    });
-    const result = spawnSync(
-      "pnpm",
-      [
-        "exec",
-        "wrangler",
-        "d1",
-        "execute",
-        "SCRIBE_DROP_DB",
-        "--remote",
-        "--config",
-        input.configPath,
-        "--env",
-        "staging",
-        "--file",
-        queryPath,
-        "--json",
-      ],
-      {
-        cwd: input.repositoryRoot,
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          CLOUDFLARE_API_TOKEN: input.cloudflareApiToken,
-          WRANGLER_WRITE_LOGS: "0",
-        },
-        timeout: 30_000,
-      },
-    );
-    if (result.status !== 0 || result.error !== undefined) {
-      throw new Error("Staging D1 notification query failed");
-    }
-    return parseWranglerD1Observation(JSON.parse(result.stdout));
-  } finally {
-    rmSync(directory, { force: true, recursive: true });
+export function createWranglerD1Arguments(input) {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    throw new Error("Staging D1 command input is invalid");
   }
+  if (typeof input.configPath !== "string" || !path.isAbsolute(input.configPath)) {
+    throw new Error("Staging Wrangler configuration path is invalid");
+  }
+  return [
+    "exec",
+    "wrangler",
+    "d1",
+    "execute",
+    "SCRIBE_DROP_DB",
+    "--remote",
+    "--config",
+    input.configPath,
+    "--env",
+    "staging",
+    "--command",
+    failureQuery(input.jobId),
+    "--json",
+  ];
+}
+
+export function readRemoteStagingFailureObservation(input) {
+  const result = spawnSync("pnpm", createWranglerD1Arguments(input), {
+    cwd: input.repositoryRoot,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      CLOUDFLARE_API_TOKEN: input.cloudflareApiToken,
+      WRANGLER_WRITE_LOGS: "0",
+    },
+    timeout: 30_000,
+  });
+  if (result.status !== 0 || result.error !== undefined) {
+    throw new Error("Staging D1 notification query failed");
+  }
+  return parseWranglerD1Observation(JSON.parse(result.stdout));
 }
 
 export function readStagingFailureEvidenceFile(evidencePath) {

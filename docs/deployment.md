@@ -350,7 +350,8 @@ terminal失敗通知を含むcandidateでは
 outbox `SENT`、job/outbox送信時刻、failure fixture削除、scale-to-zero復元が成功した
 schema version 3のacceptanceだけをproduction入力にする。job IDはrunner一時fileだけで
 受け渡し、workflow log、artifact、deployment文書へ残さない。二つのjobの各作成前に
-queue/in-progress/running 0とidle/ready candidate Workerを確認する。
+queue/in-progress/running 0とidle/ready candidate Workerを確認する。remote D1の通知
+read-backは固定Wranglerの`--command --json`だけを使い、D1 ingestion用`--file`を使わない。
 
 RunPod promotionは
 [ADR 0047](./adr/0047-drain-stale-runpod-workers-before-promotion.md)に従い、旧terminal
