@@ -218,6 +218,12 @@ GPUとdata centerを同じPATCHで更新し、失敗時は旧capacity、旧templ
 戻す。さらに実job前後のworkerがcandidate template/imageと一致し、Secure Cloud提供・
 promotion availability・実Worker配置attestationを満たすまでproduction-readyとしない。
 
+productionでは
+[ADR 0056](./adr/0056-require-production-capacity-before-promotion.md)により、上記capacity
+更新をcandidate promotion内で行わない。事前の明示承認付きcapacity移行で固定planへの
+完全一致を独立read-backし、通常preflightは不一致をremote mutation前に拒否する。
+capacity mutationは再送せず、反映待ちは読み取りだけを最大6回、合計30秒に限定する。
+
 ADR 0054のstaging recoveryでは、固定CLIの作成引数へ2 data centerを明示し、Consoleで
 exact selectionを手動確認した。作成応答とGETはfieldを省略したため、これは通常promotion
 手順ではなく期限付きの運用例外である。`Security & compliance`は`Any`であり、

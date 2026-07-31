@@ -56,6 +56,12 @@ const runpodPromotionScriptPath = path.join(
   "scripts",
   "promote-runpod-candidate.mjs",
 );
+const runpodPromotionLibraryPath = path.join(repositoryRoot, "scripts", "runpod-promotion.mjs");
+const runpodProductionCapacityPreparationPath = path.join(
+  repositoryRoot,
+  "scripts",
+  "prepare-runpod-production-capacity.mjs",
+);
 const runpodEnvironmentConfigScriptPath = path.join(
   repositoryRoot,
   "scripts",
@@ -206,6 +212,11 @@ const accessVerifierContents = readFileSync(accessVerifierPath, "utf8");
 const releaseCandidateScriptContents = readFileSync(releaseCandidateScriptPath, "utf8");
 const runpodDeploymentScriptContents = readFileSync(runpodDeploymentScriptPath, "utf8");
 const runpodPromotionScriptContents = readFileSync(runpodPromotionScriptPath, "utf8");
+const runpodPromotionLibraryContents = readFileSync(runpodPromotionLibraryPath, "utf8");
+const runpodProductionCapacityPreparationContents = readFileSync(
+  runpodProductionCapacityPreparationPath,
+  "utf8",
+);
 const runpodEnvironmentConfigScriptContents = readFileSync(
   runpodEnvironmentConfigScriptPath,
   "utf8",
@@ -1368,6 +1379,38 @@ requireText(
   "promote-runpod-candidate.mjs",
   "fixed endpoint worker drain",
 );
+requireTextCount(
+  runpodPromotionLibraryContents,
+  "RunPod production endpoint capacity must match the fixed plan before promotion",
+  2,
+  "runpod-promotion.mjs",
+  "production capacity drift guards in preflight and promotion",
+);
+requireText(
+  runpodPromotionLibraryContents,
+  "const capacityReadBackDelaysMilliseconds = [1_000, 2_000, 4_000, 8_000, 15_000];",
+  "runpod-promotion.mjs",
+  "bounded capacity convergence read-back",
+);
+requireText(
+  packageManifestContents,
+  '"runpod:capacity:prepare:production": "node scripts/prepare-runpod-production-capacity.mjs"',
+  "package.json",
+  "explicit production capacity preparation command",
+);
+for (const [description, value] of Object.entries({
+  "explicit production confirmation": "--confirm-production-capacity-migration",
+  "local-only capacity preparation": "cannot run in GitHub Actions",
+  "job and worker health read-back": "getRunpodEndpointHealth({",
+  "tested capacity preparation boundary": "prepareRunpodProductionCapacity({",
+})) {
+  requireText(
+    runpodProductionCapacityPreparationContents,
+    value,
+    "prepare-runpod-production-capacity.mjs",
+    description,
+  );
+}
 requireText(
   runpodPromotionScriptContents,
   "setRunpodEndpointCapacity({",

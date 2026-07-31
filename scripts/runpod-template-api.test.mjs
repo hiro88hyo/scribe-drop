@@ -275,7 +275,7 @@ test("rejects missing, malformed, or contradictory endpoint placement", async ()
   }
 });
 
-test("reads only bounded worker counters from endpoint health", async () => {
+test("reads only bounded job and worker counters from endpoint health", async () => {
   const endpointId = "endpoint_test";
   const signal = {};
   const result = await getRunpodEndpointHealth(
@@ -294,7 +294,7 @@ test("reads only bounded worker counters from endpoint health", async () => {
           signal,
         });
         return jsonResponse({
-          jobs: { inQueue: 7 },
+          jobs: { inProgress: 1, inQueue: 7 },
           workers: {
             idle: 0,
             initializing: 1,
@@ -308,6 +308,10 @@ test("reads only bounded worker counters from endpoint health", async () => {
     },
   );
   assert.deepEqual(result, {
+    jobs: {
+      inProgress: 1,
+      inQueue: 7,
+    },
     workers: {
       idle: 0,
       initializing: 1,
@@ -326,7 +330,7 @@ test("rejects malformed endpoint health counters", async () => {
       {
         createTimeoutSignal: () => ({}),
         async fetchImplementation() {
-          return jsonResponse({ workers: { running: -1 } });
+          return jsonResponse({ jobs: {}, workers: { running: -1 } });
         },
         async sleep() {},
       },

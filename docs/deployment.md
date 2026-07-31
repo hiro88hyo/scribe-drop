@@ -348,6 +348,33 @@ read-only preflightを実行し、後段照合が成功するまでevidenceを�
 全resource deploy後にRunPodを再照合する。
 この照合にはRunPod endpointだけでなく、Orchestratorの`RUNPOD_WORKER_IMAGE`と
 `RUNPOD_ALLOWED_GPU_IDS`が同じ生成済みRunPod planと一致することを含む。
+[ADR 0056](./adr/0056-require-production-capacity-before-promotion.md)に従い、production
+preflightはcapacity driftを更新予定として許可しない。GPU順序、data center集合、
+complianceを事前に完全一致させ、独立read-backした後だけcandidate workflowを開始する。
+通常promotion本体もcapacity driftを検出した場合はworker drainより前に停止し、
+production capacityを暗黙に移行しない。
+capacity移行が必要な場合は、全local gateとread-only実resource確認の後、明示承認を得て
+次のlocal-only commandを1回だけ実行する。追跡外production planとcredentialを事前に
+生成・注入し、値をshell履歴や文書へ残さない。
+
+```bash
+pnpm run runpod:capacity:prepare:production -- --confirm-production-capacity-migration
+```
+
+commandはactive job/Workerが0であることを確認し、worker上限0へのdrain、単一capacity
+mutation、bounded read-back、worker上限復旧を行う。失敗時は旧capacityへrollbackする。
+成功後に別のread-only preflightを通すまでproduction workflowをdispatchしない。
+capacity移行が必要な場合は、全local gateとread-only実resource確認の後、明示承認を得て
+次のlocal-only commandを1回だけ実行する。追跡外production planとcredentialを事前に
+生成・注入し、値をshell履歴や文書へ残さない。
+
+```bash
+pnpm run runpod:capacity:prepare:production -- --confirm-production-capacity-migration
+```
+
+commandはactive job/Workerが0であることを確認し、worker上限0へのdrain、単一capacity
+mutation、bounded read-back、worker上限復旧を行う。失敗時は旧capacityへrollbackする。
+成功後に別のread-only preflightを通すまでproduction workflowをdispatchしない。
 
 RunPod publication workflowはapplication artifactをcandidateごとに一度だけbuildし、
 Worker imageは新規buildまたはADR 0038の固定digest再利用の一方だけを選ぶ。environment別

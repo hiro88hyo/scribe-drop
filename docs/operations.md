@@ -230,6 +230,26 @@ timeoutでは「10分ちょうどでprovider queueから消える」と扱わな
   canonical化し、Cloudflare runtimeとGitHub staging Environmentを同じIDへ同期済みである。
   旧endpointはsupport証跡名のまま、調査中にprewarmやjobを行わず、両endpointの
   `workersMin=0`を維持する。
+- productionは
+  [ADR 0056](./adr/0056-require-production-capacity-before-promotion.md)に従い、promotion前に
+  GPU順序、data center集合、complianceを固定planへ完全一致させる。production preflightの
+  `capacity update pending`は許可しない。事前capacity移行はactive Workerとjobが0、
+  rollback用の旧capacityが取得済み、固定GPUがavailableである場合だけ明示承認後に行う。
+  PATCHは1回だけ送信し、最大30秒のbounded read-backで完全一致しなければ旧capacityへ戻す。
+  事前移行またはrollbackが未確認の状態でpromotion workflowを起動しない。
+  全local gateとread-only確認後、明示承認を得た場合だけ次を1回実行する。
+
+  ```bash
+  pnpm run runpod:capacity:prepare:production -- --confirm-production-capacity-migration
+  ```
+
+  commandはGitHub Actions内の実行を拒否し、追跡外production planを使用する。成功表示だけを
+  根拠にせず、続けて通常のproduction preflightでcapacity完全一致、active job/Worker 0、
+  scale-to-zeroを独立read-backする。capacity更新とrollbackがともに失敗した場合は
+  Worker上限0を維持するため、復旧確認なしに上限を戻したりworkflowを起動したりしない。
+  drain中に新しいjobがqueueへ入った場合は旧capacityへ戻してからWorker上限を復元し、
+  そのjobが新旧capacityの狭間で起動しないようにする。
+
 - 全候補が一時的に不足しても、利用者画面は`SUBMITTING`を「GPU起動中」と表示し、開始SLO
   超過後は`FAILED`と手動retryを提供する。同じattemptの自動再投入やclaim TTL延長はしない。
 - 利用者のretryは`FAILED` jobに新しいgeneration、attempt、token、result prefixを作る。

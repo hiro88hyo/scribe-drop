@@ -714,6 +714,14 @@ worker証跡stepが失敗した。`always()` cleanupとscale-to-zero read-back�
 acceptanceは発行していない。専用test、CI構造検査、全local gateが成功するまで再dispatch
 しない。
 
+[ADR 0056](./adr/0056-require-production-capacity-before-promotion.md)に従い、production
+promotion前のRunPod capacity完全一致を独立した前提条件にする。staging endpointが
+新規作成時から固定planへ一致していたことは、旧production endpointのin-place capacity
+移行を検証した証拠にしない。production preflightとpromotion本体はcapacity driftを
+mutation前に拒否し、capacity mutationは単一送信と最大30秒のbounded read-backを使う
+事前作業へ分離する。事前移行、独立read-back、local gateが成功するまでproduction
+workflowをdispatchしない。
+
 初回production bootstrapではOrchestratorの必須secretであるRunPod endpoint IDを先に
 確定する必要があるため、
 [ADR 0022](./adr/0022-bootstrap-production-dependencies-before-applications.md)に従って

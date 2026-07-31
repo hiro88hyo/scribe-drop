@@ -2,12 +2,16 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  prepareRunpodProductionCapacity,
   promoteRunpodCandidate as promoteRunpodCandidateWithInputs,
   reconcileRunpodEndpointCapacity,
   verifyRunpodCandidateWorkerEvidence as verifyRunpodCandidateWorkerEvidenceWithInputs,
   verifyRunpodPromotionPreflight as verifyRunpodPromotionPreflightWithInputs,
 } from "./runpod-promotion.mjs";
-import { createRunpodStagingPlan } from "./runpod-environment-config.mjs";
+import {
+  createRunpodProductionPlan,
+  createRunpodStagingPlan,
+} from "./runpod-environment-config.mjs";
 
 const plan = createRunpodStagingPlan({
   accountId: "a".repeat(32),
@@ -16,6 +20,14 @@ const plan = createRunpodStagingPlan({
   imageVisibility: "private",
   orchestratorOrigin: "https://orchestrator-staging.example.invalid",
   registryAuthId: "registry_staging",
+});
+const productionPlan = createRunpodProductionPlan({
+  accountId: "a".repeat(32),
+  gpuTypeIds: "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090",
+  image: `ghcr.io/example/scribe-drop-runpod-worker@sha256:${"b".repeat(64)}`,
+  imageVisibility: "private",
+  orchestratorOrigin: "https://orchestrator-production.example.invalid",
+  registryAuthId: "registry_production",
 });
 
 function withTemplateList(input) {
@@ -139,6 +151,135 @@ function endpoint(templateId, workers = [], workersMax = plan.endpoint.workersMa
   };
 }
 
+function endpointForPlan(
+  targetPlan,
+  templateId,
+  workers = [],
+  workersMax = targetPlan.endpoint.workersMax,
+) {
+  return {
+    executionTimeoutMs: targetPlan.endpoint.executionTimeoutSeconds * 1_000,
+    flashBootType: "OFF",
+    gpuCount: targetPlan.endpoint.gpuCount,
+    id: "endpoint_production",
+    idleTimeout: targetPlan.endpoint.idleTimeoutSeconds,
+    minCudaVersion: targetPlan.endpoint.minCudaVersion,
+    modelReferences: [],
+    name: targetPlan.endpoint.name,
+    networkVolumeIds: [],
+    scalerType: targetPlan.endpoint.scalerType,
+    scalerValue: targetPlan.endpoint.scalerValue,
+    templateId,
+    workers,
+    workersMax,
+    workersMin: targetPlan.endpoint.workersMin,
+  };
+}
+
+function templateForPlan(targetPlan, id) {
+  return {
+    containerDiskInGb: targetPlan.template.containerDiskInGb,
+    containerRegistryAuthId: targetPlan.template.registryAuthId,
+    env: targetPlan.template.environment,
+    id,
+    imageName: targetPlan.template.image,
+    isServerless: true,
+    name: targetPlan.template.name,
+    ports: [],
+    volumeInGb: 0,
+  };
+}
+
+function productionCapacity(overrides = {}) {
+  return {
+    compliance: productionPlan.endpoint.compliance,
+    dataCenterIds: ["EU-RO-1"],
+    gpuTypeIds: ["NVIDIA GeForce RTX 4090"],
+    id: "endpoint_production",
+    ...overrides,
+  };
+}
+
+function productionGpuInventory() {
+  return productionPlan.endpoint.gpuTypeIds.map((gpuId) => ({
+    available: true,
+    communityCloud: true,
+    gpuId,
+    secureCloud: true,
+    stockStatus: "Medium",
+  }));
+}
+
+function productionHealth(overrides = {}) {
+  return {
+    jobs: { inProgress: 0, inQueue: 0 },
+    workers: { idle: 0, initializing: 0, ready: 0, running: 0 },
+    ...overrides,
+  };
+}
+
+function productionPreparationHarness(options = {}) {
+  let workersMax = productionPlan.endpoint.workersMax;
+  let capacity = options.initialCapacity ?? productionCapacity();
+  let healthReads = 0;
+  const capacityRequests = [];
+  const workerMaximums = [];
+  return {
+    capacityRequests,
+    get capacity() {
+      return capacity;
+    },
+    input: {
+      endpointId: "endpoint_production",
+      environment: "production",
+      getEndpoint() {
+        return Promise.resolve(capacity);
+      },
+      getHealth() {
+        healthReads += 1;
+        return Promise.resolve(
+          options.getHealth?.({ attempt: healthReads }) ?? options.health ?? productionHealth(),
+        );
+      },
+      listGpus() {
+        return Promise.resolve(productionGpuInventory());
+      },
+      plan: productionPlan,
+      runCli(arguments_) {
+        if (arguments_[0] === "serverless" && arguments_[1] === "get") {
+          return endpointForPlan(productionPlan, "template_old", [], workersMax);
+        }
+        throw new Error("Unexpected fake CLI call");
+      },
+      setEndpointCapacity(request) {
+        capacityRequests.push(request);
+        capacity = options.applyCapacity?.({
+          capacity,
+          index: capacityRequests.length,
+          request,
+        }) ?? {
+          ...capacity,
+          dataCenterIds: request.dataCenterIds,
+          gpuTypeIds: request.gpuTypeIds,
+        };
+        return Promise.resolve();
+      },
+      setEndpointWorkersMax(request) {
+        workersMax = request.workersMax;
+        workerMaximums.push(workersMax);
+        return Promise.resolve();
+      },
+      sleep() {
+        return Promise.resolve();
+      },
+    },
+    workerMaximums,
+    get workersMax() {
+      return workersMax;
+    },
+  };
+}
+
 test("capacity reconciliation is idempotent for the exact fixed plan", async () => {
   let mutations = 0;
   const result = await reconcileRunpodEndpointCapacity({
@@ -205,6 +346,55 @@ test("capacity reconciliation updates GPU and data centers atomically", async ()
   ]);
 });
 
+test("capacity reconciliation waits for bounded control-plane convergence without resending", async () => {
+  const previousCapacity = {
+    compliance: plan.endpoint.compliance,
+    dataCenterIds: ["EU-RO-1"],
+    gpuTypeIds: ["NVIDIA GeForce RTX 4090"],
+    id: "endpoint_staging",
+  };
+  let mutationAccepted = false;
+  let readsAfterMutation = 0;
+  let mutations = 0;
+  const delays = [];
+  const result = await reconcileRunpodEndpointCapacity({
+    endpointId: "endpoint_staging",
+    environment: "staging",
+    getEndpoint() {
+      if (!mutationAccepted) {
+        return Promise.resolve(previousCapacity);
+      }
+      readsAfterMutation += 1;
+      return Promise.resolve(
+        readsAfterMutation < 3
+          ? previousCapacity
+          : {
+              ...previousCapacity,
+              dataCenterIds: plan.endpoint.dataCenterIds,
+              gpuTypeIds: plan.endpoint.gpuTypeIds,
+            },
+      );
+    },
+    plan,
+    setEndpointCapacity() {
+      mutations += 1;
+      mutationAccepted = true;
+      return Promise.resolve();
+    },
+    sleep(milliseconds) {
+      delays.push(milliseconds);
+      return Promise.resolve();
+    },
+  });
+
+  assert.deepEqual(result, {
+    changed: true,
+    endpointId: "endpoint_staging",
+  });
+  assert.equal(mutations, 1);
+  assert.deepEqual(delays, [1_000, 2_000]);
+});
+
 test("capacity reconciliation restores the exact previous capacity after failed read-back", async () => {
   const previousCapacity = {
     compliance: plan.endpoint.compliance,
@@ -222,6 +412,9 @@ test("capacity reconciliation restores the exact previous capacity after failed 
         return Promise.resolve(capacity);
       },
       plan,
+      sleep() {
+        return Promise.resolve();
+      },
       setEndpointCapacity(request) {
         mutations.push(request);
         if (mutations.length === 2) {
@@ -263,6 +456,9 @@ test("capacity reconciliation reports when update and rollback both fail", async
         return Promise.resolve(capacity);
       },
       plan,
+      sleep() {
+        return Promise.resolve();
+      },
       setEndpointCapacity() {
         mutations += 1;
         if (mutations === 1) {
@@ -359,6 +555,177 @@ test("preflight reports legacy single-GPU capacity without mutating", async () =
   });
 
   assert.equal(result.capacityUpdateRequired, true);
+});
+
+test("production preflight rejects capacity drift before any mutation", async () => {
+  let mutations = 0;
+  await assert.rejects(
+    verifyRunpodPromotionPreflightWithInputs({
+      endpointId: "endpoint_production",
+      environment: "production",
+      getEndpoint() {
+        return Promise.resolve({
+          compliance: productionPlan.endpoint.compliance,
+          dataCenterIds: ["EU-RO-1"],
+          gpuTypeIds: ["NVIDIA GeForce RTX 4090"],
+          id: "endpoint_production",
+        });
+      },
+      listGpus() {
+        return Promise.resolve(
+          productionPlan.endpoint.gpuTypeIds.map((gpuId) => ({
+            available: true,
+            communityCloud: true,
+            gpuId,
+            secureCloud: true,
+            stockStatus: "Medium",
+          })),
+        );
+      },
+      listTemplates() {
+        return Promise.resolve([]);
+      },
+      plan: productionPlan,
+      runCli(arguments_) {
+        if (arguments_[0] === "serverless" && arguments_[1] === "get") {
+          return endpointForPlan(productionPlan, "template_old");
+        }
+        mutations += 1;
+        throw new Error("Unexpected mutating CLI call");
+      },
+    }),
+    /must match the fixed plan before promotion/u,
+  );
+  assert.equal(mutations, 0);
+});
+
+test("production promotion rejects capacity drift before draining workers", async () => {
+  let mutations = 0;
+  await assert.rejects(
+    promoteRunpodCandidateWithInputs({
+      endpointId: "endpoint_production",
+      environment: "production",
+      getEndpoint() {
+        return Promise.resolve({
+          compliance: productionPlan.endpoint.compliance,
+          dataCenterIds: ["EU-RO-1"],
+          gpuTypeIds: ["NVIDIA GeForce RTX 4090"],
+          id: "endpoint_production",
+        });
+      },
+      listGpus() {
+        return Promise.resolve(
+          productionPlan.endpoint.gpuTypeIds.map((gpuId) => ({
+            available: true,
+            communityCloud: true,
+            gpuId,
+            secureCloud: true,
+            stockStatus: "Medium",
+          })),
+        );
+      },
+      listTemplates() {
+        return Promise.resolve([{ id: "template_new", name: productionPlan.template.name }]);
+      },
+      plan: productionPlan,
+      runCli(arguments_) {
+        if (arguments_[0] === "template" && arguments_[1] === "get") {
+          return templateForPlan(productionPlan, "template_new");
+        }
+        if (arguments_[0] === "serverless" && arguments_[1] === "get") {
+          return endpointForPlan(productionPlan, "template_old");
+        }
+        throw new Error("Unexpected fake CLI call");
+      },
+      setEndpointCapacity() {
+        mutations += 1;
+        return Promise.resolve();
+      },
+      setEndpointWorkersMax() {
+        mutations += 1;
+        return Promise.resolve();
+      },
+    }),
+    /must match the fixed plan before promotion/u,
+  );
+  assert.equal(mutations, 0);
+});
+
+test("production capacity preparation drains, reconciles once, and restores workers", async () => {
+  const harness = productionPreparationHarness();
+  const result = await prepareRunpodProductionCapacity(harness.input);
+
+  assert.deepEqual(result, {
+    changed: true,
+    endpointId: "endpoint_production",
+  });
+  assert.equal(harness.capacityRequests.length, 1);
+  assert.deepEqual(harness.workerMaximums, [0, 1]);
+  assert.deepEqual(harness.capacity.dataCenterIds, productionPlan.endpoint.dataCenterIds);
+  assert.deepEqual(harness.capacity.gpuTypeIds, productionPlan.endpoint.gpuTypeIds);
+});
+
+test("production capacity preparation restores workers after capacity rollback", async () => {
+  const previousCapacity = productionCapacity();
+  const harness = productionPreparationHarness({
+    applyCapacity({ capacity, index }) {
+      return index === 2 ? previousCapacity : capacity;
+    },
+    initialCapacity: previousCapacity,
+  });
+  await assert.rejects(prepareRunpodProductionCapacity(harness.input), /capacity does not match/u);
+
+  assert.equal(harness.capacityRequests.length, 2);
+  assert.deepEqual(harness.workerMaximums, [0, 1]);
+  assert.deepEqual(harness.capacity, previousCapacity);
+});
+
+test("production capacity preparation rejects queued jobs before mutation", async () => {
+  const harness = productionPreparationHarness({
+    health: productionHealth({ jobs: { inProgress: 0, inQueue: 1 } }),
+  });
+  await assert.rejects(prepareRunpodProductionCapacity(harness.input), /active jobs or workers/u);
+  assert.equal(harness.capacityRequests.length, 0);
+  assert.deepEqual(harness.workerMaximums, []);
+});
+
+test("production capacity preparation rolls back when a job arrives while drained", async () => {
+  const previousCapacity = productionCapacity();
+  const harness = productionPreparationHarness({
+    getHealth({ attempt }) {
+      return attempt === 1
+        ? productionHealth()
+        : productionHealth({ jobs: { inProgress: 0, inQueue: 1 } });
+    },
+    initialCapacity: previousCapacity,
+  });
+  await assert.rejects(prepareRunpodProductionCapacity(harness.input), /active jobs or workers/u);
+
+  assert.equal(harness.capacityRequests.length, 2);
+  assert.deepEqual(harness.workerMaximums, [0, 1]);
+  assert.deepEqual(harness.capacity, previousCapacity);
+});
+
+test("production capacity preparation stays drained when capacity rollback fails", async () => {
+  const harness = productionPreparationHarness({
+    applyCapacity({ capacity, index, request }) {
+      return index === 1
+        ? {
+            ...capacity,
+            dataCenterIds: request.dataCenterIds,
+            gpuTypeIds: ["NVIDIA L4"],
+          }
+        : capacity;
+    },
+  });
+  await assert.rejects(
+    prepareRunpodProductionCapacity(harness.input),
+    /capacity update and rollback both failed/u,
+  );
+
+  assert.equal(harness.capacityRequests.length, 2);
+  assert.deepEqual(harness.workerMaximums, [0]);
+  assert.equal(harness.workersMax, 0);
 });
 
 test("preflight rejects a stale worker when the candidate template is already attached", async () => {

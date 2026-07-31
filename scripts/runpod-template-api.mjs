@@ -279,6 +279,9 @@ export function getRunpodEndpointHealth(input, dependencies = {}) {
           typeof value !== "object" ||
           value === null ||
           Array.isArray(value) ||
+          typeof value.jobs !== "object" ||
+          value.jobs === null ||
+          Array.isArray(value.jobs) ||
           typeof value.workers !== "object" ||
           value.workers === null ||
           Array.isArray(value.workers)
@@ -286,6 +289,10 @@ export function getRunpodEndpointHealth(input, dependencies = {}) {
           throw new Error("RunPod endpoint health response is missing or invalid");
         }
         return {
+          jobs: {
+            inProgress: requireNonnegativeInteger(value.jobs.inProgress ?? 0, "jobs in progress"),
+            inQueue: requireNonnegativeInteger(value.jobs.inQueue ?? 0, "jobs in queue"),
+          },
           workers: {
             idle: requireNonnegativeInteger(value.workers.idle ?? 0, "idle workers"),
             initializing: requireNonnegativeInteger(

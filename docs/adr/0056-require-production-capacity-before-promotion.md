@@ -1,0 +1,64 @@
+# ADR 0056: production promotion前にRunPod capacityを完全一致させる
+
+- Status: Accepted
+- Date: 2026-07-31
+- Refines: ADR 0031、ADR 0049、ADR 0053、ADR 0054
+
+## Context
+
+ADR 0054の修正を含むcandidateは、canonical staging endpointがすでに固定GPUとdata centerを
+保持した状態でformal staging acceptanceを成功した。この経路はcandidate templateの切替と
+実M4A lifecycleを検証したが、旧GPU・旧data centerから固定planへ移行するcapacity PATCHを
+実行していない。
+
+production endpointは旧capacityのままなのに、read-only preflightは
+`capacity update pending`を成功として後続を許可した。production workflowはD1 migrationと
+R2 policyの冪等適用後、RunPod endpointをdrainしてcapacity PATCHを1回送信した。
+実装はPATCH応答を結果不明として扱えるようにしていた一方、直後のRESTとGraphQLの
+read-backを1回だけ実行した。固定planへ一致しなかったため旧capacityへrollbackし、
+旧Worker上限を復元して停止した。Orchestrator、Pages、candidate templateは変更していない。
+
+RunPodの公式REST APIはendpoint PATCHで複数の`gpuTypeIds`と`dataCenterIds`を受理すると
+記載し、この更新をrolling releaseとして説明する。一方、response schemaは
+`dataCenterIds`を配列としながら例ではカンマ区切り文字列を示す。ADR 0049でも、HTTP 200と
+OpenAPI enumだけでは実APIの保持結果を保証できないことを記録済みだった。stagingの
+新規endpoint作成と実job成功を、既存production endpointのin-place capacity移行の証拠へ
+拡張してはならなかった。
+
+## Decision
+
+- productionのread-only promotion preflightはcapacity driftを「更新予定」として成功させない。
+  GPU順序、data center集合、complianceが固定planへ完全一致しなければ、最初のremote
+  mutationより前に失敗する。
+- production candidate promotion本体にも同じguardを置く。preflightが迂回されても、
+  capacity driftがあるendpointをdrain、PATCH、template切替しない。
+- production capacity移行はcandidate promotionと分離した、明示承認付きの事前作業とする。
+  対象endpointがscale-to-zeroでactive Workerとjobを持たないこと、旧capacityを完全に
+  read-backできること、固定planの両GPUが利用可能であることを先に確認する。
+- capacity mutationは1回だけ送信する。mutation自体は再送せず、RESTのGPU情報と
+  Console-equivalent GraphQLのdata center/compliance情報を最大6回、合計30秒の
+  bounded backoffでread-backする。完全一致しなければ、同じbounded read-backを使って
+  旧capacityへrollbackする。
+- stagingでcapacityが一致済みだったという事実は、production capacity移行の成功証拠に
+  しない。production実endpointの事前移行と独立read-backが成功するまでpromotion workflowを
+  dispatchしない。
+- capacity移行はlocal-onlyの`runpod:capacity:prepare:production`で行う。明示confirmationを
+  必須とし、GitHub Actions内の実行を拒否する。endpoint healthのqueue/in-progress jobと
+  active Workerが0であることを確認し、Worker上限を0へdrainしてから更新し、最後に上限を
+  復元する。drain中にもhealthを再確認し、新しいjobがqueueへ入った場合は旧capacityへ
+  rollbackしてから上限を復元する。rollback、秘密値を含まない固定エラー、単一mutation、
+  bounded read-backを
+  回帰testとCI構造検査で固定する。capacity更新とrollbackの両方が失敗した場合は状態不明の
+  endpointでWorkerを起動せず、上限0の安全停止を維持する。Consoleだけの未記録変更を
+  通常手順にしない。
+
+## Consequences
+
+- capacity不一致をD1、R2、RunPod、Cloudflareをまたぐ長いworkflowの途中で初めて検出せず、
+  費用と待ち時間が発生する前に停止できる。
+- providerの反映遅延を即時失敗と誤認しない一方、mutationの自動再送と無期限pollは行わない。
+- capacity変更が必要なreleaseには事前作業が1段増える。通常のtemplate/imageだけのreleaseは
+  endpoint capacityが固定planへ一致しているため追加作業を必要としない。
+- 今回のcandidateとstaging acceptanceは、promotion制御のcommitを変更した時点でそのまま
+  再利用できない。修正後のlocal gateと事前capacity移行を成功させてから、新しい同一commitの
+  candidateとformal staging acceptanceを必要最小回数だけ実行する。
