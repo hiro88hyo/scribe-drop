@@ -364,9 +364,10 @@ pnpm run runpod:capacity:prepare:production -- --confirm-production-capacity-mig
 commandはactive jobとrunning/initializing Workerが0であることを確認してからworker上限を
 0へdrainする。endpoint APIに残るterminal Worker履歴は許容するが、healthの
 idle/initializing/ready/runningが最大30秒以内にすべて0へ収束するまでcapacityを変更しない。
-収束後に単一capacity mutation、bounded read-back、worker上限復旧を行う。失敗時は
-旧capacityへrollbackする。成功後に別のread-only preflightを通すまでproduction workflowを
-dispatchしない。
+収束後は[ADR 0057](./adr/0057-split-runpod-capacity-mutations.md)に従い、GraphQLで
+data centerを1回変更して旧GPU保持をread-backし、RESTでGPUだけを1回変更する。各段階を
+bounded read-backし、失敗時は旧data centerと旧GPUへrollbackしてからworker上限を復旧する。
+成功後に別のread-only preflightを通すまでproduction workflowをdispatchしない。
 
 RunPod publication workflowはapplication artifactをcandidateごとに一度だけbuildし、
 Worker imageは新規buildまたはADR 0038の固定digest再利用の一方だけを選ぶ。environment別

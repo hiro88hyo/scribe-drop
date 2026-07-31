@@ -104,12 +104,15 @@ function promoteRunpodCandidate(input) {
         }
         workersMax = request.workersMax;
       },
-      async setEndpointCapacity(request) {
-        if (input.setEndpointCapacity !== undefined) {
-          await input.setEndpointCapacity(request);
+      async setEndpointDataCenters(request) {
+        if (input.setEndpointDataCenters !== undefined) {
+          await input.setEndpointDataCenters(request);
         }
-        if (Object.hasOwn(request, "dataCenterIds")) {
-          dataCenterIds = request.dataCenterIds;
+        dataCenterIds = request.dataCenterIds;
+      },
+      async setEndpointGpuTypes(request) {
+        if (input.setEndpointGpuTypes !== undefined) {
+          await input.setEndpointGpuTypes(request);
         }
         gpuTypeIds = request.gpuTypeIds;
       },
@@ -223,10 +226,12 @@ function productionPreparationHarness(options = {}) {
   let capacity = options.initialCapacity ?? productionCapacity();
   let healthReads = 0;
   const capacityRequests = [];
+  const dataCenterRequests = [];
   const sleepDelays = [];
   const workerMaximums = [];
   return {
     capacityRequests,
+    dataCenterRequests,
     get capacity() {
       return capacity;
     },
@@ -252,15 +257,26 @@ function productionPreparationHarness(options = {}) {
         }
         throw new Error("Unexpected fake CLI call");
       },
-      setEndpointCapacity(request) {
-        capacityRequests.push(request);
+      setEndpointDataCenters(request) {
+        dataCenterRequests.push(request);
+        capacity = {
+          ...capacity,
+          dataCenterIds: request.dataCenterIds,
+        };
+        return Promise.resolve();
+      },
+      setEndpointGpuTypes(request) {
+        const combinedRequest = {
+          ...request,
+          dataCenterIds: capacity.dataCenterIds,
+        };
+        capacityRequests.push(combinedRequest);
         capacity = options.applyCapacity?.({
           capacity,
           index: capacityRequests.length,
-          request,
+          request: combinedRequest,
         }) ?? {
           ...capacity,
-          dataCenterIds: request.dataCenterIds,
           gpuTypeIds: request.gpuTypeIds,
         };
         return Promise.resolve();
@@ -297,7 +313,11 @@ test("capacity reconciliation is idempotent for the exact fixed plan", async () 
       });
     },
     plan,
-    setEndpointCapacity() {
+    setEndpointDataCenters() {
+      mutations += 1;
+      return Promise.resolve();
+    },
+    setEndpointGpuTypes() {
       mutations += 1;
       return Promise.resolve();
     },
@@ -310,7 +330,7 @@ test("capacity reconciliation is idempotent for the exact fixed plan", async () 
   assert.equal(mutations, 0);
 });
 
-test("capacity reconciliation updates GPU and data centers atomically", async () => {
+test("capacity reconciliation updates data centers before GPU types", async () => {
   let capacity = {
     compliance: plan.endpoint.compliance,
     dataCenterIds: ["EU-RO-1"],
@@ -325,11 +345,18 @@ test("capacity reconciliation updates GPU and data centers atomically", async ()
       return Promise.resolve(capacity);
     },
     plan,
-    setEndpointCapacity(request) {
-      mutations.push(request);
+    setEndpointDataCenters(request) {
+      mutations.push({ kind: "data-centers", ...request });
       capacity = {
         ...capacity,
         dataCenterIds: request.dataCenterIds,
+      };
+      return Promise.resolve();
+    },
+    setEndpointGpuTypes(request) {
+      mutations.push({ kind: "gpu-types", ...request });
+      capacity = {
+        ...capacity,
         gpuTypeIds: request.gpuTypeIds,
       };
       return Promise.resolve();
@@ -342,9 +369,14 @@ test("capacity reconciliation updates GPU and data centers atomically", async ()
   });
   assert.deepEqual(mutations, [
     {
-      dataCenterIds: plan.endpoint.dataCenterIds,
+      dataCenterIds: [...plan.endpoint.dataCenterIds].sort(),
+      endpointId: "endpoint_staging",
+      kind: "data-centers",
+    },
+    {
       endpointId: "endpoint_staging",
       gpuTypeIds: plan.endpoint.gpuTypeIds,
+      kind: "gpu-types",
     },
   ]);
 });
@@ -356,7 +388,8 @@ test("capacity reconciliation waits for bounded control-plane convergence withou
     gpuTypeIds: ["NVIDIA GeForce RTX 4090"],
     id: "endpoint_staging",
   };
-  let mutationAccepted = false;
+  let capacity = previousCapacity;
+  let gpuMutationAccepted = false;
   let readsAfterMutation = 0;
   let mutations = 0;
   const delays = [];
@@ -364,24 +397,31 @@ test("capacity reconciliation waits for bounded control-plane convergence withou
     endpointId: "endpoint_staging",
     environment: "staging",
     getEndpoint() {
-      if (!mutationAccepted) {
-        return Promise.resolve(previousCapacity);
+      if (!gpuMutationAccepted) {
+        return Promise.resolve(capacity);
       }
       readsAfterMutation += 1;
       return Promise.resolve(
         readsAfterMutation < 3
-          ? previousCapacity
+          ? capacity
           : {
-              ...previousCapacity,
-              dataCenterIds: plan.endpoint.dataCenterIds,
+              ...capacity,
               gpuTypeIds: plan.endpoint.gpuTypeIds,
             },
       );
     },
     plan,
-    setEndpointCapacity() {
+    setEndpointDataCenters(request) {
       mutations += 1;
-      mutationAccepted = true;
+      capacity = {
+        ...capacity,
+        dataCenterIds: request.dataCenterIds,
+      };
+      return Promise.resolve();
+    },
+    setEndpointGpuTypes() {
+      mutations += 1;
+      gpuMutationAccepted = true;
       return Promise.resolve();
     },
     sleep(milliseconds) {
@@ -394,7 +434,7 @@ test("capacity reconciliation waits for bounded control-plane convergence withou
     changed: true,
     endpointId: "endpoint_staging",
   });
-  assert.equal(mutations, 1);
+  assert.equal(mutations, 2);
   assert.deepEqual(delays, [1_000, 2_000]);
 });
 
@@ -418,26 +458,33 @@ test("capacity reconciliation restores the exact previous capacity after failed 
       sleep() {
         return Promise.resolve();
       },
-      setEndpointCapacity(request) {
-        mutations.push(request);
-        if (mutations.length === 2) {
-          capacity = previousCapacity;
-        }
+      setEndpointDataCenters(request) {
+        mutations.push({ kind: "data-centers", ...request });
+        capacity = { ...capacity, dataCenterIds: request.dataCenterIds };
+        return Promise.resolve();
+      },
+      setEndpointGpuTypes(request) {
+        mutations.push({ kind: "gpu-types", ...request });
         return Promise.resolve();
       },
     }),
-    /capacity does not match/u,
+    /GPU update did not produce/u,
   );
   assert.deepEqual(mutations, [
     {
-      dataCenterIds: plan.endpoint.dataCenterIds,
+      dataCenterIds: [...plan.endpoint.dataCenterIds].sort(),
+      endpointId: "endpoint_staging",
+      kind: "data-centers",
+    },
+    {
       endpointId: "endpoint_staging",
       gpuTypeIds: plan.endpoint.gpuTypeIds,
+      kind: "gpu-types",
     },
     {
       dataCenterIds: previousCapacity.dataCenterIds,
       endpointId: "endpoint_staging",
-      gpuTypeIds: previousCapacity.gpuTypeIds,
+      kind: "data-centers",
     },
   ]);
   assert.deepEqual(capacity, previousCapacity);
@@ -462,15 +509,19 @@ test("capacity reconciliation reports when update and rollback both fail", async
       sleep() {
         return Promise.resolve();
       },
-      setEndpointCapacity() {
+      setEndpointDataCenters(request) {
         mutations += 1;
         if (mutations === 1) {
           capacity = {
             ...capacity,
-            dataCenterIds: plan.endpoint.dataCenterIds,
+            dataCenterIds: request.dataCenterIds,
             gpuTypeIds: ["NVIDIA L4"],
           };
         }
+        return Promise.resolve();
+      },
+      setEndpointGpuTypes() {
+        mutations += 1;
         return Promise.resolve();
       },
     }),
@@ -640,7 +691,11 @@ test("production promotion rejects capacity drift before draining workers", asyn
         }
         throw new Error("Unexpected fake CLI call");
       },
-      setEndpointCapacity() {
+      setEndpointDataCenters() {
+        mutations += 1;
+        return Promise.resolve();
+      },
+      setEndpointGpuTypes() {
         mutations += 1;
         return Promise.resolve();
       },
@@ -664,7 +719,10 @@ test("production capacity preparation drains, reconciles once, and restores work
   });
   assert.equal(harness.capacityRequests.length, 1);
   assert.deepEqual(harness.workerMaximums, [0, 1]);
-  assert.deepEqual(harness.capacity.dataCenterIds, productionPlan.endpoint.dataCenterIds);
+  assert.deepEqual(
+    harness.capacity.dataCenterIds,
+    [...productionPlan.endpoint.dataCenterIds].sort(),
+  );
   assert.deepEqual(harness.capacity.gpuTypeIds, productionPlan.endpoint.gpuTypeIds);
 });
 
@@ -756,9 +814,13 @@ test("production capacity preparation restores workers after capacity rollback",
     },
     initialCapacity: previousCapacity,
   });
-  await assert.rejects(prepareRunpodProductionCapacity(harness.input), /capacity does not match/u);
+  await assert.rejects(
+    prepareRunpodProductionCapacity(harness.input),
+    /GPU update did not produce/u,
+  );
 
-  assert.equal(harness.capacityRequests.length, 2);
+  assert.equal(harness.capacityRequests.length, 1);
+  assert.equal(harness.dataCenterRequests.length, 2);
   assert.deepEqual(harness.workerMaximums, [0, 1]);
   assert.deepEqual(harness.capacity, previousCapacity);
 });
@@ -1309,14 +1371,14 @@ test("does not mutate an endpoint that already uses the candidate template", asy
 
 test("drains and replaces legacy single-GPU capacity even when the template is current", async () => {
   const workerMaximums = [];
-  const capacityUpdates = [];
+  const gpuUpdates = [];
   const result = await promoteRunpodCandidate({
     endpointId: "endpoint_staging",
     environment: "staging",
     initialGpuTypeIds: ["NVIDIA GeForce RTX 4090"],
     plan,
-    async setEndpointCapacity(request) {
-      capacityUpdates.push(request);
+    async setEndpointGpuTypes(request) {
+      gpuUpdates.push(request);
     },
     async setEndpointWorkersMax({ workersMax }) {
       workerMaximums.push(workersMax);
@@ -1335,9 +1397,8 @@ test("drains and replaces legacy single-GPU capacity even when the template is c
 
   assert.equal(result.changed, true);
   assert.deepEqual(workerMaximums, [0, 1]);
-  assert.deepEqual(capacityUpdates, [
+  assert.deepEqual(gpuUpdates, [
     {
-      dataCenterIds: plan.endpoint.dataCenterIds,
       endpointId: "endpoint_staging",
       gpuTypeIds: plan.endpoint.gpuTypeIds,
     },
@@ -1521,8 +1582,11 @@ test("rolls back the exact previous GPU and data-center capacity", async () => {
       initialDataCenterIds: previousCapacity.dataCenterIds,
       initialGpuTypeIds: previousCapacity.gpuTypeIds,
       plan,
-      async setEndpointCapacity(request) {
-        capacityUpdates.push(request);
+      async setEndpointDataCenters(request) {
+        capacityUpdates.push({ kind: "data-centers", ...request });
+      },
+      async setEndpointGpuTypes(request) {
+        capacityUpdates.push({ kind: "gpu-types", ...request });
       },
       runCli(arguments_) {
         if (arguments_[0] === "template" && arguments_[1] === "list") {
@@ -1548,13 +1612,24 @@ test("rolls back the exact previous GPU and data-center capacity", async () => {
 
   assert.deepEqual(capacityUpdates, [
     {
-      dataCenterIds: plan.endpoint.dataCenterIds,
+      dataCenterIds: [...plan.endpoint.dataCenterIds].sort(),
       endpointId: "endpoint_staging",
-      gpuTypeIds: plan.endpoint.gpuTypeIds,
+      kind: "data-centers",
     },
     {
       endpointId: "endpoint_staging",
-      ...previousCapacity,
+      gpuTypeIds: plan.endpoint.gpuTypeIds,
+      kind: "gpu-types",
+    },
+    {
+      dataCenterIds: previousCapacity.dataCenterIds,
+      endpointId: "endpoint_staging",
+      kind: "data-centers",
+    },
+    {
+      endpointId: "endpoint_staging",
+      gpuTypeIds: previousCapacity.gpuTypeIds,
+      kind: "gpu-types",
     },
   ]);
   assert.equal(currentTemplateId, "template_old");
@@ -1569,7 +1644,10 @@ test("refuses promotion before mutation when data-center rollback evidence is mi
       initialDataCenterIds: undefined,
       initialGpuTypeIds: ["NVIDIA GeForce RTX 4090"],
       plan,
-      async setEndpointCapacity() {
+      async setEndpointDataCenters() {
+        mutations += 1;
+      },
+      async setEndpointGpuTypes() {
         mutations += 1;
       },
       async setEndpointWorkersMax() {
@@ -1599,7 +1677,10 @@ test("refuses promotion before mutation when compliance differs from the fixed p
       environment: "staging",
       initialCompliance: ["HIPAA"],
       plan,
-      async setEndpointCapacity() {
+      async setEndpointDataCenters() {
+        mutations += 1;
+      },
+      async setEndpointGpuTypes() {
         mutations += 1;
       },
       async setEndpointWorkersMax() {

@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-07-31
 - Refines: ADR 0031、ADR 0049、ADR 0053、ADR 0054
+- Refined by: ADR 0057
 
 ## Context
 
@@ -55,10 +56,10 @@ read-backで0へ収束させる必要がある。
   idle/initializing/ready/running Workerがすべて0へ収束したことを、最大6回、合計30秒の
   bounded read-backで確認する。収束しなければcapacityを変更せずWorker上限を復元して
   失敗する。
-- capacity mutationは1回だけ送信する。mutation自体は再送せず、RESTのGPU情報と
-  Console-equivalent GraphQLのdata center/compliance情報を最大6回、合計30秒の
-  bounded backoffでread-backする。完全一致しなければ、同じbounded read-backを使って
-  旧capacityへrollbackする。
+- capacityのprovider mutation境界は
+  [ADR 0057](./0057-split-runpod-capacity-mutations.md)を正とする。GraphQLでdata centerを
+  1回更新し、旧GPU保持を中間read-backしてから、RESTでGPUだけを1回更新する。各mutationを
+  再送せず、完全一致しなければ同じ分割境界とbounded read-backで旧capacityへrollbackする。
 - stagingでcapacityが一致済みだったという事実は、production capacity移行の成功証拠に
   しない。production実endpointの事前移行と独立read-backが成功するまでpromotion workflowを
   dispatchしない。

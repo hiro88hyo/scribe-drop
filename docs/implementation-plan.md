@@ -718,9 +718,9 @@ acceptanceは発行していない。専用test、CI構造検査、全local gate
 promotion前のRunPod capacity完全一致を独立した前提条件にする。staging endpointが
 新規作成時から固定planへ一致していたことは、旧production endpointのin-place capacity
 移行を検証した証拠にしない。production preflightとpromotion本体はcapacity driftを
-mutation前に拒否し、capacity mutationは単一送信と最大30秒のbounded read-backを使う
-事前作業へ分離する。事前移行、独立read-back、local gateが成功するまでproduction
-workflowをdispatchしない。
+mutation前に拒否し、provider mutationはGraphQL data centerとREST GPUを各単一送信し、
+各段階で最大30秒のbounded read-backを使う事前作業へ分離する。事前移行、独立read-back、
+local gateが成功するまでproduction workflowをdispatchしない。
 最初の事前移行はmutation前に停止した。endpoint APIはterminal Worker履歴だけを返したが、
 health APIは5秒のidle timeout後もready/idleを返した。terminal履歴をdrain失敗とせず、
 worker上限0の後にhealthが完全に0へ収束したことをcapacity mutation前に検証する回帰testと
@@ -728,6 +728,11 @@ worker上限0の後にhealthが完全に0へ収束したことをcapacity mutati
 最初の修正後の事前移行では、上限0のread-back後にhealthがidle/readyからinitializingへ
 遷移し、capacity mutation前に停止して上限を復元した。drain後のinitializingも即時失敗せず
 bounded convergence待ちへ含める回帰testを追加し、再度全local gateを通す。
+隔離endpointによる追加検証で、REST PATCHは`gpuTypeIds`を保持した一方、
+`dataCenterIds`を90秒後も保持しないことを確認した。[ADR 0057](./adr/0057-split-runpod-capacity-mutations.md)
+に従い、事前作業はGraphQL `locations`更新、中間GPU保持read-back、REST `gpuTypeIds`更新、
+最終完全一致へ分割する。各mutationを1回だけ送り、逆順rollbackを検証してからproductionへ
+適用する。
 
 初回production bootstrapではOrchestratorの必須secretであるRunPod endpoint IDを先に
 確定する必要があるため、

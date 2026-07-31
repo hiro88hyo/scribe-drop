@@ -9,7 +9,8 @@ import { prepareRunpodProductionCapacity } from "./runpod-promotion.mjs";
 import {
   getRunpodEndpointCapacity,
   getRunpodEndpointHealth,
-  setRunpodEndpointCapacity,
+  setRunpodEndpointDataCenters,
+  setRunpodEndpointGpuTypes,
   setRunpodEndpointWorkersMax,
 } from "./runpod-template-api.mjs";
 
@@ -97,10 +98,16 @@ try {
     },
     plan,
     runCli,
-    setEndpointCapacity({ dataCenterIds, endpointId: targetEndpointId, gpuTypeIds }) {
-      return setRunpodEndpointCapacity({
+    setEndpointDataCenters({ dataCenterIds, endpointId: targetEndpointId }) {
+      return setRunpodEndpointDataCenters({
         apiKey,
         dataCenterIds,
+        endpointId: targetEndpointId,
+      });
+    },
+    setEndpointGpuTypes({ endpointId: targetEndpointId, gpuTypeIds }) {
+      return setRunpodEndpointGpuTypes({
+        apiKey,
         endpointId: targetEndpointId,
         gpuTypeIds,
       });

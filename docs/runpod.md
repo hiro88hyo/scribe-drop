@@ -214,15 +214,19 @@ deploy verifierを通す。
 公式RESTのGPU情報と結合し、固定planへ完全一致した場合だけ続行する。promotion時は
 更新前のdata center、GPU、complianceを取得し、data centerを取得できない場合や自動変更
 できないcomplianceが不一致の場合はmutation前に停止する。`workersMax=0`でdrainしてから
-GPUとdata centerを同じPATCHで更新し、失敗時は旧capacity、旧template、旧worker上限へ
-戻す。さらに実job前後のworkerがcandidate template/imageと一致し、Secure Cloud提供・
-promotion availability・実Worker配置attestationを満たすまでproduction-readyとしない。
+[ADR 0057](./adr/0057-split-runpod-capacity-mutations.md)に従い、GraphQL
+`saveEndpoint`へ現設定をround-tripして`locations`だけを1回変更する。旧GPU保持を中間
+read-backしてからREST PATCHへ`gpuTypeIds`だけを1回送り、失敗時は旧data center、旧GPU、
+旧template、旧worker上限へ戻す。REST bodyへ`dataCenterIds`を含めない。さらに実job前後の
+workerがcandidate template/imageと一致し、Secure Cloud提供・promotion availability・
+実Worker配置attestationを満たすまでproduction-readyとしない。
 
 productionでは
 [ADR 0056](./adr/0056-require-production-capacity-before-promotion.md)により、上記capacity
 更新をcandidate promotion内で行わない。事前の明示承認付きcapacity移行で固定planへの
 完全一致を独立read-backし、通常preflightは不一致をremote mutation前に拒否する。
-capacity mutationは再送せず、反映待ちは読み取りだけを最大6回、合計30秒に限定する。
+GraphQL data center mutationとREST GPU mutationはそれぞれ再送せず、各段階の反映待ちは
+読み取りだけを最大6回、合計30秒に限定する。
 事前移行ではjobとrunning/initializing Workerが0であることを確認してworker上限を0へ
 drainする。endpoint APIに残るterminal Worker履歴は許容するが、healthの
 idle/initializing/ready/runningがすべて0へ収束する前にcapacityを変更しない。

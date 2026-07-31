@@ -242,13 +242,15 @@ stagingとproductionの両workflowは最初のremote mutationより前にRunPod 
 実行する。providerが追加する既知の二つのtemplate portだけは
 [ADR 0032](./adr/0032-automate-runpod-default-port-normalization.md)の安全条件下で
 1回だけ自動除去し、厳格なread-back後にpromotionする。
-productionは[ADR 0056](./adr/0056-require-production-capacity-before-promotion.md)に従い、
+productionは[ADR 0056](./adr/0056-require-production-capacity-before-promotion.md)と
+[ADR 0057](./adr/0057-split-runpod-capacity-mutations.md)に従い、
 GPU、data center、complianceが固定planへ完全一致した場合だけpreflightを成功させる。
 `capacity update pending`をproductionの成功条件にせず、capacity移行をD1、R2、
-candidate promotionと同じworkflow内で初めて試さない。capacity mutationは1回だけ送り、
-最大30秒のbounded read-backだけを行い、事前移行が失敗または未実施ならworkflowを
-dispatchしない。事前移行はWorker上限0のread-back後、terminal Worker履歴ではなくhealthの
-idle/initializing/ready/runningがすべて0へ収束したことをcapacity mutation前に検証する。
+candidate promotionと同じworkflow内で初めて試さない。GraphQLのdata center更新とRESTの
+GPU更新を分離し、各mutationを1回だけ送る。各段階は最大30秒のbounded read-backだけを行い、
+事前移行が失敗または未実施ならworkflowをdispatchしない。事前移行はWorker上限0の
+read-back後、terminal Worker履歴ではなくhealthのidle/initializing/ready/runningが
+すべて0へ収束したことを最初のcapacity mutation前に検証する。
 
 promotion workflowをdispatchする前に、少なくとも`pnpm check`、`pnpm test:e2e`、
 `pnpm secrets:check`、`pnpm security:audit`をlocalで成功させる。変更対象に応じた専用testと

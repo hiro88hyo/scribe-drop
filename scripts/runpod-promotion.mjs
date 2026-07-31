@@ -109,26 +109,14 @@ function capacityMatchesPlan(untrustedEndpoint, plan) {
   }
 }
 
-async function setCapacityAndReadBack(input, capacity, plan, validate) {
-  if (typeof input.setEndpointCapacity !== "function") {
-    throw new Error("RunPod endpoint capacity update is unavailable");
-  }
-  try {
-    await input.setEndpointCapacity({
-      dataCenterIds: capacity.dataCenterIds,
-      endpointId: input.endpointId,
-      gpuTypeIds: capacity.gpuTypeIds,
-    });
-  } catch {
-    // Mutation responses are never retried. Exact read-back is authoritative.
-  }
+async function waitForCapacityReadBack(input, validate) {
   const sleep = input.sleep ?? defaultSleep;
   let lastError;
   for (let attempt = 0; attempt <= capacityReadBackDelaysMilliseconds.length; attempt += 1) {
     try {
-      const endpoint = await getCapacityEndpoint(input);
-      validate(endpoint, plan);
-      return endpoint;
+      const capacity = providerCapacity(await getCapacityEndpoint(input));
+      validate(capacity);
+      return capacity;
     } catch (error) {
       lastError = error;
       const delay = capacityReadBackDelaysMilliseconds[attempt];
@@ -145,6 +133,82 @@ async function setCapacityAndReadBack(input, capacity, plan, validate) {
     }
   }
   throw lastError;
+}
+
+function validateExactCapacity(actual, expected, message) {
+  if (!isDeepStrictEqual(actual, expected)) {
+    throw new Error(message);
+  }
+}
+
+async function updateCapacityAndReadBack(input, untrustedDesiredCapacity) {
+  const desiredCapacity = requireRollbackableCapacity(providerCapacity(untrustedDesiredCapacity));
+  let currentCapacity = requireRollbackableCapacity(
+    providerCapacity(await getCapacityEndpoint(input)),
+  );
+  if (!isDeepStrictEqual(currentCapacity.compliance, desiredCapacity.compliance)) {
+    throw new Error("RunPod endpoint compliance does not match the desired immutable capacity");
+  }
+
+  if (!isDeepStrictEqual(currentCapacity.dataCenterIds, desiredCapacity.dataCenterIds)) {
+    if (typeof input.setEndpointDataCenters !== "function") {
+      throw new Error("RunPod endpoint data-center update is unavailable");
+    }
+    const gpuTypeIdsBefore = currentCapacity.gpuTypeIds;
+    try {
+      await input.setEndpointDataCenters({
+        dataCenterIds: desiredCapacity.dataCenterIds,
+        endpointId: input.endpointId,
+      });
+    } catch {
+      // Mutation responses are never retried. Exact read-back is authoritative.
+    }
+    currentCapacity = await waitForCapacityReadBack(input, (capacity) => {
+      validateExactCapacity(
+        capacity.compliance,
+        desiredCapacity.compliance,
+        "RunPod endpoint data-center update changed the compliance policy",
+      );
+      validateExactCapacity(
+        capacity.gpuTypeIds,
+        gpuTypeIdsBefore,
+        "RunPod endpoint data-center update changed the GPU policy",
+      );
+      validateExactCapacity(
+        capacity.dataCenterIds,
+        desiredCapacity.dataCenterIds,
+        "RunPod endpoint data-center update did not match",
+      );
+    });
+  }
+
+  if (!isDeepStrictEqual(currentCapacity.gpuTypeIds, desiredCapacity.gpuTypeIds)) {
+    if (typeof input.setEndpointGpuTypes !== "function") {
+      throw new Error("RunPod endpoint GPU update is unavailable");
+    }
+    try {
+      await input.setEndpointGpuTypes({
+        endpointId: input.endpointId,
+        gpuTypeIds: desiredCapacity.gpuTypeIds,
+      });
+    } catch {
+      // Mutation responses are never retried. Exact read-back is authoritative.
+    }
+    currentCapacity = await waitForCapacityReadBack(input, (capacity) => {
+      validateExactCapacity(
+        capacity,
+        desiredCapacity,
+        "RunPod endpoint GPU update did not produce the desired capacity",
+      );
+    });
+  }
+
+  validateExactCapacity(
+    currentCapacity,
+    desiredCapacity,
+    "RunPod endpoint capacity does not match",
+  );
+  return currentCapacity;
 }
 
 function requireWorkers(value) {
@@ -514,25 +578,17 @@ export async function reconcileRunpodEndpointCapacity(input) {
   requireRollbackableCapacity(previousCapacity);
 
   try {
-    await setCapacityAndReadBack(
+    await updateCapacityAndReadBack(
       { ...input, endpointId },
       {
+        compliance: previousCapacity.compliance,
         dataCenterIds: plan.endpoint.dataCenterIds,
         gpuTypeIds: plan.endpoint.gpuTypeIds,
-      },
-      plan,
-      (endpoint, expectedPlan) => {
-        validateRunpodEndpointCapacity(endpoint, expectedPlan);
       },
     );
   } catch (updateError) {
     try {
-      await setCapacityAndReadBack({ ...input, endpointId }, previousCapacity, plan, (endpoint) => {
-        const restored = providerCapacity(endpoint);
-        if (!isDeepStrictEqual(restored, previousCapacity)) {
-          throw new Error("RunPod endpoint rollback did not restore the previous capacity");
-        }
-      });
+      await updateCapacityAndReadBack({ ...input, endpointId }, previousCapacity);
     } catch (rollbackError) {
       throw new RunpodCapacityRollbackError(
         "RunPod endpoint capacity update and rollback both failed",
@@ -593,11 +649,7 @@ export async function prepareRunpodProductionCapacity(input) {
       validateNoActiveJobsOrWorkersHealth(await input.getHealth({ endpointId }));
     } catch (healthError) {
       try {
-        await setCapacityAndReadBack(input, previousCapacity, plan, (endpoint) => {
-          if (!isDeepStrictEqual(providerCapacity(endpoint), previousCapacity)) {
-            throw new Error("RunPod endpoint rollback did not restore the previous capacity");
-          }
-        });
+        await updateCapacityAndReadBack(input, previousCapacity);
       } catch (rollbackError) {
         throw new RunpodCapacityRollbackError(
           "RunPod endpoint received work during capacity preparation and rollback failed",
@@ -756,12 +808,7 @@ export async function promoteRunpodCandidate(input) {
     const currentCapacity = providerCapacity(await getCapacityEndpoint(input));
     if (!isDeepStrictEqual(currentCapacity, previousCapacity)) {
       rollbackStage = "capacity restore";
-      await setCapacityAndReadBack(input, previousCapacity, plan, (endpoint) => {
-        const restored = providerCapacity(endpoint);
-        if (!isDeepStrictEqual(restored, previousCapacity)) {
-          throw new Error("RunPod endpoint rollback did not restore the previous capacity");
-        }
-      });
+      await updateCapacityAndReadBack(input, previousCapacity);
     }
     if (currentTemplateId !== previousTemplateId) {
       rollbackStage = "template restore";
@@ -789,17 +836,11 @@ export async function promoteRunpodCandidate(input) {
     });
     if (!candidateCapacityIsCurrent) {
       promotionStage = "capacity update";
-      await setCapacityAndReadBack(
-        input,
-        {
-          dataCenterIds: plan.endpoint.dataCenterIds,
-          gpuTypeIds: plan.endpoint.gpuTypeIds,
-        },
-        plan,
-        (endpoint, expectedPlan) => {
-          validateRunpodEndpointCapacity(endpoint, expectedPlan);
-        },
-      );
+      await updateCapacityAndReadBack(input, {
+        compliance: previousCapacity.compliance,
+        dataCenterIds: plan.endpoint.dataCenterIds,
+        gpuTypeIds: plan.endpoint.gpuTypeIds,
+      });
     }
     if (previousTemplateId !== templateId) {
       promotionStage = "template update";

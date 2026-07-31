@@ -18,7 +18,8 @@ import {
   clearRunpodTemplatePorts,
   getRunpodEndpointCapacity,
   listRunpodTemplates,
-  setRunpodEndpointCapacity,
+  setRunpodEndpointDataCenters,
+  setRunpodEndpointGpuTypes,
   setRunpodEndpointWorkersMax,
 } from "./runpod-template-api.mjs";
 
@@ -178,10 +179,16 @@ try {
         endpointId: targetEndpointId,
       });
     },
-    setEndpointCapacity({ dataCenterIds, endpointId: targetEndpointId, gpuTypeIds }) {
-      return setRunpodEndpointCapacity({
+    setEndpointDataCenters({ dataCenterIds, endpointId: targetEndpointId }) {
+      return setRunpodEndpointDataCenters({
         apiKey: process.env["RUNPOD_API_KEY"],
         dataCenterIds,
+        endpointId: targetEndpointId,
+      });
+    },
+    setEndpointGpuTypes({ endpointId: targetEndpointId, gpuTypeIds }) {
+      return setRunpodEndpointGpuTypes({
+        apiKey: process.env["RUNPOD_API_KEY"],
         endpointId: targetEndpointId,
         gpuTypeIds,
       });

@@ -237,7 +237,9 @@ timeoutでは「10分ちょうどでprovider queueから消える」と扱わな
   running/initializing Workerが0、rollback用の旧capacityが取得済み、固定GPUがavailableで
   ある場合だけ明示承認後に行う。idle/ready Workerは上限0へdrainできるが、capacity
   mutation前にhealth上も0へ収束する必要がある。
-  PATCHは1回だけ送信し、最大30秒のbounded read-backで完全一致しなければ旧capacityへ戻す。
+  [ADR 0057](./adr/0057-split-runpod-capacity-mutations.md)に従い、GraphQLのdata center更新と
+  RESTのGPU更新を各1回だけ送信する。旧GPU保持の中間read-backと最終完全一致をそれぞれ
+  最大30秒で確認し、成立しなければ旧data centerと旧GPUへ戻す。
   事前移行またはrollbackが未確認の状態でpromotion workflowを起動しない。
   全local gateとread-only確認後、明示承認を得た場合だけ次を1回実行する。
 

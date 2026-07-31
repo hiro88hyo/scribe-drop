@@ -13,7 +13,11 @@ import {
   validateRunpodPlan,
 } from "./runpod-environment-config.mjs";
 import { reconcileRunpodEndpointCapacity } from "./runpod-promotion.mjs";
-import { getRunpodEndpointCapacity, setRunpodEndpointCapacity } from "./runpod-template-api.mjs";
+import {
+  getRunpodEndpointCapacity,
+  setRunpodEndpointDataCenters,
+  setRunpodEndpointGpuTypes,
+} from "./runpod-template-api.mjs";
 
 const resourceIdPattern = /^[A-Za-z0-9_-]{3,128}$/u;
 const environment = process.argv[2];
@@ -237,10 +241,16 @@ async function main() {
       });
     },
     plan,
-    setEndpointCapacity({ dataCenterIds, endpointId: targetEndpointId, gpuTypeIds }) {
-      return setRunpodEndpointCapacity({
+    setEndpointDataCenters({ dataCenterIds, endpointId: targetEndpointId }) {
+      return setRunpodEndpointDataCenters({
         apiKey,
         dataCenterIds,
+        endpointId: targetEndpointId,
+      });
+    },
+    setEndpointGpuTypes({ endpointId: targetEndpointId, gpuTypeIds }) {
+      return setRunpodEndpointGpuTypes({
+        apiKey,
         endpointId: targetEndpointId,
         gpuTypeIds,
       });

@@ -1423,11 +1423,17 @@ for (const [description, value] of Object.entries({
     description,
   );
 }
-requireText(
-  runpodPromotionScriptContents,
-  "setRunpodEndpointCapacity({",
-  "promote-runpod-candidate.mjs",
-  "exact endpoint capacity promotion",
+for (const [description, value] of Object.entries({
+  "GraphQL endpoint data-center promotion": "setRunpodEndpointDataCenters({",
+  "REST endpoint GPU promotion": "setRunpodEndpointGpuTypes({",
+})) {
+  requireText(runpodPromotionScriptContents, value, "promote-runpod-candidate.mjs", description);
+}
+forbidText(
+  `${runpodPromotionScriptContents}\n${runpodProductionCapacityPreparationContents}`,
+  "setRunpodEndpointCapacity",
+  "RunPod capacity mutation adapters",
+  "unverified combined REST capacity update",
 );
 requireText(
   runpodEnvironmentConfigScriptContents,
@@ -1497,15 +1503,21 @@ requireText(
 );
 requireText(
   runpodTemplateApiScriptContents,
-  "dataCenterIds: input.dataCenterIds",
+  'locations: dataCenterIds.join(",")',
   "runpod-template-api.mjs",
-  "exact endpoint data-center mutation",
+  "GraphQL endpoint data-center mutation",
 );
 requireText(
   runpodTemplateApiScriptContents,
-  "gpuTypeIds: input.gpuTypeIds",
+  "JSON.stringify({ gpuTypeIds })",
   "runpod-template-api.mjs",
-  "ordered endpoint GPU fallback mutation",
+  "REST-only ordered endpoint GPU fallback mutation",
+);
+forbidText(
+  runpodTemplateApiScriptContents,
+  "JSON.stringify({ dataCenterIds, gpuTypeIds })",
+  "runpod-template-api.mjs",
+  "combined REST data-center and GPU mutation",
 );
 requireText(
   runpodTemplateApiScriptContents,
