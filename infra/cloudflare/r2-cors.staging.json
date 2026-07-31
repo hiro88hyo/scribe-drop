@@ -1,0 +1,23 @@
+{
+  "rules": [
+    {
+      "id": "scribe-drop-browser-multipart-staging",
+      "allowed": {
+        "origins": ["https://replace-with-staging-web.example.invalid"],
+        "methods": ["POST", "PUT", "DELETE"],
+        "headers": [
+          "authorization",
+          "content-type",
+          "x-amz-content-sha256",
+          "x-amz-date",
+          "x-amz-security-token",
+          "x-amz-user-agent",
+          "amz-sdk-invocation-id",
+          "amz-sdk-request"
+        ]
+      },
+      "exposeHeaders": ["ETag"],
+      "maxAgeSeconds": 3600
+    }
+  ]
+}

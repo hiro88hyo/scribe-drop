@@ -1,0 +1,38 @@
+{
+  "name": "@scribe-drop/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "pnpm run build:client && pnpm run build:functions",
+    "build:client": "vite build",
+    "build:functions": "WRANGLER_WRITE_LOGS=0 wrangler pages functions build functions --outdir .wrangler/functions-build --project-directory . --build-output-directory dist --minify",
+    "build:functions:test": "WRANGLER_WRITE_LOGS=0 wrangler pages functions build functions --outdir .wrangler/functions-test --project-directory . --build-output-directory dist",
+    "dev": "vite",
+    "preview": "vite preview",
+    "preview:e2e": "vite preview --host 127.0.0.1 --port 4173 --strictPort",
+    "test:workers": "pnpm --filter '@scribe-drop/web^...' run build && pnpm run build:client && pnpm run build:functions:test && vitest run --config vitest.workers.config.ts",
+    "typecheck": "tsc --project tsconfig.client.json --noEmit && tsc --project tsconfig.functions.json --noEmit && tsc --project tsconfig.config.json --noEmit && tsc --project tsconfig.test.json --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1080.0",
+    "@aws-sdk/s3-request-presigner": "3.1080.0",
+    "@scribe-drop/contracts": "workspace:*",
+    "@scribe-drop/domain": "workspace:*",
+    "@scribe-drop/observability": "workspace:*",
+    "jose": "6.2.4",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-router": "8.3.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.18.8",
+    "@cloudflare/workers-types": "5.20260724.1",
+    "@types/node": "26.1.1",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.4",
+    "vite": "8.1.5"
+  }
+}

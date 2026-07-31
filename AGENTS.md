@@ -19,6 +19,7 @@
 - Volta の pnpm support を使うため、ローカル環境と CI で `VOLTA_FEATURE_PNPM=1` を設定する。
 - root `package.json` の `volta.node`、`volta.pnpm`、`packageManager` に project version を固定し、pnpm の値を一致させる。Corepack、nvm、mise、asdf をこのリポジトリの version 解決に併用しない。
 - `pnpm-lock.yaml` をコミットし、CI では `pnpm install --frozen-lockfile` を使う。
+- dependency の install script は原則拒否し、必要な package だけを root `pnpm-workspace.yaml` の `allowBuilds` で review 後に許可する。
 - TypeScript は全 workspace で strict mode を有効にする。
 - `noUncheckedIndexedAccess`、`exactOptionalPropertyTypes`、`useUnknownInCatchVariables` を有効にする。
 - formatter は Prettier、lint は ESLint を使う。生成物以外の lint 抑制には理由をコメントする。
@@ -40,6 +41,7 @@
 - JavaScript と Python の直接依存は意図せず浮動しないよう lockfile で固定する。
 - Docker base image、FFmpeg、faster-whisper、CTranslate2、model revision を固定する。
 - dependency update は機能変更と分離し、test と security scan を通す。
+- GitHub Actions は公式 release を確認して full commit SHA に固定し、対応する tag をコメントで残す。floating branch や major tag だけを使わない。
 
 ### Platform CLI
 
@@ -48,9 +50,24 @@
 - Cloudflare の構成は Wrangler 設定と migration を source of truth とし、dashboard だけの未記録変更を作らない。
 - RunPod の Serverless endpoint、template、GPU、運用確認には公式 CLI の `runpodctl` を使う。
 - `runpodctl` の対応バージョンを deployment 文書と CI で固定し、配布 binary の checksum を検証する。latest install script を無条件に CI で実行しない。
+- Gitleaks は `tools/versions.json` に version と配布 binary の checksum を固定し、Git 履歴と作業ツリーの両方を検査する。
 - CLI credential と API key はローカルの credential store または CI secret から渡し、リポジトリや shell script に書かない。
 - staging と production を明示的に区別し、更新・削除・deploy 前に account、resource ID、environment を確認する。
 - application runtime から Wrangler や `runpodctl` を subprocess として呼ばない。実行時の RunPod 連携は型付き HTTP client を使う。
+
+### Staging promotion gate
+
+- runtime、依存、deployment設定、migration、外部service連携へ影響する変更は、同じrelease candidateがstaging acceptanceを通過するまでproductionへdeployしない。
+- release candidateは`release/<version>`の単一commitから一度だけbuildし、production用に再buildしない。
+- stagingとproductionはresourceとsecretを分離するが、application artifact、RunPod image digest、migration集合は同一candidateを使用する。
+- production deployは任意のbranch、commit、image、local buildを入力に取らず、成功したstaging evidenceに紐付くcandidateだけを昇格する。
+- code、dependency、migration、deployment設定を変更した時点で既存のstaging evidenceを無効とし、candidateのbuildとstaging acceptanceをやり直す。
+- mock E2Eやunit testは実service staging acceptanceの代替にしない。変更経路を固定dummy dataで実R2、Queue、RunPod、成果物downloadまで検証する。
+- OSやbrowser固有のfile picker、PWA、offline動作を変更した場合は、対象実機のstaging smokeも必須とする。
+- deploy前後に実resourceをread-backし、許可したenvironment固有値以外の構成差分を拒否する。
+- staging自動E2EのAccess service principalはADR 0024の完全一致値だけを許可し、credentialをstaging GitHub Environmentに限定する。productionではservice principal設定を拒否する。
+- promotion workflowとparity verifierが未実装または失敗している間はproduction deployを行わない。
+- 緊急時のgate省略は[ADR 0023](docs/adr/0023-promote-only-staging-verified-artifacts.md)のbreak-glass条件に限定し、明示承認と監査記録なしに実行しない。
 
 ## 3. Git-flow
 
@@ -89,6 +106,7 @@
 
 - `packages/contracts` は HTTP、Queue、RunPod、manifest の schema と公開型を管理する。
 - `packages/domain` は状態遷移、エラー分類、値オブジェクトなど純粋なロジックを管理し、Cloudflare、AWS SDK、Hono、React に依存しない。
+- `packages/observability` はallowlist方式の構造化ログ型とserializerを管理し、任意messageや任意metadataを受け付けない。
 - `packages/test-support` は fake、fixture、固定 clock、固定 ID generator を管理し、本番コードから import しない。
 - `apps/web` と `apps/orchestrator` は domain が定義する port を adapter で実装する。
 - repository だけが D1 の SQL と永続化上の状態遷移を扱う。
@@ -152,13 +170,15 @@ pnpm format:check
 pnpm typecheck
 pnpm test
 pnpm build
+pnpm d1:verify
+pnpm ci:verify
 pnpm test:e2e
 
 uv sync --project apps/runpod-worker --frozen
-uv run --project apps/runpod-worker ruff check apps/runpod-worker
-uv run --project apps/runpod-worker ruff format --check apps/runpod-worker
-uv run --project apps/runpod-worker mypy --strict apps/runpod-worker/src
-uv run --project apps/runpod-worker pytest apps/runpod-worker/tests
+uv run --directory apps/runpod-worker ruff check .
+uv run --directory apps/runpod-worker ruff format --check .
+uv run --directory apps/runpod-worker mypy --strict src tests
+uv run --directory apps/runpod-worker pytest
 ```
 
 ## 9. 文書化と ADR
@@ -190,6 +210,9 @@ CI では最低限、次を実行する。
 - 正常系だけでなく、認可、重複、競合、timeout、partial failure を検証している。
 - lint、型検査、test、build が成功している。
 - migration、contract、実装、文書が同期している。
+- production対象の変更では、同一candidateのstaging acceptance evidenceとartifact digest照合が成功している。
 - ログと成果物に機密情報が含まれないことを確認している。
 - 未解決事項、手動設定、運用上の注意を明示している。
 - 設計との差異が ADR に記録されている。
+
+container scan は scan 対象の Dockerfile と固定 image が存在する Phase から必須とする。それ以前は secret scan と JavaScript/Python dependency audit を必須とし、空の container scan を成功扱いにしない。

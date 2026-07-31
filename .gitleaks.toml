@@ -1,0 +1,14 @@
+title = "ScribeDrop Gitleaks configuration"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "RunPod registry auth IDs are non-secret resource identifiers"
+condition = "AND"
+regexTarget = "line"
+regexes = ['''^\s*"registryAuthId": "[A-Za-z0-9_-]{3,128}",?\s*$''']
+paths = ['''^\.runpod/deploy/(?:staging|production)-plan\.json$''']

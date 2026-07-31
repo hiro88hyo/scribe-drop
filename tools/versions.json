@@ -1,0 +1,81 @@
+{
+  "volta": "2.0.2",
+  "uv": "0.11.32",
+  "python": "3.12",
+  "runpodWorkerImage": {
+    "platform": "linux/amd64",
+    "dockerfileFrontend": {
+      "version": "1.7",
+      "digest": "sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e"
+    },
+    "baseImage": {
+      "name": "nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04",
+      "digest": "sha256:9175fa92f96de35a8cfb9493f0dfcf9435c7a597e9d95ad41d2cae382a95e3f9"
+    },
+    "uvImage": {
+      "version": "0.11.32",
+      "digest": "sha256:0d127b3a7049b879a6e18a79c7f33fea59aa83c226464248f89cfb716a6b96f5"
+    },
+    "ubuntuSnapshot": "20260725T000000Z",
+    "caCertificatesPackage": "20260601~24.04.1",
+    "gnupgPackage": "2.4.4-2ubuntu17.4",
+    "opensslPackage": "3.0.13-0ubuntu3.11",
+    "pythonPackage": "3.12.3-1ubuntu0.15",
+    "ffmpegPackage": "7:6.1.1-3ubuntu5",
+    "model": {
+      "repository": "dropbox-dash/faster-whisper-large-v3-turbo",
+      "revision": "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf",
+      "modelSha256": "e76620f83d5f5b69efd3d87e3dc180c1bd21df9fbebacfd4335e5e1efcc018da"
+    },
+    "syft": {
+      "version": "1.49.0",
+      "actionCommit": "e22c389904149dbc22b58101806040fa8d37a610"
+    },
+    "trivy": {
+      "version": "0.72.0",
+      "actionCommit": "ed142fd0673e97e23eac54620cfb913e5ce36c25"
+    }
+  },
+  "gitleaks": {
+    "version": "8.30.1",
+    "artifacts": {
+      "darwin-arm64": {
+        "filename": "gitleaks_8.30.1_darwin_arm64.tar.gz",
+        "sha256": "b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5"
+      },
+      "darwin-x64": {
+        "filename": "gitleaks_8.30.1_darwin_x64.tar.gz",
+        "sha256": "dfe101a4db2255fc85120ac7f3d25e4342c3c20cf749f2c20a18081af1952709"
+      },
+      "linux-arm64": {
+        "filename": "gitleaks_8.30.1_linux_arm64.tar.gz",
+        "sha256": "e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080"
+      },
+      "linux-x64": {
+        "filename": "gitleaks_8.30.1_linux_x64.tar.gz",
+        "sha256": "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+      }
+    }
+  },
+  "runpodctl": {
+    "version": "2.7.2",
+    "artifacts": {
+      "darwin-arm64": {
+        "filename": "runpodctl-darwin-arm64",
+        "sha256": "a016e442fdf12e4642ad3425ea6d624a40882d77accdfa043b5e40a4fd08d037"
+      },
+      "darwin-x64": {
+        "filename": "runpodctl-darwin-amd64",
+        "sha256": "0eea8bac3f915be2a3d8a5c958ea1a71415e0a77a9e8593150ba1816f87c07cb"
+      },
+      "linux-arm64": {
+        "filename": "runpodctl-linux-arm64",
+        "sha256": "76f31a2fc6f91d3be117c619c4fbd625abf8a09298a0ca4cb31132ba63d59bf3"
+      },
+      "linux-x64": {
+        "filename": "runpodctl-linux-amd64",
+        "sha256": "acf5c49a3192b522e95cae92539fa6fcd8be8c48802aa26c7f3f2ec980ab4f5c"
+      }
+    }
+  }
+}

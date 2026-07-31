@@ -1,0 +1,10 @@
+.tools/
+.venv/
+coverage/
+dist/
+node_modules/
+playwright-report/
+test-results/
+pnpm-lock.yaml
+apps/runpod-worker/uv.lock
+docs/spec.md

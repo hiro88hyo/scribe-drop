@@ -1,0 +1,53 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+!.env.*.example
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+!.dev.vars.*.example
+
+# Node.js and pnpm
+node_modules/
+.pnpm-store/
+*.tsbuildinfo
+
+# Python and uv
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Cloudflare local state
+.wrangler/
+.mf/
+
+# RunPod local deployment state
+.runpod/
+
+# Test and build output
+coverage/
+dist/
+build/
+playwright-report/
+test-results/
+
+# Locally installed project tools
+.tools/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+*~
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

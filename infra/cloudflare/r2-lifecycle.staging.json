@@ -1,0 +1,36 @@
+{
+  "rules": [
+    {
+      "id": "scribe-drop-incoming-retention-staging",
+      "enabled": true,
+      "conditions": {
+        "prefix": "incoming/"
+      },
+      "deleteObjectsTransition": {
+        "condition": {
+          "type": "Age",
+          "maxAge": 604800
+        }
+      },
+      "abortMultipartUploadsTransition": {
+        "condition": {
+          "type": "Age",
+          "maxAge": 86400
+        }
+      }
+    },
+    {
+      "id": "scribe-drop-results-retention-staging",
+      "enabled": true,
+      "conditions": {
+        "prefix": "results/"
+      },
+      "deleteObjectsTransition": {
+        "condition": {
+          "type": "Age",
+          "maxAge": 7776000
+        }
+      }
+    }
+  ]
+}

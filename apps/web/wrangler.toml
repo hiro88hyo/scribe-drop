@@ -1,0 +1,21 @@
+name = "scribe-drop-web-staging"
+pages_build_output_dir = "./dist"
+compatibility_date = "2026-07-25"
+
+[vars]
+ACCESS_AUDIENCES = "[\"replace-with-access-audience\"]"
+ACCESS_TEAM_DOMAIN = "https://replace-with-team.cloudflareaccess.com"
+ALLOWED_ORIGIN = "https://replace-with-staging-web.example.invalid"
+APP_ENV = "staging"
+CLOUDFLARE_ACCOUNT_ID = "00000000000000000000000000000000"
+R2_BUCKET_NAME = "recording-transcriber-staging"
+STAGING_E2E_SERVICE_TOKEN_COMMON_NAME = "replace-with-staging-e2e-service-token"
+
+[[d1_databases]]
+binding = "SCRIBE_DROP_DB"
+database_name = "scribe-drop-staging"
+database_id = "00000000-0000-0000-0000-000000000101"
+
+[[r2_buckets]]
+binding = "RECORDINGS"
+bucket_name = "recording-transcriber-staging"

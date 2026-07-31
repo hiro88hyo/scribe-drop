@@ -1,0 +1,224 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - main
+  push:
+    branches:
+      - develop
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VOLTA_FEATURE_PNPM: "1"
+
+jobs:
+  quality:
+    name: Quality gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Volta
+        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
+        with:
+          volta-version: 2.0.2
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: 0.11.32
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: apps/runpod-worker/uv.lock
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Python dependencies
+        run: uv sync --project apps/runpod-worker --frozen
+
+      - name: Install checksummed project tools
+        run: |
+          pnpm run gitleaks:install
+          pnpm run runpodctl:install
+
+      - name: Verify toolchain
+        run: pnpm run toolchain:check
+
+      - name: Check formatting
+        run: pnpm run format:check
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Type-check
+        run: pnpm run typecheck
+
+      - name: Test
+        run: pnpm run test
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Verify D1 migrations
+        run: pnpm run d1:verify
+
+      - name: Verify CI and image pinning
+        run: pnpm run ci:verify
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up Volta
+        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
+        with:
+          volta-version: 2.0.2
+
+      - name: Install checksummed Gitleaks
+        run: pnpm run gitleaks:install
+
+      - name: Scan Git history and working tree
+        run: pnpm run secrets:check
+
+  dependency-audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Volta
+        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
+        with:
+          volta-version: 2.0.2
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: 0.11.32
+          python-version: "3.12"
+          enable-cache: false
+
+      - name: Audit JavaScript dependencies
+        run: pnpm audit --audit-level high
+
+      - name: Audit Python dependencies
+        run: uv audit --preview-features audit-command --project apps/runpod-worker --frozen
+
+  browser-e2e:
+    name: Browser E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Volta
+        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
+        with:
+          volta-version: 2.0.2
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install fixed Playwright browser
+        run: pnpm --filter @scribe-drop/e2e exec playwright install --with-deps chromium
+
+      - name: Run mocked browser lifecycle
+        run: pnpm run test:e2e
+
+  runpod-container:
+    name: RunPod container supply chain
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Reclaim unused ephemeral runner toolchains
+        run: |
+          sudo rm -rf \
+            /opt/ghc \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/local/.ghcup \
+            /usr/local/lib/android \
+            /usr/share/dotnet
+          available_kib="$(df --output=avail -k / | tail -n 1)"
+          if [ "${available_kib}" -lt 26214400 ]; then
+            echo "RunPod image build and scan require at least 25 GiB free" >&2
+            exit 1
+          fi
+
+      - name: Build fixed RunPod Worker image
+        run: |
+          docker buildx build \
+            --file apps/runpod-worker/Dockerfile \
+            --load \
+            --tag scribe-drop-runpod-worker:ci \
+            .
+
+      - name: Verify non-root offline runtime and model integrity
+        run: |
+          docker run \
+            --rm \
+            --network none \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --entrypoint python \
+            scribe-drop-runpod-worker:ci \
+            -m scribe_drop_worker.container_check
+
+      - name: Generate SPDX JSON SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: scribe-drop-runpod-worker:ci
+          format: spdx-json
+          output-file: runpod-worker.spdx.json
+          syft-version: v1.49.0
+          upload-artifact: false
+
+      - name: Scan image vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: scribe-drop-runpod-worker:ci
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: "1"
+          format: table
+          output: runpod-worker-trivy.txt
+          hide-progress: true
+          timeout: 15m
+          cache: false
+          version: v0.72.0
+
+      - name: Upload supply-chain reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: runpod-worker-supply-chain
+          path: |
+            runpod-worker.spdx.json
+            runpod-worker-trivy.txt
+          if-no-files-found: warn
+          retention-days: 14

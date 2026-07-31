@@ -1,0 +1,26 @@
+{
+  "name": "@scribe-drop/orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json",
+    "test:workers": "vitest run --config vitest.workers.config.ts",
+    "typecheck": "tsc --project tsconfig.app.json --noEmit && tsc --project tsconfig.config.json --noEmit && tsc --project tsconfig.test.json --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1080.0",
+    "@aws-sdk/s3-request-presigner": "3.1080.0",
+    "@scribe-drop/contracts": "workspace:*",
+    "@scribe-drop/domain": "workspace:*",
+    "@scribe-drop/observability": "workspace:*",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.18.8",
+    "@cloudflare/workers-types": "5.20260724.1",
+    "@scribe-drop/test-support": "workspace:*",
+    "@types/node": "26.1.1",
+    "vitest": "4.1.10"
+  }
+}

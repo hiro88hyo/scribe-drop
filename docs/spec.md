@@ -1,5 +1,9 @@
 # 録音文字起こしサービス'ScribeDrop' 設計・実装指示書
 
+## 0. 追加要件と優先順位
+
+RunPod securityは[additional-spec.md](./additional-spec.md)と[ADR 0006](./adr/0006-minimal-runpod-capability-exchange.md)を正とし、本書の11〜15章も同じ契約へ同期する。将来矛盾が生じた場合は追加要件とADR 0006を優先し、署名付きR2 URL、heartbeat情報、文字起こしoptions、per-job webhookを`/run`へ含めない。
+
 ## 1. 目的
 
 CloudflareとRunPodを利用し、以下の処理を行う個人向けWebアプリケーションを実装する。
@@ -11,7 +15,7 @@ CloudflareとRunPodを利用し、以下の処理を行う個人向けWebアプ�
 5. RunPod ServerlessのGPU Workerで文字起こしする
 6. Markdown、JSON、SRTをR2へ保存する
 7. Web画面で処理状況と結果を確認できるようにする
-8. 処理完了時にDiscordへ通知する
+8. 処理完了または失敗時にDiscordへ通知する
 9. GPUは常時起動せず、RunPod Serverlessをゼロスケールで利用する
 
 本システムでは、特に以下を重視する。
@@ -19,7 +23,7 @@ CloudflareとRunPodを利用し、以下の処理を行う個人向けWebアプ�
 * スマートフォンでも使いやすいアップロードUX
 * 音声データと文字起こし結果の非公開性
 * 長期的なR2認証情報をブラウザやRunPodへ渡さない
-* Queue、Webhook、HTTP再送に対する冪等性
+* Queue、RunPod claim、Cron、HTTP再送に対する冪等性
 * RunPodジョブの二重投入が発生しても、文字起こし本体を二重実行しない
 * 外部サービス障害時にもジョブ状態が不整合にならない
 * ログやDiscord通知に録音内容を出さない
@@ -53,7 +57,6 @@ Cloudflare Queue                         │
 Orchestrator Worker                      │
     ├─ RunPod /run                        │
     ├─ RunPod claim API受信               │
-    ├─ RunPod webhook受信                 │
     ├─ RunPod /status照会                 │
     ├─ Discord通知                        │
     └─ Cronによる状態回復・再照会 ─────────┘
@@ -82,14 +85,13 @@ Cloudflare Pagesは以下だけを担当する。
 * R2 Event NotificationsのQueue Consumer
 * RunPodジョブ投入
 * RunPod Workerからの実行権claim
-* RunPod Webhook受信
 * RunPod `/status`照会
 * 状態遷移
 * Discord通知
 * Cronによるリカバリ
 * Dead Letter Queue処理
 
-ブラウザ向けAPIと外部Webhookを同じエンドポイントに混在させない。
+ブラウザ向けAPIとRunPod内部APIを同じ認証境界に混在させない。
 
 ---
 
@@ -107,7 +109,9 @@ Cloudflare Pagesは以下だけを担当する。
 * PWA対応
 * IndexedDB
 * AWS SDK for JavaScript v3
-* `@aws-sdk/lib-storage`
+* `@aws-sdk/client-s3`の明示的multipart API（`@aws-sdk/lib-storage`は
+  [ADR 0008](./adr/0008-r2-browser-upload-capability.md)の`PutObject`禁止と
+  両立しないため使用しない）
 * Cloudflare Access Pages Plugin
 
 UIライブラリは必須ではない。導入する場合も依存を増やしすぎず、モバイル優先で実装する。
@@ -282,9 +286,11 @@ results/{owner_hash}/{job_id}/{attempt_id}/manifest.json
 
 R2のCORSは次に限定する。
 
-* Allowed Origin: `https://transcribe.example.com`
-* Allowed Methods: multipartに必要なメソッドのみ
-* Allowed Headers: AWS Signature v4とアップロードに必要なもののみ
+* Allowed Origin: environmentごとのAccess保護対象と同一の単一exact origin。stagingの
+  実値は`SCRIBE_DROP_STAGING_WEB_ORIGIN`から追跡外設定へ生成する
+* Allowed Methods: `POST`、`PUT`、`DELETE`
+* Allowed Headers: AWS Signature v4とアップロードに必要なheaderだけ。stagingの
+  追跡対象templateは`infra/cloudflare/r2-cors.staging.json`
 * Expose Headers: `ETag`
 * ワイルドカードoriginは禁止
 
@@ -298,11 +304,17 @@ R2のCORSは次に限定する。
 
 * 対象バケットを1つに限定
 * 対象オブジェクトを今回の`source_key`だけに限定
+* `CreateMultipartUpload`、`UploadPart`、`CompleteMultipartUpload`、
+  `AbortMultipartUpload`だけに限定
 * 有効期限15分
 * 親R2トークンはPages Functionsのsecretに保存
 * 親R2トークンはブラウザへ返さない
 * 一時認証情報をログに記録しない
 * 一時認証情報をD1へ保存しない
+
+発行形式と権限境界は
+[ADR 0008](./adr/0008-r2-browser-upload-capability.md)を正とし、Worker内で親R2
+secretを使ってCloudflare公式形式のJWTをlocal signingする。
 
 レスポンス例:
 
@@ -346,7 +358,9 @@ leavePartsOnError: false
 * 同一画面内での再試行
 * multipart abort
 * 完了時にETagを取得
-* 可能なら`If-None-Match: *`相当のcreate-only条件を使用する
+* `CreateMultipartUpload`では`If-None-Match: *`相当のcreate-only条件を利用できない
+  ため、[ADR 0008](./adr/0008-r2-browser-upload-capability.md)の一意key、
+  exact-object credential、ETag mutation検知を適用する
 
 ページ再読込後の完全なmultipart再開は第2段階としてよいが、アップロード対象と進捗情報はIndexedDBへ保存する。
 
@@ -363,6 +377,10 @@ queue: recording-uploaded
 結果ファイルへの書込みではこのQueueを発火させない。
 
 Queueはat-least-onceであることを前提とし、同一イベントが複数回来ても安全に処理する。
+初回sourceとして受け入れるactionはbrowser uploaderが生成する
+`CompleteMultipartUpload`だけとする。raw eventはCloudflare公式形式の
+`account`、`action`、`bucket`、`eventTime`、`object.key`、`object.size`、
+`object.eTag`をstrictに検証し、未知field、環境違い、生成規則外keyを拒否する。
 
 ---
 
@@ -425,13 +443,21 @@ CREATE TABLE job_attempts (
     generation INTEGER NOT NULL,
 
     status TEXT NOT NULL,
-    claim_token_hash TEXT NOT NULL,
-    webhook_token_hash TEXT NOT NULL,
+    claim_token_hash TEXT,
+    claim_issued_at TEXT,
+    claim_expires_at TEXT,
+    claim_consumed_at TEXT,
+    heartbeat_token_hash TEXT,
+    heartbeat_issued_at TEXT,
+    heartbeat_expires_at TEXT,
+    heartbeat_revoked_at TEXT,
 
     winning_runpod_job_id TEXT,
     result_prefix TEXT NOT NULL,
 
     submission_started_at TEXT,
+    submission_outcome TEXT,
+    submission_finished_at TEXT,
     claimed_at TEXT,
     heartbeat_at TEXT,
     completed_at TEXT,
@@ -454,6 +480,13 @@ CREATE UNIQUE INDEX idx_attempt_winner_runpod
 ON job_attempts(winning_runpod_job_id)
 WHERE winning_runpod_job_id IS NOT NULL;
 ```
+
+Phase 3では[ADR 0010](./adr/0010-separate-attempt-and-capability-issuance.md)に従い、
+未発行状態をissued列のNULLとlegacy sentinelで表す。Phase 4では
+[ADR 0011](./adr/0011-runpod-submission-window-and-capability-lifetime.md)に従う
+forward-only table rebuildによってsentinelをNULLへ変換し、未使用の
+`webhook_token_hash`を除去する。claim tokenはRunPod投入直前、heartbeat tokenは
+winner claim成功時に初めて発行する。
 
 ### 7.3 runpod_submissions
 
@@ -480,9 +513,12 @@ ON runpod_submissions(attempt_id);
 ```text
 submit_response
 worker_claim
-webhook
 status_poll
 ```
+
+初期migrationに存在する`webhook_token_hash`は使用せず、ADR 0011に従う
+forward-only migrationで除去する。上記は移行後の論理schemaであり、適用済みmigration
+を書き換えない。
 
 ### 7.4 job_events
 
@@ -513,6 +549,7 @@ ON job_events(job_id, created_at);
 CREATE TABLE notification_outbox (
     id TEXT PRIMARY KEY,
     job_id TEXT NOT NULL UNIQUE,
+    job_version INTEGER,
     status TEXT NOT NULL,
     attempt_count INTEGER NOT NULL DEFAULT 0,
     next_attempt_at TEXT,
@@ -523,6 +560,21 @@ CREATE TABLE notification_outbox (
     FOREIGN KEY(job_id) REFERENCES jobs(id)
 );
 ```
+
+outboxは1 jobにつき1行とし、現在のterminal状態に対する配送状態を表す。`FAILED`から
+新しいattemptへretryすると`jobs.notified_at`を消去し、次に`FAILED`または`COMPLETED`へ
+到達した時点で同じoutbox行を`PENDING`へ戻す。`job_version`は対象terminal状態のCAS
+versionを保持し、versionが変わった場合は未送信の旧通知であってもattempt数とbackoffを
+引き継がない。これにより履歴目的で配送行を増やさず、失敗通知後の成功通知も欠落させない。
+
+production promotion前のformal stagingでは、音声を含まない合成破損M4Aを通常の
+upload/R2/Queue/RunPod経路へ投入し、jobがexact `FAILED`、現在versionのoutboxが`SENT`、
+jobとoutboxの送信時刻が設定済みになることを実D1とDiscord webhookで確認する。job IDは
+runnerのmode `0600`一時fileだけへ保存し、検証後にfixture jobを削除する。
+正常M4Aと合成破損M4Aの各job直前にprovider queue/in-progress 0、running Worker 0、
+idleまたはreadyのexact candidate Worker 1件以上を確認する。
+[ADR 0059](./adr/0059-require-real-staging-failure-notification-acceptance.md)の3 checkを
+含まない旧staging acceptanceをproductionへ使用しない。
 
 ---
 
@@ -637,8 +689,12 @@ WHERE id = ?
 サーバーはR2 HEADで以下を確認する。
 
 * オブジェクトが存在する
-* サイズが申告値と大きく異ならない
+* サイズが申告値と完全一致する
 * source keyが一致する
+
+request bodyは空objectだけを許可し、browserが観測したETag、size、bucket、keyは
+受け取らない。詳細は
+[ADR 0009](./adr/0009-server-verified-upload-completion.md)を正とする。
 
 ### `GET /api/jobs`
 
@@ -687,21 +743,22 @@ FAILED状態だけ許可する。
 
 Queue Consumerは各メッセージについて以下を行う。
 
-1. スキーマ検証
+1. Cloudflare公式raw eventのstrictスキーマ検証
 2. bucket確認
-3. `incoming/` prefix確認
+3. `CompleteMultipartUpload` actionと生成済み`incoming/` key形式の確認
 4. object keyからjob IDを取得
 5. D1のjobを取得
 6. source key一致確認
-7. R2 HEADでサイズとETagを再確認
+7. R2 HEADで、eventおよび申告値に対するサイズとETagを再確認
 8. D1へETagと実サイズを保存
-9. attemptがなければ作成
-10. RunPod投入
-11. 成功時だけメッセージをack
-12. 一時障害時はretry
-13. 恒久的な不正データはFAILED化してack
+9. generation 1がなければ作成し、jobとattemptを`SUBMISSION_PENDING`にする
+10. D1 transaction成功、冪等な重複、または恒久的な拒否だけを個別ack
+11. R2/D1一時障害または解消可能なCAS競合はmessage単位でretry
+12. retry上限到達時は環境別DLQへ移し、bodyをログへ出さず運用手順に従う
 
 同一のbucket、key、ETagが複数回来ても、新しいattemptを作らない。
+Phase 3のconsumerはここで終了し、RunPodへは投入しない。claim tokenの発行、
+`SUBMISSION_PENDING`からの投入、結果不明時の回復はPhase 4の責務とする。
 
 ### 10.2 source上書き
 
@@ -712,77 +769,36 @@ status = SOURCE_MUTATED
 error_code = SOURCE_ETAG_CHANGED
 ```
 
-まだRunPod処理前なら失敗として終了する。
-
-処理開始後に検出した場合はキャンセル要求を行う。
+まだRunPod処理前なら以後のsubmission対象から除外する。RunPod job IDが判明した後に
+検出した場合の`/cancel`とreconciliationはPhase 5で実装し、Phase 3では
+`SOURCE_MUTATED`への遷移によって後続処理をfail closedにする。
 
 ---
 
 ## 11. RunPodジョブ投入
 
-### 11.1 URL発行
-
-Orchestratorはattemptごとに次を発行する。
-
-* source用presigned GET
-* transcript.md用presigned PUT
-* transcript.json用presigned PUT
-* transcript.srt用presigned PUT
-* manifest.json用presigned PUT
-* claim token
-* webhook token
-
-RunPodにR2 Access Keyを渡さない。
-
-presigned URLは特定オブジェクト、特定操作だけを許可する。
-
-有効期限は初期値24時間とし、RunPodの最大待機・実行時間より長くする。
-
-### 11.2 RunPod入力
+### 11.1 RunPod入力
 
 ```json
 {
   "input": {
-    "schema_version": 1,
-    "job_id": "01J...",
-    "attempt_id": "01J...",
-    "source": {
-      "url": "https://...signed...",
-      "expected_size_bytes": 12345678,
-      "expected_etag": "..."
-    },
-    "results": {
-      "markdown_put_url": "https://...signed...",
-      "json_put_url": "https://...signed...",
-      "srt_put_url": "https://...signed...",
-      "manifest_put_url": "https://...signed..."
-    },
-    "claim": {
-      "url": "https://hooks.transcribe.example.com/internal/runpod/claim",
-      "token": "..."
-    },
-    "heartbeat": {
-      "url": "https://hooks.transcribe.example.com/internal/runpod/heartbeat",
-      "token": "..."
-    },
-    "options": {
-      "language": "ja",
-      "model": "large-v3-turbo",
-      "vad": true,
-      "beam_size": 5,
-      "word_timestamps": false
-    }
+    "schemaVersion": 1,
+    "jobId": "01J...",
+    "attemptId": "01J...",
+    "claimToken": "one-time-token"
   },
-  "webhook": "https://hooks.transcribe.example.com/internal/runpod/webhook/<token>",
   "policy": {
     "executionTimeout": 21600000,
-    "ttl": 86400000,
-    "lowPriority": false
+    "ttl": 28800000
   }
 }
 ```
 
-### 11.3 二重投入への対応
+`/run`には上記以外を含めない。特にpresigned URL、R2 key、filename、title、ユーザー情報、文字起こしoption、callback URL、heartbeat情報、webhook、`s3Config`を送らない。
+
+claim tokenは256 bit以上の暗号論的乱数とし、D1にはSHA-256 hash、失効日時、消費日時だけを保存する。attemptへ結び付け、claim時にRunPod job IDへ結び付ける。成功後は同じwinnerからの再送であっても再利用させない。
+
+### 11.2 二重投入への対応
 
 RunPod `/run`には、ネットワークタイムアウト時に「投入が成功したか不明」という状態があり得る。
 
@@ -803,29 +819,45 @@ RunPod handlerはモデルのロードや音声ダウンロードより先にcla
   "jobId": "01J...",
   "attemptId": "01J...",
   "runpodJobId": "runpod-native-job-id",
-  "token": "one-time-claim-token"
+  "claimToken": "one-time-claim-token"
 }
 ```
 
 Orchestratorは以下を行う。
 
-1. claim tokenをSHA-256し、保存済みhashと比較
-2. jobとactive attemptを確認
+1. claim tokenをSHA-256し、保存済みhash、失効、消費状態を比較
+2. job、active attempt、generationを確認
 3. attemptがキャンセル済みでないことを確認
-4. `winning_runpod_job_id`がNULLなら、今回のRunPod job IDを設定
-5. 同じRunPod job IDからの再claimなら200
-6. 別RunPod job IDが既にwinnerなら409
-7. `runpod_submissions`へ記録
-8. winnerだけ処理続行を許可
+4. `winning_runpod_job_id`がNULLのときだけ、token消費とwinner設定を一つの条件付き更新で行う
+5. `runpod_submissions`へ記録
+6. winner確定後だけpresigned URLとheartbeat tokenを生成
+7. winnerだけ処理続行を許可
 
 レスポンス:
 
 ```json
 {
   "granted": true,
-  "cancelRequested": false
+  "source": {
+    "getUrl": "short-lived-presigned-url",
+    "expectedSizeBytes": 12345678,
+    "expectedEtag": "..."
+  },
+  "results": {
+    "markdownPutUrl": "short-lived-presigned-url",
+    "jsonPutUrl": "short-lived-presigned-url",
+    "srtPutUrl": "short-lived-presigned-url",
+    "manifestPutUrl": "short-lived-presigned-url"
+  },
+  "heartbeat": {
+    "url": "https://hooks.example.com/internal/runpod/heartbeat",
+    "token": "short-lived-token"
+  },
+  "expiresAt": "..."
 }
 ```
+
+source URLは1 objectへのGET、各result URLはattempt固有の1 objectへのPUTだけを許可する。list、delete、別key、別attemptへ権限を広げない。有効期限は初期2時間とし、最大入力時間のbenchmarkに基づいてheartbeatによる更新または上限延長を決める。
 
 敗者RunPodジョブは、モデルロードやダウンロードを行わず即座に終了する。
 
@@ -837,6 +869,8 @@ Orchestratorは以下を行う。
 
 これにより、RunPod `/run`が複数回成功しても高負荷なGPU処理は原則1回だけになる。
 
+claim成功responseを失った場合は同じtokenへcapabilityを再発行しない。reconciliationで旧attemptを終了させ、新しいgenerationとtokenで再投入する。
+
 ---
 
 ## 13. RunPod Worker
@@ -844,19 +878,21 @@ Orchestratorは以下を行う。
 ### 13.1 起動順序
 
 1. 入力スキーマ検証
-2. URLのhostとHTTPSを検証
-3. claim取得
+2. claim取得
+3. claim responseのURLをHTTPS、host、port、userinfo、DNS解決後IPまで検証
 4. 一時ディレクトリ作成
 5. sourceをストリーミングダウンロード
 6. 最大サイズを再検証
 7. ffprobe
 8. duration、stream、codec検証
-9. faster-whisper実行
+9. image内の固定faster-whisper modelをロードして実行
 10. 出力生成
 11. Markdown、JSON、SRTをPUT
 12. manifestを最後にPUT
-13. 一時ファイル削除
-14. 結果メタデータをreturn
+13. 一時ファイル削除とworker refresh
+14. allowlist済み結果メタデータだけをreturn
+
+claim成功前にmodelをmemoryへloadせず、model download、音声download、ffprobe、GPU推論を開始しない。
 
 ### 13.2 入力検証
 
@@ -1011,37 +1047,28 @@ manifestがないattemptを完了扱いにしてはならない。
 
 ---
 
-## 14. Webhook処理
+## 14. RunPod status確認とfinalize
 
-RunPod Webhook本文だけを信用しない。
+per-job webhookは使用しない。OrchestratorがRunPod `/status/{job_id}`を定期照会し、観測したterminal statusをD1へ即時保存する。
 
-Webhook URLのtokenをSHA-256し、attemptのhashと比較する。
+以下をすべて満たした場合だけfinalizeする。
 
-Webhook受信後は次を行う。
+1. RunPod `/status`がterminalのCOMPLETED
+2. RunPod job IDがwinning jobと一致
+3. attemptが現在のactive attemptでgenerationも一致
+4. R2上にmanifestが存在
+5. manifestのjob IDとattempt IDが一致
+6. manifestの`complete`がtrue
+7. Markdown、JSON、SRTがすべて存在し、keyとbyte sizeがmanifestと一致
+8. `COMPLETED`への条件付き更新とnotification outbox作成が成功
 
-1. token検証
-2. RunPod job IDを取得
-3. `runpod_submissions`へ記録
-4. RunPod `/status/{job_id}`をOrchestratorから呼ぶ
-5. statusレスポンスを正とする
-6. RunPod job IDがwinning jobであることを確認
-7. attemptが現在のactive attemptであることを確認
-8. R2上のmanifestをHEAD/GETする
-9. manifestのjob IDとattempt IDを確認
-10. 成果物がすべて存在することを確認
-11. `COMPLETED`へ条件付き更新
-12. notification outboxを作成
-13. 重複Webhookなら200を返し、何もしない
-
-古いattemptや敗者RunPod jobからのWebhookで、現在のジョブを完了させてはならない。
-
-Webhook処理は常に短時間で200を返せる構造にする。
+status、worker output、manifestのいずれか単独では完了扱いにしない。古いattemptやloserの成果物で現在のjobを更新しない。
 
 ---
 
 ## 15. Cronによる回復処理
 
-RunPod Webhookが届かない場合に備え、Cron Triggerを5分ごとに実行する。
+Cron Triggerを5分以内の間隔で実行する。
 
 対象:
 
@@ -1054,14 +1081,18 @@ CANCEL_REQUESTED
 処理:
 
 * `winning_runpod_job_id`があるものをRunPod `/status`で照会
-* terminal状態ならWebhookと同じfinalize処理を行う
+* `accepted`後10分以内にwinner claimへ進まないsubmissionをCASでFAILEDへ収束させ、
+  D1に記録したexact RunPod job IDだけをcancelする
+* stale accepted submissionのcancelが不確定ならFAILEDを戻さず次回Cronで再試行する
+* terminal状態をD1へ保存し、14章のfinalize処理を行う
 * heartbeatが一定時間ないものを確認
 * 実行期限を超えたものをFAILEDにする
+* `COMPLETED`または`FAILED`かつ未通知のjobをnotification outboxへ冪等に登録する
 * notification outboxを再送する
 * 中途半端なSUBMITTING状態を回復する
 * 期限切れのUPLOADINGをEXPIREDにする
 
-CronとWebhookが同時に完了処理しても、D1の条件付きUPDATEで一方だけが成功するようにする。
+RunPodのasync resultは完了後30分だけ保持されるため、その間にterminal statusを一度も観測できなかったjobはmanifestが存在してもfail closedとし、運用者のreconciliation対象にする。複数のCronが同時に完了処理しても、D1の条件付きUPDATEで一つだけが成功するようにする。
 
 ---
 
@@ -1079,11 +1110,25 @@ CronとWebhookが同時に完了処理しても、D1の条件付きUPDATEで一�
 結果: https://transcribe.example.com/jobs/01J...
 ```
 
+失敗時は、音声時間、処理時間、内部例外、provider応答を含めず、安全な案内と同じ保護済み
+詳細リンクだけを送る。
+
+```text
+「週次定例」の文字起こしに失敗しました。
+
+詳細を確認し、必要に応じて新しい試行で再実行してください。
+詳細: https://transcribe.example.com/jobs/01J...
+```
+
 リンク先はCloudflare Accessで保護されたジョブ詳細画面とする。
 
 Discord Webhook URLはCloudflare secretに保存する。
 
 通知失敗時はnotification outboxから指数バックオフで再試行する。
+
+5分Cronはoutbox取得前に、削除されていない未通知の`COMPLETED`と`FAILED`を集中走査する。
+各失敗経路が個別に通知を作成する設計にはせず、新しい失敗遷移を追加しても通知漏れを
+起こさない。claim時にはjobが同じterminal状態であることを再確認する。
 
 通知は補助機能であり、アプリ内のジョブ状態を正とする。
 
@@ -1215,7 +1260,6 @@ Android Share Targetは第2段階とする。
 * R2一時認証情報
 * presigned URL
 * claim token
-* webhook token
 * Discord Webhook URL
 
 エラーは利用者向けメッセージと内部ログを分離する。
@@ -1260,31 +1304,33 @@ FFPROBE_INVALID_CONTAINER
 ### Queue
 
 * 同じR2イベントを2回受信
-* batch全体のretry
+* upload-completeより先・後の両順序
+* batch内の個別ack/retry
 * D1更新後にack失敗
-* RunPod POST前の失敗
-* RunPod POST成功後にレスポンス喪失
-* RunPod POST成功後にD1書込み失敗
+* malformed event、環境違い、生成規則外key
+* HEAD不在、一時障害、eventとHEADの不一致
+* サイズ不一致、source上書き、恒久拒否
+* retry上限到達後のDLQ移送
 
 ### RunPod重複
 
 * 同じattemptで2つのRunPod jobがclaim
 * 最初だけgranted
-* 同じwinnerからの再claimは成功
+* 同じwinnerからの再claimもtoken再利用として拒否
+* claim response喪失後は古いattemptへcapabilityを再発行しない
 * loserは文字起こしを開始しない
 * 古いgenerationからのclaimを拒否
 
-### Webhook
+### Status pollingとfinalize
 
-* 正常Webhook
-* 同じWebhookを3回受信
-* token不正
-* RunPod statusとWebhook本文が不一致
-* loser jobからのWebhook
-* 古いattemptからのWebhook
+* terminal statusの重複poll
+* RunPod statusのunknown fieldと不正output
+* loser jobのstatus
+* 古いattemptのstatus
 * manifestなし
 * 一部成果物なし
-* CronとWebhookの同時完了
+* status未観測のまま30分経過
+* 複数Cronの同時完了
 
 ### RunPod Worker
 
@@ -1328,7 +1374,7 @@ FFPROBE_INVALID_CONTAINER
 * 通信失敗時に再試行できる
 * アップロード後に画面を閉じても処理が継続する
 * 後から履歴を確認できる
-* 完了時にDiscord通知が来る
+* 完了時と失敗時にDiscord通知が来る
 
 ### セキュリティ
 
@@ -1348,8 +1394,8 @@ FFPROBE_INVALID_CONTAINER
 * Queue再送でRunPod処理結果が二重反映されない
 * RunPod `/run`が重複成功してもwinnerは1つ
 * loser RunPod jobはWhisper処理を開始しない
-* Webhookが重複しても通知outboxは1件
-* Webhookが失われてもCronで完了を検出できる
+* status pollやCronが重複しても通知outboxは1件で、retry後の次terminal通知に再利用される
+* RunPod result保持期間内にterminal statusを保存し、未観測時は誤完了しない
 * 古いattemptの完了で新しいattemptが上書きされない
 * manifestがない処理をCOMPLETEDにしない
 
@@ -1400,8 +1446,7 @@ FFPROBE_INVALID_CONTAINER
 
 ### Phase 5: 完了処理
 
-* Webhook
-* `/status`検証
+* `/status` pollingとterminal観測の保存
 * Cron reconciliation
 * Discord
 * artifact download
@@ -1411,7 +1456,7 @@ FFPROBE_INVALID_CONTAINER
 * 重複イベント
 * HTTPタイムアウト
 * claim競合
-* webhook重複
+* status poll重複
 * stale attempt
 * partial result
 * DLQ
@@ -1446,4 +1491,4 @@ FFPROBE_INVALID_CONTAINER
 * Cloudflare、RunPod、Google側で必要な手動設定をチェックリスト化する
 * READMEにはローカル起動、テスト、デプロイ、ロールバック手順を記載する
 
-最初のPRではPhase 1とPhase 2までを実装し、外部RunPod呼出しはfake clientにする。その後、Phase 3以降を小さいPRに分割すること。
+Phase 1とPhase 2は別々のfeature branchとPRに分け、Phase 2では外部RunPod呼出しをfake clientにする。Phase 3以降もPhaseごとに独立したfeature branchと小さいPRへ分割すること。

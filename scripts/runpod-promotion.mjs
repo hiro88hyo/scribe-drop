@@ -1,0 +1,880 @@
+import { isDeepStrictEqual } from "node:util";
+
+import {
+  createRunpodTemplateArguments,
+  hasOnlyKnownRunpodDefaultPortDrift,
+  validateCreatedRunpodEndpoint,
+  validateCreatedRunpodTemplate,
+  validateRunpodEndpointCapacity,
+  validateRunpodGpuInventory,
+  validateRunpodPlan,
+} from "./runpod-environment-config.mjs";
+
+const resourceIdPattern = /^[A-Za-z0-9_-]{3,128}$/u;
+const dataCenterIdPattern = /^[A-Z]{2,3}-[A-Z]{2,3}-[0-9]+$/u;
+const compliancePattern = /^[A-Z][A-Z0-9_]{1,63}$/u;
+const capacityReadBackDelaysMilliseconds = [1_000, 2_000, 4_000, 8_000, 15_000];
+
+class RunpodCapacityRollbackError extends Error {}
+
+function defaultSleep(milliseconds) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+}
+
+function requireRecord(value, name) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`${name} is missing or invalid`);
+  }
+  return value;
+}
+
+function requireResourceId(value, name) {
+  if (typeof value !== "string" || !resourceIdPattern.test(value)) {
+    throw new Error(`${name} is missing or invalid`);
+  }
+  return value;
+}
+
+function requireArray(value, name) {
+  if (!Array.isArray(value)) {
+    throw new Error(`${name} is missing or invalid`);
+  }
+  return value;
+}
+
+function providerCapacity(untrustedEndpoint) {
+  const endpoint = requireRecord(untrustedEndpoint, "RunPod endpoint capacity response");
+  const gpuTypeIds = requireArray(endpoint.gpuTypeIds, "RunPod endpoint GPU types");
+  const compliance = requireArray(endpoint.compliance, "RunPod endpoint compliance");
+  const dataCenterIds =
+    endpoint.dataCenterIds === undefined
+      ? undefined
+      : typeof endpoint.dataCenterIds === "string"
+        ? endpoint.dataCenterIds.split(",").map((candidate) => candidate.trim())
+        : endpoint.dataCenterIds;
+  if (
+    gpuTypeIds.length === 0 ||
+    gpuTypeIds.length > 3 ||
+    gpuTypeIds.some((value) => typeof value !== "string" || value.length === 0) ||
+    new Set(gpuTypeIds).size !== gpuTypeIds.length ||
+    compliance.some((value) => typeof value !== "string" || !compliancePattern.test(value)) ||
+    new Set(compliance).size !== compliance.length ||
+    (dataCenterIds !== undefined &&
+      (!Array.isArray(dataCenterIds) ||
+        dataCenterIds.length === 0 ||
+        dataCenterIds.some(
+          (value) => typeof value !== "string" || !dataCenterIdPattern.test(value),
+        ) ||
+        new Set(dataCenterIds).size !== dataCenterIds.length))
+  ) {
+    throw new Error("RunPod endpoint capacity response is missing or invalid");
+  }
+  return {
+    compliance: [...compliance].sort(),
+    ...(dataCenterIds === undefined ? {} : { dataCenterIds: [...dataCenterIds].sort() }),
+    gpuTypeIds: [...gpuTypeIds],
+  };
+}
+
+function validateImmutableCapacityPolicy(capacity, plan) {
+  if (!isDeepStrictEqual([...capacity.compliance].sort(), [...plan.endpoint.compliance].sort())) {
+    throw new Error(
+      "RunPod endpoint compliance does not match the fixed plan and cannot be changed automatically",
+    );
+  }
+}
+
+function requireRollbackableCapacity(capacity) {
+  if (!Array.isArray(capacity.dataCenterIds) || capacity.dataCenterIds.length === 0) {
+    throw new Error("RunPod endpoint data-center rollback evidence is missing");
+  }
+  return capacity;
+}
+
+async function getCapacityEndpoint(input) {
+  if (typeof input.getEndpoint !== "function") {
+    throw new Error("RunPod endpoint capacity read-back is unavailable");
+  }
+  return input.getEndpoint({ endpointId: input.endpointId });
+}
+
+function capacityMatchesPlan(untrustedEndpoint, plan) {
+  try {
+    validateRunpodEndpointCapacity(untrustedEndpoint, plan);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForCapacityReadBack(input, validate) {
+  const sleep = input.sleep ?? defaultSleep;
+  let lastError;
+  for (let attempt = 0; attempt <= capacityReadBackDelaysMilliseconds.length; attempt += 1) {
+    try {
+      const capacity = providerCapacity(await getCapacityEndpoint(input));
+      validate(capacity);
+      return capacity;
+    } catch (error) {
+      lastError = error;
+      const delay = capacityReadBackDelaysMilliseconds[attempt];
+      if (delay === undefined) {
+        break;
+      }
+      if (typeof input.onCapacityReadBackRetry === "function") {
+        input.onCapacityReadBackRetry({
+          attempt: attempt + 2,
+          maximumAttempts: capacityReadBackDelaysMilliseconds.length + 1,
+        });
+      }
+      await sleep(delay);
+    }
+  }
+  throw lastError;
+}
+
+function validateExactCapacity(actual, expected, message) {
+  if (!isDeepStrictEqual(actual, expected)) {
+    throw new Error(message);
+  }
+}
+
+async function updateCapacityAndReadBack(input, untrustedDesiredCapacity) {
+  const desiredCapacity = requireRollbackableCapacity(providerCapacity(untrustedDesiredCapacity));
+  let currentCapacity = requireRollbackableCapacity(
+    providerCapacity(await getCapacityEndpoint(input)),
+  );
+  if (!isDeepStrictEqual(currentCapacity.compliance, desiredCapacity.compliance)) {
+    throw new Error("RunPod endpoint compliance does not match the desired immutable capacity");
+  }
+
+  if (!isDeepStrictEqual(currentCapacity.dataCenterIds, desiredCapacity.dataCenterIds)) {
+    if (typeof input.setEndpointDataCenters !== "function") {
+      throw new Error("RunPod endpoint data-center update is unavailable");
+    }
+    const gpuTypeIdsBefore = currentCapacity.gpuTypeIds;
+    try {
+      await input.setEndpointDataCenters({
+        dataCenterIds: desiredCapacity.dataCenterIds,
+        endpointId: input.endpointId,
+      });
+    } catch {
+      // Mutation responses are never retried. Exact read-back is authoritative.
+    }
+    currentCapacity = await waitForCapacityReadBack(input, (capacity) => {
+      validateExactCapacity(
+        capacity.compliance,
+        desiredCapacity.compliance,
+        "RunPod endpoint data-center update changed the compliance policy",
+      );
+      validateExactCapacity(
+        capacity.gpuTypeIds,
+        gpuTypeIdsBefore,
+        "RunPod endpoint data-center update changed the GPU policy",
+      );
+      validateExactCapacity(
+        capacity.dataCenterIds,
+        desiredCapacity.dataCenterIds,
+        "RunPod endpoint data-center update did not match",
+      );
+    });
+  }
+
+  if (!isDeepStrictEqual(currentCapacity.gpuTypeIds, desiredCapacity.gpuTypeIds)) {
+    if (typeof input.setEndpointGpuTypes !== "function") {
+      throw new Error("RunPod endpoint GPU update is unavailable");
+    }
+    try {
+      await input.setEndpointGpuTypes({
+        endpointId: input.endpointId,
+        gpuTypeIds: desiredCapacity.gpuTypeIds,
+      });
+    } catch {
+      // Mutation responses are never retried. Exact read-back is authoritative.
+    }
+    currentCapacity = await waitForCapacityReadBack(input, (capacity) => {
+      validateExactCapacity(
+        capacity,
+        desiredCapacity,
+        "RunPod endpoint GPU update did not produce the desired capacity",
+      );
+    });
+  }
+
+  validateExactCapacity(
+    currentCapacity,
+    desiredCapacity,
+    "RunPod endpoint capacity does not match",
+  );
+  return currentCapacity;
+}
+
+function requireWorkers(value) {
+  return value === undefined ? [] : requireArray(value, "RunPod endpoint workers");
+}
+
+function validateNoActiveJobsOrWorkersHealth(untrustedHealth) {
+  const health = requireRecord(untrustedHealth, "RunPod endpoint health response");
+  const jobs = requireRecord(health.jobs, "RunPod endpoint job health");
+  const workers = requireRecord(health.workers, "RunPod endpoint worker health");
+  if (
+    jobs.inProgress !== 0 ||
+    jobs.inQueue !== 0 ||
+    workers.idle !== 0 ||
+    workers.initializing !== 0 ||
+    workers.ready !== 0 ||
+    workers.running !== 0
+  ) {
+    throw new Error("RunPod production endpoint has active jobs or workers");
+  }
+  return health;
+}
+
+function validateNoJobsOrBusyWorkersHealth(untrustedHealth) {
+  const health = requireRecord(untrustedHealth, "RunPod endpoint health response");
+  const jobs = requireRecord(health.jobs, "RunPod endpoint job health");
+  const workers = requireRecord(health.workers, "RunPod endpoint worker health");
+  if (
+    jobs.inProgress !== 0 ||
+    jobs.inQueue !== 0 ||
+    workers.initializing !== 0 ||
+    workers.running !== 0
+  ) {
+    throw new Error("RunPod production endpoint has active jobs or workers");
+  }
+  return health;
+}
+
+function validateNoActiveJobsHealth(untrustedHealth) {
+  const health = requireRecord(untrustedHealth, "RunPod endpoint health response");
+  const jobs = requireRecord(health.jobs, "RunPod endpoint job health");
+  if (jobs.inProgress !== 0 || jobs.inQueue !== 0) {
+    throw new Error("RunPod production endpoint has active jobs or workers");
+  }
+  return health;
+}
+
+async function waitForDrainedHealth(input, endpointId) {
+  const sleep = input.sleep ?? defaultSleep;
+  let lastError;
+  for (let attempt = 0; attempt <= capacityReadBackDelaysMilliseconds.length; attempt += 1) {
+    const health = await input.getHealth({ endpointId });
+    validateNoActiveJobsHealth(health);
+    try {
+      return validateNoActiveJobsOrWorkersHealth(health);
+    } catch (error) {
+      lastError = error;
+      const delay = capacityReadBackDelaysMilliseconds[attempt];
+      if (delay === undefined) {
+        break;
+      }
+      if (typeof input.onDrainHealthReadBackRetry === "function") {
+        input.onDrainHealthReadBackRetry({
+          attempt: attempt + 2,
+          maximumAttempts: capacityReadBackDelaysMilliseconds.length + 1,
+        });
+      }
+      await sleep(delay);
+    }
+  }
+  throw lastError;
+}
+
+function validateNoActiveWorkers(untrustedWorkers) {
+  const terminalStatuses = new Set(["EXITED", "TERMINATED"]);
+  const workers = requireWorkers(untrustedWorkers);
+  if (
+    workers.some((untrustedWorker) => {
+      const worker = requireRecord(untrustedWorker, "RunPod endpoint worker");
+      return !terminalStatuses.has(worker.desiredStatus);
+    })
+  ) {
+    throw new Error("RunPod endpoint has active or unrecognized workers and cannot be promoted");
+  }
+  return workers;
+}
+
+function candidateWorkersMatch(untrustedWorkers, templateId, image) {
+  const workers = validateNoActiveWorkers(untrustedWorkers);
+  return workers.every((untrustedWorker) => {
+    const worker = requireRecord(untrustedWorker, "RunPod endpoint worker");
+    return worker.templateId === templateId && worker.imageName === image;
+  });
+}
+
+function validateCandidateWorkers(untrustedWorkers, templateId, image) {
+  const workers = validateNoActiveWorkers(untrustedWorkers);
+  if (
+    workers.some((untrustedWorker) => {
+      const worker = requireRecord(untrustedWorker, "RunPod endpoint worker");
+      return worker.templateId !== templateId || worker.imageName !== image;
+    })
+  ) {
+    throw new Error("RunPod endpoint retains a worker from a different template or image");
+  }
+  return workers;
+}
+
+function validateCandidateWorkerEvidence(untrustedWorkers, templateId, image) {
+  const allowedStatuses = new Set(["RUNNING", "EXITED", "TERMINATED"]);
+  const workers = requireWorkers(untrustedWorkers);
+  if (workers.length === 0) {
+    throw new Error("RunPod candidate worker evidence is missing");
+  }
+  if (
+    workers.some((untrustedWorker) => {
+      const worker = requireRecord(untrustedWorker, "RunPod endpoint worker");
+      return (
+        !allowedStatuses.has(worker.desiredStatus) ||
+        worker.templateId !== templateId ||
+        worker.imageName !== image
+      );
+    })
+  ) {
+    throw new Error("RunPod candidate worker evidence does not match the release candidate");
+  }
+  if (
+    workers.filter(
+      (untrustedWorker) =>
+        requireRecord(untrustedWorker, "RunPod endpoint worker").desiredStatus === "RUNNING",
+    ).length > 1
+  ) {
+    throw new Error("RunPod candidate worker evidence contains multiple active workers");
+  }
+  return workers;
+}
+
+function validateIdleEndpoint(untrustedEndpoint, plan, effectiveTemplateId) {
+  const endpoint = requireRecord(untrustedEndpoint, "RunPod endpoint response");
+  const currentTemplateId = requireResourceId(endpoint.templateId, "RunPod current template ID");
+  validateNoActiveWorkers(endpoint.workers);
+  validateCreatedRunpodEndpoint(
+    { ...endpoint, templateId: effectiveTemplateId },
+    plan,
+    effectiveTemplateId,
+  );
+  return currentTemplateId;
+}
+
+function validateDrainedEndpoint(untrustedEndpoint, plan, effectiveTemplateId) {
+  const endpoint = requireRecord(untrustedEndpoint, "RunPod endpoint response");
+  const workers = requireWorkers(endpoint.workers);
+  if (
+    (endpoint.workersMin ?? 0) !== 0 ||
+    (endpoint.workersMax ?? 0) !== 0 ||
+    workers.length !== 0
+  ) {
+    throw new Error("RunPod endpoint did not drain all workers");
+  }
+  validateCreatedRunpodEndpoint(
+    {
+      ...endpoint,
+      templateId: effectiveTemplateId,
+      workersMax: plan.endpoint.workersMax,
+    },
+    plan,
+    effectiveTemplateId,
+  );
+  return requireResourceId(endpoint.templateId, "RunPod current template ID");
+}
+
+function validateCapacityPreparationDrainedEndpoint(untrustedEndpoint, plan, effectiveTemplateId) {
+  const endpoint = requireRecord(untrustedEndpoint, "RunPod endpoint response");
+  if ((endpoint.workersMin ?? 0) !== 0 || (endpoint.workersMax ?? 0) !== 0) {
+    throw new Error("RunPod endpoint did not drain all workers");
+  }
+  validateNoActiveWorkers(endpoint.workers);
+  validateCreatedRunpodEndpoint(
+    {
+      ...endpoint,
+      templateId: effectiveTemplateId,
+      workersMax: plan.endpoint.workersMax,
+    },
+    plan,
+    effectiveTemplateId,
+  );
+  return requireResourceId(endpoint.templateId, "RunPod current template ID");
+}
+
+async function setWorkersMaxAndReadBack(input, workersMax, getEndpoint, validate) {
+  if (typeof input.setEndpointWorkersMax !== "function") {
+    throw new Error("RunPod endpoint worker drain is unavailable");
+  }
+  try {
+    await input.setEndpointWorkersMax({
+      endpointId: input.endpointId,
+      workersMax,
+    });
+  } catch {
+    // A lost mutation response has an unknown outcome. The exact read-back
+    // below is authoritative, so the mutation itself is never retried.
+  }
+  const endpoint = getEndpoint();
+  validate(endpoint);
+  return endpoint;
+}
+
+function matchingTemplates(templates, name) {
+  return templates.filter(
+    (entry) =>
+      typeof entry === "object" && entry !== null && !Array.isArray(entry) && entry.name === name,
+  );
+}
+
+async function listTemplates(input) {
+  if (typeof input.listTemplates !== "function") {
+    throw new Error("RunPod template listing is unavailable");
+  }
+  return input.listTemplates();
+}
+
+async function verifyGpuCapacity(input, plan) {
+  if (typeof input.listGpus !== "function") {
+    throw new Error("RunPod GPU inventory is unavailable");
+  }
+  validateRunpodGpuInventory(await input.listGpus(), plan);
+}
+
+async function getOrCreateTemplateResponse(plan, input) {
+  const matches = matchingTemplates(
+    requireArray(await listTemplates(input), "RunPod template list"),
+    plan.template.name,
+  );
+  if (matches.length > 1) {
+    throw new Error("Multiple RunPod templates match the candidate plan");
+  }
+  if (matches.length === 1) {
+    const summary = requireRecord(matches[0], "RunPod template summary");
+    const templateId = requireResourceId(summary.id, "RunPod template ID");
+    return input.runCli(["template", "get", templateId]);
+  }
+
+  return input.runCli(createRunpodTemplateArguments(plan));
+}
+
+export async function verifyRunpodPromotionPreflight(input) {
+  const plan = validateRunpodPlan(input.plan, input.environment);
+  await verifyGpuCapacity(input, plan);
+  const endpointId = requireResourceId(input.endpointId, "RunPod endpoint ID");
+  const matches = matchingTemplates(
+    requireArray(await listTemplates(input), "RunPod template list"),
+    plan.template.name,
+  );
+  if (matches.length > 1) {
+    throw new Error("Multiple RunPod templates match the candidate plan");
+  }
+
+  let candidateTemplateId;
+  let candidateTemplatePortsRequireNormalization = false;
+  if (matches.length === 1) {
+    const summary = requireRecord(matches[0], "RunPod template summary");
+    const templateId = requireResourceId(summary.id, "RunPod template ID");
+    const candidate = input.runCli(["template", "get", templateId]);
+    if (hasOnlyKnownRunpodDefaultPortDrift(candidate, plan)) {
+      candidateTemplateId = requireResourceId(
+        requireRecord(candidate, "RunPod template response").id,
+        "RunPod template ID",
+      );
+      candidateTemplatePortsRequireNormalization = true;
+    } else {
+      candidateTemplateId = validateCreatedRunpodTemplate(candidate, plan);
+    }
+  }
+
+  const endpoint = input.runCli([
+    "serverless",
+    "get",
+    endpointId,
+    "--include-template",
+    "--include-workers",
+  ]);
+  const currentTemplateId = requireResourceId(
+    requireRecord(endpoint, "RunPod endpoint response").templateId,
+    "RunPod current template ID",
+  );
+  validateIdleEndpoint(endpoint, plan, candidateTemplateId ?? currentTemplateId);
+  const capacityEndpoint = await getCapacityEndpoint(input);
+  const capacity = providerCapacity(capacityEndpoint);
+  validateImmutableCapacityPolicy(capacity, plan);
+  const capacityUpdateRequired = !capacityMatchesPlan(capacityEndpoint, plan);
+  if (capacityUpdateRequired) {
+    requireRollbackableCapacity(capacity);
+    if (input.environment === "production") {
+      throw new Error(
+        "RunPod production endpoint capacity must match the fixed plan before promotion",
+      );
+    }
+  }
+  const candidateIsAttached =
+    candidateTemplateId !== undefined && currentTemplateId === candidateTemplateId;
+  if (candidateIsAttached) {
+    validateCandidateWorkers(endpoint.workers, candidateTemplateId, plan.template.image);
+  }
+  if (candidateTemplatePortsRequireNormalization && currentTemplateId === candidateTemplateId) {
+    throw new Error("RunPod candidate template with default ports is already attached");
+  }
+  return {
+    capacityUpdateRequired,
+    candidateTemplateExists: candidateTemplateId !== undefined,
+    candidateTemplatePortsRequireNormalization,
+    endpointId,
+  };
+}
+
+export async function verifyRunpodCandidateWorkerEvidence(input) {
+  if (input.environment !== "staging") {
+    throw new Error("RunPod candidate worker evidence verification is restricted to staging");
+  }
+  const plan = validateRunpodPlan(input.plan, "staging");
+  const endpointId = requireResourceId(input.endpointId, "RunPod endpoint ID");
+  const matches = matchingTemplates(
+    requireArray(await listTemplates(input), "RunPod template list"),
+    plan.template.name,
+  );
+  if (matches.length !== 1) {
+    throw new Error("RunPod candidate template identity is ambiguous");
+  }
+  const summary = requireRecord(matches[0], "RunPod template summary");
+  const templateId = requireResourceId(summary.id, "RunPod template ID");
+  validateCreatedRunpodTemplate(input.runCli(["template", "get", templateId]), plan);
+
+  const endpoint = requireRecord(
+    input.runCli(["serverless", "get", endpointId, "--include-template", "--include-workers"]),
+    "RunPod endpoint response",
+  );
+  const currentTemplateId = requireResourceId(endpoint.templateId, "RunPod current template ID");
+  if (currentTemplateId !== templateId) {
+    throw new Error("RunPod candidate template is not attached");
+  }
+  const workersMin = endpoint.workersMin ?? 0;
+  if (workersMin !== 0 && workersMin !== 1) {
+    throw new Error("RunPod candidate worker minimum is missing or invalid");
+  }
+  validateCreatedRunpodEndpoint(
+    {
+      ...endpoint,
+      workersMin: plan.endpoint.workersMin,
+    },
+    plan,
+    templateId,
+  );
+  validateCandidateWorkerEvidence(endpoint.workers, templateId, plan.template.image);
+  validateRunpodEndpointCapacity(await getCapacityEndpoint(input), plan);
+
+  return { endpointId, templateId };
+}
+
+export async function reconcileRunpodEndpointCapacity(input) {
+  const plan = validateRunpodPlan(input.plan, input.environment);
+  const endpointId = requireResourceId(input.endpointId, "RunPod endpoint ID");
+  const capacityBefore = await getCapacityEndpoint({ ...input, endpointId });
+  const previousCapacity = providerCapacity(capacityBefore);
+  validateImmutableCapacityPolicy(previousCapacity, plan);
+  if (capacityMatchesPlan(capacityBefore, plan)) {
+    return { changed: false, endpointId };
+  }
+  requireRollbackableCapacity(previousCapacity);
+
+  try {
+    await updateCapacityAndReadBack(
+      { ...input, endpointId },
+      {
+        compliance: previousCapacity.compliance,
+        dataCenterIds: plan.endpoint.dataCenterIds,
+        gpuTypeIds: plan.endpoint.gpuTypeIds,
+      },
+    );
+  } catch (updateError) {
+    try {
+      await updateCapacityAndReadBack({ ...input, endpointId }, previousCapacity);
+    } catch (rollbackError) {
+      throw new RunpodCapacityRollbackError(
+        "RunPod endpoint capacity update and rollback both failed",
+        {
+          cause: rollbackError,
+        },
+      );
+    }
+    throw updateError;
+  }
+
+  return { changed: true, endpointId };
+}
+
+export async function prepareRunpodProductionCapacity(input) {
+  if (input.environment !== "production") {
+    throw new Error("RunPod capacity preparation is restricted to production");
+  }
+  const plan = validateRunpodPlan(input.plan, "production");
+  await verifyGpuCapacity(input, plan);
+  const endpointId = requireResourceId(input.endpointId, "RunPod endpoint ID");
+  const getEndpoint = () =>
+    input.runCli(["serverless", "get", endpointId, "--include-template", "--include-workers"]);
+  const endpointBefore = getEndpoint();
+  const currentTemplateId = requireResourceId(
+    requireRecord(endpointBefore, "RunPod endpoint response").templateId,
+    "RunPod current template ID",
+  );
+  validateIdleEndpoint(endpointBefore, plan, currentTemplateId);
+  if (typeof input.getHealth !== "function") {
+    throw new Error("RunPod endpoint job and worker health read-back is unavailable");
+  }
+  validateNoJobsOrBusyWorkersHealth(await input.getHealth({ endpointId }));
+  const capacityBefore = await getCapacityEndpoint(input);
+  const previousCapacity = providerCapacity(capacityBefore);
+  validateImmutableCapacityPolicy(previousCapacity, plan);
+  if (capacityMatchesPlan(capacityBefore, plan)) {
+    return { changed: false, endpointId };
+  }
+  requireRollbackableCapacity(previousCapacity);
+  if (typeof input.setEndpointWorkersMax !== "function") {
+    throw new Error("RunPod endpoint worker drain is unavailable");
+  }
+
+  let preparationError;
+  try {
+    await setWorkersMaxAndReadBack(input, 0, getEndpoint, (endpoint) => {
+      validateCapacityPreparationDrainedEndpoint(endpoint, plan, currentTemplateId);
+    });
+    await waitForDrainedHealth(input, endpointId);
+    await reconcileRunpodEndpointCapacity({
+      ...input,
+      endpointId,
+      environment: "production",
+      plan,
+    });
+    try {
+      validateNoActiveJobsOrWorkersHealth(await input.getHealth({ endpointId }));
+    } catch (healthError) {
+      try {
+        await updateCapacityAndReadBack(input, previousCapacity);
+      } catch (rollbackError) {
+        throw new RunpodCapacityRollbackError(
+          "RunPod endpoint received work during capacity preparation and rollback failed",
+          { cause: rollbackError },
+        );
+      }
+      throw healthError;
+    }
+  } catch (error) {
+    preparationError = error;
+  }
+
+  if (preparationError instanceof RunpodCapacityRollbackError) {
+    throw preparationError;
+  }
+
+  let restorationError;
+  try {
+    await setWorkersMaxAndReadBack(input, plan.endpoint.workersMax, getEndpoint, (endpoint) => {
+      const restoredTemplateId = validateIdleEndpoint(endpoint, plan, currentTemplateId);
+      if (restoredTemplateId !== currentTemplateId) {
+        throw new Error("RunPod capacity preparation changed the endpoint template");
+      }
+    });
+  } catch (error) {
+    restorationError = error;
+  }
+
+  if (preparationError !== undefined && restorationError !== undefined) {
+    throw new Error("RunPod capacity preparation and worker limit restoration both failed", {
+      cause: restorationError,
+    });
+  }
+  if (restorationError !== undefined) {
+    throw new Error("RunPod capacity preparation worker limit restoration failed", {
+      cause: restorationError,
+    });
+  }
+  if (preparationError !== undefined) {
+    throw preparationError;
+  }
+
+  validateRunpodEndpointCapacity(await getCapacityEndpoint(input), plan);
+  return { changed: true, endpointId };
+}
+
+export async function promoteRunpodCandidate(input) {
+  const plan = validateRunpodPlan(input.plan, input.environment);
+  await verifyGpuCapacity(input, plan);
+  const endpointId = requireResourceId(input.endpointId, "RunPod endpoint ID");
+  const getEndpoint = () =>
+    input.runCli(["serverless", "get", endpointId, "--include-template", "--include-workers"]);
+  const candidate = await getOrCreateTemplateResponse(plan, input);
+  let templateId;
+  if (hasOnlyKnownRunpodDefaultPortDrift(candidate, plan)) {
+    templateId = requireResourceId(
+      requireRecord(candidate, "RunPod template response").id,
+      "RunPod template ID",
+    );
+    const endpointBeforeNormalization = getEndpoint();
+    const currentTemplateId = requireResourceId(
+      requireRecord(endpointBeforeNormalization, "RunPod endpoint response").templateId,
+      "RunPod current template ID",
+    );
+    validateIdleEndpoint(endpointBeforeNormalization, plan, currentTemplateId);
+    if (currentTemplateId === templateId) {
+      throw new Error("RunPod candidate template with default ports is already attached");
+    }
+    if (typeof input.clearTemplatePorts !== "function") {
+      throw new Error("RunPod template port normalization is unavailable");
+    }
+
+    try {
+      await input.clearTemplatePorts(templateId);
+    } catch {
+      // A lost mutation response has an unknown outcome. The exact read-back
+      // below is authoritative, so the mutation itself is never retried.
+    }
+    try {
+      templateId = validateCreatedRunpodTemplate(
+        input.runCli(["template", "get", templateId]),
+        plan,
+      );
+    } catch (error) {
+      throw new Error("RunPod candidate template port normalization failed", {
+        cause: error,
+      });
+    }
+  } else {
+    templateId = validateCreatedRunpodTemplate(candidate, plan);
+  }
+  const before = getEndpoint();
+  const previousTemplateId = validateIdleEndpoint(before, plan, templateId);
+  const capacityBefore = await getCapacityEndpoint(input);
+  const previousCapacity = providerCapacity(capacityBefore);
+  validateImmutableCapacityPolicy(previousCapacity, plan);
+  const candidateCapacityIsCurrent = capacityMatchesPlan(capacityBefore, plan);
+  if (input.environment === "production" && !candidateCapacityIsCurrent) {
+    throw new Error(
+      "RunPod production endpoint capacity must match the fixed plan before promotion",
+    );
+  }
+  const candidateWorkersAreCurrent =
+    previousTemplateId === templateId &&
+    candidateWorkersMatch(before.workers, templateId, plan.template.image);
+  if (
+    previousTemplateId === templateId &&
+    candidateWorkersAreCurrent &&
+    candidateCapacityIsCurrent
+  ) {
+    validateCreatedRunpodEndpoint(before, plan, templateId);
+    return { changed: false, endpointId, templateId };
+  }
+  requireRollbackableCapacity(previousCapacity);
+  if (typeof input.setEndpointWorkersMax !== "function") {
+    throw new Error("RunPod endpoint worker drain is unavailable");
+  }
+
+  const validateDrainedTemplate = (endpoint, expectedTemplateId) => {
+    const actualTemplateId = validateDrainedEndpoint(endpoint, plan, expectedTemplateId);
+    if (actualTemplateId !== expectedTemplateId) {
+      throw new Error("RunPod endpoint template update read-back did not match");
+    }
+  };
+  let rollbackStage = "initial read-back";
+  const restorePreviousEndpoint = async () => {
+    rollbackStage = "initial read-back";
+    let current = getEndpoint();
+    validateNoActiveWorkers(requireRecord(current, "RunPod endpoint response").workers);
+    let currentTemplateId = requireResourceId(current.templateId, "RunPod current template ID");
+    const currentWorkersMax = current.workersMax ?? 0;
+    if (
+      currentTemplateId === previousTemplateId &&
+      currentWorkersMax === plan.endpoint.workersMax &&
+      isDeepStrictEqual(providerCapacity(await getCapacityEndpoint(input)), previousCapacity)
+    ) {
+      validateIdleEndpoint(current, plan, previousTemplateId);
+      return;
+    }
+    if (currentWorkersMax !== 0) {
+      rollbackStage = "worker drain";
+      current = await setWorkersMaxAndReadBack(input, 0, getEndpoint, (endpoint) => {
+        const actualTemplateId = requireResourceId(
+          requireRecord(endpoint, "RunPod endpoint response").templateId,
+          "RunPod current template ID",
+        );
+        validateDrainedTemplate(endpoint, actualTemplateId);
+      });
+      currentTemplateId = requireResourceId(
+        requireRecord(current, "RunPod endpoint response").templateId,
+        "RunPod current template ID",
+      );
+    } else {
+      validateDrainedTemplate(current, currentTemplateId);
+    }
+    const currentCapacity = providerCapacity(await getCapacityEndpoint(input));
+    if (!isDeepStrictEqual(currentCapacity, previousCapacity)) {
+      rollbackStage = "capacity restore";
+      await updateCapacityAndReadBack(input, previousCapacity);
+    }
+    if (currentTemplateId !== previousTemplateId) {
+      rollbackStage = "template restore";
+      try {
+        input.runCli(["serverless", "update", endpointId, "--template-id", previousTemplateId]);
+      } catch {
+        // The exact read-back below decides whether rollback took effect.
+      }
+      const restoredTemplate = getEndpoint();
+      validateDrainedTemplate(restoredTemplate, previousTemplateId);
+    }
+    rollbackStage = "worker limit restore";
+    await setWorkersMaxAndReadBack(input, plan.endpoint.workersMax, getEndpoint, (endpoint) => {
+      const actualTemplateId = validateIdleEndpoint(endpoint, plan, previousTemplateId);
+      if (actualTemplateId !== previousTemplateId) {
+        throw new Error("RunPod endpoint rollback did not restore the previous template");
+      }
+    });
+  };
+
+  let promotionStage = "worker drain";
+  try {
+    await setWorkersMaxAndReadBack(input, 0, getEndpoint, (endpoint) => {
+      validateDrainedTemplate(endpoint, previousTemplateId);
+    });
+    if (!candidateCapacityIsCurrent) {
+      promotionStage = "capacity update";
+      await updateCapacityAndReadBack(input, {
+        compliance: previousCapacity.compliance,
+        dataCenterIds: plan.endpoint.dataCenterIds,
+        gpuTypeIds: plan.endpoint.gpuTypeIds,
+      });
+    }
+    if (previousTemplateId !== templateId) {
+      promotionStage = "template update";
+      try {
+        input.runCli(["serverless", "update", endpointId, "--template-id", templateId]);
+      } catch {
+        // The exact read-back below decides whether promotion took effect.
+      }
+      const switched = getEndpoint();
+      validateDrainedTemplate(switched, templateId);
+    }
+    promotionStage = "worker limit restore";
+    await setWorkersMaxAndReadBack(input, plan.endpoint.workersMax, getEndpoint, (endpoint) => {
+      const actualTemplateId = validateIdleEndpoint(endpoint, plan, templateId);
+      if (actualTemplateId !== templateId) {
+        throw new Error("RunPod endpoint template update read-back did not match");
+      }
+      validateCreatedRunpodEndpoint(endpoint, plan, templateId);
+      validateCandidateWorkers(endpoint.workers, templateId, plan.template.image);
+    });
+    promotionStage = "final capacity read-back";
+    validateRunpodEndpointCapacity(await getCapacityEndpoint(input), plan);
+  } catch (error) {
+    try {
+      await restorePreviousEndpoint();
+    } catch (rollbackError) {
+      throw new Error(
+        `RunPod promotion failed during ${promotionStage}; rollback failed during ${rollbackStage}`,
+        {
+          cause: rollbackError,
+        },
+      );
+    }
+    throw error;
+  }
+  return { changed: true, endpointId, templateId };
+}

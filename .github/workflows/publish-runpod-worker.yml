@@ -1,0 +1,462 @@
+name: Publish RunPod release candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      reusable_worker_candidate_run_id:
+        description: Successful candidate run whose unchanged RunPod Worker digest may be reused
+        required: false
+        type: string
+
+run-name: Publish RunPod release candidate from ${{ github.ref_name }}
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: release-candidate-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VOLTA_FEATURE_PNPM: "1"
+  WRANGLER_WRITE_LOGS: "0"
+
+jobs:
+  preflight:
+    name: Validate release identity and remote readiness
+    environment: staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      reusable_worker_image: ${{ steps.reusable-worker.outputs.image }}
+      reusable_worker_source_run_id: ${{ steps.reusable-worker.outputs.source_run_id }}
+      reusable_worker_source_sha: ${{ steps.reusable-worker.outputs.source_sha }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up Volta
+        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
+        with:
+          volta-version: 2.0.2
+
+      - name: Require the versioned release branch
+        run: |
+          case "${GITHUB_REF}" in
+            refs/heads/release/*)
+              release_version="${GITHUB_REF#refs/heads/release/}"
+              package_version="$(node -p "require('./package.json').version")"
+              if [ "${release_version}" != "${package_version}" ]; then
+                echo "Release branch and package version must match" >&2
+                exit 1
+              fi
+              ;;
+            *)
+              echo "Release candidates can only be published from release/<version>" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Verify staging Pages upload permission before costly work
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
+          SCRIBE_DROP_STAGING_PAGES_PROJECT: ${{ vars.SCRIBE_DROP_STAGING_PAGES_PROJECT }}
+        run: pnpm run cloudflare:pages:upload-permission:verify:staging
+
+      - name: Install fixed runpodctl
+        run: pnpm run runpodctl:install
+
+      - name: Verify read-only staging RunPod readiness before costly work
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID: ${{ secrets.SCRIBE_DROP_STAGING_RUNPOD_ENDPOINT_ID }}
+          SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS: ${{ vars.SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS }}
+        run: pnpm run runpod:release-readiness:staging
+
+      - name: Verify reusable unchanged RunPod Worker candidate
+        id: reusable-worker
+        if: ${{ inputs.reusable_worker_candidate_run_id != '' }}
+        env:
+          EXPECTED_RELEASE_BRANCH: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_CANDIDATE_RUN_ID: ${{ inputs.reusable_worker_candidate_run_id }}
+        run: |
+          if ! printf '%s' "${SOURCE_CANDIDATE_RUN_ID}" | grep -Eq '^[1-9][0-9]*$'; then
+            echo "Reusable Worker candidate run ID is invalid" >&2
+            exit 1
+          fi
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_CANDIDATE_RUN_ID}" \
+            >"${RUNNER_TEMP}/reusable-worker-run.json"
+          source_sha="$(
+            node scripts/verify-reusable-workflow-run.mjs \
+              "${RUNNER_TEMP}/reusable-worker-run.json" \
+              .github/workflows/publish-runpod-worker.yml \
+              "${SOURCE_CANDIDATE_RUN_ID}"
+          )"
+          if [ "${source_sha}" = "${GITHUB_SHA}" ]; then
+            echo "Reusable Worker source must be an earlier candidate" >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "${source_sha}" "${GITHUB_SHA}"; then
+            echo "Reusable Worker source is not an ancestor of this candidate" >&2
+            exit 1
+          fi
+          if ! git diff --quiet "${source_sha}" "${GITHUB_SHA}" -- \
+            .dockerignore \
+            apps/runpod-worker \
+            tools/versions.json; then
+            echo "RunPod Worker build or scan inputs changed; a new image build is required" >&2
+            exit 1
+          fi
+          gh run download "${SOURCE_CANDIDATE_RUN_ID}" \
+            --name "scribe-drop-release-candidate-${source_sha}" \
+            --dir "${RUNNER_TEMP}/reusable-worker-candidate"
+          release_version="$(node -p "require('./package.json').version")"
+          worker_image="$(
+            EXPECTED_COMMIT_SHA="${source_sha}" \
+            EXPECTED_RELEASE_VERSION="${release_version}" \
+              node scripts/read-reusable-worker-reference.mjs \
+                "${RUNNER_TEMP}/reusable-worker-candidate"
+          )"
+          {
+            printf 'image=%s\n' "${worker_image}"
+            printf 'source_run_id=%s\n' "${SOURCE_CANDIDATE_RUN_ID}"
+            printf 'source_sha=%s\n' "${source_sha}"
+          } >>"${GITHUB_OUTPUT}"
+
+  application:
+    name: Assemble candidate application artifacts
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Volta
+        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
+        with:
+          volta-version: 2.0.2
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and validate immutable application artifacts
+        run: |
+          pnpm run build
+          mkdir -p candidate-build/orchestrator
+          pnpm exec wrangler deploy \
+            --dry-run \
+            --minify \
+            --config apps/orchestrator/wrangler.toml \
+            --env staging \
+            --outdir "${GITHUB_WORKSPACE}/candidate-build/orchestrator"
+          pnpm run candidate:application:create \
+            candidate-application \
+            candidate-build/orchestrator
+          pnpm run candidate:application:verify candidate-application
+
+      - name: Upload verified candidate application artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scribe-drop-candidate-application-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: candidate-application
+          if-no-files-found: error
+          retention-days: 1
+
+  quality:
+    name: Candidate quality gate
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Volta
+        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
+        with:
+          volta-version: 2.0.2
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: 0.11.32
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: apps/runpod-worker/uv.lock
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Python dependencies
+        run: uv sync --project apps/runpod-worker --frozen
+
+      - name: Install checksummed project tools
+        run: |
+          pnpm run gitleaks:install
+          pnpm run runpodctl:install
+
+      - name: Run the complete local quality gate
+        run: pnpm check
+
+  browser-e2e:
+    name: Candidate browser E2E
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Volta
+        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
+        with:
+          volta-version: 2.0.2
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install fixed Playwright browser
+        run: pnpm --filter @scribe-drop/e2e exec playwright install --with-deps chromium
+
+      - name: Run mocked browser lifecycle
+        run: pnpm run test:e2e
+
+  security:
+    name: Candidate security gates
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up Volta
+        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
+        with:
+          volta-version: 2.0.2
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: 0.11.32
+          python-version: "3.12"
+          enable-cache: false
+
+      - name: Install checksummed Gitleaks
+        run: pnpm run gitleaks:install
+
+      - name: Scan Git history and working tree
+        run: pnpm run secrets:check
+
+      - name: Audit JavaScript dependencies
+        run: pnpm audit --audit-level high
+
+      - name: Audit Python dependencies
+        run: uv audit --preview-features audit-command --project apps/runpod-worker --frozen
+
+  publish:
+    name: Publish immutable release candidate
+    needs:
+      - application
+      - browser-e2e
+      - preflight
+      - quality
+      - security
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Volta
+        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
+        with:
+          volta-version: 2.0.2
+
+      - name: Download verified candidate application artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: scribe-drop-candidate-application-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: candidate-application
+
+      - name: Reverify candidate application artifacts before expensive work
+        run: pnpm run candidate:application:verify candidate-application
+
+      - name: Reclaim unused ephemeral runner toolchains
+        run: |
+          sudo rm -rf \
+            /opt/ghc \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/local/.ghcup \
+            /usr/local/lib/android \
+            /usr/share/dotnet
+          available_kib="$(df --output=avail -k / | tail -n 1)"
+          if [ "${available_kib}" -lt 26214400 ]; then
+            echo "RunPod image build and scan require at least 25 GiB free" >&2
+            exit 1
+          fi
+
+      - name: Authenticate to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "${GHCR_TOKEN}" |
+            docker login ghcr.io \
+              --username "${GITHUB_ACTOR}" \
+              --password-stdin
+
+      - name: Build fixed RunPod Worker image
+        if: ${{ needs.preflight.outputs.reusable_worker_image == '' }}
+        run: |
+          docker buildx build \
+            --file apps/runpod-worker/Dockerfile \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --load \
+            --tag scribe-drop-runpod-worker:publish \
+            .
+
+      - name: Pull verified reusable RunPod Worker image
+        if: ${{ needs.preflight.outputs.reusable_worker_image != '' }}
+        env:
+          REUSABLE_WORKER_IMAGE: ${{ needs.preflight.outputs.reusable_worker_image }}
+        run: |
+          docker pull "${REUSABLE_WORKER_IMAGE}"
+          docker tag "${REUSABLE_WORKER_IMAGE}" scribe-drop-runpod-worker:publish
+
+      - name: Verify non-root offline runtime and model integrity
+        run: |
+          docker run \
+            --rm \
+            --network none \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --entrypoint python \
+            scribe-drop-runpod-worker:publish \
+            -m scribe_drop_worker.container_check
+
+      - name: Generate synthetic M4A acceptance fixture
+        run: |
+          mkdir -p candidate-fixtures
+          docker run \
+            --rm \
+            --network none \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --entrypoint /usr/bin/ffmpeg \
+            scribe-drop-runpod-worker:publish \
+            -nostdin \
+            -loglevel error \
+            -f lavfi \
+            -i anullsrc=r=16000:cl=mono \
+            -t 2 \
+            -c:a aac \
+            -b:a 64k \
+            -movflags frag_keyframe+empty_moov \
+            -f mp4 \
+            pipe:1 >candidate-fixtures/android-aac.m4a
+          test -s candidate-fixtures/android-aac.m4a
+          printf '%s\n' \
+            '{"schemaVersion":1,"filename":"android-aac.m4a","mediaType":"audio/mp4a-latm","synthetic":true}' \
+            >candidate-fixtures/metadata.json
+
+      - name: Generate SPDX JSON SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: scribe-drop-runpod-worker:publish
+          format: spdx-json
+          output-file: runpod-worker.spdx.json
+          syft-version: v1.49.0
+          upload-artifact: false
+
+      - name: Scan image vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: scribe-drop-runpod-worker:publish
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: "1"
+          format: table
+          output: runpod-worker-trivy.txt
+          hide-progress: true
+          timeout: 15m
+          cache: false
+          version: v0.72.0
+
+      - name: Push run-scoped image and record immutable reference
+        if: ${{ needs.preflight.outputs.reusable_worker_image == '' }}
+        run: |
+          registry_owner="${GITHUB_REPOSITORY_OWNER,,}"
+          image="ghcr.io/${registry_owner}/scribe-drop-runpod-worker"
+          tagged_image="${image}:candidate-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker tag scribe-drop-runpod-worker:publish "${tagged_image}"
+          docker push "${tagged_image}"
+
+          manifest_file="$(mktemp)"
+          trap 'rm -f "${manifest_file}"' EXIT
+          docker buildx imagetools inspect "${tagged_image}" --raw >"${manifest_file}"
+          digest="sha256:$(sha256sum "${manifest_file}" | cut -d ' ' -f 1)"
+          printf '%s@%s\n' "${image}" "${digest}" >runpod-worker-image.txt
+          printf 'Published immutable image: %s@%s\n' "${image}" "${digest}"
+
+      - name: Record verified reusable immutable reference
+        if: ${{ needs.preflight.outputs.reusable_worker_image != '' }}
+        env:
+          REUSABLE_WORKER_IMAGE: ${{ needs.preflight.outputs.reusable_worker_image }}
+        run: |
+          docker buildx imagetools inspect "${REUSABLE_WORKER_IMAGE}" >/dev/null
+          printf '%s\n' "${REUSABLE_WORKER_IMAGE}" >runpod-worker-image.txt
+          printf 'Reused verified immutable RunPod Worker image.\n'
+
+      - name: Create and verify candidate manifest
+        env:
+          EXPECTED_COMMIT_SHA: ${{ github.sha }}
+          REUSABLE_WORKER_SOURCE_RUN_ID: ${{ needs.preflight.outputs.reusable_worker_source_run_id }}
+          REUSABLE_WORKER_SOURCE_SHA: ${{ needs.preflight.outputs.reusable_worker_source_sha }}
+        run: |
+          mkdir -p candidate-supply-chain
+          install -m 0644 runpod-worker.spdx.json candidate-supply-chain/
+          install -m 0644 runpod-worker-trivy.txt candidate-supply-chain/
+          node scripts/create-runpod-worker-provenance.mjs \
+            runpod-worker-image.txt \
+            candidate-supply-chain/runpod-worker-provenance.json
+          pnpm run candidate:create \
+            release-candidate \
+            candidate-application \
+            runpod-worker-image.txt \
+            candidate-fixtures \
+            candidate-supply-chain
+          pnpm run candidate:verify release-candidate
+
+      - name: Upload failed supply-chain evidence
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-candidate-failure-${{ github.sha }}
+          path: |
+            runpod-worker.spdx.json
+            runpod-worker-trivy.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload immutable release candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scribe-drop-release-candidate-${{ github.sha }}
+          path: release-candidate
+          if-no-files-found: error
+          retention-days: 30
