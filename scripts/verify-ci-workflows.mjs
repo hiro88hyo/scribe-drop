@@ -3,6 +3,8 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+import { findRunnerContextBeforeSteps } from "./github-workflow-static-analysis.mjs";
+
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(scriptDirectory, "..");
 const workflowsDirectory = path.join(repositoryRoot, ".github", "workflows");
@@ -191,6 +193,9 @@ if (workflowFiles.length === 0) {
 
 for (const filename of workflowFiles) {
   const contents = readFileSync(path.join(workflowsDirectory, filename), "utf8");
+  for (const jobName of findRunnerContextBeforeSteps(contents)) {
+    failures.push(`${filename} ${jobName}: runner context is unavailable before step evaluation`);
+  }
 
   for (const match of contents.matchAll(usesPattern)) {
     const reference = match[1];
@@ -301,6 +306,21 @@ const stagingPagesPromotionStep = workflowStep(
 const stagingReadbackStep = workflowStep(
   stagingAcceptanceJob,
   "Verify candidate and live resource read-back",
+  "deploy-staging-candidate.yml acceptance job",
+);
+const stagingFailureLifecycleStep = workflowStep(
+  stagingAcceptanceJob,
+  "Run real staging failure notification lifecycle",
+  "deploy-staging-candidate.yml acceptance job",
+);
+const stagingFailureNotificationStep = workflowStep(
+  stagingAcceptanceJob,
+  "Verify the synthetic failure notification was delivered",
+  "deploy-staging-candidate.yml acceptance job",
+);
+const stagingFailureCleanupStep = workflowStep(
+  stagingAcceptanceJob,
+  "Delete the synthetic staging failure fixture",
   "deploy-staging-candidate.yml acceptance job",
 );
 
@@ -938,6 +958,25 @@ requireTextCount(
   "deploy-staging-candidate.yml acceptance job",
   "idle candidate worker gate before both real jobs",
 );
+requireTextCount(
+  stagingAcceptanceJob,
+  "STAGING_FAILURE_EVIDENCE_PATH: ${{ runner.temp }}/staging-failure-evidence.json",
+  3,
+  "deploy-staging-candidate.yml acceptance job",
+  "step-scoped runner-temporary failure evidence path",
+);
+for (const [step, description] of [
+  [stagingFailureLifecycleStep, "failure lifecycle evidence path"],
+  [stagingFailureNotificationStep, "failure notification evidence path"],
+  [stagingFailureCleanupStep, "failure cleanup evidence path"],
+]) {
+  requireText(
+    step,
+    "STAGING_FAILURE_EVIDENCE_PATH: ${{ runner.temp }}/staging-failure-evidence.json",
+    "deploy-staging-candidate.yml acceptance job",
+    description,
+  );
+}
 requireTextCount(
   stagingAcceptanceJob,
   "pnpm run runpod:cooldown:staging",

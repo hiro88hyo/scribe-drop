@@ -171,6 +171,10 @@ claimと認証済み`GET /api/me`をupload前に検証し、実M4A、manifest-la
 failure job IDはmode `0600`のrunner一時fileだけで受け渡し、実配送確認後に同じAccess
 service principalで削除する。両fixture削除とscale-to-zero復元が成功した後だけ、
 schema version 3の24時間有効なacceptance artifactを発行する。
+`runner.*` contextはstep評価時だけ使用し、job-level `env`、`if`、strategyなどstepより
+前のfieldでは参照しない。`pnpm ci:verify`は全workflowの各jobを静的検査し、この誤配置を
+GitHubへのdispatch前に拒否する。複数stepで同じrunner一時fileを使う場合も、pathを各stepの
+`env`へ明示してjob scopeへ持ち上げない。
 acceptanceには実IDやoriginを含めず、retention、R2 policy、RunPod GPU・配置・runtime
 invariantをenvironment markerで正規化したpolicy hashを含める。
 [ADR 0043](./adr/0043-bound-runpod-start-slo-and-staging-wait.md)に従い、実E2Eは
