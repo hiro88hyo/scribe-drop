@@ -332,8 +332,11 @@ Cloudflare mutationより前にstaging evidenceとの一致を要求する。evi
 
 `main`と`develop`への直接pushを禁止し、`Quality gate`、`Secret scan`、
 `Dependency audit`、`Browser E2E`、`RunPod container supply chain`の5件をstrictな
-required status checkに設定する。承認1名、stale review破棄、最新push以外の承認拒否、
+required status checkに設定する。[ADR 0063](./adr/0063-use-solo-maintainer-pr-policy.md)に従い、
+独立maintainerが不在の間は承認0名、last push approvalなしとするが、PR、stale review破棄、
 conversation解決を要求し、管理者にも適用する。force-pushとbranch削除は禁止する。
+承認を偽装する別accountやbotは使わず、qualified maintainerが参加したら承認1名とlast push
+approvalを別PRで再有効化する。production Environmentのrequired reviewerは変更しない。
 
 現行`release/<version>`はrelease修正を直接積めるGit-flowを維持するためPRとstatus checkを
 必須にしない。一方で管理者を含むforce-pushとbranch削除は禁止する。production deployは

@@ -27,8 +27,8 @@ function protection(branch) {
     result.required_pull_request_reviews = {
       dismiss_stale_reviews: true,
       require_code_owner_reviews: false,
-      require_last_push_approval: true,
-      required_approving_review_count: 1,
+      require_last_push_approval: false,
+      required_approving_review_count: 0,
     };
     result.required_status_checks = {
       checks: requiredStatusCheckNames.map((context) => ({ context })),
@@ -52,8 +52,8 @@ test("creates strict long-lived and maintainable release requests", () => {
     contexts: requiredStatusCheckNames,
     strict: true,
   });
-  assert.equal(develop.required_pull_request_reviews.required_approving_review_count, 1);
-  assert.equal(develop.required_pull_request_reviews.require_last_push_approval, true);
+  assert.equal(develop.required_pull_request_reviews.required_approving_review_count, 0);
+  assert.equal(develop.required_pull_request_reviews.require_last_push_approval, false);
   assert.equal(develop.required_conversation_resolution, true);
 
   const release = createBranchProtectionRequest(releaseBranch);
@@ -71,7 +71,7 @@ test("accepts exact main, develop, and release branch protections", () => {
   });
 });
 
-test("rejects missing checks, review weakening, and release lockout", () => {
+test("rejects missing checks, review-policy drift, and release lockout", () => {
   const missingCheck = protections();
   missingCheck.main.required_status_checks.checks.pop();
   assert.throws(
@@ -79,9 +79,23 @@ test("rejects missing checks, review weakening, and release lockout", () => {
     /required status checks/u,
   );
 
-  const weakReview = protections();
-  weakReview.develop.required_pull_request_reviews.require_last_push_approval = false;
-  assert.throws(() => verifyBranchProtections(weakReview, releaseBranch), /review policy/u);
+  const missingReviewBoundary = protections();
+  missingReviewBoundary.develop.required_pull_request_reviews = null;
+  assert.throws(
+    () => verifyBranchProtections(missingReviewBoundary, releaseBranch),
+    /pull request reviews/u,
+  );
+
+  const obsoleteIndependentReview = protections();
+  obsoleteIndependentReview.main.required_pull_request_reviews = {
+    ...obsoleteIndependentReview.main.required_pull_request_reviews,
+    require_last_push_approval: true,
+    required_approving_review_count: 1,
+  };
+  assert.throws(
+    () => verifyBranchProtections(obsoleteIndependentReview, releaseBranch),
+    /review policy/u,
+  );
 
   const lockedRelease = protections();
   lockedRelease[releaseBranch].required_pull_request_reviews = {
