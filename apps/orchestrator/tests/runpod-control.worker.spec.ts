@@ -1,5 +1,5 @@
 import { applyD1Migrations } from "cloudflare:test";
-import { env, exports } from "cloudflare:workers";
+import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { runpodClaimResponseSchema } from "@scribe-drop/contracts";
@@ -7,6 +7,7 @@ import { createStructuredLogger } from "@scribe-drop/observability";
 import { DeterministicFaultPlan, inspectStructuredLogs } from "@scribe-drop/test-support";
 
 import { hashCapabilityToken } from "../src/capability-token.js";
+import { handleRunpodHttpRequest } from "../src/runpod-http-handler.js";
 import {
   createD1RunpodControlRepository,
   type RunpodControlRepository,
@@ -231,6 +232,121 @@ describe("D1 RunPod control repository", () => {
         timestamp: "2026-07-25T00:15:01.000Z",
       }),
     ).resolves.toBe(false);
+  });
+
+  it("fails an accepted job at the start SLO and retries its exact provider cancellation", async () => {
+    const repository = createD1RunpodControlRepository(env.SCRIBE_DROP_DB);
+    const claimHash = await hashCapabilityToken(CLAIM_TOKEN);
+    await repository.prepareSubmission({
+      claimExpiresAt: "2026-07-25T00:15:00.000Z",
+      claimTokenHash: claimHash,
+      jobId: JOB_ID,
+      timestamp: NOW,
+    });
+    await expect(
+      repository.recordSubmissionAccepted({
+        attemptId: ATTEMPT_ID,
+        runpodJobId: "accepted-provider-job",
+        timestamp: "2026-07-25T00:00:01.000Z",
+      }),
+    ).resolves.toBe(true);
+
+    await expect(
+      repository.findStaleAcceptedSubmissions("2026-07-25T00:00:00.999Z", 25),
+    ).resolves.toEqual([]);
+    await expect(
+      repository.findStaleAcceptedSubmissions("2026-07-25T00:00:01.000Z", 25),
+    ).resolves.toEqual([
+      {
+        attemptId: ATTEMPT_ID,
+        jobId: JOB_ID,
+        runpodJobId: "accepted-provider-job",
+        submissionFinishedAt: "2026-07-25T00:00:01.000Z",
+      },
+    ]);
+
+    const failureOutcomes = await Promise.all([
+      repository.failStaleAcceptedSubmission({
+        attemptId: ATTEMPT_ID,
+        eventId: FIRST_EVENT_ID,
+        jobId: JOB_ID,
+        runpodJobId: "accepted-provider-job",
+        staleBefore: "2026-07-25T00:00:01.000Z",
+        timestamp: "2026-07-25T00:10:01.000Z",
+      }),
+      repository.failStaleAcceptedSubmission({
+        attemptId: ATTEMPT_ID,
+        eventId: SECOND_EVENT_ID,
+        jobId: JOB_ID,
+        runpodJobId: "accepted-provider-job",
+        staleBefore: "2026-07-25T00:00:01.000Z",
+        timestamp: "2026-07-25T00:10:01.000Z",
+      }),
+    ]);
+    expect(failureOutcomes.filter(Boolean)).toHaveLength(1);
+    await expect(repository.findFailedUnclaimedSubmissions(25)).resolves.toEqual([
+      {
+        attemptId: ATTEMPT_ID,
+        jobId: JOB_ID,
+        runpodJobId: "accepted-provider-job",
+        submissionFinishedAt: "2026-07-25T00:00:01.000Z",
+      },
+    ]);
+
+    await expect(
+      repository.claimWinner({
+        attemptId: ATTEMPT_ID,
+        claimTokenHash: claimHash,
+        eventId: FIRST_EVENT_ID,
+        heartbeatExpiresAt: "2026-07-25T08:00:00.000Z",
+        heartbeatTokenHash: await hashCapabilityToken("h".repeat(43)),
+        jobId: JOB_ID,
+        runpodJobId: "accepted-provider-job",
+        timestamp: "2026-07-25T00:10:02.000Z",
+      }),
+    ).resolves.toBe(false);
+
+    const cancellationOutcomes = await Promise.all([
+      repository.markFailedUnclaimedSubmissionCancelled({
+        attemptId: ATTEMPT_ID,
+        eventId: FIRST_EVENT_ID,
+        jobId: JOB_ID,
+        runpodJobId: "accepted-provider-job",
+        timestamp: "2026-07-25T00:10:03.000Z",
+      }),
+      repository.markFailedUnclaimedSubmissionCancelled({
+        attemptId: ATTEMPT_ID,
+        eventId: SECOND_EVENT_ID,
+        jobId: JOB_ID,
+        runpodJobId: "accepted-provider-job",
+        timestamp: "2026-07-25T00:10:03.000Z",
+      }),
+    ]);
+    expect(cancellationOutcomes.filter(Boolean)).toHaveLength(1);
+    await expect(repository.findFailedUnclaimedSubmissions(25)).resolves.toEqual([]);
+
+    const state = await env.SCRIBE_DROP_DB.prepare(
+      `
+        SELECT
+          jobs.status AS job_status,
+          jobs.error_code AS job_error_code,
+          attempts.status AS attempt_status,
+          attempts.error_code AS attempt_error_code,
+          attempts.runpod_terminal_status
+        FROM jobs
+        INNER JOIN job_attempts AS attempts ON attempts.id = jobs.active_attempt_id
+        WHERE jobs.id = ?1
+      `,
+    )
+      .bind(JOB_ID)
+      .first();
+    expect(state).toEqual({
+      attempt_error_code: "PROCESSING_FAILED",
+      attempt_status: "FAILED",
+      job_error_code: "PROCESSING_FAILED",
+      job_status: "FAILED",
+      runpod_terminal_status: "CANCELLED",
+    });
   });
 
   it("recovers an unpersisted submission outcome after a deterministic D1 failure", async () => {
@@ -510,8 +626,16 @@ describe("D1 RunPod control repository", () => {
       jobId: JOB_ID,
       runpodJobId: "winner-job-id",
     };
+    const handleControlRequest = (request: Request): Promise<Response> =>
+      handleRunpodHttpRequest(request, env, {
+        claimDependencies: {
+          createRunpodPlacementVerifier: () => ({
+            verify: () => Promise.resolve({ outcome: "verified" }),
+          }),
+        },
+      });
 
-    const claimResponse = await exports.default.fetch(
+    const claimResponse = await handleControlRequest(
       new Request("https://orchestrator.example.invalid/internal/runpod/claim", {
         body: JSON.stringify(claimBody),
         headers: { "content-type": "application/json" },
@@ -531,7 +655,7 @@ describe("D1 RunPod control repository", () => {
       throw new Error("Expected a granted claim");
     }
 
-    const replayResponse = await exports.default.fetch(
+    const replayResponse = await handleControlRequest(
       new Request("https://orchestrator.example.invalid/internal/runpod/claim", {
         body: JSON.stringify(claimBody),
         headers: { "content-type": "application/json" },
@@ -540,7 +664,7 @@ describe("D1 RunPod control repository", () => {
     );
     expect(replayResponse.status).toBe(403);
 
-    const loserResponse = await exports.default.fetch(
+    const loserResponse = await handleControlRequest(
       new Request("https://orchestrator.example.invalid/internal/runpod/claim", {
         body: JSON.stringify({
           ...claimBody,
@@ -553,7 +677,7 @@ describe("D1 RunPod control repository", () => {
     expect(loserResponse.status).toBe(200);
     await expect(loserResponse.json()).resolves.toEqual({ deduplicated: true });
 
-    const heartbeatResponse = await exports.default.fetch(
+    const heartbeatResponse = await handleControlRequest(
       new Request("https://orchestrator.example.invalid/internal/runpod/heartbeat", {
         body: JSON.stringify({
           attemptId: ATTEMPT_ID,

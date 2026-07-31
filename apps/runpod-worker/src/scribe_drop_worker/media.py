@@ -54,7 +54,7 @@ class ProbeStream(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     index: int = Field(ge=0)
-    codec_name: str
+    codec_name: str | None = None
     codec_type: Literal["attachment", "audio", "data", "subtitle", "video"]
 
 
@@ -144,12 +144,14 @@ def _validate_probe_output(output: ProbeOutput, *, max_duration_seconds: float) 
     accepted_formats = formats.intersection(ALLOWED_FORMATS)
     if not accepted_formats:
         raise WorkerError(INVALID_MEDIA)
-    audio_streams = tuple(
-        stream
+    audio_codecs = tuple(
+        stream.codec_name
         for stream in output.streams
-        if stream.codec_type == "audio" and stream.codec_name in ALLOWED_AUDIO_CODECS
+        if stream.codec_type == "audio"
+        and stream.codec_name is not None
+        and stream.codec_name in ALLOWED_AUDIO_CODECS
     )
-    if not audio_streams:
+    if not audio_codecs:
         raise WorkerError(INVALID_MEDIA)
     try:
         duration = float(output.format.duration)
@@ -163,5 +165,5 @@ def _validate_probe_output(output: ProbeOutput, *, max_duration_seconds: float) 
         duration_seconds=duration,
         stream_count=len(output.streams),
         format_name=sorted(accepted_formats)[0],
-        audio_codec=audio_streams[0].codec_name,
+        audio_codec=audio_codecs[0],
     )

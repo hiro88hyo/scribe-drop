@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   parseEncryptedPagesSecretNames,
+  requirePagesProjectName,
   verifyRequiredPagesSecrets,
 } from "./cloudflare-pages-secret-verifier.mjs";
 
@@ -45,4 +46,14 @@ test("fails closed when a required Pages secret is missing", () => {
       ),
     /Missing required Pages secrets: R2_PARENT_SECRET_ACCESS_KEY/u,
   );
+});
+
+test("keeps staging and production Pages projects isolated", () => {
+  assert.equal(requirePagesProjectName("staging"), "scribe-drop-web-staging");
+  assert.equal(requirePagesProjectName("production"), "scribe-drop-web-production");
+  assert.throws(
+    () => requirePagesProjectName("production", "scribe-drop-web-staging"),
+    /must be scribe-drop-web-production/u,
+  );
+  assert.throws(() => requirePagesProjectName("preview"), /must be staging or production/u);
 });

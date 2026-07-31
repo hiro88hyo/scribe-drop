@@ -3,7 +3,6 @@ import {
   MAX_JOB_TITLE_LENGTH,
   MAX_ORIGINAL_FILENAME_LENGTH,
   OUTPUT_FORMATS,
-  allowedMediaTypeSchema,
   createJobRequestSchema,
   type JobDetail,
   type JobSummary,
@@ -24,6 +23,7 @@ import type { ChangeEvent, DragEvent, JSX, SyntheticEvent } from "react";
 
 import { requestArtifactDownload } from "./artifact-download.js";
 import { apiClient } from "./api-client.js";
+import { normalizeSelectedMediaType } from "./media-selection.js";
 import {
   formatByteSize,
   formatDateTime,
@@ -156,7 +156,7 @@ function UploadPanel(): JSX.Element {
       return;
     }
     if (
-      !allowedMediaTypeSchema.safeParse(candidate.type).success ||
+      normalizeSelectedMediaType(candidate) === undefined ||
       candidate.size <= 0 ||
       candidate.size > MAX_FILE_SIZE_BYTES ||
       candidate.name.length > MAX_ORIGINAL_FILENAME_LENGTH
@@ -190,8 +190,13 @@ function UploadPanel(): JSX.Element {
       setSelectionError("アップロードするファイルを選択してください。");
       return;
     }
+    const contentType = normalizeSelectedMediaType(file);
+    if (contentType === undefined) {
+      setSelectionError("対応する音声・動画ファイルを選択してください。");
+      return;
+    }
     const request = createJobRequestSchema.safeParse({
-      contentType: file.type,
+      contentType,
       filename: file.name,
       options: {
         language,
@@ -240,7 +245,7 @@ function UploadPanel(): JSX.Element {
         <p className="muted">ドラッグ＆ドロップ、または端末からファイルを選択できます。</p>
       </div>
       <input
-        accept="audio/*,video/mp4,video/quicktime,video/webm"
+        accept=".m4a,audio/*,video/mp4,video/quicktime,video/webm"
         aria-label="文字起こしする音声・動画ファイル"
         className="visually-hidden"
         disabled={active}

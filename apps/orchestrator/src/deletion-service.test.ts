@@ -175,6 +175,33 @@ describe("pending user deletion sweep", () => {
     });
   });
 
+  it("cancels known RunPod work before deleting an already-expired job record", async () => {
+    const order: string[] = [];
+    const cancel = vi.fn<RunpodControlClient["cancel"]>(() => {
+      order.push("cancel");
+      return Promise.resolve({ outcome: "accepted" });
+    });
+    const deleteJobRecord = vi.fn<DeletionRepository["deleteJobRecord"]>(() => {
+      order.push("delete");
+      return Promise.resolve("deleted");
+    });
+
+    await expect(
+      processPendingDeletions(environment(memoryBucket([]).bucket), logger([]), {
+        createRepository: () => fakeRepository(candidate(), { deleteJobRecord }),
+        createRunpodClient: () => runpodClient(cancel),
+        now: () => NOW,
+      }),
+    ).resolves.toEqual({
+      completedCount: 1,
+      deferredCount: 0,
+      retryCount: 0,
+    });
+
+    expect(cancel).toHaveBeenCalledWith("runpod-job-placeholder");
+    expect(order).toEqual(["cancel", "delete"]);
+  });
+
   it("removes the exact source and every attempt prefix before deleting D1", async () => {
     const unrelatedKey = "results/unrelated/object.txt";
     const { bucket, keys } = memoryBucket([

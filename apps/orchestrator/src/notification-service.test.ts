@@ -14,7 +14,9 @@ const DELIVERY: NotificationDelivery = {
   durationSeconds: 3723,
   id: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
   jobId: "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+  jobVersion: 1,
   runpodExecutionMs: 258_000,
+  terminalStatus: "COMPLETED",
   title: "Weekly\nmeeting @everyone",
 };
 
@@ -44,6 +46,7 @@ function repository(
 ): NotificationOutboxRepository {
   return {
     claimNext: () => Promise.resolve(DELIVERY),
+    enqueueNextTerminal: () => Promise.resolve(false),
     markSent: () => Promise.resolve(true),
     release: () => Promise.resolve(true),
     ...overrides,
@@ -53,9 +56,19 @@ function repository(
 describe("notification service", () => {
   it("sends an allowlisted message and acknowledges the lease", async () => {
     let content = "";
+    const order: string[] = [];
     const send = vi.fn<DiscordClient["send"]>((value) => {
+      order.push("send");
       content = value;
       return Promise.resolve({ outcome: "sent" });
+    });
+    const enqueueNextTerminal = vi.fn<NotificationOutboxRepository["enqueueNextTerminal"]>(() => {
+      order.push("enqueue");
+      return Promise.resolve(false);
+    });
+    const claimNext = vi.fn<NotificationOutboxRepository["claimNext"]>(() => {
+      order.push("claim");
+      return Promise.resolve(DELIVERY);
     });
     const markSent = vi.fn<NotificationOutboxRepository["markSent"]>(() => Promise.resolve(true));
     const records: string[] = [];
@@ -63,11 +76,18 @@ describe("notification service", () => {
     await expect(
       dispatchNextNotification(environment(), logger(records), {
         createClient: () => ({ send }),
-        createRepository: () => repository({ markSent }),
+        createNotificationId: () => "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+        createRepository: () =>
+          repository({
+            claimNext,
+            enqueueNextTerminal,
+            markSent,
+          }),
         now: () => NOW,
       }),
     ).resolves.toBe("sent");
 
+    expect(order).toEqual(["enqueue", "claim", "send"]);
     expect(content).toContain("Weekly meeting @everyone");
     expect(content).toContain("音声時間: 1時間2分3秒");
     expect(content).toContain("処理時間: 4分18秒");
@@ -75,6 +95,42 @@ describe("notification service", () => {
     expect(markSent).toHaveBeenCalledWith(DELIVERY, NOW.toISOString());
     expect(records.join("\n")).not.toContain(content);
     expect(records.join("\n")).toContain('"event":"notification.sent"');
+  });
+
+  it("sends a failure notification without completion-only metadata", async () => {
+    let content = "";
+    const send = vi.fn<DiscordClient["send"]>((value) => {
+      content = value;
+      return Promise.resolve({ outcome: "sent" });
+    });
+    const delivery: NotificationDelivery = {
+      attemptCount: 1,
+      durationSeconds: null,
+      id: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      jobId: "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+      jobVersion: 1,
+      runpodExecutionMs: null,
+      terminalStatus: "FAILED",
+      title: "Capacity test",
+    };
+
+    await expect(
+      dispatchNextNotification(environment(), logger([]), {
+        createClient: () => ({ send }),
+        createNotificationId: () => "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+        createRepository: () =>
+          repository({
+            claimNext: () => Promise.resolve(delivery),
+          }),
+        now: () => NOW,
+      }),
+    ).resolves.toBe("sent");
+
+    expect(content).toContain("文字起こしに失敗しました");
+    expect(content).toContain("新しい試行で再実行してください");
+    expect(content).toContain(`http://localhost:5173/jobs/${delivery.jobId}`);
+    expect(content).not.toContain("音声時間");
+    expect(content).not.toContain("処理時間");
   });
 
   it("releases retryable failures with bounded backoff and rejects permanent failures", async () => {

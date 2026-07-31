@@ -441,6 +441,172 @@ const FAIL_EXPIRED_UNKNOWN_JOB_SQL = `
   RETURNING id
 `;
 
+const FIND_STALE_ACCEPTED_SUBMISSIONS_SQL = `
+  SELECT
+    attempts.id AS attempt_id,
+    attempts.job_id,
+    attempts.submission_finished_at,
+    (
+      SELECT submissions.runpod_job_id
+      FROM runpod_submissions AS submissions
+      WHERE submissions.attempt_id = attempts.id
+        AND submissions.source = 'submit_response'
+      ORDER BY submissions.created_at, submissions.runpod_job_id
+      LIMIT 1
+    ) AS runpod_job_id
+  FROM job_attempts AS attempts
+  INNER JOIN jobs ON jobs.id = attempts.job_id
+  WHERE attempts.status = 'SUBMITTING'
+    AND attempts.submission_outcome = 'accepted'
+    AND attempts.submission_finished_at <= ?1
+    AND attempts.winning_runpod_job_id IS NULL
+    AND attempts.runpod_terminal_status IS NULL
+    AND jobs.active_attempt_id = attempts.id
+    AND jobs.status = 'SUBMITTING'
+    AND jobs.deleted_at IS NULL
+    AND EXISTS (
+      SELECT 1
+      FROM runpod_submissions AS submissions
+      WHERE submissions.attempt_id = attempts.id
+        AND submissions.source = 'submit_response'
+    )
+  ORDER BY attempts.submission_finished_at, attempts.id
+  LIMIT ?2
+`;
+
+const FAIL_STALE_ACCEPTED_ATTEMPT_SQL = `
+  UPDATE job_attempts
+  SET
+    status = 'FAILED',
+    failed_at = ?3,
+    error_code = 'PROCESSING_FAILED',
+    error_message = NULL,
+    updated_at = ?3
+  WHERE id = ?1
+    AND job_id = ?2
+    AND status = 'SUBMITTING'
+    AND submission_outcome = 'accepted'
+    AND submission_finished_at <= ?5
+    AND winning_runpod_job_id IS NULL
+    AND runpod_terminal_status IS NULL
+    AND EXISTS (
+      SELECT 1
+      FROM runpod_submissions
+      WHERE attempt_id = ?1
+        AND runpod_job_id = ?4
+        AND source = 'submit_response'
+    )
+    AND EXISTS (
+      SELECT 1
+      FROM jobs
+      WHERE id = ?2
+        AND active_attempt_id = ?1
+        AND status = 'SUBMITTING'
+        AND deleted_at IS NULL
+    )
+  RETURNING id
+`;
+
+const FAIL_STALE_ACCEPTED_JOB_SQL = `
+  UPDATE jobs
+  SET
+    status = 'FAILED',
+    error_code = 'PROCESSING_FAILED',
+    error_message = NULL,
+    failed_at = ?3,
+    updated_at = ?3,
+    version = version + 1
+  WHERE id = ?1
+    AND active_attempt_id = ?2
+    AND status = 'SUBMITTING'
+    AND deleted_at IS NULL
+    AND EXISTS (
+      SELECT 1
+      FROM job_attempts
+      WHERE id = ?2
+        AND job_id = ?1
+        AND status = 'FAILED'
+        AND submission_outcome = 'accepted'
+        AND submission_finished_at <= ?5
+        AND failed_at = ?3
+        AND winning_runpod_job_id IS NULL
+        AND runpod_terminal_status IS NULL
+        AND EXISTS (
+          SELECT 1
+          FROM runpod_submissions
+          WHERE attempt_id = ?2
+            AND runpod_job_id = ?4
+            AND source = 'submit_response'
+        )
+    )
+  RETURNING id
+`;
+
+const FIND_FAILED_UNCLAIMED_SUBMISSIONS_SQL = `
+  SELECT
+    attempts.id AS attempt_id,
+    attempts.job_id,
+    attempts.submission_finished_at,
+    (
+      SELECT submissions.runpod_job_id
+      FROM runpod_submissions AS submissions
+      WHERE submissions.attempt_id = attempts.id
+        AND submissions.source = 'submit_response'
+      ORDER BY submissions.created_at, submissions.runpod_job_id
+      LIMIT 1
+    ) AS runpod_job_id
+  FROM job_attempts AS attempts
+  INNER JOIN jobs ON jobs.id = attempts.job_id
+  WHERE attempts.status = 'FAILED'
+    AND attempts.error_code = 'PROCESSING_FAILED'
+    AND attempts.submission_outcome = 'accepted'
+    AND attempts.winning_runpod_job_id IS NULL
+    AND attempts.runpod_terminal_status IS NULL
+    AND jobs.active_attempt_id = attempts.id
+    AND jobs.status = 'FAILED'
+    AND jobs.deleted_at IS NULL
+    AND EXISTS (
+      SELECT 1
+      FROM runpod_submissions AS submissions
+      WHERE submissions.attempt_id = attempts.id
+        AND submissions.source = 'submit_response'
+    )
+  ORDER BY attempts.failed_at, attempts.id
+  LIMIT ?1
+`;
+
+const MARK_FAILED_UNCLAIMED_SUBMISSION_CANCELLED_SQL = `
+  UPDATE job_attempts
+  SET
+    runpod_terminal_job_id = ?3,
+    runpod_terminal_status = 'CANCELLED',
+    runpod_terminal_observed_at = ?4,
+    updated_at = ?4
+  WHERE id = ?1
+    AND job_id = ?2
+    AND status = 'FAILED'
+    AND error_code = 'PROCESSING_FAILED'
+    AND submission_outcome = 'accepted'
+    AND winning_runpod_job_id IS NULL
+    AND runpod_terminal_status IS NULL
+    AND EXISTS (
+      SELECT 1
+      FROM runpod_submissions
+      WHERE attempt_id = ?1
+        AND runpod_job_id = ?3
+        AND source = 'submit_response'
+    )
+    AND EXISTS (
+      SELECT 1
+      FROM jobs
+      WHERE id = ?2
+        AND active_attempt_id = ?1
+        AND status = 'FAILED'
+        AND deleted_at IS NULL
+    )
+  RETURNING id
+`;
+
 const FIND_DISPATCHABLE_PENDING_JOB_SQL = `
   SELECT jobs.id
   FROM jobs
@@ -565,6 +731,14 @@ const expiredUnknownSubmissionRowSchema = z
     job_id: ulidSchema,
   })
   .strict();
+const staleAcceptedSubmissionRowSchema = z
+  .object({
+    attempt_id: ulidSchema,
+    job_id: ulidSchema,
+    runpod_job_id: runpodJobIdSchema,
+    submission_finished_at: utcDateTimeSchema,
+  })
+  .strict();
 const pendingJobRowSchema = z.object({ id: ulidSchema }).strict();
 const reconciliationLimitSchema = z.number().int().min(1).max(100);
 
@@ -603,6 +777,13 @@ export interface ExpiredUnknownSubmission {
   readonly jobId: string;
 }
 
+export interface StaleAcceptedSubmission {
+  readonly attemptId: string;
+  readonly jobId: string;
+  readonly runpodJobId: string;
+  readonly submissionFinishedAt: string;
+}
+
 export interface RunpodControlRepository {
   cancelExpiredUnboundSubmission(input: {
     readonly attemptId: string;
@@ -630,10 +811,30 @@ export interface RunpodControlRepository {
     timestamp: string,
     limit: number,
   ): Promise<readonly ExpiredUnknownSubmission[]>;
+  findFailedUnclaimedSubmissions(limit: number): Promise<readonly StaleAcceptedSubmission[]>;
+  findStaleAcceptedSubmissions(
+    staleBefore: string,
+    limit: number,
+  ): Promise<readonly StaleAcceptedSubmission[]>;
+  failStaleAcceptedSubmission(input: {
+    readonly attemptId: string;
+    readonly eventId: string;
+    readonly jobId: string;
+    readonly runpodJobId: string;
+    readonly staleBefore: string;
+    readonly timestamp: string;
+  }): Promise<boolean>;
   failExpiredUnknownSubmission(input: {
     readonly attemptId: string;
     readonly eventId: string;
     readonly jobId: string;
+    readonly timestamp: string;
+  }): Promise<boolean>;
+  markFailedUnclaimedSubmissionCancelled(input: {
+    readonly attemptId: string;
+    readonly eventId: string;
+    readonly jobId: string;
+    readonly runpodJobId: string;
     readonly timestamp: string;
   }): Promise<boolean>;
   markHeartbeat(input: {
@@ -690,6 +891,17 @@ function mapClaimContext(row: z.infer<typeof claimContextRowSchema>): ClaimConte
     sourceEtag: row.source_etag,
     sourceKey: row.source_key,
     winningRunpodJobId: row.winning_runpod_job_id,
+  };
+}
+
+function mapStaleAcceptedSubmission(
+  row: z.infer<typeof staleAcceptedSubmissionRowSchema>,
+): StaleAcceptedSubmission {
+  return {
+    attemptId: row.attempt_id,
+    jobId: row.job_id,
+    runpodJobId: row.runpod_job_id,
+    submissionFinishedAt: row.submission_finished_at,
   };
 }
 
@@ -811,6 +1023,64 @@ export function createD1RunpodControlRepository(database: D1Database): RunpodCon
         }));
     },
 
+    async findFailedUnclaimedSubmissions(limit) {
+      const results = await database
+        .withSession("first-primary")
+        .prepare(FIND_FAILED_UNCLAIMED_SUBMISSIONS_SQL)
+        .bind(reconciliationLimitSchema.parse(limit))
+        .all();
+      return z
+        .array(staleAcceptedSubmissionRowSchema)
+        .max(limit)
+        .parse(results.results)
+        .map(mapStaleAcceptedSubmission);
+    },
+
+    async findStaleAcceptedSubmissions(staleBefore, limit) {
+      const results = await database
+        .withSession("first-primary")
+        .prepare(FIND_STALE_ACCEPTED_SUBMISSIONS_SQL)
+        .bind(utcDateTimeSchema.parse(staleBefore), reconciliationLimitSchema.parse(limit))
+        .all();
+      return z
+        .array(staleAcceptedSubmissionRowSchema)
+        .max(limit)
+        .parse(results.results)
+        .map(mapStaleAcceptedSubmission);
+    },
+
+    async failStaleAcceptedSubmission(input) {
+      const timestamp = utcDateTimeSchema.parse(input.timestamp);
+      const staleBefore = utcDateTimeSchema.parse(input.staleBefore);
+      const runpodJobId = runpodJobIdSchema.parse(input.runpodJobId);
+      const results = await database.batch([
+        database
+          .prepare(FAIL_STALE_ACCEPTED_ATTEMPT_SQL)
+          .bind(
+            ulidSchema.parse(input.attemptId),
+            ulidSchema.parse(input.jobId),
+            timestamp,
+            runpodJobId,
+            staleBefore,
+          ),
+        database
+          .prepare(FAIL_STALE_ACCEPTED_JOB_SQL)
+          .bind(input.jobId, input.attemptId, timestamp, runpodJobId, staleBefore),
+        database
+          .prepare(RECORD_EVENT_SQL)
+          .bind(
+            ulidSchema.parse(input.eventId),
+            input.jobId,
+            input.attemptId,
+            "runpod_submission_start_slo_exceeded",
+            timestamp,
+          ),
+      ]);
+      const updatedAttempt = updatedIdRowsSchema.parse(results[0]?.results ?? [])[0];
+      const updatedJob = updatedIdRowsSchema.parse(results[1]?.results ?? [])[0];
+      return updatedAttempt !== undefined && updatedJob !== undefined;
+    },
+
     async failExpiredUnknownSubmission(input) {
       const timestamp = utcDateTimeSchema.parse(input.timestamp);
       const results = await database.batch([
@@ -833,6 +1103,31 @@ export function createD1RunpodControlRepository(database: D1Database): RunpodCon
       const updatedAttempt = updatedIdRowsSchema.parse(results[0]?.results ?? [])[0];
       const updatedJob = updatedIdRowsSchema.parse(results[1]?.results ?? [])[0];
       return updatedAttempt !== undefined && updatedJob !== undefined;
+    },
+
+    async markFailedUnclaimedSubmissionCancelled(input) {
+      const timestamp = utcDateTimeSchema.parse(input.timestamp);
+      const runpodJobId = runpodJobIdSchema.parse(input.runpodJobId);
+      const results = await database.batch([
+        database
+          .prepare(MARK_FAILED_UNCLAIMED_SUBMISSION_CANCELLED_SQL)
+          .bind(
+            ulidSchema.parse(input.attemptId),
+            ulidSchema.parse(input.jobId),
+            runpodJobId,
+            timestamp,
+          ),
+        database
+          .prepare(RECORD_EVENT_SQL)
+          .bind(
+            ulidSchema.parse(input.eventId),
+            input.jobId,
+            input.attemptId,
+            "runpod_stale_submission_cancelled",
+            timestamp,
+          ),
+      ]);
+      return updatedIdRowsSchema.parse(results[0]?.results ?? [])[0] !== undefined;
     },
 
     async markHeartbeat(input) {

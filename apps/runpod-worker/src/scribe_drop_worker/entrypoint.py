@@ -29,7 +29,7 @@ def main() -> None:
     )
     runpod_module = importlib.import_module("runpod")
     serverless = cast("ServerlessPort", runpod_module.serverless)
-    serverless.start({"handler": handler})
+    serverless.start({"handler": handler, "refresh_worker": True})
 
 
 if __name__ == "__main__":

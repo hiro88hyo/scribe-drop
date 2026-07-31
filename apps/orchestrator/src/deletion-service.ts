@@ -181,27 +181,27 @@ export async function processPendingDeletions(
 
   for (const candidate of candidates) {
     const notBeforeMilliseconds = Date.parse(candidate.deletionNotBefore);
+    let cancellationConfirmed: boolean;
+    try {
+      cancellationConfirmed = await cancelKnownRunpodJobs(repository, client, candidate);
+    } catch {
+      cancellationConfirmed = false;
+    }
+    if (!cancellationConfirmed) {
+      const recorded = await recordRetry(
+        repository,
+        candidate,
+        "RUNPOD_CANCEL_FAILED",
+        timestamp,
+        timestampMilliseconds,
+        random,
+        logger,
+      );
+      retryCount += recorded ? 1 : 0;
+      deferredCount += recorded ? 0 : 1;
+      continue;
+    }
     if (timestampMilliseconds < notBeforeMilliseconds) {
-      let cancellationConfirmed: boolean;
-      try {
-        cancellationConfirmed = await cancelKnownRunpodJobs(repository, client, candidate);
-      } catch {
-        cancellationConfirmed = false;
-      }
-      if (!cancellationConfirmed) {
-        const recorded = await recordRetry(
-          repository,
-          candidate,
-          "RUNPOD_CANCEL_FAILED",
-          timestamp,
-          timestampMilliseconds,
-          random,
-          logger,
-        );
-        retryCount += recorded ? 1 : 0;
-        deferredCount += recorded ? 0 : 1;
-        continue;
-      }
       const deferred = await repository.deferDeletion({
         expectedVersion: candidate.version,
         jobId: candidate.jobId,

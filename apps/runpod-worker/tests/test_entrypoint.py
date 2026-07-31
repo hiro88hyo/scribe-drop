@@ -11,11 +11,11 @@ from scribe_drop_worker.entrypoint import main
 if TYPE_CHECKING:
     import pytest
 
-EXPECTED_CONFIGURATION_KEYS: Final = {"handler"}
+EXPECTED_CONFIGURATION_KEYS: Final = {"handler", "refresh_worker"}
 
 
 def test_main_starts_official_serverless_handler(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Process startup validates configuration before registering one handler."""
+    """Process startup registers one handler and locally stops after every job."""
     settings = load_settings(
         {
             "APP_ENV": "local",
@@ -36,3 +36,4 @@ def test_main_starts_official_serverless_handler(monkeypatch: pytest.MonkeyPatch
     assert len(observed) == 1
     assert set(observed[0]) == EXPECTED_CONFIGURATION_KEYS
     assert callable(observed[0]["handler"])
+    assert observed[0]["refresh_worker"] is True

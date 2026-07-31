@@ -160,8 +160,10 @@ git check-ignore apps/web/.wrangler/deploy/config.json
 
 共通で`CLOUDFLARE_ACCOUNT_ID`と`SCRIBE_DROP_STAGING_D1_DATABASE_ID`を使う。Webでは
 さらに`SCRIBE_DROP_STAGING_WEB_ORIGIN`、`SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`と
-`SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`を使う。値はcredential storeまたはCI secretから
-環境へ渡し、shell scriptや追跡ファイルへ埋め込まない。
+`SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`、
+`SCRIBE_DROP_STAGING_PAGES_ACCESS_AUDIENCE`を使う。2つのAUDは異なる値でなければならない。
+値はcredential storeまたはCI secretから環境へ渡し、shell scriptや追跡ファイルへ
+埋め込まない。
 
 retentionを初期値から変更する場合は`MULTIPART_RETENTION_HOURS`、
 `SOURCE_RETENTION_DAYS`、`RESULT_RETENTION_DAYS`、`AUDIT_RETENTION_DAYS`を同じshell

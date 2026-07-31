@@ -2,25 +2,45 @@
 
 ## 状態と範囲
 
-- 評価日: 2026-07-27 UTC
+- 評価日: 2026-07-31 UTC
 - 対象: Phase 1からPhase 7のlocal、CI、staging checkpoint
-- 結果: `docs/spec.md` 21章と`docs/additional-spec.md` 14章の必須受け入れ条件を満たす
-- 対象外: production deploymentとAndroid Share Target。Share Targetは仕様どおり別PRとする
+- 結果: Phase 7までのbaselineは確認済み。現行releaseはterminal失敗通知を含む
+  schema version 3のformal staging acceptanceとproduction smoke完了までBlocked
+- 対象外: production promotionの合格判定とAndroid Share Target。過去のproduction試験
+  deployは無効な証跡であり、Share Targetは仕様どおり別PRとする
+- `Gate`はsource上の必須workflow checkを表し、実行時の合否はcandidateに結び付く短命
+  staging acceptance artifactを正とする。
 
 実account、domain、resource/deployment ID、credential、利用者dataはこのchecklistへ
 保存しない。手動確認の詳細はenvironment別deployment recordを参照する。
 
+Pixelの`.m4a` file picker対応を含む同一candidateは実R2、Queue、RunPodを使うstaging
+acceptanceとproduction promotionを通過した。しかしPixel実機のproduction smokeで、
+AAC音声に付随する`codec_name`なしのdata streamをWorkerのffprobe response schemaが
+拒否した。実録音をfixtureへ保存せず同じstream構造の回帰テストを追加し、修正前の
+`INVALID_MEDIA`と修正後の受理を同一Worker image上で再現した。
+修正candidateのsynthetic staging acceptanceは成功したが、補助実媒体のstaging確認では
+endpointに残った前candidateの`EXITED` workerが再利用され、同じ`INVALID_MEDIA`となった。
+candidateのimmutable image自体は実媒体を受理し、live templateもcandidateと一致したため、
+原因はterminal workerを非稼働として残したpromotion read-backの不足と確定した。
+[ADR 0047](./adr/0047-drain-stale-runpod-workers-before-promotion.md)のdrainとE2E前後の
+worker image照合を追加し、従来のstaging acceptance evidenceはrelease判定に使用しない。
+[ADR 0023](./adr/0023-promote-only-staging-verified-artifacts.md)に従い、修正を含む新しい
+release candidateで実service staging acceptanceと対象実機production smokeを完了するまで
+release判断をBlockedとする。
+
 ## UX
 
-| 受け入れ条件                              | 状態 | 主な証跡                                                                                                                                                                                  |
-| ----------------------------------------- | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| PCでdrag-and-dropできる                   | Pass | `apps/e2e/tests/input-accessibility.spec.ts`                                                                                                                                              |
-| Android相当環境でfile chooserを使用できる | Pass | `apps/e2e/tests/input-accessibility.spec.ts`                                                                                                                                              |
-| upload進捗を表示する                      | Pass | `apps/e2e/tests/job-lifecycle.spec.ts`、`apps/web/src/client/multipart-uploader.test.ts`                                                                                                  |
-| 通信失敗から再試行できる                  | Pass | `apps/e2e/tests/job-lifecycle.spec.ts`                                                                                                                                                    |
-| upload後に画面を閉じても処理が継続する    | Pass | page close後に新pageの履歴・詳細から待機、実行、完了を復元する`apps/e2e/tests/job-lifecycle.spec.ts`、Queue/RunPodの[Phase 5 staging record](./deployments/2026-07-26-phase-5-staging.md) |
-| 後から履歴を確認できる                    | Pass | `apps/e2e/tests/job-lifecycle.spec.ts`、`apps/web/tests/jobs.worker.spec.ts`                                                                                                              |
-| 完了時にDiscord通知が届く                 | Pass | `apps/orchestrator/tests/notification-outbox.worker.spec.ts`、[Phase 5 staging record](./deployments/2026-07-26-phase-5-staging.md)                                                       |
+| 受け入れ条件                              | 状態    | 主な証跡                                                                                                                                                                                  |
+| ----------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PCでdrag-and-dropできる                   | Pass    | `apps/e2e/tests/input-accessibility.spec.ts`                                                                                                                                              |
+| Android相当環境でfile chooserを使用できる | Pending | Pixel実機で選択とupload受付、Playwrightで`.m4a` media type、Workerで補助data streamの回帰を確認。旧workerをdrainする新candidateの実service staging acceptanceとproduction完了を待つ       |
+| upload進捗を表示する                      | Pass    | `apps/e2e/tests/job-lifecycle.spec.ts`、`apps/web/src/client/multipart-uploader.test.ts`                                                                                                  |
+| 通信失敗から再試行できる                  | Pass    | `apps/e2e/tests/job-lifecycle.spec.ts`                                                                                                                                                    |
+| upload後に画面を閉じても処理が継続する    | Pass    | page close後に新pageの履歴・詳細から待機、実行、完了を復元する`apps/e2e/tests/job-lifecycle.spec.ts`、Queue/RunPodの[Phase 5 staging record](./deployments/2026-07-26-phase-5-staging.md) |
+| 後から履歴を確認できる                    | Pass    | `apps/e2e/tests/job-lifecycle.spec.ts`、`apps/web/tests/jobs.worker.spec.ts`                                                                                                              |
+| 完了時にDiscord通知が届く                 | Pass    | `apps/orchestrator/tests/notification-outbox.worker.spec.ts`、[Phase 5 staging record](./deployments/2026-07-26-phase-5-staging.md)                                                       |
+| 失敗時に安全なDiscord通知が届く           | Gate    | [ADR 0059](./adr/0059-require-real-staging-failure-notification-acceptance.md)に従い、合成破損M4A、exact FAILED、current-version outbox SENT、fixture削除をformal stagingで必須化         |
 
 ## Security
 
@@ -45,6 +65,7 @@
 | 重複`/run`でもwinnerは1つ                                           | Pass | `apps/orchestrator/tests/runpod-control.worker.spec.ts`                                                           |
 | loserはWhisperを開始しない                                          | Pass | `apps/orchestrator/tests/runpod-control.worker.spec.ts`、`apps/runpod-worker/tests/test_service.py`               |
 | 重複status poll/Cronでもnotification outboxは1件                    | Pass | `apps/orchestrator/tests/completion.worker.spec.ts`、`apps/orchestrator/tests/notification-outbox.worker.spec.ts` |
+| 失敗通知後のretryでも次のterminal通知を欠落させない                 | Pass | `apps/orchestrator/tests/completion.worker.spec.ts`、`apps/orchestrator/tests/notification-outbox.worker.spec.ts` |
 | provider保持期間内にterminal statusを保存し、未観測を誤完了にしない | Pass | `apps/orchestrator/tests/completion.worker.spec.ts`                                                               |
 | 古いattemptの完了で現在attemptを上書きしない                        | Pass | `apps/orchestrator/tests/completion.worker.spec.ts`                                                               |
 | manifestなしを`COMPLETED`にしない                                   | Pass | `apps/orchestrator/tests/completion.worker.spec.ts`                                                               |
@@ -76,7 +97,7 @@
 | API、artifact、認証済みresponse、本文をCache Storageへ保存しない | Pass | `apps/e2e/tests/pwa-cache.spec.ts`、[ADR 0020](./adr/0020-cache-only-public-pwa-shell-assets.md)                                                                                        |
 | source、result、監査情報を独立期限で回収する                     | Pass | `apps/orchestrator/tests/retention.worker.spec.ts`、[ADR 0019](./adr/0019-layer-application-and-r2-retention.md)、[Phase 7 staging record](./deployments/2026-07-26-phase-7-staging.md) |
 | 利用者deleteを優先し、capability安全期限後に物理削除する         | Pass | `apps/orchestrator/tests/deletion.worker.spec.ts`、[ADR 0018](./adr/0018-asynchronous-user-deletion.md)、[Phase 7 staging record](./deployments/2026-07-26-phase-7-staging.md)          |
-| R2 lifecycleをapplication cleanupの最終防衛にする                | Pass | `scripts/cloudflare-staging-config.test.mjs`、[Phase 7 staging record](./deployments/2026-07-26-phase-7-staging.md)                                                                     |
+| R2 lifecycleをapplication cleanupの最終防衛にする                | Pass | `scripts/cloudflare-environment-config.test.mjs`、[Phase 7 staging record](./deployments/2026-07-26-phase-7-staging.md)                                                                 |
 | keyboard、focus、screen reader、mobile幅を確認する               | Pass | `apps/e2e/tests/input-accessibility.spec.ts`、`apps/e2e/tests/job-lifecycle.spec.ts`                                                                                                    |
 
 ## Verification
@@ -90,6 +111,6 @@ pnpm secrets:check
 pnpm security:audit
 ```
 
-最新PRではQuality gate、Browser E2E、Secret scan、Dependency audit、
-container supply-chainの全jobが成功している。stagingの手動確認はPhase別deployment
-recordを正とし、production deploymentは別のrelease判断とする。
+Phase 7までのCIとstaging手動確認はPhase別deployment recordを正とする。現在のrelease
+candidateは変更後のrequired CI、container supply-chain、実service staging acceptanceを
+すべてやり直し、candidate manifestへ結び付けるまでproduction promotion evidenceとしない。

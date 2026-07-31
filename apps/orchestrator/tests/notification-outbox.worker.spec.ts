@@ -8,6 +8,7 @@ const NOW = "2026-07-25T01:00:00.000Z";
 const JOB_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const ATTEMPT_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAW";
 const OUTBOX_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAX";
+const NEXT_OUTBOX_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAY";
 
 beforeAll(async () => {
   await applyD1Migrations(env.SCRIBE_DROP_DB, env.TEST_MIGRATIONS);
@@ -86,11 +87,12 @@ beforeEach(async () => {
         INSERT INTO notification_outbox (
           id,
           job_id,
+          job_version,
           status,
           attempt_count,
           next_attempt_at,
           created_at
-        ) VALUES (?1, ?2, 'PENDING', 0, ?3, ?3)
+        ) VALUES (?1, ?2, 1, 'PENDING', 0, ?3, ?3)
       `,
     ).bind(OUTBOX_ID, JOB_ID, NOW),
   ]);
@@ -110,7 +112,9 @@ describe("notification outbox repository", () => {
       durationSeconds: 60,
       id: OUTBOX_ID,
       jobId: JOB_ID,
+      jobVersion: 1,
       runpodExecutionMs: 120_000,
+      terminalStatus: "COMPLETED",
       title: "Verification job",
     });
     if (delivery === undefined) {
@@ -160,5 +164,88 @@ describe("notification outbox repository", () => {
       attemptCount: 2,
       id: OUTBOX_ID,
     });
+  });
+
+  it("enqueues and sends a failed job without completion metadata", async () => {
+    await env.SCRIBE_DROP_DB.batch([
+      env.SCRIBE_DROP_DB.prepare("DELETE FROM notification_outbox WHERE job_id = ?1").bind(JOB_ID),
+      env.SCRIBE_DROP_DB.prepare(
+        `
+          UPDATE jobs
+          SET
+            status = 'FAILED',
+            duration_seconds = NULL,
+            completed_at = NULL,
+            failed_at = ?2,
+            notified_at = NULL,
+            updated_at = ?2
+          WHERE id = ?1
+        `,
+      ).bind(JOB_ID, NOW),
+    ]);
+    const repository = createD1NotificationOutboxRepository(env.SCRIBE_DROP_DB);
+
+    const enqueueResults = await Promise.all([
+      repository.enqueueNextTerminal(NEXT_OUTBOX_ID, NOW),
+      repository.enqueueNextTerminal(OUTBOX_ID, NOW),
+    ]);
+    expect(enqueueResults.toSorted()).toEqual([false, true]);
+    const delivery = await repository.claimNext(NOW, "2026-07-25T01:02:00.000Z");
+    expect(delivery).toMatchObject({
+      attemptCount: 1,
+      durationSeconds: null,
+      jobId: JOB_ID,
+      jobVersion: 1,
+      runpodExecutionMs: 120_000,
+      terminalStatus: "FAILED",
+      title: "Verification job",
+    });
+    expect([OUTBOX_ID, NEXT_OUTBOX_ID]).toContain(delivery?.id);
+    if (delivery === undefined) {
+      throw new Error("Expected a failure notification lease");
+    }
+    await expect(repository.markSent(delivery, NOW)).resolves.toBe(true);
+    await expect(repository.claimNext(NOW, "2026-07-25T01:02:00.000Z")).resolves.toBeUndefined();
+  });
+
+  it("rejects a stale sending lease and rearms the outbox for the next job version", async () => {
+    const repository = createD1NotificationOutboxRepository(env.SCRIBE_DROP_DB);
+    const initialDelivery = await repository.claimNext(NOW, "2026-07-25T01:02:00.000Z");
+    if (initialDelivery === undefined) {
+      throw new Error("Expected an initial notification lease");
+    }
+    const nextTimestamp = "2026-07-25T02:00:00.000Z";
+    await env.SCRIBE_DROP_DB.prepare(
+      `
+        UPDATE jobs
+        SET
+          status = 'FAILED',
+          duration_seconds = NULL,
+          completed_at = NULL,
+          failed_at = ?2,
+          notified_at = NULL,
+          updated_at = ?2,
+          version = version + 1
+        WHERE id = ?1
+      `,
+    )
+      .bind(JOB_ID, nextTimestamp)
+      .run();
+
+    await expect(repository.enqueueNextTerminal(NEXT_OUTBOX_ID, nextTimestamp)).resolves.toBe(true);
+    await expect(repository.markSent(initialDelivery, nextTimestamp)).resolves.toBe(false);
+    const delivery = await repository.claimNext(nextTimestamp, "2026-07-25T02:02:00.000Z");
+    expect(delivery).toMatchObject({
+      attemptCount: 1,
+      id: OUTBOX_ID,
+      jobVersion: 2,
+      terminalStatus: "FAILED",
+    });
+    const rows = await env.SCRIBE_DROP_DB.prepare(
+      "SELECT COUNT(*) AS count FROM notification_outbox WHERE job_id = ?1",
+    )
+      .bind(JOB_ID)
+      .first();
+    expect(rows).toEqual({ count: 1 });
   });
 });

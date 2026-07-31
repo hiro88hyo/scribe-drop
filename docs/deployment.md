@@ -34,7 +34,8 @@ environment全体で1件のsubmission gate、`accepted`・`rejected`・`unknown`
 RunPod WorkerはPydantic strict入力、claim-first実行、exact hostとpublic DNS検証、
 検証済みIPへの接続固定、redirect拒否、streaming size/ETag照合、ffprobe、
 faster-whisperのclaim後遅延load、artifact integrity、manifest-last、`/tmp` cleanup、
-worker refreshまでlocal実装・テスト済みである。RunPod Workerはamd64 CUDA/cuDNN
+handler outputの停止要求とSDK job loopのローカル終了を組み合わせたworker refreshまで
+local実装・テスト済みである。RunPod Workerはamd64 CUDA/cuDNN
 base digest、Ubuntu snapshot、Python/FFmpeg package、uv build image、model commitと
 5 fileの全hashを固定したmulti-stage imageを実build済みである。UID 10001、
 networkなし、read-only root filesystemでmodel/依存/native import/ffprobe versionと
@@ -46,6 +47,17 @@ workerがReadyになるまで起動した。RTX 4090のGPU配置、Secure Cloud�
 volumeなし、FlashBoot無効のendpoint invariantと、期限切れclaimを拒否する最小jobを
 確認した。実ID、image参照、originは追跡対象へ保存していない。
 
+これは初期checkpointの単一GPU構成である。現行releaseでは
+[ADR 0053](./adr/0053-use-mixed-availability-gpus-with-runtime-attestation.md)に従い、
+stagingとproductionで`RTX 5090`、`RTX 4090`の固定順を使用する。固定CLIがGPUを省略しても
+一致とみなさず、公式REST APIのexact GPU read-backと実staging GPU E2Eを必須とする。
+各claimでは実WorkerのSecure Cloud配置をR2 capability発行前に検証する。
+[ADR 0054](./adr/0054-use-explicit-datacenters-for-staging-recovery.md)の2 data centerを
+追跡対象planへ固定し、Compliance filterは`Any`を維持する。GPUは公式REST API、
+data centerとcomplianceはConsole-equivalent GraphQLでread-backし、結合したcapacityを
+完全一致で検証する。Compliance filterはSecure Cloud切替ではないため、claim時attestationを
+省略しない。
+
 Phase 5のlocal実装では、5分Cron、RunPod status poll、terminal状態のD1保存、
 manifest/artifact検証、原子的finalize、notification outbox、Discord再送、所有者限定
 artifact URL、cancel、新しいattemptによるretryを追加している。stagingへは
@@ -54,8 +66,10 @@ deployした。実browserのend-to-end smokeではRunPod terminal、complete man
 Markdown・JSON・SRT、原子的finalize、Discord送信まで成功した。RunPod、Discord、R2の
 公開endpointへ送るglobal `fetch()`は
 [ADR 0016](./adr/0016-use-manual-redirects-in-workers.md)に従い、
-`manual` redirect modeで自動追従を拒否する。
-production environmentへのdeploymentは未実施である。
+`manual` redirect modeで自動追従を拒否する。その後の初回production試験deployは
+stagingと別image digestを使用し、実M4Aのstaging acceptanceも欠いていた。production
+smokeは`INVALID_MEDIA`で成果物を作成せず、この試験deployをrelease evidenceとして
+無効化して追加deployを停止した。
 
 Phase 6では外部serviceへ接続しないdeterministic fault injectionをlocal/CIへ追加した。
 RunPod応答喪失、D1/Queue/R2/Discord障害、stale generation、partial result、同時Cron、
@@ -64,20 +78,28 @@ source上書きの状態・監査・logを検証する。`0006_phase6_failure_in
 stagingへPhase 6 applicationをdeployする場合はこのmigrationを先に適用する。Phase 6の
 ためのproduction deploymentや実serviceへの障害注入は行わない。
 
-Phase 7のlocal checkpointでは`0007_user_deletion.sql`を追加し、user deletionの
+Phase 7では`0007_user_deletion.sql`を追加し、user deletionの
 非同期cleanup用schedule、試行回数、allowlist error codeをjob rowへ保持する。
-applicationをdeployする場合はこのmigrationをWebとOrchestratorより先に適用する。
+このmigrationをWebとOrchestratorより先にstagingへ適用した。
 論理削除直後は通常APIから非表示になるが、R2の物理削除は最後に発行された2時間の
 capabilityと5分graceが失効した後に5分Cronが実行する。migrationとcleanupのlocal
 D1/R2 integration testは成功している。stagingへのmigration、Orchestrator/Web deploy、
-R2 lifecycle適用は完了した。実dataを使わないdelete/Cron smokeは未実施であり、完了前に
-productionへ進めない。
+R2 lifecycle適用も完了した。
 
-retentionのlocal checkpointでは`0008_retention_cleanup.sql`を追加し、sourceとattempt
+retentionでは`0008_retention_cleanup.sql`を追加し、sourceとattempt
 resultの削除markerおよび候補indexを追加する。application cleanupとR2 lifecycleの責任は
 [ADR 0019](./adr/0019-layer-application-and-r2-retention.md)を正とする。`0008`を
-applicationより先に適用し、Orchestratorの4 retention変数と同じ値から生成したlifecycleを
-review後に適用する。staging適用は完了し、retention smokeは未実施である。
+applicationより先にstagingへ適用し、Orchestratorの4 retention変数と同じ値から生成した
+lifecycleもreview後に適用した。認証済みPWA offline fallback、固定dummy dataによる
+delete、retention、Cron recoveryを確認し、D1/R2の試験dataを全件清掃した。初回
+production試験deployの証跡はADR 0023の同一candidate条件を満たさないため無効であり、
+Phase 7までの過去のstaging結果をproduction promotionの根拠には使用しない。
+
+terminal失敗通知では`0009_notification_terminal_generation.sql`を追加し、
+notification outboxへ対象jobのCAS versionを保存する。既存行は参照先jobの現在versionで
+backfillし、新applicationはclaimと送信ackでversion一致を要求する。nullable列の追加と
+backfillだけの後方互換migrationであり、Orchestrator deploy前に適用する。rollbackで旧
+Orchestratorへ戻しても追加列は残し、migration自体は戻さない。
 
 `apps/orchestrator/wrangler.toml`と`apps/web/wrangler.toml`の全ゼロIDおよびoriginは
 安全なplaceholderであり、remote操作には使用できない。実IDと実originは追跡対象へ
@@ -93,7 +115,11 @@ pnpm exec wrangler login
 pnpm exec wrangler whoami
 ```
 
-対話ログインできないCIでは、最小権限のCloudflare API tokenをCI secretから渡す。token、account固有値、resource IDをshell scriptや追跡対象ファイルへ埋め込まない。
+対話ログインできないCIでは、
+[cloudflare-permissions.md](./cloudflare-permissions.md)で全操作を先に棚卸しした役割別
+Cloudflare API tokenをCI secretから渡す。Backend/Access用`CLOUDFLARE_API_TOKEN`は完成形
+8権限を一度に設定し、別のAccess管理tokenを作らない。Pages用tokenだけは分離する。
+token、account固有値、resource IDをshell scriptや追跡対象ファイルへ埋め込まない。
 
 RunPod操作にはchecksum検証済みのproject-local `runpodctl`を使用する。
 
@@ -113,7 +139,10 @@ pnpm run runpodctl user
 | staging     | 専用一式   | 専用   | 統合、migration、障害試験    |
 | production  | 専用一式   | 専用   | release branch検証後の本番用 |
 
-D1、R2、Queue、DLQ、RunPod endpoint、Access application、secretは環境間で共有しない。production設定はstagingでの手順が確定してから追加する。
+D1、R2、Queue、DLQ、RunPod endpoint、Access application、secretは環境間で共有しない。
+初回production bootstrapは
+[ADR 0022](./adr/0022-bootstrap-production-dependencies-before-applications.md)と
+[0.1.0 production readiness](./releases/0.1.0-production-readiness.md)を正とする。
 
 ## Staging構築時の順序
 
@@ -126,14 +155,25 @@ end-to-end smokeを実施する。
 3. R2 CORSと`incoming/`限定Event Notificationを設定する。
 4. D1 migrationを適用し、適用済みversionを記録する。
 5. OrchestratorとWebのsecretをCloudflare secret storeへ登録する。
-6. `develop`の`Publish RunPod worker` workflowでRunPod Worker imageをbuildし、SBOM、
-   scan、offline checkを通したGHCR digestからtemplateとstaging endpointを作成する。
+6. `release/<version>`の`Publish RunPod release candidate` workflowでRunPod Worker
+   imageを一度だけbuildし、SBOM、scan、offline checkを通したcandidate digestから
+   templateとstaging endpointを作成する。
 7. staging endpoint IDとRunPod API keyをOrchestrator secretへ登録する。
 8. [ADR 0012](./adr/0012-runpodctl-staging-verification-boundary.md)に従い、
    `runpodctl`で取得できるactive workers 0、max workers 1、GPU 1、Network Volumeなし、
-   FlashBoot無効、timeoutを確認する。GPU配置とSecure Cloudは初回worker起動後に確認する。
-9. 実音声の処理時間、artifact/manifest、通知、重複配送、claim競合、cleanup、
-   reconciliationとrollback手順を確認する。
+   FlashBoot無効、timeoutを確認する。固定GPU候補は公式REST APIで順序まで完全一致を
+   read-backし、inventoryで両候補のSecure Cloud提供とavailableを確認する。stock tierは
+   release invariantにしない。candidate imageのGPU実行と実Workerの
+   `secureCloud=true`はstaging E2Eのclaim前attestationで確認する。
+   [ADR 0052](./adr/0052-attest-runpod-placement-before-claim.md)に従い、
+   `RUNPOD_WORKER_IMAGE`と`RUNPOD_ALLOWED_GPU_IDS`はcandidate manifestとRunPod planから
+   Orchestrator設定へ自動生成し、deploy後のWorker bindingでも完全一致を確認する。
+   APIが保持する終了済みworker recordは
+   [ADR 0026](./adr/0026-classify-runpod-terminal-worker-records.md)に従って分類し、
+   `RUNNING`または未認識recordが0件であることを確認する。
+9. 固定dummy mediaの処理時間、artifact/manifest、通知、重複配送、claim競合、cleanup、
+   reconciliationとrollback手順を確認する。変更が対象実機に依存する場合は追加の
+   staging device smokeを行う。
 
 ## Phase 3 staging checkpoint
 
@@ -225,6 +265,7 @@ Web設定には同じexact originと、Access application作成後の次の非se
 
 - `SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`
 - `SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`
+- `SCRIBE_DROP_STAGING_PAGES_ACCESS_AUDIENCE`
 
 ```bash
 pnpm cloudflare:config:staging:web
@@ -244,8 +285,14 @@ pnpm exec wrangler deploy \
 Pages commandは`--config`をサポートしないため、生成処理は
 `apps/web/.wrangler/deploy/config.json`から追跡外Wrangler設定への公式config redirectを
 作成する。commandはapp rootを`--cwd`に指定し、実`functions/`と`dist/`を利用する。
+[ADR 0029](./adr/0029-discover-pages-config-from-app-root.md)に従い、deploy config
+directory自体を`--cwd`にしない。migration、R2、RunPod、Orchestratorを変更する前に、
+同じapp rootとprojectを指定した`pages deployment list --json`を実行し、出力はrunner
+一時fileへだけ保存する。
 Accessとsecretの設定後に、[cloudflare-access.md](./cloudflare-access.md)の
 未認証preflightを通し、commit SHAを明示してdeployする。
+deploy後はPages project APIのproduction `wrangler_config_hash`と生成configのSHA-256を
+照合し、commitが一致してもconfig hashが異なる場合はpromotionを失敗させる。
 PagesのWeb Analyticsは有効化しない。外部beaconの自動注入は
 [ADR 0005](./adr/0005-web-response-security-policy.md)の同一origin限定CSPと矛盾するため、
 Metrics画面でも無効であることを確認する。
@@ -253,7 +300,26 @@ Metrics画面でも無効であることを確認する。
 ```bash
 pnpm cloudflare:secrets:verify:staging
 pnpm cloudflare:access:verify:staging
+pnpm cloudflare:pages:upload-permission:verify:staging
 ```
+
+[ADR 0042](./adr/0042-preflight-pages-upload-permission.md)に従い、Pages projectとdeployment
+一覧のread-backだけでdeploy可能と判断しない。`GET /upload-token`が成功するAPI tokenを
+使い、短期upload capabilityはlog、file、artifactへ保存しない。tokenは対象accountの
+Cloudflare Pages Editだけを持つ`CLOUDFLARE_PAGES_API_TOKEN`として、Access、D1、R2、
+Workers用tokenと分離する。このgateがlocalで成功するまでrelease-candidateとstaging
+promotionをdispatchしない。stagingのPages secret、project、deployment、config hashの
+read-backにもこの専用tokenを使い、一般tokenはPages commandへ渡さない。
+productionもproduction Environment固有の専用Pages tokenを使い、staging evidenceとpolicyを
+照合した後、D1/R2/RunPod/Workerの最初のmutationより前にproduction projectの
+`GET /upload-token`を検証する。production Pages secret、deployment list、deploy、最終
+config hash read-backへ一般tokenを渡さない。
+Cloudflare tokenのexact permissionと不要な権限は
+[cloudflare-permissions.md](./cloudflare-permissions.md)を正とし、権限不足をremote
+mutation後に見つけて場当たり的に追加しない。
+staging/productionとも、D1、R2、RunPod、Worker、Pagesの最初のmutationより前に
+`pnpm cloudflare:worker-route:verify:<environment>`を実行し、固定Wranglerが使う
+`Zone Read`と`Workers Routes Read`を実credentialで確認する。
 
 ```bash
 pnpm exec wrangler pages deploy \
@@ -263,6 +329,191 @@ pnpm exec wrangler pages deploy \
 ```
 
 resourceの作成・変更・削除とdeployの直前には、CLIの認証先、environment、resource名、IDを再確認する。dashboardだけで行った変更は残さず、Wrangler設定、migration、deployment記録へ反映する。
+
+## Production promotion gate
+
+productionへ影響する変更は
+[ADR 0023](./adr/0023-promote-only-staging-verified-artifacts.md)のcandidateとstaging
+acceptanceを必須とする。各candidateは単一の`release/<version>` commitへ固定し、
+stagingとproductionで同じapplication artifact、RunPod image digest、migration集合を
+使用する。Worker inputsが変わったcandidateではimageを一度だけbuildする。変更されて
+いないdigestの検証済み再利用は
+[ADR 0038](./adr/0038-reuse-unchanged-runpod-worker-image.md)に従い、production用には
+いずれの経路でも再buildしない。
+
+production deployは成功したstaging evidenceが参照するcandidateだけを入力とする。
+commitまたはartifact digestが異なる場合、acceptance後にcode、dependency、migration、
+deployment設定が変更された場合、実resource parity checkが失敗した場合は停止する。
+mock E2Eやlocal testは実service staging acceptanceの代替にしない。
+terminal失敗通知を含むcandidateでは
+[ADR 0059](./adr/0059-require-real-staging-failure-notification-acceptance.md)に従い、
+正常な合成M4Aに続けて合成破損M4Aを通常経路へ投入する。exact `FAILED`、現在versionの
+outbox `SENT`、job/outbox送信時刻、failure fixture削除、scale-to-zero復元が成功した
+schema version 3のacceptanceだけをproduction入力にする。job IDはrunner一時fileだけで
+受け渡し、workflow log、artifact、deployment文書へ残さない。最初のjob前は通常の
+queue/in-progress/running 0とidle/ready candidate Worker、または
+[ADR 0062](./adr/0062-require-stable-candidate-evidence-for-stale-running.md)の3回安定した
+stale `running=1`を確認する。後者の次に投入できるのは合成fixtureだけとする。二回目は
+[ADR 0061](./adr/0061-bind-post-refresh-prewarm-to-worker-restart-evidence.md)の
+refresh証拠とADR 0062の3回連続確認を必須にし、限定条件下のstale `running=1`だけを受理する。remote D1の通知
+read-backは固定Wranglerの`--command --json`だけを使い、D1 ingestion用`--file`を使わない。
+
+RunPod promotionは
+[ADR 0047](./adr/0047-drain-stale-runpod-workers-before-promotion.md)に従い、旧terminal
+workerを残したままtemplateだけを切り替えない。worker上限0のexact read-back、worker
+0件、candidate template切替、上限復旧、全workerのcandidate template/image一致を一つの
+rollback可能な手順として実行する。staging acceptanceは実M4A lifecycleの前後に同じ
+read-only preflightを実行し、後段照合が成功するまでevidenceを発行しない。productionも
+全resource deploy後にRunPodを再照合する。
+この照合にはRunPod endpointだけでなく、Orchestratorの`RUNPOD_WORKER_IMAGE`と
+`RUNPOD_ALLOWED_GPU_IDS`が同じ生成済みRunPod planと一致することを含む。
+[ADR 0056](./adr/0056-require-production-capacity-before-promotion.md)に従い、production
+preflightはcapacity driftを更新予定として許可しない。GPU順序、data center集合、
+complianceを事前に完全一致させ、独立read-backした後だけcandidate workflowを開始する。
+通常promotion本体もcapacity driftを検出した場合はworker drainより前に停止し、
+production capacityを暗黙に移行しない。
+capacity移行が必要な場合は、全local gateとread-only実resource確認の後、明示承認を得て
+次のlocal-only commandを1回だけ実行する。追跡外production planとcredentialを事前に
+生成・注入し、値をshell履歴や文書へ残さない。
+
+```bash
+pnpm run runpod:capacity:prepare:production -- --confirm-production-capacity-migration
+```
+
+commandはactive jobとrunning/initializing Workerが0であることを確認してからworker上限を
+0へdrainする。endpoint APIに残るterminal Worker履歴は許容するが、healthの
+idle/initializing/ready/runningが最大30秒以内にすべて0へ収束するまでcapacityを変更しない。
+収束後は[ADR 0057](./adr/0057-split-runpod-capacity-mutations.md)に従い、GraphQLで
+data centerを1回変更して旧GPU保持をread-backし、RESTでGPUだけを1回変更する。各段階を
+bounded read-backし、失敗時は旧data centerと旧GPUへrollbackしてからworker上限を復旧する。
+成功後に別のread-only preflightを通すまでproduction workflowをdispatchしない。
+
+RunPod publication workflowはapplication artifactをcandidateごとに一度だけbuildし、
+Worker imageは新規buildまたはADR 0038の固定digest再利用の一方だけを選ぶ。environment別
+buildとproduction deploy jobを持たない。candidate manifest、staging/production
+promotion workflow、実resource read-back verifierは実装済みである。次のcandidateで
+staging acceptanceが成功し、GitHub production Environmentのreview・branch・credential
+分離を確認するまで、追加のproduction deployを行わない。追跡外production configの生成と
+read-only検査は実行できるが、remote mutationの許可にはならない。
+
+Orchestrator artifactは
+[ADR 0027](./adr/0027-store-raw-orchestrator-module.md)に従い、固定Wranglerのworkspace
+基準の絶対`--outdir`が生成するraw `index.js`だけをcandidateへ保存する。`--outfile`が
+生成するmultipart upload body、config基準になり得る相対`--outdir`、補助fileをpromotion
+入力にせず、candidate作成時と各promotion前の検証でraw ES module条件を確認する。
+[ADR 0028](./adr/0028-fail-fast-before-runpod-image-build.md)に従い、Web、Pages Functions、
+Orchestratorの検証済みapplication artifactを先に一度だけbuildし、同じartifactをRunPod
+imageと合成する。applicationの生成・再検証に失敗した場合はcontainer buildを開始しない。
+
+通常の実行順序は次のとおりとする。
+
+1. production workflowの同一pathがdefault branch `develop`へ登録済みであること、
+   `main`、`develop`、現行release branchのprotection、GitHub production Environmentの
+   review、`release/*` policy、15変数名、4 secret名を
+   `pnpm github:controls:verify:production`で確認する。失敗中はcandidateを開始しない。
+2. release-to-main PRがclosedであることを確認し、
+   `Publish RunPod release candidate`を`release/<version>`で実行する。
+3. 成功したcandidate run IDだけを`Deploy release candidate to staging`へ渡す。
+4. stagingの正常M4A、合成失敗、Discord配送、両fixture削除、scale-to-zero復元を確認し、
+   schema version 3のacceptanceを発行する。
+5. staging acceptance成功後に同じrelease-to-main PRをreopenし、release commitを
+   変更せず最終PR CIを一度だけ通す。
+6. 24時間以内に成功したstaging run IDだけを
+   `Promote staging-accepted candidate to production`へ渡す。
+7. production jobはGitHub Environmentのrequired reviewer承認後にもrun、candidate、
+   evidence、digestを再検証し、正規化したenvironment policyがstagingと一致してから
+   D1/R2、RunPod、Orchestrator、最後に利用者入口のPagesを更新する。更新後に実resourceを
+   再検証する。最初のremote mutation前にacceptanceの残存時間が30分未満なら中止し、
+   staging acceptanceからやり直す。
+
+PRをreopenした後にcode、dependency、migration、deployment設定を変更する必要が生じた
+場合はPRをcloseし、既存candidateとstaging evidenceを無効化して手順1からやり直す。
+
+staging workflowは[ADR 0036](./adr/0036-defer-custom-domain-readiness-to-acceptance.md)の
+job境界を維持する。Pages promotionはcompiled routeと公式APIのexact read-backで確定し、
+デプロイ直後の任意地域custom domain probeを成立条件にしない。認証済みreadinessは
+`acceptance`のupload前に実行する。404ではworkflow全体を再dispatchせず、原因確認後に
+同じrunのfailed `acceptance` jobだけを再実行する。成功済み`migrate`、`deploy-pages`、
+`deploy-backend`を再実行しない。Pages promotion自体を再開する場合も、公式APIのexact
+read-backが一致すればdeployを省略し、結果不明のmutationを自動再送しない。
+
+candidate、staging、production workflowを起動する前に、変更対象のlocal testと標準local
+gateを完了する。remote workflowをlocal検証の代替に使用しない。
+
+RunPod Worker build inputsに差分がないapplication-only candidateでは、
+[ADR 0038](./adr/0038-reuse-unchanged-runpod-worker-image.md)の検証済みsource candidate
+run IDをcandidate workflowへ指定できる。workflowはsource run、artifact、祖先関係、
+Worker input差分を検証し、任意image inputは受け付けない。再利用したdigestにも現在runの
+container check、SBOM、vulnerability scanを必須とする。検証失敗時に自動buildへ
+fallbackせず、新規buildが必要かを明示的に判断する。
+
+stagingのAccess自動試験は
+[ADR 0024](./adr/0024-staging-only-access-service-principal.md)の専用service principalだけを
+使用する。service tokenのID/secretはstaging Environment secretに置き、production
+Environmentへ複製しない。transportは
+[ADR 0041](./adr/0041-authenticate-both-staging-access-layers.md)に従い、browser requestの
+各hopで送信先を再評価する。exact application originだけへ、外側Access用の標準2 headerと
+内側Pages Access用のJSON `Authorization`を同時送信し、cookie取得後も継続する。Playwright
+routeはexact application originだけへ登録し、callback内でもoriginを再検証する。その他の
+originはadapterを通さず、browserが生成したheaderを変更しない。最終originと、絶対URLで
+送る認証済み`/api/me`のoriginが正規staging originと一致しない場合はupload前に停止する。
+[ADR 0040](./adr/0040-verify-staging-service-auth-before-mutation.md)に従い、同じcredentialの
+形式、2 application、相異なるAUD、layer固有header、exact policy、application cookie、
+service principal claim、認証済み`GET /api/me`をstaging `preflight`でも検証する。この
+read-only gateはdependency install直後、candidate download、RunPod CLI install、すべての
+remote mutationより前に置き、localで同じprobeが成功するまでpromotion workflowを起動しない。
+
+## 追跡外production設定
+
+初回production bootstrapは
+[ADR 0022](./adr/0022-bootstrap-production-dependencies-before-applications.md)と
+[0.1.0 production readiness](./releases/0.1.0-production-readiness.md)を正とする。
+production rendererとverifierのlocal/CI検証が成功するまではremote mutationを開始しない。
+また、production workflowがdefault branchに未登録、または
+`pnpm github:controls:verify:production`が失敗する間はcandidateも開始しない。
+
+production専用の非secret値をcredential storeまたは一時environmentへ読み込み、次を生成する。
+変数名と生成先は[environment-variables.md](./environment-variables.md)を正とする。
+
+```bash
+pnpm cloudflare:config:production
+pnpm runpod:config:production
+
+git check-ignore .wrangler/deploy/orchestrator-production.toml
+git check-ignore .wrangler/deploy/r2-cors-production.json
+git check-ignore .wrangler/deploy/r2-lifecycle-production.json
+git check-ignore apps/web/.wrangler/deploy/wrangler-production.toml
+git check-ignore .runpod/deploy/production-plan.json
+```
+
+生成fileはmode `0600`、親directoryは`0700`でなければならない。Orchestrator production
+configにはstaging sectionを出力しない。Web config redirectは
+`wrangler-production.toml`だけを指す。RunPod planはenvironment、template、endpoint名を
+productionへ固定し、digestなしimage、staging marker、workers max 1超過、volume、
+FlashBootを拒否する。
+
+resource作成前にWranglerとrunpodctlの認証先をread-onlyで確認し、production専用の
+D1、private R2、Queue、DLQ、Pages、Orchestrator、Access、RunPodを使う。resource ID、
+origin、AUD、image digest、registry auth IDはdeployment記録へ転記しない。
+
+Access applicationとPages secretを設定した後、値を読み出さず次を確認する。
+
+```bash
+pnpm cloudflare:secrets:verify:production
+pnpm cloudflare:access:verify:production
+```
+
+直接のRunPod production deployはfail-closedであり、次のcommandは非0で終了する。
+candidateとstaging evidenceを内部で照合するproduction promotion jobだけが専用scriptを
+使用する。
+
+```bash
+pnpm runpod:deploy:production
+```
+
+scriptは同名resourceを無条件に採用しない。plan digestと一致するignored pending state、
+一意なtemplate/endpoint、厳格なread-backが揃う場合だけ再開する。IDを標準出力へ表示せず、
+削除と既存resourceの更新は行わない。
 
 R2 S3-compatible APIは`wrangler dev`のlocal R2 emulationでは利用できないため、
 browser uploadの自動テストはfake transportを使う。CORS、temporary credentialの

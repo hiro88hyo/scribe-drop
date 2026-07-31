@@ -24,12 +24,14 @@ import {
   createD1RunpodControlRepository,
   type RunpodControlRepository,
 } from "./runpod-control-repository.js";
+import { createRunpodClient, type RunpodCancelResult } from "./runpod-client.js";
 import {
   submitPendingRunpodJob,
   type SubmissionDispatchResult,
 } from "./runpod-submission-service.js";
 
 const RECONCILIATION_BATCH_SIZE = 25;
+export const ACCEPTED_SUBMISSION_START_SLO_MS = 10 * 60 * 1_000;
 
 export interface ReconciliationEnvironment
   extends RunpodConfigEnvironment, NotificationConfigEnvironment, RetentionConfigEnvironment {
@@ -38,6 +40,11 @@ export interface ReconciliationEnvironment
 }
 
 export interface ReconciliationDependencies {
+  readonly cancelStaleSubmission?: (
+    runpodJobId: string,
+    environment: ReconciliationEnvironment,
+    config: RunpodConfig,
+  ) => Promise<RunpodCancelResult>;
   readonly createEventId?: (timestampMilliseconds: number) => string;
   readonly createMaintenanceRepository?: (database: D1Database) => MaintenanceRepository;
   readonly createRepository?: (database: D1Database) => RunpodControlRepository;
@@ -70,6 +77,7 @@ export interface ReconciliationDependencies {
 
 export interface ReconciliationResult {
   readonly cancelledUnboundCount: number;
+  readonly cancelledStaleSubmissionCount: number;
   readonly completion: CompletionResult;
   readonly deletion: DeletionSweepResult;
   readonly dispatch: SubmissionDispatchResult | "none";
@@ -77,6 +85,8 @@ export interface ReconciliationResult {
   readonly expiredUploadCount: number;
   readonly notification: NotificationDispatchResult;
   readonly retention: RetentionSweepResult;
+  readonly staleAcceptedSubmissionCount: number;
+  readonly staleCancellationDeferredCount: number;
 }
 
 function defaultRandomBytes(length: number): Uint8Array {
@@ -111,6 +121,13 @@ export async function reconcileJobs(
   try {
     const repositoryFactory = dependencies.createRepository ?? createD1RunpodControlRepository;
     const repository = repositoryFactory(environment.SCRIBE_DROP_DB);
+    const cancelStaleSubmission =
+      dependencies.cancelStaleSubmission ??
+      ((runpodJobId: string, _environment: ReconciliationEnvironment, runpodConfig: RunpodConfig) =>
+        createRunpodClient({
+          apiKey: runpodConfig.runpodApiKey,
+          endpointId: runpodConfig.runpodEndpointId,
+        }).cancel(runpodJobId));
     const processDeletions =
       dependencies.processDeletions ??
       ((deletionEnvironment: ReconciliationEnvironment, deletionLogger: StructuredLogger) =>
@@ -130,12 +147,22 @@ export async function reconcileJobs(
       timestamp,
       RECONCILIATION_BATCH_SIZE,
     );
+    const staleBefore = new Date(
+      startedAt.getTime() - ACCEPTED_SUBMISSION_START_SLO_MS,
+    ).toISOString();
+    const staleAccepted = await repository.findStaleAcceptedSubmissions(
+      staleBefore,
+      RECONCILIATION_BATCH_SIZE,
+    );
     const createEventId =
       dependencies.createEventId ??
       ((timestampMilliseconds: number) =>
         createUlid(timestampMilliseconds, dependencies.randomBytes ?? defaultRandomBytes));
     let expiredSubmissionCount = 0;
     let expiredUploadCount = 0;
+    let staleAcceptedSubmissionCount = 0;
+    let cancelledStaleSubmissionCount = 0;
+    let staleCancellationDeferredCount = 0;
 
     const maintenanceRepositoryFactory =
       dependencies.createMaintenanceRepository ?? createD1MaintenanceRepository;
@@ -181,6 +208,79 @@ export async function reconcileJobs(
           jobId: submission.jobId,
         });
       }
+    }
+
+    const cancelFailedSubmission = async (submission: {
+      readonly attemptId: string;
+      readonly jobId: string;
+      readonly runpodJobId: string;
+    }): Promise<void> => {
+      const cancellation = await cancelStaleSubmission(submission.runpodJobId, environment, config);
+      if (cancellation.outcome !== "accepted" && cancellation.outcome !== "not_found") {
+        staleCancellationDeferredCount += 1;
+        logger.warn("job.submission_cancel_deferred", {
+          attemptId: submission.attemptId,
+          errorCode: "RUNPOD_CANCEL_DEFERRED",
+          jobId: submission.jobId,
+          runpodJobId: submission.runpodJobId,
+          status: "FAILED",
+        });
+        return;
+      }
+      const recorded = await repository.markFailedUnclaimedSubmissionCancelled({
+        attemptId: submission.attemptId,
+        eventId: createEventId(startedAt.getTime()),
+        jobId: submission.jobId,
+        runpodJobId: submission.runpodJobId,
+        timestamp,
+      });
+      if (recorded) {
+        cancelledStaleSubmissionCount += 1;
+        logger.info("job.submission_cancelled", {
+          attemptId: submission.attemptId,
+          jobId: submission.jobId,
+          runpodJobId: submission.runpodJobId,
+          status: "FAILED",
+        });
+      } else {
+        logger.info("reconciliation.state_conflict", {
+          attemptId: submission.attemptId,
+          jobId: submission.jobId,
+        });
+      }
+    };
+
+    const pendingCancellation =
+      await repository.findFailedUnclaimedSubmissions(RECONCILIATION_BATCH_SIZE);
+    for (const submission of pendingCancellation) {
+      await cancelFailedSubmission(submission);
+    }
+
+    for (const submission of staleAccepted) {
+      const failed = await repository.failStaleAcceptedSubmission({
+        attemptId: submission.attemptId,
+        eventId: createEventId(startedAt.getTime()),
+        jobId: submission.jobId,
+        runpodJobId: submission.runpodJobId,
+        staleBefore,
+        timestamp,
+      });
+      if (!failed) {
+        logger.info("reconciliation.state_conflict", {
+          attemptId: submission.attemptId,
+          jobId: submission.jobId,
+        });
+        continue;
+      }
+      staleAcceptedSubmissionCount += 1;
+      logger.warn("job.submission_start_slo_exceeded", {
+        attemptId: submission.attemptId,
+        errorCode: "PROCESSING_FAILED",
+        jobId: submission.jobId,
+        runpodJobId: submission.runpodJobId,
+        status: "FAILED",
+      });
+      await cancelFailedSubmission(submission);
     }
 
     let cancelledUnboundCount = 0;
@@ -255,6 +355,7 @@ export async function reconcileJobs(
     });
     return {
       cancelledUnboundCount,
+      cancelledStaleSubmissionCount,
       completion,
       deletion,
       dispatch,
@@ -262,6 +363,8 @@ export async function reconcileJobs(
       expiredUploadCount,
       notification,
       retention,
+      staleAcceptedSubmissionCount,
+      staleCancellationDeferredCount,
     };
   } catch (error) {
     logger.error("reconciliation.dependency_failure", {

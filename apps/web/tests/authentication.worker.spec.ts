@@ -31,6 +31,7 @@ const TEST_ORIGIN = "https://example.test";
 const TEST_TEAM_DOMAIN = "https://test-team.cloudflareaccess.com";
 const TEST_AUDIENCE = "test-access-audience";
 const TEST_CSRF_SECRET = "local-only-test-csrf-secret-at-least-32-bytes";
+const TEST_SERVICE_COMMON_NAME = "staging-e2e-token.access";
 const TEST_AUTH = {
   email: "user@example.test",
   sub: "test-user-sub",
@@ -74,6 +75,7 @@ beforeAll(async () => {
 
 interface AccessTokenOptions {
   readonly audience?: string;
+  readonly commonName?: string;
   readonly email?: string;
   readonly expiresAt?: number;
   readonly includeEmail?: boolean;
@@ -81,6 +83,7 @@ interface AccessTokenOptions {
   readonly issuer?: string;
   readonly notBefore?: number;
   readonly sub?: string;
+  readonly tokenType?: "app";
 }
 
 async function createAccessToken(
@@ -90,7 +93,10 @@ async function createAccessToken(
 ): Promise<string> {
   const payload =
     options.includeEmail === false
-      ? {}
+      ? {
+          ...(options.commonName === undefined ? {} : { common_name: options.commonName }),
+          ...(options.tokenType === undefined ? {} : { type: options.tokenType }),
+        }
       : {
           email: options.email ?? TEST_AUTH.email,
         };
@@ -141,6 +147,28 @@ describe("Web security environment", () => {
   ])("rejects %s", (_caseName, environment) => {
     expect(parseWebSecurityConfig(environment)).toEqual({ ok: false });
   });
+
+  it("allows the dedicated service identity only in staging configuration", () => {
+    const stagingEnvironment = {
+      ...TEST_ENVIRONMENT,
+      APP_ENV: "staging",
+      STAGING_E2E_SERVICE_TOKEN_COMMON_NAME: TEST_SERVICE_COMMON_NAME,
+    };
+    expect(parseWebSecurityConfig(stagingEnvironment)).toEqual({
+      config: {
+        ...TEST_CONFIG,
+        appEnvironment: "staging",
+        stagingE2eServiceTokenCommonName: TEST_SERVICE_COMMON_NAME,
+      },
+      ok: true,
+    });
+    expect(
+      parseWebSecurityConfig({
+        ...stagingEnvironment,
+        APP_ENV: "production",
+      }),
+    ).toEqual({ ok: false });
+  });
 });
 
 describe("Cloudflare Access JWT verifier", () => {
@@ -173,6 +201,61 @@ describe("Cloudflare Access JWT verifier", () => {
       { auth: TEST_AUTH, status: "authenticated" },
       { auth: TEST_AUTH, status: "authenticated" },
     ]);
+  });
+
+  it("accepts only the configured staging E2E service identity", async () => {
+    const verifier = createAccessJwtVerifier({
+      now: () => NOW,
+      resolveKey: createLocalJWKSet({ keys: [oldPublicJwk] }),
+    });
+    const serviceToken = await createAccessToken(oldKeys, "old-key", {
+      commonName: TEST_SERVICE_COMMON_NAME,
+      includeEmail: false,
+      sub: "",
+      tokenType: "app",
+    });
+    const stagingConfig = {
+      ...TEST_CONFIG,
+      appEnvironment: "staging",
+      stagingE2eServiceTokenCommonName: TEST_SERVICE_COMMON_NAME,
+    } satisfies WebSecurityConfig;
+    const serviceSubjectDigest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(
+        `scribe-drop:staging-e2e-service:v1\u0000${TEST_SERVICE_COMMON_NAME}`,
+      ),
+    );
+    const expectedServiceSubject = `service:${[...new Uint8Array(serviceSubjectDigest)]
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("")}`;
+
+    await expect(verifier(createRequest(serviceToken), stagingConfig)).resolves.toEqual({
+      auth: {
+        email: "staging-e2e@example.invalid",
+        sub: expectedServiceSubject,
+      },
+      status: "authenticated",
+    });
+    expectUnauthenticated(await verifier(createRequest(serviceToken), TEST_CONFIG));
+    expectUnauthenticated(
+      await verifier(createRequest(serviceToken), {
+        ...stagingConfig,
+        stagingE2eServiceTokenCommonName: "another-token.access",
+      }),
+    );
+    expectUnauthenticated(
+      await verifier(
+        createRequest(
+          await createAccessToken(oldKeys, "old-key", {
+            commonName: TEST_SERVICE_COMMON_NAME,
+            includeEmail: false,
+            sub: "unexpected-service-sub",
+            tokenType: "app",
+          }),
+        ),
+        stagingConfig,
+      ),
+    );
   });
 
   it("rejects missing, expired, premature and wrongly scoped tokens uniformly", async () => {

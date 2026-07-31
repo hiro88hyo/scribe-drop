@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 const AUDIENCE_PATTERN = /^[A-Za-z0-9_-]+$/u;
+const SERVICE_TOKEN_COMMON_NAME_PATTERN = /^[A-Za-z0-9._-]{3,512}$/u;
 const TEAM_HOST_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.cloudflareaccess\.com$/u;
 const MINIMUM_SECRET_BYTES = 32;
 
@@ -16,6 +17,10 @@ const textEnvironmentSchema = z
         (value) => new TextEncoder().encode(value).byteLength >= MINIMUM_SECRET_BYTES,
         "CSRF secret is too short",
       ),
+    STAGING_E2E_SERVICE_TOKEN_COMMON_NAME: z
+      .string()
+      .regex(SERVICE_TOKEN_COMMON_NAME_PATTERN)
+      .optional(),
   })
   .strict();
 
@@ -60,6 +65,7 @@ export interface WebSecurityEnvironment {
   readonly ALLOWED_ORIGIN: string;
   readonly APP_ENV: string;
   readonly CSRF_HMAC_SECRET: string;
+  readonly STAGING_E2E_SERVICE_TOKEN_COMMON_NAME?: string;
 }
 
 export interface WebSecurityConfig {
@@ -68,6 +74,7 @@ export interface WebSecurityConfig {
   readonly allowedOrigin: string;
   readonly appEnvironment: "local" | "staging" | "production";
   readonly csrfHmacSecret: string;
+  readonly stagingE2eServiceTokenCommonName?: string;
 }
 
 export type WebSecurityConfigResult =
@@ -88,6 +95,7 @@ export function parseWebSecurityConfig(
     ALLOWED_ORIGIN: environment.ALLOWED_ORIGIN,
     APP_ENV: environment.APP_ENV,
     CSRF_HMAC_SECRET: environment.CSRF_HMAC_SECRET,
+    STAGING_E2E_SERVICE_TOKEN_COMMON_NAME: environment.STAGING_E2E_SERVICE_TOKEN_COMMON_NAME,
   });
   if (!textResult.success) {
     return { ok: false };
@@ -106,6 +114,12 @@ export function parseWebSecurityConfig(
   if (!audiencesResult.success || !originResult.success || !teamDomainResult.success) {
     return { ok: false };
   }
+  if (
+    textResult.data.STAGING_E2E_SERVICE_TOKEN_COMMON_NAME !== undefined &&
+    textResult.data.APP_ENV !== "staging"
+  ) {
+    return { ok: false };
+  }
 
   return {
     config: {
@@ -114,6 +128,11 @@ export function parseWebSecurityConfig(
       allowedOrigin: originResult.data,
       appEnvironment: textResult.data.APP_ENV,
       csrfHmacSecret: textResult.data.CSRF_HMAC_SECRET,
+      ...(textResult.data.STAGING_E2E_SERVICE_TOKEN_COMMON_NAME === undefined
+        ? {}
+        : {
+            stagingE2eServiceTokenCommonName: textResult.data.STAGING_E2E_SERVICE_TOKEN_COMMON_NAME,
+          }),
     },
     ok: true,
   };

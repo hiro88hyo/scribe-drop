@@ -27,4 +27,6 @@ Python package、native import、ffprobeを検証する。GPU modelのmemory loa
 この検査では行わない。
 
 handlerは成功、失敗、cancelのすべてでtask固有`/tmp`を削除し、RunPod SDKへ
-`refresh_worker=true`を返す。このfieldはRunPod SDKがjob outputから除去する。
+`refresh_worker=true`を返す。このfieldはRunPod SDKがjob outputから除去する。さらに
+`serverless.start`にも`refresh_worker=true`を固定し、result送信後にSDK自身のjob loopを
+終了する。control planeのPod停止反映だけへ依存しない。

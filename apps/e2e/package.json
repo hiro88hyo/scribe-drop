@@ -1,11 +1,15 @@
 {
   "name": "@scribe-drop/e2e",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "pretest": "pnpm --filter @scribe-drop/web run build:client",
     "test": "playwright test --config playwright.config.ts",
+    "test:staging:failure-cleanup": "playwright test --config playwright.staging.config.ts staging-tests/failure-cleanup.spec.ts",
+    "test:staging:failure-notification": "playwright test --config playwright.staging.config.ts staging-tests/failure-notification.spec.ts",
+    "test:staging": "playwright test --config playwright.staging.config.ts staging-tests/release-candidate.spec.ts",
+    "test:staging:readiness": "playwright test --config playwright.staging.config.ts staging-tests/data-plane-readiness.spec.ts",
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "devDependencies": {

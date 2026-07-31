@@ -23,6 +23,76 @@ GPU配置とSecure Cloudを確認し、最小jobがclaim期限切れを安全に
 endpoint invariant確認を完了した。実音声の完了、artifact、通知を含むend-to-end
 smokeと処理時間の計測は、後述するPhase 5のstaging検証で完了した。
 
+このRTX 4090単一構成は当時のcheckpointであり、release acceptanceで供給待ちが再現した。
+[ADR 0053](./adr/0053-use-mixed-availability-gpus-with-runtime-attestation.md)に従い、
+現行releaseはstaging/production共通の固定GPU候補`RTX 5090`、`RTX 4090`、
+Secure-capable inventory gate、公式REST APIのexact GPU read-backへ更新する。
+両GPU種別はCommunity Cloudにも提供されるため、実Workerの`secureCloud=true`をclaim前に
+照合する。ADR 0054の2 data centerとCompliance `Any`をplanへ固定し、RESTのGPU情報と
+Console-equivalent GraphQLの配置情報を結合して自動read-backする。
+全候補不足時も10分開始SLO、次の5分Cron境界でのFAILED収束、exact cancelを維持し、
+CIだけでなく実利用時の無期限待機と孤児provider jobを防ぐ。さらに
+[ADR 0051](./adr/0051-prewarm-staging-before-job-creation.md)に従い、staging acceptanceは
+一時的なActive workerがcandidate imageでreadyになった後にだけsynthetic jobを作成し、
+成功・失敗後は`workersMin=0`をexact read-backする。
+さらに[ADR 0052](./adr/0052-attest-runpod-placement-before-claim.md)に従い、claim前に
+job status由来のworker IDとPod詳細を照合し、対象endpoint、RUNNING、candidate image、
+許可GPU、Secure Cloudの完全一致が取れないWorkerへR2 capabilityを発行しない。
+
+commit `9f04f3d`のcandidateは全gateとartifact再検証に成功し、stagingではD1、Pages、
+R2、RunPod、Orchestratorのpromotionとlive read-backまで成功した。endpointは
+`RTX 5090`、`RTX 4090`を完全一致で保持したが、job作成前prewarmは8分間割当を得られず
+安全停止した。synthetic jobは作成されず、scale-to-zero、空queue、active D1/provider
+job 0を確認した。inventory上Highの`RTX PRO 4500 Blackwell`は隔離endpoint作成を拒否され、
+available表示の`RTX 3090`もendpoint read-backが指定と一致しなかったため追加しない。
+5090または4090の隔離candidate prewarmでReadyを再確認するまでworkflowを再実行せず、
+production promotionをBlockedとする。
+
+2026-07-29の追加確認では、inventoryが5090と4090を`available/Low`と返した状態で
+5090のcandidate imageを使う隔離prewarmを1回だけ実施した。endpoint構成は完全一致し、
+`initializing=1`まで進んだが、8分間machineは割り当てられなかった。録音、job、
+R2 capabilityは作成せず、scale-to-zeroへの復元、隔離endpoint削除、staging active
+Worker 0を独立read-backした。candidate publicationとstaging workflowは開始せず、
+Blockedを維持する。
+
+同日の4090隔離prewarmも別の1回として実施した。endpoint構成は完全一致し、
+`initializing=1`まで進んだ後に0へ戻ったが、8分間machineは割り当てられなかった。
+録音、job、R2 capabilityは作成していない。隔離endpoint 0、staging `workersMin=0`、
+active Worker 0を独立read-backした。staging health APIの`throttled=1`表示は残るため、
+供給回復とは判定せず、candidate publicationとworkflowを開始しない。
+
+同日の`A100-SXM4-80GB`隔離検査は、inventoryが`available/Medium`を返した状態で実施した。
+providerはendpoint作成を受理したが、scale-to-zero構成の直後read-backで指定GPUを
+完全一致で保持しなかったため、prewarm前にfail closedした。Worker、録音、job、
+R2 capabilityは作成せず、隔離endpoint削除とstaging無変更を独立read-backした。
+A100をfallbackへ追加せず、Blockedを維持する。
+
+2026-07-30に5090のinventoryが`available/Medium`へ改善したため、隔離prewarmを1回だけ
+再実施した。endpointは5090とcandidate構成を完全一致で保持し、health APIは一時
+`ready=2`、その後`ready=1`を返したが、8分間対応するactive WorkerとPod配置詳細を
+read-backできなかった。検証不能なReadyを成功扱いせず、録音、job、R2 capability、
+candidate publication、workflowを開始していない。scale-to-zeroへの復元、隔離endpoint
+削除、staging active Worker 0を独立read-backし、Blockedを維持する。
+
+2026-07-31に[ADR 0054](./adr/0054-use-explicit-datacenters-for-staging-recovery.md)の
+staging限定recoveryを実施した。既存endpointの単一data center選択とglobal inventoryの
+差をprovider supportへ調査依頼し、別endpointへ`EUR-IS-1`と`EU-RO-1`を明示した。
+作成APIはdata center fieldをread-backしないためConsoleでexact selectionを確認した。
+`Security & compliance`はSecure Cloud切替ではなくdata center certification filterである。
+現行要件に特定certificationはないため`Any`を維持し、実Workerの
+`secureCloud=true` attestationを代替しない。
+recovery endpointは約10秒でReadyとなり、実audio/mp4 uploadからRunPod完了、
+claim前配置attestation、manifest、3形式のartifact、D1 finalize、利用者によるdownloadと
+正常な文字起こし確認まで成功した。処理後はactive D1/provider job 0、
+`workersMin=0`へ収束した。
+
+この結果でstagingの利用経路は回復した。data center selectionと空のcompliance filterは
+plan、deployment、rollback、drift testへ実装し、RESTのGPU情報とConsole-equivalent
+GraphQLのdata center/compliance情報を結合してexact read-backする。追跡外planの再生成、
+旧endpointのsupport証跡名へのrename、recovery endpointのcanonical化、GitHub staging
+Environmentのsecret同期、read-only readinessとpromotion preflightまで成功した。
+同一candidateの自動acceptanceを完了するまでproduction promotionを開始しない。
+
 Phase 5では[ADR 0013](./adr/0013-reconciliation-and-fresh-attempt-retry.md)に従い、
 5分Cron、RunPod status観測、terminal状態の先行保存、manifest/artifact検証、
 原子的finalize、notification outbox、Discord再送、所有者限定artifact URL、
@@ -304,9 +374,14 @@ temporary credentialのexact-object multipart/abort成功とaction/object拒否�
 - attemptごとに固有のresult prefixを決めるが、source/result URLとheartbeat tokenはwinner claim成功後に初めて発行する。
 - Queue からの submission を `SUBMISSION_PENDING` → `SUBMITTING` と条件付き遷移させる。
 - `/run` の成功、明示的失敗、timeout で結果不明のケースを別に扱い、submission の追跡情報を記録する。
+- [ADR 0043](./adr/0043-bound-runpod-start-slo-and-staging-wait.md)に従い、
+  accepted後10分以内にwinner claimへ進まないattemptをFAILEDへCAS遷移し、
+  次のCron境界からexact provider jobのcancelを成功確認まで再試行する。
 - claim API を実装する。
   - token hashの定時間比較、expiry、consumptionを確認
   - current active attempt、generation、cancel状態を確認
+  - job status由来のworker IDとPod詳細からendpoint、RUNNING、immutable image、許可GPU、
+    Secure Cloudをwinner CAS前に照合し、timeout・不正応答・不一致をfail closedにする
   - winner未確定時だけ原子的にRunPod job IDを設定
   - claim成功時にtokenを消費し、同じwinnerからの再送を含む全再利用を拒否
   - 別job ID、loser、古いgenerationを拒否
@@ -320,7 +395,11 @@ temporary credentialのexact-object multipart/abort成功とaction/object拒否�
 
 - Python 3.12、Pydantic、httpx、固定したRunPod SDK、faster-whisper、CTranslate2を用いる。
 - non-rootのmulti-stage Docker imageを作り、modelとrevisionをbuild時に固定してimageへ含める。base imageはdigestで固定し、runtimeのmodel/code/package downloadをoffline testで拒否する。
-- production endpointはSecure Cloudを優先し、Flex、active workers 0、max workers 1、GPU 1、Network Volumeなし、永続diskなし、FlashBoot無効とする。例外は別ADRなしにdeployしない。
+- production endpointは固定GPU候補`RTX 5090`、`RTX 4090`を順に使い、Flex、
+  active workers 0、max workers 1、GPU 1、Network Volumeなし、永続diskなし、
+  FlashBoot無効とする。両候補がSecure Cloudで提供され、availableでなければdeployせず、
+  実Workerが`secureCloud=true`でなければclaimとR2 capability発行を拒否する。
+  例外は別ADRなしに認めない。
 - handlerは入力検証とclaim成功前にmodelのmemory load、source download、R2 URL取得、GPU推論を開始しない。
 - claim/heartbeat originはdeployment allowlistから構成する。受信URLはHTTPS、host、port、userinfo、解決後IPを検証し、localhost、private、link-local、metadata、許可外hostを拒否してredirectを無効化する。
 - sourceをtask固有`/tmp`へstreaming downloadし、途中でも2 GiB上限を強制する。
@@ -328,7 +407,7 @@ temporary credentialのexact-object multipart/abort成功とaction/object拒否�
 - faster-whisperを固定設定で実行し、segment境界でcancelとheartbeat状態を確認する。
 - Markdownは利用者titleをRunPodへ渡さずgeneric headingで生成する。JSON、SRTと合わせてSHA-256とbyte sizeを算出する。
 - 成果物をPUTした後、manifestを最後にPUTする。
-- `finally`で一時ディレクトリを削除し、handler returnのworker refreshでworker stateを破棄する。
+- `finally`で一時ディレクトリを削除し、handler returnと`serverless.start`設定のworker refreshでworker stateを破棄する。
 - allowlist方式の共通log sanitizerを使い、URL、token、Authorization、filename、title、email、本文、segment、HTTP response body、完全なFFmpeg command/stderrを出力しない。
 - 最外層で例外をallowlist error codeへ正規化し、RunPod outputへraw exception、traceback、URL、path、本文を含めない。成功時もjob/attempt ID、status、duration、detected language、segment count、manifestWrittenだけを返す。
 - CIでSBOM、container vulnerability scan、Python dependency auditを生成する。high/critical findingの例外はADRへ期限と除去条件を残す。
@@ -337,6 +416,8 @@ temporary credentialのexact-object multipart/abort成功とaction/object拒否�
 
 - 二つの RunPod job が同じ attempt を claim しても winner は一つだけである。
 - claim tokenの再利用を同じwinnerの完全一致再送も含めて拒否し、別attempt、別RunPod job ID、期限切れ、cancel済みattemptも拒否する。
+- Community Cloud、別GPU・image・endpoint、停止Pod、worker ID欠落、status/Pod API障害では
+  winner CAS、heartbeat生成、R2 capability発行を行わない。
 - claim response喪失時は古いwinnerへcapabilityを再発行せず、新しいgenerationだけが回復処理を続行できる。
 - `/run` contractはpresigned URL、R2 key、PII、options、webhook、未知fieldを拒否する。
 - loserとstale attemptはURL発行、download、model load、Whisper、artifact PUTを呼ばない。
@@ -346,7 +427,7 @@ temporary credentialのexact-object multipart/abort成功とaction/object拒否�
 - サイズ・時間・stream上限をテストする。
 - cancel と heartbeat 障害の方針がテストされている。
 - 成果物が一部失敗した場合に manifest は作成されない。
-- 正常、失敗、cancelのすべてで一時ファイルが削除され、worker refreshが要求される。
+- 正常、失敗、cancelのすべてで一時ファイルが削除され、handler outputとSDK起動設定の両方でworker refreshが要求される。
 - RunPod request、status、output、stdout、stderrにtoken、署名付きURL、元filename、本文、FFmpeg pathが含まれない。
 - modelはimage内の固定revisionだけからloadされ、networkを切ったcontainer testでも起動できる。
 - endpoint設定は[ADR 0012](./adr/0012-runpodctl-staging-verification-boundary.md)に従い、
@@ -374,11 +455,15 @@ temporary credentialのexact-object multipart/abort成功とaction/object拒否�
   - 同じ D1 batch で一意な notification outbox を作成
 - 5 分間隔の reconciliation Cron を実装する。
   - `SUBMITTING`、`RUNNING`、`CANCEL_REQUESTED` の status poll
+  - accepted submissionの10分開始SLOと、失敗済みunclaimed jobのcancel再試行
   - stale heartbeat と実行期限
   - 中途半端な submission
   - 期限切れ upload
+  - 未通知の`COMPLETED`と`FAILED`を集中走査してoutboxへ冪等登録
   - notification retry
 - Discord client と指数 backoff 付き outbox dispatcher を実装する。
+- forward-only migration `0009_notification_terminal_generation.sql`でoutboxにjob CAS
+  versionを保存し、retry前の配送attemptを次のterminal通知へ持ち越さない。
 - artifact API を実装し、所有権・COMPLETED・active attempt を検証して 5 分の GET URL を返す。
 - cancel API と RunPod `/cancel` 呼出しを実装する。
 - FAILED job の retry API を実装し、新しい generation、token、result prefix を発行する。
@@ -391,6 +476,8 @@ temporary credentialのexact-object multipart/abort成功とaction/object拒否�
 - 複数Cronまたは手動reconcileが同時にfinalizeしても状態更新とoutboxは一度だけである。
 - RunPod statusを観測できなかったjobはmanifestだけでCOMPLETEDにならない。
 - Discord 障害は job 完了を取り消さず、outbox から再試行される。
+- 失敗経路を個別列挙せず、terminal走査によってすべての`FAILED`を通知対象にする。
+- 失敗通知済みjobをretryした後も、次の`FAILED`または`COMPLETED`通知が1回だけ送られる。
 - artifact URL は所有者だけが取得でき、API 応答やログへ不要に保持されない。
 - stagingの実browser smokeでRunPod terminal、complete manifest、3形式のartifact、
   `COMPLETED` job、所有者限定artifact GET、`SENT` outboxとDiscord受信を確認する。
@@ -472,6 +559,8 @@ owner、CSRF、Origin、JSON content typeを確認した後で即時に通常API
 [ADR 0018](./adr/0018-asynchronous-user-deletion.md)に従ってheartbeatを失効させる。
 Orchestrator Cronは既知RunPod jobをcancelし、最後のR2 capability失効後にD1所有の
 source keyと全attempt prefixを冪等に削除してから、CAS付きでD1親rowを物理削除する。
+cancelは`deletion_not_before`の前後にかかわらずD1削除前に確認し、不確定時はD1を保持して
+bounded backoffする。
 R2/D1/RunPod failureの分類、backoff、partial artifact、foreign owner、重複request、
 unrelated object保護をunit testとWorkers integration testで検証済みである。
 [ADR 0019](./adr/0019-layer-application-and-r2-retention.md)に従うretentionのlocal
@@ -492,7 +581,9 @@ Orchestrator/Web deploy、実R2 lifecycle適用、未認証Access smokeまで完
 live tailでも正常な`reconciliation.completed`とallowlist fieldだけを確認し、
 Phase 7のstaging checkpointを完了した。upload pageを閉じ、新しいpageの履歴・詳細から
 処理状態を復元するPlaywrightも追加した。[acceptance checklist](./acceptance-checklist.md)で
-仕様の必須受け入れ条件を証跡へ全件対応付けた。production deploymentは未実施である。
+仕様の必須受け入れ条件を証跡へ全件対応付けた。当時production deploymentは未実施
+だった。その後の初回production試験deployはADR 0023の同一candidate条件を満たさず、
+release evidenceとして無効化している。
 
 ### 保存期間と削除
 
@@ -544,13 +635,142 @@ Android Share Target は設計書どおり別 PR とする。
 
 環境は local、staging、production を分離し、D1、R2、Queue、DLQ、RunPod endpoint、Access audience、Discord webhook を共有しない。
 
-リリース順序は次のとおりとする。
+productionへ影響する変更は[ADR 0023](./adr/0023-promote-only-staging-verified-artifacts.md)
+に従い、`release/<version>`の単一commitへrelease candidateを固定する。Worker inputsが
+変わったcandidateではRunPod imageを一度だけbuildし、変更されていない場合の固定digest
+再利用は[ADR 0038](./adr/0038-reuse-unchanged-runpod-worker-image.md)の検証条件を必須とする。
+stagingとproductionはresourceとsecretを分離するが、application artifact、RunPod image
+digest、migration集合は同じcandidateを使用し、production用に再buildしない。
 
-1. migration の後方互換性を確認して適用する。
-2. orchestrator を deploy する。
-3. Pages Functions と Web asset を deploy する。
-4. RunPod image digest と endpoint 設定を更新する。
-5. staging smoke test 後に production へ進める。
+既存environmentの後方互換なリリース順序は次のとおりとする。
+
+1. candidate manifestへcommit、artifact digest、migration digest、config policy versionを
+   記録する。
+2. migrationの後方互換性を確認し、stagingへmigration、Orchestrator、Pages Functionsと
+   Web asset、RunPod revisionの順でcandidateをdeployする。
+3. stagingの実binding、R2 notification、Queue、DLQ、RunPod invariantをread-backする。
+4. 変更経路を通る実service E2Eと、必要な対象実機smokeをstagingで完了する。
+5. staging evidenceとcandidate manifestの同一性をCIで検証する。
+6. 同じcandidateをproductionへ同じ順序でdeployし、deploy後のread-backとsmokeを行う。
+
+candidate作成後にcode、dependency、migration、deployment設定を変更した場合は既存の
+staging evidenceを無効とし、buildとstaging acceptanceをやり直す。mock E2Eやunit testだけ
+で実service staging acceptanceを代替しない。promotion workflowまたは実resource
+read-back verifierが欠落・失敗している間はproductionへdeployしない。
+terminal失敗通知を変更したcandidateでは
+[ADR 0059](./adr/0059-require-real-staging-failure-notification-acceptance.md)に従い、
+正常な合成M4Aだけでなく、合成破損M4Aのexact `FAILED`、現在versionのoutbox `SENT`、
+fixture削除、scale-to-zero復元をformal stagingの同じacceptance jobで必須にする。
+最初のjob直前は通常のqueue/in-progress/running 0とidle/ready candidate Worker、または
+[ADR 0062](./adr/0062-require-stable-candidate-evidence-for-stale-running.md)の3回安定した
+stale `running=1`を再確認する。stale health受理後に投入できるのは合成fixtureだけとする。
+成功job後は[ADR 0061](./adr/0061-bind-post-refresh-prewarm-to-worker-restart-evidence.md)の
+runner一時証拠でWorker process再起動を確認し、job 0と異常state 0が揃う場合だけstaleな
+`running=1`を受理する。再起動未確認のまま失敗fixtureを投入しない。
+schema version 3の短命acceptanceに3 checkがない場合はproductionへ進めない。
+Orchestrator artifactは
+[ADR 0027](./adr/0027-store-raw-orchestrator-module.md)のraw ES module条件をcandidate作成時と
+検証時に満たし、multipart upload bodyを同一artifactとして扱わない。
+[ADR 0028](./adr/0028-fail-fast-before-runpod-image-build.md)に従い、application artifactを
+高コストなRunPod image buildより前に一度だけ生成・検証し、後段で再buildせずcandidateへ
+合成する。生成済みPages Functionsの`/api/me`固有route、fallback、API middlewareと
+route順もroot `pnpm check`とcandidate application artifact作成の両方で検証する。
+[ADR 0029](./adr/0029-discover-pages-config-from-app-root.md)に従い、Pages configはapp
+rootから検出し、同じtargetへのread-only preflightを最初のremote mutation前に完了する。
+[ADR 0030](./adr/0030-scope-access-service-credentials-to-app-origin.md)に従い、staging
+service credentialは正規Web originへだけ継続送信する。Pages config hash、Access
+service-token claim、認証済み`/api/me`をmedia uploadより前に検証する。
+[ADR 0041](./adr/0041-authenticate-both-staging-access-layers.md)に従い、custom hostnameと
+Pages Previewの二重Accessを、外側用標準2 header、内側用JSON `Authorization`、相異なる
+2 AUDで構成する。3 headerはexact Web originへだけ送り、cookie取得後も継続する。
+[ADR 0042](./adr/0042-preflight-pages-upload-permission.md)に従い、Pages projectのread権限
+だけでdeploy可能と判断せず、短期upload capabilityの取得をrelease-candidateとstaging
+promotionの高コスト処理より前に検証して即座に破棄する。
+[ADR 0040](./adr/0040-verify-staging-service-auth-before-mutation.md)に従い、同じService Auth
+検証をdependency install直後のread-only preflightにも置き、RunPod CLI install、candidate
+download、D1、Pages、backendの変更前にcredential、policy、Access data planeの不整合を
+停止する。Access team redirectはcookieの有無にかかわらず拒否し、localで同じprobeと
+標準gateが成功するまでremote workflowを起動しない。
+[ADR 0033](./adr/0033-wait-for-pages-data-plane-convergence.md)と、それを一部更新する
+[ADR 0036](./adr/0036-defer-custom-domain-readiness-to-acceptance.md)に従い、Pages
+promotionはcompiled routeと公式APIのexact read-backで確定する。stagingはpreflight、
+migration、Pages、backend、acceptanceを独立jobにし、認証済み
+`/api/me?candidate=<commit>`をacceptanceの先頭で上限付きにpollする。custom domainの
+data-planeと固定E2E identityが収束するまでmedia uploadとRunPod GPU jobを開始しない。
+readiness失敗時はfailed acceptanceだけを再実行し、成功済みmutationを繰り返さない。
+[ADR 0031](./adr/0031-retry-only-runpod-read-commands.md)に従い、RunPod promotionの
+read-only CLI一時障害だけを上限付きで再試行し、mutationは再試行しない。
+[ADR 0032](./adr/0032-automate-runpod-default-port-normalization.md)に従い、providerが
+追加する既知のtemplate portだけを未接続・idle条件下で自動除去し、厳格なread-backを
+通す。candidateごとのConsole手動修正は通常手順にしない。
+[ADR 0034](./adr/0034-fail-before-release-candidate-cost.md)に従い、release branchでは
+candidateと重複する手動CIを起動しない。candidate workflowの最初にstaging限定の
+read-only RunPod readinessを並列・上限付きで検査し、成功するまでbuild、browser install、
+container build、scanを開始しない。candidate作成後のstagingでは完全planを再検証する。
+release-to-main PRはstaging acceptance成功までclosedに保ち、通常のrelease commitは
+candidate 1本とstaging 1本に限定する。その後、同じPRをreopenして確定commitの最終CIを
+一度だけ実行する。原因修正と対象gateの成功なしに失敗workflowを再dispatchしない。
+変更したpromotionロジックとworkflow構造を含むlocal gateが成功するまでremote workflowを
+起動せず、remote runをlocal testの代替にしない。
+
+[ADR 0054](./adr/0054-use-explicit-datacenters-for-staging-recovery.md)の手動staging
+recoveryは、実利用経路の回復確認であり、上記のcandidate acceptanceを代替しない。
+data center selectionと空のcompliance filterは追跡対象planとdeployment codeへ実装し、
+GPUの公式REST read-backとdata center/complianceのConsole-equivalent GraphQL read-backを
+結合する。GitHub staging EnvironmentとCloudflare staging runtimeのendpoint設定は同じ
+canonical endpointへ同期済みである。次のcandidate workflowでもGraphQL境界をexact
+read-backできなければproductionをBlockedのままにする。
+
+[ADR 0055](./adr/0055-separate-worker-evidence-from-idle-promotion-preflight.md)に従い、
+promotion前のRunPod preflightはactive Workerを必ず拒否する。実M4A lifecycle後は同じ
+preflightを再利用せず、candidate template/image、許可status、単一active Worker、
+endpoint invariant、GPU/data center/complianceを検証する専用read-only verifierを使う。
+2026-07-31の最初のformal staging runは実M4A lifecycleまで成功したが、この境界の誤りで
+worker証跡stepが失敗した。`always()` cleanupとscale-to-zero read-backは成功し、
+acceptanceは発行していない。専用test、CI構造検査、全local gateが成功するまで再dispatch
+しない。
+
+[ADR 0056](./adr/0056-require-production-capacity-before-promotion.md)に従い、production
+promotion前のRunPod capacity完全一致を独立した前提条件にする。staging endpointが
+新規作成時から固定planへ一致していたことは、旧production endpointのin-place capacity
+移行を検証した証拠にしない。production preflightとpromotion本体はcapacity driftを
+mutation前に拒否し、provider mutationはGraphQL data centerとREST GPUを各単一送信し、
+各段階で最大30秒のbounded read-backを使う事前作業へ分離する。事前移行、独立read-back、
+local gateが成功するまでproduction workflowをdispatchしない。
+最初の事前移行はmutation前に停止した。endpoint APIはterminal Worker履歴だけを返したが、
+health APIは5秒のidle timeout後もready/idleを返した。terminal履歴をdrain失敗とせず、
+worker上限0の後にhealthが完全に0へ収束したことをcapacity mutation前に検証する回帰testと
+実装を追加する。この修正の全local gateが成功するまで事前移行を再実行しない。
+最初の修正後の事前移行では、上限0のread-back後にhealthがidle/readyからinitializingへ
+遷移し、capacity mutation前に停止して上限を復元した。drain後のinitializingも即時失敗せず
+bounded convergence待ちへ含める回帰testを追加し、再度全local gateを通す。
+隔離endpointによる追加検証で、REST PATCHは`gpuTypeIds`を保持した一方、
+`dataCenterIds`を90秒後も保持しないことを確認した。[ADR 0057](./adr/0057-split-runpod-capacity-mutations.md)
+に従い、事前作業はGraphQL `locations`更新、中間GPU保持read-back、REST `gpuTypeIds`更新、
+最終完全一致へ分割する。各mutationを1回だけ送り、逆順rollbackを検証してからproductionへ
+適用する。
+
+[ADR 0061](./adr/0061-bind-post-refresh-prewarm-to-worker-restart-evidence.md)に従い、
+正常M4A後の二回目prewarmは初回と同じhealth条件を無条件に再利用しない。SDK job loopの
+終了と同じWorker枠でのcontainer再起動はWorker ID一致と`lastStartedAt`の前進で証明し、IDと時刻は
+mode `0600`のrunner一時fileだけでstep間連携する。candidate完全一致、単一active Worker、
+provider job 0、initializing/throttled/unhealthy 0が揃う二回目だけ、RunPod healthのstale
+`running=1`を許容する。ADR 0061時点では初回prewarm、再起動未確認、busy/unknown状態をfail closedし、
+全結果でevidence削除とscale-to-zeroを行う。
+
+[ADR 0062](./adr/0062-require-stable-candidate-evidence-for-stale-running.md)に従い、
+RunPod `/health`の単発`running`分類を初回synthetic jobのready判定へ使わない。candidate完全一致、
+単一active Worker、provider job 0、異常state 0、同じWorker IDと`lastStartedAt`を3回連続で
+確認する。15秒pollの途中にjob、異常state、Worker交換、process再起動があれば0から数え直す。
+post-refreshではADR 0061の同一IDと起動時刻前進も重ねる。timeout時は安全なcounterだけを
+出力し、IDやprovider bodyを出さない。
+
+初回production bootstrapではOrchestratorの必須secretであるRunPod endpoint IDを先に
+確定する必要があるため、
+[ADR 0022](./adr/0022-bootstrap-production-dependencies-before-applications.md)に従って
+Cloudflare resource、固定imageとRunPod endpoint、secret、migration、Orchestrator、
+Webの順に準備する。active workerを0に保ち、Accessとbindingのread-backが完了するまで
+jobと利用者trafficを許可しない。
 
 rollback で古いコードが新しい schema を読めるよう、破壊的 migration は追加・移行・削除の複数リリースに分ける。RunPod image は tag だけでなく digest でも記録する。
 

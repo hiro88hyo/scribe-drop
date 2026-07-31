@@ -1,5 +1,5 @@
 import type { CompletedPart } from "@aws-sdk/client-s3";
-import type { TemporaryUploadCredentials } from "@scribe-drop/contracts";
+import type { AllowedMediaType, TemporaryUploadCredentials } from "@scribe-drop/contracts";
 
 export const MULTIPART_PART_SIZE_BYTES = 16 * 1024 * 1024;
 export const MULTIPART_QUEUE_SIZE = 3;
@@ -63,6 +63,7 @@ export interface MultipartTransport {
 
 export interface MultipartUploadInput {
   readonly concurrency?: number;
+  readonly contentType: AllowedMediaType;
   readonly credentials: TemporaryUploadCredentials;
   readonly file: File;
   readonly nowMilliseconds?: () => number;
@@ -242,7 +243,7 @@ export async function uploadFileMultipart(
     emitProgress(input.onProgress, 0, input.file.size, startedAtMilliseconds, nowMilliseconds);
     uploadId = (
       await transport.create({
-        contentType: input.file.type,
+        contentType: input.contentType,
         signal: operationController.signal,
       })
     ).uploadId;
@@ -265,7 +266,7 @@ export async function uploadFileMultipart(
         const end = Math.min(start + partSizeBytes, input.file.size);
         try {
           const result = await transport.uploadPart({
-            body: input.file.slice(start, end, input.file.type),
+            body: input.file.slice(start, end, input.contentType),
             contentLength: end - start,
             partNumber: partIndex + 1,
             signal: operationController.signal,

@@ -339,6 +339,7 @@ const INSERT_NOTIFICATION_SQL = `
   INSERT INTO notification_outbox (
     id,
     job_id,
+    job_version,
     status,
     attempt_count,
     next_attempt_at,
@@ -349,6 +350,11 @@ const INSERT_NOTIFICATION_SQL = `
   SELECT
     ?1,
     ?2,
+    (
+      SELECT version
+      FROM jobs
+      WHERE id = ?2
+    ),
     'PENDING',
     0,
     ?3,
@@ -360,7 +366,16 @@ const INSERT_NOTIFICATION_SQL = `
     AND job_id = ?2
     AND status = 'COMPLETED'
     AND completed_at = ?3
-  ON CONFLICT(job_id) DO NOTHING
+  ON CONFLICT(job_id) DO UPDATE SET
+    job_version = excluded.job_version,
+    status = 'PENDING',
+    attempt_count = 0,
+    next_attempt_at = excluded.next_attempt_at,
+    last_error = NULL,
+    created_at = excluded.created_at,
+    sent_at = NULL
+  WHERE notification_outbox.job_version IS NOT excluded.job_version
+    OR notification_outbox.status IN ('SENT', 'DEAD')
 `;
 
 const RECORD_COMPLETION_EVENT_SQL = `

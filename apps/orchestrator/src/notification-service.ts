@@ -1,4 +1,5 @@
 import type { StructuredLogger } from "@scribe-drop/observability";
+import { createUlid, type RandomBytes } from "@scribe-drop/domain";
 
 import { parseNotificationConfig, type NotificationConfigEnvironment } from "./config.js";
 import { createDiscordClient, type DiscordClient } from "./discord-client.js";
@@ -19,9 +20,11 @@ export interface NotificationEnvironment extends NotificationConfigEnvironment {
 
 export interface NotificationDependencies {
   readonly createClient?: (webhookUrl: string) => DiscordClient;
+  readonly createNotificationId?: (timestampMilliseconds: number) => string;
   readonly createRepository?: (database: D1Database) => NotificationOutboxRepository;
   readonly now?: () => Date;
   readonly random?: () => number;
+  readonly randomBytes?: RandomBytes;
 }
 
 export type NotificationDispatchResult =
@@ -37,7 +40,7 @@ function formatDuration(totalSeconds: number): string {
     : `${String(minutes)}分${String(seconds)}秒`;
 }
 
-function notificationContent(
+function completionNotificationContent(
   title: string,
   durationSeconds: number,
   executionMilliseconds: number | null,
@@ -53,6 +56,20 @@ function notificationContent(
     `処理時間: ${execution}`,
     `結果: ${resultUrl}`,
   ].join("\n");
+}
+
+function failureNotificationContent(title: string, resultUrl: string): string {
+  const safeTitle = title.replace(/[\r\n\t]+/gu, " ").trim();
+  return [
+    `「${safeTitle}」の文字起こしに失敗しました。`,
+    "",
+    "詳細を確認し、必要に応じて新しい試行で再実行してください。",
+    `詳細: ${resultUrl}`,
+  ].join("\n");
+}
+
+function defaultRandomBytes(length: number): Uint8Array {
+  return crypto.getRandomValues(new Uint8Array(length));
 }
 
 function retryAt(now: Date, attemptCount: number, random: () => number): string {
@@ -83,6 +100,14 @@ export async function dispatchNextNotification(
   const claimedAt = now();
   const repositoryFactory = dependencies.createRepository ?? createD1NotificationOutboxRepository;
   const repository = repositoryFactory(environment.SCRIBE_DROP_DB);
+  const createNotificationId =
+    dependencies.createNotificationId ??
+    ((timestampMilliseconds: number) =>
+      createUlid(timestampMilliseconds, dependencies.randomBytes ?? defaultRandomBytes));
+  await repository.enqueueNextTerminal(
+    createNotificationId(claimedAt.getTime()),
+    claimedAt.toISOString(),
+  );
   const delivery = await repository.claimNext(
     claimedAt.toISOString(),
     new Date(claimedAt.getTime() + NOTIFICATION_LEASE_MS).toISOString(),
@@ -96,14 +121,17 @@ export async function dispatchNextNotification(
     : config.webBaseUrl;
   const clientFactory =
     dependencies.createClient ?? ((webhookUrl: string) => createDiscordClient({ webhookUrl }));
-  const result = await clientFactory(config.discordWebhookUrl).send(
-    notificationContent(
-      delivery.title,
-      delivery.durationSeconds,
-      delivery.runpodExecutionMs,
-      `${baseUrl}/jobs/${encodeURIComponent(delivery.jobId)}`,
-    ),
-  );
+  const resultUrl = `${baseUrl}/jobs/${encodeURIComponent(delivery.jobId)}`;
+  const content =
+    delivery.terminalStatus === "COMPLETED"
+      ? completionNotificationContent(
+          delivery.title,
+          delivery.durationSeconds,
+          delivery.runpodExecutionMs,
+          resultUrl,
+        )
+      : failureNotificationContent(delivery.title, resultUrl);
+  const result = await clientFactory(config.discordWebhookUrl).send(content);
   if (result.outcome === "sent") {
     const marked = await repository.markSent(delivery, now().toISOString());
     if (!marked) {

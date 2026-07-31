@@ -16,7 +16,8 @@ import {
   renderR2LifecycleStagingConfig,
   renderOrchestratorStagingConfig,
   renderWebStagingConfig,
-} from "./cloudflare-staging-config.mjs";
+} from "./cloudflare-environment-config.mjs";
+import { verifyReleaseCandidate } from "./release-candidate.mjs";
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(scriptDirectory, "..");
@@ -32,16 +33,32 @@ const allowedTargets = new Set(["all", "orchestrator", "r2-cors", "r2-lifecycle"
 if (target === undefined || !allowedTargets.has(target)) {
   throw new Error("Expected config target: all, orchestrator, r2-cors, r2-lifecycle, or web");
 }
+const requiresOrchestratorPolicy = target === "all" || target === "orchestrator";
+const candidateDirectory = process.env.RELEASE_CANDIDATE_DIRECTORY;
+const runpodWorkerImage = requiresOrchestratorPolicy
+  ? candidateDirectory === undefined
+    ? process.env.SCRIBE_DROP_STAGING_RUNPOD_IMAGE
+    : verifyReleaseCandidate({
+        candidateDirectory: path.resolve(candidateDirectory),
+        expectedCommitSha: process.env.EXPECTED_COMMIT_SHA,
+        expectedReleaseVersion: process.env.EXPECTED_RELEASE_VERSION,
+      }).runpodWorker.image
+  : undefined;
 const identifiers = {
   accessAudience: process.env.SCRIBE_DROP_STAGING_ACCESS_AUDIENCE,
   accessTeamDomain: process.env.SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN,
   accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
   d1DatabaseId: process.env.SCRIBE_DROP_STAGING_D1_DATABASE_ID,
   auditRetentionDays: process.env.AUDIT_RETENTION_DAYS,
+  candidateMigrationsDirectory: process.env.SCRIBE_DROP_CANDIDATE_MIGRATIONS_DIR,
   multipartRetentionHours: process.env.MULTIPART_RETENTION_HOURS,
   orchestratorOrigin: process.env.SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN,
+  pagesAccessAudience: process.env.SCRIBE_DROP_STAGING_PAGES_ACCESS_AUDIENCE,
   resultRetentionDays: process.env.RESULT_RETENTION_DAYS,
+  runpodAllowedGpuTypeIds: process.env.SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS,
+  runpodWorkerImage,
   sourceRetentionDays: process.env.SOURCE_RETENTION_DAYS,
+  stagingE2eServiceTokenCommonName: process.env.SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME,
   webOrigin: process.env.SCRIBE_DROP_STAGING_WEB_ORIGIN,
 };
 

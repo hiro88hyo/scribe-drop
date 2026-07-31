@@ -1463,7 +1463,7 @@ wheels = [
 
 [[package]]
 name = "scribe-drop-runpod-worker"
-version = "0.0.0"
+version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "ctranslate2" },

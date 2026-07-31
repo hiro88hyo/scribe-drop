@@ -23,9 +23,11 @@ const TEST_PART_SIZE_BYTES = 5 * 1024 * 1024;
 interface FakeTransportObservations {
   aborts: string[];
   completedPartNumbers: number[];
+  createContentTypes: string[];
   creates: number;
   destroyed: number;
   maximumActiveParts: number;
+  uploadedBodyTypes: string[];
   uploadedPartNumbers: number[];
 }
 
@@ -36,9 +38,11 @@ function createFakeTransport(options?: { readonly failPartNumber?: number }): {
   const observations: FakeTransportObservations = {
     aborts: [],
     completedPartNumbers: [],
+    createContentTypes: [],
     creates: 0,
     destroyed: 0,
     maximumActiveParts: 0,
+    uploadedBodyTypes: [],
     uploadedPartNumbers: [],
   };
   let activeParts = 0;
@@ -54,7 +58,8 @@ function createFakeTransport(options?: { readonly failPartNumber?: number }): {
         observations.completedPartNumbers.push(...input.parts.map((part) => part.PartNumber ?? -1));
         return Promise.resolve({ eTag: '"complete-etag-3"' });
       },
-      create() {
+      create(input) {
+        observations.createContentTypes.push(input.contentType);
         observations.creates += 1;
         return Promise.resolve({ uploadId: "upload-id" });
       },
@@ -62,6 +67,7 @@ function createFakeTransport(options?: { readonly failPartNumber?: number }): {
         observations.destroyed += 1;
       },
       async uploadPart(input) {
+        observations.uploadedBodyTypes.push(input.body.type);
         observations.uploadedPartNumbers.push(input.partNumber);
         activeParts += 1;
         observations.maximumActiveParts = Math.max(observations.maximumActiveParts, activeParts);
@@ -87,6 +93,7 @@ describe("browser multipart uploader", () => {
     const { observations, transport } = createFakeTransport();
 
     const result = await uploadFileMultipart({
+      contentType: "audio/mp4",
       credentials: CREDENTIALS,
       file: createFile(1024),
       signal: new AbortController().signal,
@@ -113,6 +120,7 @@ describe("browser multipart uploader", () => {
 
     await uploadFileMultipart({
       concurrency: 3,
+      contentType: "audio/mp4",
       credentials: CREDENTIALS,
       file: createFile(TEST_PART_SIZE_BYTES * 3 + 1),
       nowMilliseconds: () => {
@@ -147,6 +155,7 @@ describe("browser multipart uploader", () => {
     const { observations, transport } = createFakeTransport({ failPartNumber: 2 });
 
     const error = await uploadFileMultipart({
+      contentType: "audio/mp4",
       credentials: CREDENTIALS,
       file: createFile(TEST_PART_SIZE_BYTES * 3 + 1),
       partSizeBytes: TEST_PART_SIZE_BYTES,
@@ -196,6 +205,7 @@ describe("browser multipart uploader", () => {
     };
 
     const upload = uploadFileMultipart({
+      contentType: "audio/mp4",
       credentials: CREDENTIALS,
       file: createFile(1024),
       signal: controller.signal,
@@ -209,5 +219,23 @@ describe("browser multipart uploader", () => {
       aborts: 1,
       destroyed: 1,
     });
+  });
+
+  it("uses the canonical request MIME type instead of an Android file alias", async () => {
+    const { observations, transport } = createFakeTransport();
+    const file = new File([new Uint8Array(1024)], "recording.m4a", {
+      type: "audio/mp4a-latm",
+    });
+
+    await uploadFileMultipart({
+      contentType: "audio/mp4",
+      credentials: CREDENTIALS,
+      file,
+      signal: new AbortController().signal,
+      transport,
+    });
+
+    expect(observations.createContentTypes).toEqual(["audio/mp4"]);
+    expect(observations.uploadedBodyTypes).toEqual(["audio/mp4"]);
   });
 });

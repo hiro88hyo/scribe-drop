@@ -9,11 +9,15 @@ Phase 4ではstaging RunPod endpointを作成し、初回workerのRTX 4090配置
 Ready、期限切れclaim拒否を確認した。Phase 5では5分Cronによるsubmission回収、
 status poll、finalize、cancelとnotification outboxを実装し、stagingの実browser smokeで
 RunPod terminal、manifest、Markdown・JSON・SRT、job完了とDiscord受信まで確認した。
+この単一GPU確認は過去checkpointであり、現行releaseのcapacity運用は
+[ADR 0049](./adr/0049-pin-observed-runpod-capacity.md)を正とする。
 Phase 7では認証済みPWA offline fallback、明示削除、capability安全期限までの延期、
 source・result・監査情報の独立retention、次回Cronでの物理削除を固定dummy dataだけで
 staging確認し、試験dataをD1/R2から全件清掃した。
-production environmentへのdeploymentは未実施である。この文書の手順は
-staging/production運用の必須runbookであり、placeholder IDのままremote操作してはならない。
+初回production試験deployは実施したが、同一candidateのstaging acceptanceを欠き、
+実M4Aが`INVALID_MEDIA`で失敗したためrelease evidenceとして無効化した。追加deployは
+ADR 0023のpromotion gateで停止している。この文書の手順はstaging/production運用の必須
+runbookであり、placeholder IDのままremote操作してはならない。
 
 RunPodが`INVALID_MEDIA`を返した場合、利用者dataを外部toolへ送らない。固定imageと同じ
 FFmpeg packageでcontainer、codec、duration、top-level JSON fieldを再現する。
@@ -22,9 +26,22 @@ FFmpeg packageでcontainer、codec、duration、top-level JSON fieldを再現す
 
 RunPod image revisionまたはprivate registry credentialを切り替える場合、実jobの投入前に
 workerが追跡外plan/stateと同じtemplate、image、registry credentialを使っていることを
-確認する。endpoint切替後もOutdated workerが旧imageを処理し、credential更新前に失敗した
-Unhealthy workerが残る場合がある。全jobがterminalであることをD1で確認してから対象
-workerだけをConsoleでterminateし、新workerの3項目一致を確認する。
+確認する。endpoint切替後も`EXITED` workerが旧imageを処理し得るため、
+[ADR 0047](./adr/0047-drain-stale-runpod-workers-before-promotion.md)のpromotionは
+worker上限を0にして全recordをdrainし、template切替後に上限を復旧する。Consoleでの
+手動terminateを通常手順にせず、復旧後の全workerについてtemplateとimageを照合する。
+
+`runpodctl serverless get --include-workers`はConsoleに実workerがない場合でも終了済み
+recordを返すことがある。`desiredStatus`が`EXITED`または`TERMINATED`ならactiveではないが、
+candidateとのtemplate/image不一致を許可しない。`RUNNING`、未知値、欠落値はdrain前に
+promotionを停止し、配列の長さやterminal statusだけで安全と判断しない。
+
+実staging lifecycle後のworker証跡では、promotion前のidle-only判定を使わない。
+[ADR 0055](./adr/0055-separate-worker-evidence-from-idle-promotion-preflight.md)の専用
+read-only verifierだけが、candidateと一致する最大1件の`RUNNING` Workerを許可する。
+未知status、candidateと異なるtemplate/image、複数の`RUNNING`、capacity driftは停止条件で
+ある。この検査はWorkerをterminateせず、成功・失敗にかかわらず後続の`always()` cleanupで
+`workersMin=0`を確認する。cleanup失敗時はacceptanceを発行せず、課金継続として扱う。
 
 staging smokeのためにactive workerを1へ上げた場合、完了後は0へ戻す。固定
 `runpodctl` 2.7.2は`--workers-min 0`を成功扱いにしても値を更新しないため、
@@ -34,6 +51,13 @@ Consoleでendpointを保存するとtemplateのregistry credentialが以前の�
 
 Queue、DLQ、D1、R2はenvironmentごとに分離する。操作前にGit branch、Wranglerの
 versionと認証先、Cloudflare account、environment、queue名を声出し確認する。
+使用tokenの役割と全permissionは
+[cloudflare-permissions.md](./cloudflare-permissions.md)を先に確認し、read-only確認の
+途中で権限を追加しない。
+Worker custom domainを含むdeployでは、固定WranglerがWorker upload後にzoneと既存routeを
+read-backする。`pnpm cloudflare:worker-route:verify:<environment>`が成功するまでD1、R2、
+RunPod、Worker、Pagesを変更しない。以前成功したtokenを置換する場合は、成功時の8権限と
+Account/Zone scopeからの差分を先に確認し、未記録のdashboard構成を棄却しない。
 
 ```bash
 pnpm exec wrangler --version
@@ -170,18 +194,104 @@ terminal status、artifact、cancel request、notification outboxを同じservic
 回収する。Cronが重複しても期待status、active attempt、generation、winner、versionを
 含むCASで一度だけ状態を進める。
 
+通知dispatcherは送信前に、削除されていない`COMPLETED`または`FAILED`で
+`notified_at IS NULL`のjobを1件だけoutboxへ登録する。失敗通知は内部例外、error message、
+provider応答、録音・文字起こし本文を含めず、title、安全な再実行案内、Access保護済み
+詳細リンクだけを送る。失敗通知済みjobをretryすると`notified_at`を消去し、次のterminal
+状態で既存outbox行を再初期化する。outboxの`job_version`と現在のjob CAS versionが
+異なる場合は、旧通知が`PENDING`または`SENDING`でもattempt数、backoff、errorを次の
+通知へ引き継がない。通知は最大で次の5分Cron境界まで遅延し得る。
+未送信通知を手動SQLで作成したり、Discord障害を理由にjob状態を戻したりしない。
+
+formal stagingでは[ADR 0059](./adr/0059-require-real-staging-failure-notification-acceptance.md)
+の合成破損M4Aを通常経路へ1件だけ投入する。exact `FAILED`、現在versionのoutbox `SENT`、
+job/outbox送信時刻を固定Wranglerのread-only remote D1 queryで確認する。job IDを
+consoleやartifactへ出さず、mode `0600`のrunner一時fileだけでE2E、検証、明示削除の間を
+受け渡す。D1 read-backは`--command --json`だけを使い、進捗行とquery結果を混在させる
+ingestion用`--file`を使用しない。正常job前は通常のqueue/in-progress/running 0とidle/ready
+candidate Worker、または[ADR 0062](./adr/0062-require-stable-candidate-evidence-for-stale-running.md)の
+3回安定したstale `running=1`を確認する。後者の次に
+投入できるのは合成fixtureだけである。失敗job前は[ADR 0061](./adr/0061-bind-post-refresh-prewarm-to-worker-restart-evidence.md)に従い、
+runner一時evidenceから同じWorker IDでのprocess再起動を確認する。job 0、candidate完全一致、異常state 0が
+揃い、同じID/起動時刻を3回連続観測した場合だけstale `running=1`を許容する。検証失敗時も
+fixture削除と`workersMin=0`復元を`always()`で行う。本番でこのfailure fixtureや手動SQLを
+使わない。job完了後はhandler outputの停止要求とSDK起動設定の両方でWorkerをrefreshし、
+旧Workerが残る場合は次fixtureを投入せずscale-to-zeroへ戻す。
+
+10分開始SLOはsubmissionをstaleと判定する境界であり、provider cancel完了時刻ではない。
+実際のFAILED遷移とcancel開始は次の5分Cron境界になり得る。利用者表示、alert、staging
+timeoutでは「10分ちょうどでprovider queueから消える」と扱わない。
+
 - `SUBMITTING`でprovider応答が不明なattemptは、`submission_outcome`が`unknown`または
   D1書込み失敗で未記録の`NULL`であり、claim期限切れ、winnerなし、
   submission記録なしを同時に満たす場合だけ`FAILED`へ収束させる。同じattemptを
   `/run`へ再送しない。
+- `accepted`のまま10分以内にwinner claimへ進まないattemptは、active attemptと
+  winner不在をCASで確認して`FAILED`へ収束させる。記録済みのexact RunPod job IDを
+  cancelし、成功またはnot-foundをterminal観測として保存する。cancelが不確定なら
+  `job.submission_cancel_deferred`を記録し、FAILEDを戻さず次回Cronで再試行する。
+- `job.submission_start_slo_exceeded`はGPU供給またはendpoint構成のrelease blockerである。
+  claim tokenを15分より延長したり、workflowを自動retryしたりして回避しない。
+- 同eventはproductionでも利用者影響として扱う。RunPod `/health`の`inQueue`または
+  `throttled`増加と、`ready=0`かつ`running=0`を照合する。endpointのGPU候補とtemplateを
+  公式APIでread-backし、固定planと不一致なら新規submissionを増やさない。
+- claimはjob statusのworker IDとPod詳細を使い、endpoint、RUNNING、candidate image、
+  許可GPU、Secure Cloudをwinner CAS前に照合する。照合不能または不一致は通常の
+  `CLAIM_REJECTED`としてfail closedにし、R2 URLを発行しない。provider body、worker ID、
+  Pod IDをlogへ追加して調査しない。RunPod planとCloudflare bindingのread-backを先に確認する。
+- inventory preflightは固定GPU候補がすべてSecure Cloud専用かつavailableであることを
+  確認する。stock tierは運用シグナルでありreleaseの合否には使わない。条件を満たさない
+  場合はworkflowを開始せず、同じjobやworkflowを繰り返して供給待ちを隠さない。
+- inventoryのavailableは実割り当てを保証しない。staging acceptanceは
+  [ADR 0051](./adr/0051-prewarm-staging-before-job-creation.md)に従い、job作成前に
+  candidate Workerを最大8分prewarmする。ready evidenceを得られなければjobを作らず、
+  `workersMin=0`のexact read-backまで確認する。cleanup失敗は課金継続のalert対象とする。
+- [ADR 0054](./adr/0054-use-explicit-datacenters-for-staging-recovery.md)のstaging recoveryは
+  明示した2 data centerとCompliance `Any`を使用する。Compliance filterはSecure Cloud
+  切替ではないため、実Workerの`secureCloud=true` attestationを必ず維持する。追跡対象plan
+  とpromotionはRESTのGPU情報とConsole-equivalent GraphQLのdata center/compliance情報を
+  結合検証し、read-back不能またはdrift時はmutation前に停止する。recovery endpointは
+  canonical化し、Cloudflare runtimeとGitHub staging Environmentを同じIDへ同期済みである。
+  旧endpointはsupport証跡名のまま、調査中にprewarmやjobを行わず、両endpointの
+  `workersMin=0`を維持する。
+- productionは
+  [ADR 0056](./adr/0056-require-production-capacity-before-promotion.md)に従い、promotion前に
+  GPU順序、data center集合、complianceを固定planへ完全一致させる。production preflightの
+  `capacity update pending`は許可しない。事前capacity移行はactive jobと
+  running/initializing Workerが0、rollback用の旧capacityが取得済み、固定GPUがavailableで
+  ある場合だけ明示承認後に行う。idle/ready Workerは上限0へdrainできるが、capacity
+  mutation前にhealth上も0へ収束する必要がある。
+  [ADR 0057](./adr/0057-split-runpod-capacity-mutations.md)に従い、GraphQLのdata center更新と
+  RESTのGPU更新を各1回だけ送信する。旧GPU保持の中間read-backと最終完全一致をそれぞれ
+  最大30秒で確認し、成立しなければ旧data centerと旧GPUへ戻す。
+  事前移行またはrollbackが未確認の状態でpromotion workflowを起動しない。
+  全local gateとread-only確認後、明示承認を得た場合だけ次を1回実行する。
+
+  ```bash
+  pnpm run runpod:capacity:prepare:production -- --confirm-production-capacity-migration
+  ```
+
+  commandはGitHub Actions内の実行を拒否し、追跡外production planを使用する。成功表示だけを
+  根拠にせず、続けて通常のproduction preflightでcapacity完全一致、active job/Worker 0、
+  scale-to-zeroを独立read-backする。capacity更新とrollbackがともに失敗した場合は
+  Worker上限0を維持するため、復旧確認なしに上限を戻したりworkflowを起動したりしない。
+  endpoint APIに`EXITED`または`TERMINATED` Worker履歴が残っても、それだけをactiveとは
+  判定しない。一方、drain後もhealthのidle/initializing/ready/runningが最大30秒で0へ
+  収束しなければcapacityを変更せず、Worker上限を復元して停止する。
+  drain中に新しいjobがqueueへ入った場合は旧capacityへ戻してからWorker上限を復元し、
+  そのjobが新旧capacityの狭間で起動しないようにする。
+
+- 全候補が一時的に不足しても、利用者画面は`SUBMITTING`を「GPU起動中」と表示し、開始SLO
+  超過後は`FAILED`と手動retryを提供する。同じattemptの自動再投入やclaim TTL延長はしない。
 - 利用者のretryは`FAILED` jobに新しいgeneration、attempt、token、result prefixを作る。
   RunPod Consoleのprovider-side retryは使わない。
 - cancelはWeb APIが`CANCEL_REQUESTED`を記録し、Cronがwinnerを再確認してRunPod
   `/cancel`を呼ぶ。RunPod API keyをWebへ複製しない。
 - deleteはWeb APIがowner条件とversion CASで即時に論理削除し、heartbeatを失効させる。
-  Cronは既知RunPod jobをcancelし、最後のR2 capabilityの2時間と5分graceが過ぎるまで
-  sourceやresultを消さない。期限後はD1由来のexact source keyと全attempt prefixを
-  繰り返しlist/deleteし、R2不存在を確認してからD1親rowを物理削除する。
+  Cronは`deletion_not_before`の前後にかかわらず既知RunPod jobを先にcancelする。cancelが
+  acceptedまたはnot-foundでなければD1を保持してbackoffする。最後のR2 capabilityの2時間と
+  5分graceが過ぎるまでsourceやresultを消さない。期限後はD1由来のexact source keyと
+  全attempt prefixを繰り返しlist/deleteし、R2不存在を確認してからD1親rowを物理削除する。
 - retentionはterminal jobだけを対象に、source、attempt result、監査情報を7日、90日、
   180日の独立したcutoffで回収する。値はenvironment変数で変更できるが、
   `source <= result <= audit`を崩さない。監査期限はuser deletionと同じ物理削除へ渡す。
@@ -207,6 +317,11 @@ terminal status、artifact、cancel request、notification outboxを同じservic
    行わない。
 5. `job.deletion_completed`後にD1親子rowがなく、対象exact key/prefixがなく、
    unrelated objectが残ることを固定dummy dataだけで確認する。
+
+D1親rowが残っている限り、provider job IDを失うRunPod queue全体の手動purgeは行わない。
+過去の不具合ですでにD1だけが消えた孤児jobを回収する場合に限り、対象environmentで
+`inQueue=1`、`inProgress=0`、active worker 0、active D1 job 0をread-onlyで確認し、
+別reviewを経た一回限りの回復操作として扱う。通常運用や再試行手順には含めない。
 
 R2 lifecycleはapplication cleanupが長期間失敗した場合の最終防衛であり、利用者deleteの
 完了判定には使わない。incomplete multipartはWorkers bindingから列挙できないため、

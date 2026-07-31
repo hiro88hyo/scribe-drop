@@ -21,6 +21,10 @@ import {
   type ClaimContext,
   type RunpodControlRepository,
 } from "./runpod-control-repository.js";
+import {
+  createRunpodPlacementVerifier,
+  type RunpodPlacementVerifier,
+} from "./runpod-placement-verifier.js";
 
 export const HEARTBEAT_TOKEN_TTL_MS = RUNPOD_JOB_TTL_MS;
 
@@ -50,7 +54,11 @@ export interface RunpodClaimEnvironment {
   readonly CLOUDFLARE_ACCOUNT_ID: string;
   readonly R2_ACCESS_KEY_ID: string;
   readonly R2_SECRET_ACCESS_KEY: string;
+  readonly RUNPOD_ALLOWED_GPU_IDS: string;
+  readonly RUNPOD_API_KEY: string;
+  readonly RUNPOD_ENDPOINT_ID: string;
   readonly RUNPOD_INTERNAL_BASE_URL: string;
+  readonly RUNPOD_WORKER_IMAGE: string;
   readonly SCRIBE_DROP_DB: D1Database;
 }
 
@@ -58,6 +66,9 @@ export interface RunpodClaimDependencies {
   readonly createEventId?: (timestampMilliseconds: number) => string;
   readonly createR2CapabilityIssuer?: (environment: RunpodClaimEnvironment) => R2CapabilityIssuer;
   readonly createRepository?: (database: D1Database) => RunpodControlRepository;
+  readonly createRunpodPlacementVerifier?: (
+    environment: RunpodClaimEnvironment,
+  ) => RunpodPlacementVerifier;
   readonly logger: StructuredLogger;
   readonly now?: () => Date;
   readonly randomBytes?: CapabilityRandomBytes & RandomBytes;
@@ -138,6 +149,27 @@ export async function claimRunpodExecution(
   }
 
   if (context.attemptStatus !== "SUBMITTING" || context.jobStatus !== "SUBMITTING") {
+    dependencies.logger.warn("runpod_claim_rejected", {
+      attemptId: request.attemptId,
+      errorCode: "CLAIM_REJECTED",
+      jobId: request.jobId,
+    });
+    return { kind: "rejected" };
+  }
+
+  const placementVerifierFactory =
+    dependencies.createRunpodPlacementVerifier ??
+    ((verifierEnvironment: RunpodClaimEnvironment) =>
+      createRunpodPlacementVerifier({
+        allowedGpuTypeIds: verifierEnvironment.RUNPOD_ALLOWED_GPU_IDS.split(",").map((value) =>
+          value.trim(),
+        ),
+        apiKey: verifierEnvironment.RUNPOD_API_KEY,
+        endpointId: verifierEnvironment.RUNPOD_ENDPOINT_ID,
+        expectedImage: verifierEnvironment.RUNPOD_WORKER_IMAGE,
+      }));
+  const placement = await placementVerifierFactory(environment).verify(request.runpodJobId);
+  if (placement.outcome !== "verified") {
     dependencies.logger.warn("runpod_claim_rejected", {
       attemptId: request.attemptId,
       errorCode: "CLAIM_REJECTED",
