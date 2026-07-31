@@ -211,7 +211,8 @@ consoleやartifactへ出さず、mode `0600`のrunner一時fileだけでE2E、�
 ingestion用`--file`を使用しない。正常/失敗jobの各作成前に
 queue/in-progress/running 0とidle/ready candidate Workerを確認する。検証失敗時も
 fixture削除と`workersMin=0`復元を`always()`で行う。本番でこのfailure fixtureや手動SQLを
-使わない。
+使わない。job完了後はhandler outputの停止要求とSDK起動設定の両方でWorkerをrefreshし、
+旧Workerが残る場合は次fixtureを投入せずscale-to-zeroへ戻す。
 
 10分開始SLOはsubmissionをstaleと判定する境界であり、provider cancel完了時刻ではない。
 実際のFAILED遷移とcancel開始は次の5分Cron境界になり得る。利用者表示、alert、staging

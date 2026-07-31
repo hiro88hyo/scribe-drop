@@ -67,7 +67,7 @@
 ### Worker runtimeとsupply chain
 
 - production endpointはSecure Cloudを優先し、Flex worker、active workers 0、max workers 1、GPU 1、Network Volumeなし、永続diskなしとする。Secure Cloudを利用できない場合はdeployを暗黙に続行せず、残余リスクと期限を別ADRで承認する。
-- FlashBootは無効化する。固定modelをimageに内包し、handler完了時はRunPod SDKのworker refreshを使ってworker stateを破棄する。通常の`finally`でもtask固有`/tmp`を削除し、二重にdata残存を抑制する。
+- FlashBootは無効化する。固定modelをimageに内包し、handler outputと`serverless.start`設定の両方でRunPod SDKのworker refreshを要求してworker stateを破棄する。通常の`finally`でもtask固有`/tmp`を削除し、二重にdata残存を抑制する。詳細は[ADR 0060](./0060-terminate-runpod-job-loop-after-refresh.md)に従う。
 - model、revision、Python dependency、faster-whisper、CTranslate2、CUDA、base image digestを固定する。runtime download、package install、code fetchを禁止し、offline modeを検証する。
 - CIでSBOM、container scan、Python dependency auditを生成する。high/critical findingを例外扱いにする場合は影響、補償制御、除去条件、期限をADRへ残す。
 - outbound URLはHTTPS、host、port、userinfo、resolved IPを検証し、redirectを無効化する。localhost、loopback、private、link-local、metadata address、許可外hostを拒否する。DNS validationと実接続の間のrebindingは残余リスクであり、可能ならcustom resolver/transportまたはplatform egress制御で接続先IPも検証する。

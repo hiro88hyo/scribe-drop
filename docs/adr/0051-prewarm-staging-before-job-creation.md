@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-07-29
 - Refines: ADR 0043、ADR 0050のstaging release gate
-- Refined by: [ADR 0059](./0059-require-real-staging-failure-notification-acceptance.md)
+- Refined by: [ADR 0059](./0059-require-real-staging-failure-notification-acceptance.md)、[ADR 0060](./0060-terminate-runpod-job-loop-after-refresh.md)
 
 ## Context
 
@@ -53,6 +53,8 @@ cleanup後にprovider queueからも消えた。ADR 0043の開始SLOは10分だ�
 ADR 0059以降は`ready/running`条件を厳格化し、各synthetic job直前にprovider queueと
 in-progress jobが0、running Workerが0、idleまたはready Workerが1件以上であることを
 必須とする。成功job後のWorker refreshを考慮し、失敗fixture前にも同じprewarmを再実行する。
+ADR 0060以降はhandler outputの停止要求だけでなく、SDK起動設定でもrefreshを固定し、
+result送信後にjob取得loopをローカル終了する。交換Workerのreadiness条件は緩めない。
 
 ## Consequences
 

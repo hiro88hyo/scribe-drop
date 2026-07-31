@@ -407,7 +407,7 @@ temporary credentialのexact-object multipart/abort成功とaction/object拒否�
 - faster-whisperを固定設定で実行し、segment境界でcancelとheartbeat状態を確認する。
 - Markdownは利用者titleをRunPodへ渡さずgeneric headingで生成する。JSON、SRTと合わせてSHA-256とbyte sizeを算出する。
 - 成果物をPUTした後、manifestを最後にPUTする。
-- `finally`で一時ディレクトリを削除し、handler returnのworker refreshでworker stateを破棄する。
+- `finally`で一時ディレクトリを削除し、handler returnと`serverless.start`設定のworker refreshでworker stateを破棄する。
 - allowlist方式の共通log sanitizerを使い、URL、token、Authorization、filename、title、email、本文、segment、HTTP response body、完全なFFmpeg command/stderrを出力しない。
 - 最外層で例外をallowlist error codeへ正規化し、RunPod outputへraw exception、traceback、URL、path、本文を含めない。成功時もjob/attempt ID、status、duration、detected language、segment count、manifestWrittenだけを返す。
 - CIでSBOM、container vulnerability scan、Python dependency auditを生成する。high/critical findingの例外はADRへ期限と除去条件を残す。
@@ -427,7 +427,7 @@ temporary credentialのexact-object multipart/abort成功とaction/object拒否�
 - サイズ・時間・stream上限をテストする。
 - cancel と heartbeat 障害の方針がテストされている。
 - 成果物が一部失敗した場合に manifest は作成されない。
-- 正常、失敗、cancelのすべてで一時ファイルが削除され、worker refreshが要求される。
+- 正常、失敗、cancelのすべてで一時ファイルが削除され、handler outputとSDK起動設定の両方でworker refreshが要求される。
 - RunPod request、status、output、stdout、stderrにtoken、署名付きURL、元filename、本文、FFmpeg pathが含まれない。
 - modelはimage内の固定revisionだけからloadされ、networkを切ったcontainer testでも起動できる。
 - endpoint設定は[ADR 0012](./adr/0012-runpodctl-staging-verification-boundary.md)に従い、

@@ -186,6 +186,8 @@ SOURCE_MUTATEDは即時失敗とし、COMPLETEDだけを長時間待たない。
 `workersMin=1`を一時設定し、candidate template/imageのWorkerとhealth readinessを最大8分
 だけ待つ。provider queue/in-progress/runningは0、idleまたはready Workerは1件以上を
 必須とする。成功jobのWorker refresh後、失敗fixture前にも同じprewarmを再実行する。
+Worker refreshはhandler outputの`stopPod`要求に加え、固定SDKの起動設定でresult送信後に
+job取得loopをローカル終了する。entrypoint testで設定keyとboolean値を完全一致検証する。
 idleにならなければsynthetic jobを作らず失敗し、prewarm内部とworkflowの
 `always()` cleanupの両方で`workersMin=0`をexact read-backする。candidate Workerの
 post-lifecycle evidenceとscale-to-zero復元が成功した後だけacceptanceを発行する。

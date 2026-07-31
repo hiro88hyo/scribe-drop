@@ -34,7 +34,8 @@ environment全体で1件のsubmission gate、`accepted`・`rejected`・`unknown`
 RunPod WorkerはPydantic strict入力、claim-first実行、exact hostとpublic DNS検証、
 検証済みIPへの接続固定、redirect拒否、streaming size/ETag照合、ffprobe、
 faster-whisperのclaim後遅延load、artifact integrity、manifest-last、`/tmp` cleanup、
-worker refreshまでlocal実装・テスト済みである。RunPod Workerはamd64 CUDA/cuDNN
+handler outputの停止要求とSDK job loopのローカル終了を組み合わせたworker refreshまで
+local実装・テスト済みである。RunPod Workerはamd64 CUDA/cuDNN
 base digest、Ubuntu snapshot、Python/FFmpeg package、uv build image、model commitと
 5 fileの全hashを固定したmulti-stage imageを実build済みである。UID 10001、
 networkなし、read-only root filesystemでmodel/依存/native import/ffprobe versionと
