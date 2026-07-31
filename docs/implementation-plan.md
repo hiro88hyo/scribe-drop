@@ -661,7 +661,9 @@ terminal失敗通知を変更したcandidateでは
 [ADR 0059](./adr/0059-require-real-staging-failure-notification-acceptance.md)に従い、
 正常な合成M4Aだけでなく、合成破損M4Aのexact `FAILED`、現在versionのoutbox `SENT`、
 fixture削除、scale-to-zero復元をformal stagingの同じacceptance jobで必須にする。
-最初のjob直前はqueue/in-progress/running 0とidle/ready candidate Workerを再確認する。
+最初のjob直前は通常のqueue/in-progress/running 0とidle/ready candidate Worker、または
+[ADR 0062](./adr/0062-require-stable-candidate-evidence-for-stale-running.md)の3回安定した
+stale `running=1`を再確認する。stale health受理後に投入できるのは合成fixtureだけとする。
 成功job後は[ADR 0061](./adr/0061-bind-post-refresh-prewarm-to-worker-restart-evidence.md)の
 runner一時証拠でWorker process再起動を確認し、job 0と異常state 0が揃う場合だけstaleな
 `running=1`を受理する。再起動未確認のまま失敗fixtureを投入しない。
@@ -753,8 +755,15 @@ bounded convergence待ちへ含める回帰testを追加し、再度全local gat
 終了と同じWorker枠でのcontainer再起動はWorker ID一致と`lastStartedAt`の前進で証明し、IDと時刻は
 mode `0600`のrunner一時fileだけでstep間連携する。candidate完全一致、単一active Worker、
 provider job 0、initializing/throttled/unhealthy 0が揃う二回目だけ、RunPod healthのstale
-`running=1`を許容する。初回prewarm、再起動未確認、busy/unknown状態ではfail closedし、
+`running=1`を許容する。ADR 0061時点では初回prewarm、再起動未確認、busy/unknown状態をfail closedし、
 全結果でevidence削除とscale-to-zeroを行う。
+
+[ADR 0062](./adr/0062-require-stable-candidate-evidence-for-stale-running.md)に従い、
+RunPod `/health`の単発`running`分類を初回synthetic jobのready判定へ使わない。candidate完全一致、
+単一active Worker、provider job 0、異常state 0、同じWorker IDと`lastStartedAt`を3回連続で
+確認する。15秒pollの途中にjob、異常state、Worker交換、process再起動があれば0から数え直す。
+post-refreshではADR 0061の同一IDと起動時刻前進も重ねる。timeout時は安全なcounterだけを
+出力し、IDやprovider bodyを出さない。
 
 初回production bootstrapではOrchestratorの必須secretであるRunPod endpoint IDを先に
 確定する必要があるため、

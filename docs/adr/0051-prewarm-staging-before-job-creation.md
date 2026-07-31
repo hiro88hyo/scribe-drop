@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-07-29
 - Refines: ADR 0043、ADR 0050のstaging release gate
-- Refined by: [ADR 0059](./0059-require-real-staging-failure-notification-acceptance.md)、[ADR 0060](./0060-terminate-runpod-job-loop-after-refresh.md)、[ADR 0061](./0061-bind-post-refresh-prewarm-to-worker-restart-evidence.md)
+- Refined by: [ADR 0059](./0059-require-real-staging-failure-notification-acceptance.md)、[ADR 0060](./0060-terminate-runpod-job-loop-after-refresh.md)、[ADR 0061](./0061-bind-post-refresh-prewarm-to-worker-restart-evidence.md)、[ADR 0062](./0062-require-stable-candidate-evidence-for-stale-running.md)
 
 ## Context
 
@@ -58,6 +58,8 @@ result送信後にjob取得loopをローカル終了する。交換Workerのread
 ADR 0061以降の二回目prewarmは初回Worker IDと起動時刻をrunner一時fileへ保持し、
 `lastStartedAt`の前進を必須にする。このrefresh証拠とjob 0、candidate完全一致、異常state 0が
 揃う場合だけ、RunPod healthのstale `running=1`をready相当として限定的に受理する。
+ADR 0062以降は初回を含むstale `running=1`に同じWorker IDと起動時刻の3回連続観測を要求する。
+初回で受理後に投入できるのは利用者dataではなく合成release fixtureだけとする。
 
 ## Consequences
 

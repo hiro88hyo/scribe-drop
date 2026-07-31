@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-07-31
 - Refines: ADR 0051、ADR 0059、ADR 0060
+- Refined by: [ADR 0062](./0062-require-stable-candidate-evidence-for-stale-running.md)
 
 ## Context
 

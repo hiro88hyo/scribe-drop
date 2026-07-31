@@ -262,11 +262,16 @@ template/imageだけでなく、endpoint invariantとREST、Console-equivalent G
 GPU/data center/complianceも再検証する。専用verifierはscale-to-zero cleanupの代替ではなく、
 成否にかかわらず最後に`workersMin=0`をexact read-backする。
 
+初回を含むprewarmは[ADR 0062](./adr/0062-require-stable-candidate-evidence-for-stale-running.md)
+に従う。通常のidle/readyに加え、candidate完全一致、job 0、異常state 0、同じWorker IDと
+`lastStartedAt`を3回連続確認したstale `running=1`だけを受理できる。初回の次に投入できるのは
+合成release fixtureだけであり、利用者dataのadmissionへ流用しない。
+
 正常job後の二回目prewarmは[ADR 0061](./adr/0061-bind-post-refresh-prewarm-to-worker-restart-evidence.md)
 に従う。最初のready WorkerのIDと`lastStartedAt`をmode `0600`のrunner一時fileへ保存し、
 次job前に同じWorker IDと起動時刻の前進を確認する。job 0、candidate完全一致、単一active Worker、
-initializing/throttled/unhealthy 0が揃う場合だけ、RunPod healthのstale `running=1`を
-ready相当として扱う。初回起動ではこの例外を使わず、evidenceはcooldownで削除する。
+initializing/throttled/unhealthy 0に加え、stale healthではADR 0062の3回連続確認を要求する。
+evidenceはcooldownで削除する。
 
 digest付きimageから`--serverless` templateを新規作成する。Serverless templateは1 endpoint
 にだけ関連付けられ、persistent volumeをサポートしない。初期container diskは30 GiB、

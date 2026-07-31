@@ -184,16 +184,21 @@ SOURCE_MUTATEDは即時失敗とし、COMPLETEDだけを長時間待たない。
 自動retryせず、原因と供給状況を確認するまで次のworkflowを起動しない。
 [ADR 0051](./adr/0051-prewarm-staging-before-job-creation.md)に従い、upload前に
 `workersMin=1`を一時設定し、candidate template/imageのWorkerとhealth readinessを最大8分
-だけ待つ。初回はprovider queue/in-progress/running 0、idleまたはready Worker 1件以上を
-必須とする。成功jobのWorker refresh後、失敗fixture前には[ADR 0061](./adr/0061-bind-post-refresh-prewarm-to-worker-restart-evidence.md)の
+だけ待つ。通常はprovider queue/in-progress/running 0、idleまたはready Worker 1件以上を
+必須とする。[ADR 0062](./adr/0062-require-stable-candidate-evidence-for-stale-running.md)に従い、
+`idle=0, ready=0, running=1`だけはcandidate完全一致、job 0、異常state 0、同じWorker IDと
+起動時刻の3回連続観測後に受理できる。初回の次に投入できるのは合成M4Aだけである。
+成功jobのWorker refresh後、失敗fixture前には[ADR 0061](./adr/0061-bind-post-refresh-prewarm-to-worker-restart-evidence.md)の
 専用prewarmを実行する。初回Worker IDと`lastStartedAt`はmode `0600`のrunner一時fileだけに
-保持し、同じWorker ID、再起動時刻の前進、candidate完全一致、provider job 0、異常state 0を必須にする。
-この条件が揃う二回目だけ、staleな`running=1`をready相当として受理できる。
+保持し、同じWorker ID、再起動時刻の前進、candidate完全一致、provider job 0、異常state 0、
+stale healthの場合は追加の3回連続観測を必須にする。
 Worker refreshはhandler outputの`stopPod`要求に加え、固定SDKの起動設定でresult送信後に
 job取得loopをローカル終了する。entrypoint testで設定keyとboolean値を完全一致検証する。
 いずれのready条件も満たさなければsynthetic jobを作らず失敗し、prewarm内部とworkflowの
 `always()` cleanupの両方で`workersMin=0`をexact read-backする。candidate Workerの
 post-lifecycle evidenceとscale-to-zero復元が成功した後だけacceptanceを発行する。
+timeout errorは最後のmode、Worker/job数、health counter、連続確認数だけを出力し、ID、
+時刻、image、provider bodyを含めない。
 [ADR 0059](./adr/0059-require-real-staging-failure-notification-acceptance.md)のfailure
 notification確認またはfixture cleanupが失敗した場合も、`always()` cleanupで
 failure fixture削除とscale-to-zeroを試みる。remote D1 read-backは固定Wranglerの

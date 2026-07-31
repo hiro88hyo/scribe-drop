@@ -5,6 +5,7 @@ import {
   cooldownStagingRunpodCandidate,
   prewarmStagingRunpodCandidate,
   STAGING_RUNPOD_PREWARM_TIMEOUT_MS,
+  STAGING_RUNPOD_STALE_RUNNING_CONFIRMATIONS,
 } from "./runpod-active-worker.mjs";
 import { createRunpodStagingPlan } from "./runpod-environment-config.mjs";
 
@@ -136,6 +137,7 @@ test("waits for queued and running work to clear before returning", async () => 
 
 test("accepts stale running health only after an evidenced worker restart", async () => {
   let currentTime = 0;
+  let healthReads = 0;
   let workersMin = 1;
   const previousWorker = {
     id: "worker_candidate",
@@ -155,6 +157,7 @@ test("accepts stale running health only after an evidenced worker restart", asyn
         );
       },
       getHealth() {
+        healthReads += 1;
         return Promise.resolve(health("running"));
       },
       now: () => currentTime,
@@ -171,6 +174,7 @@ test("accepts stale running health only after an evidenced worker restart", asyn
 
   assert.equal(result.id, "worker_candidate");
   assert.equal(result.lastStartedAtMs, Date.parse("2026-07-31 11:46:56.648 +0000 UTC"));
+  assert.equal(healthReads, STAGING_RUNPOD_STALE_RUNNING_CONFIRMATIONS);
 });
 
 test("rejects stale running health when the worker process did not restart", async () => {
@@ -254,8 +258,73 @@ test("rejects stale running health from a different worker slot", async () => {
   assert.equal(workersMin, 0);
 });
 
-test("does not accept running health without prior worker evidence", async () => {
+test("accepts stable running health before the first synthetic job", async () => {
   let currentTime = 0;
+  let healthReads = 0;
+  let workersMin = 1;
+  const result = await prewarmStagingRunpodCandidate(input, {
+    getCapacity() {
+      return Promise.resolve(capacity());
+    },
+    getEndpoint() {
+      return Promise.resolve(endpoint(workersMin));
+    },
+    getHealth() {
+      healthReads += 1;
+      return Promise.resolve(health("running"));
+    },
+    now: () => currentTime,
+    setWorkersMin(request) {
+      workersMin = request.workersMin;
+      return Promise.resolve();
+    },
+    sleep(milliseconds) {
+      currentTime += milliseconds;
+      return Promise.resolve();
+    },
+  });
+
+  assert.equal(result.id, "worker_candidate");
+  assert.equal(healthReads, STAGING_RUNPOD_STALE_RUNNING_CONFIRMATIONS);
+  assert.equal(workersMin, 1);
+});
+
+test("restarts stable running confirmation after queued work appears", async () => {
+  let currentTime = 0;
+  let healthReads = 0;
+  const result = await prewarmStagingRunpodCandidate(input, {
+    getCapacity() {
+      return Promise.resolve(capacity());
+    },
+    getEndpoint() {
+      return Promise.resolve(endpoint(1));
+    },
+    getHealth() {
+      healthReads += 1;
+      return Promise.resolve(
+        health("running", {
+          inProgress: 0,
+          inQueue: healthReads === 2 ? 1 : 0,
+        }),
+      );
+    },
+    now: () => currentTime,
+    setWorkersMin() {
+      return Promise.resolve();
+    },
+    sleep(milliseconds) {
+      currentTime += milliseconds;
+      return Promise.resolve();
+    },
+  });
+
+  assert.equal(result.id, "worker_candidate");
+  assert.equal(healthReads, STAGING_RUNPOD_STALE_RUNNING_CONFIRMATIONS + 2);
+});
+
+test("does not accept running health while the worker keeps restarting", async () => {
+  let currentTime = 0;
+  let endpointReads = 0;
   let workersMin = 1;
   await assert.rejects(
     prewarmStagingRunpodCandidate(input, {
@@ -263,7 +332,13 @@ test("does not accept running health without prior worker evidence", async () =>
         return Promise.resolve(capacity());
       },
       getEndpoint() {
-        return Promise.resolve(endpoint(workersMin));
+        endpointReads += 1;
+        const seconds = String(endpointReads % 60).padStart(2, "0");
+        return Promise.resolve(
+          endpoint(workersMin, {
+            lastStartedAt: `2026-07-31 11:45:${seconds}.960 +0000 UTC`,
+          }),
+        );
       },
       getHealth() {
         return Promise.resolve(health("running"));
@@ -278,7 +353,7 @@ test("does not accept running health without prior worker evidence", async () =>
         return Promise.resolve();
       },
     }),
-    /prewarm failed; scale-to-zero was restored/u,
+    /stableRunning=1/u,
   );
   assert.equal(workersMin, 0);
 });
@@ -409,7 +484,14 @@ test("restores scale-to-zero when no candidate worker becomes ready", async () =
         return Promise.resolve();
       },
     }),
-    /prewarm failed; scale-to-zero was restored/u,
+    (error) => {
+      assert.match(
+        error.message,
+        /mode=initial,active=1,jobsInProgress=0,jobsInQueue=0,idle=0,ready=0,running=0,initializing=1,throttled=0,unhealthy=0,refreshConfirmed=true,stableRunning=0/u,
+      );
+      assert.doesNotMatch(error.message, /worker_candidate|template_candidate|sha256/u);
+      return true;
+    },
   );
 
   assert.equal(currentTime, STAGING_RUNPOD_PREWARM_TIMEOUT_MS);

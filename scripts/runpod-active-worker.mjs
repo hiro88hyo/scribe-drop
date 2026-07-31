@@ -6,10 +6,35 @@ import {
 
 export const STAGING_RUNPOD_PREWARM_TIMEOUT_MS = 8 * 60 * 1_000;
 export const STAGING_RUNPOD_PREWARM_POLL_INTERVAL_MS = 15_000;
+export const STAGING_RUNPOD_STALE_RUNNING_CONFIRMATIONS = 3;
 
 const terminalWorkerStatuses = new Set(["EXITED", "TERMINATED"]);
 const resourceIdPattern = /^[A-Za-z0-9_-]{3,128}$/u;
 const runpodWorkerStartPattern = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{1,9} [+-]\d{4} UTC$/u;
+
+class RunpodPrewarmReadinessTimeoutError extends Error {
+  constructor(observation) {
+    const details =
+      observation === undefined
+        ? "observation=unavailable"
+        : [
+            `mode=${observation.mode}`,
+            `active=${String(observation.active)}`,
+            `jobsInProgress=${String(observation.jobsInProgress)}`,
+            `jobsInQueue=${String(observation.jobsInQueue)}`,
+            `idle=${String(observation.idle)}`,
+            `ready=${String(observation.ready)}`,
+            `running=${String(observation.running)}`,
+            `initializing=${String(observation.initializing)}`,
+            `throttled=${String(observation.throttled)}`,
+            `unhealthy=${String(observation.unhealthy)}`,
+            `refreshConfirmed=${String(observation.refreshConfirmed)}`,
+            `stableRunning=${String(observation.stableRunning)}`,
+          ].join(",");
+    super(`RunPod staging candidate worker did not become ready (${details})`);
+    this.name = "RunpodPrewarmReadinessTimeoutError";
+  }
+}
 
 function requireRecord(value, name) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -203,6 +228,9 @@ export async function prewarmStagingRunpodCandidate(input, dependencies) {
   if (!Number.isSafeInteger(startedAt) || startedAt < 0) {
     throw new Error("RunPod staging prewarm clock is invalid");
   }
+  let lastObservation;
+  let stableRunningConfirmations = 0;
+  let stableRunningEvidence;
 
   try {
     validateRunpodEndpointCapacity(
@@ -243,8 +271,8 @@ export async function prewarmStagingRunpodCandidate(input, dependencies) {
         workers.initializing,
         "RunPod initializing worker count",
       );
-      const readyWorkerCount =
-        idleWorkerCount + requireCounter(workers.ready, "RunPod ready worker count");
+      const readyWorkerCount = requireCounter(workers.ready, "RunPod ready worker count");
+      const idleOrReadyWorkerCount = idleWorkerCount + readyWorkerCount;
       const runningWorkerCount = requireCounter(workers.running, "RunPod running worker count");
       const throttledWorkerCount = requireCounter(
         workers.throttled,
@@ -254,11 +282,10 @@ export async function prewarmStagingRunpodCandidate(input, dependencies) {
         workers.unhealthy,
         "RunPod unhealthy worker count",
       );
-      const normalReadyState = readyWorkerCount >= 1 && runningWorkerCount === 0;
-      const refreshedRunningState =
-        previousWorker !== undefined && readyWorkerCount === 0 && runningWorkerCount === 1;
+      const normalReadyState = idleOrReadyWorkerCount >= 1 && runningWorkerCount === 0;
+      const staleRunningState = idleOrReadyWorkerCount === 0 && runningWorkerCount === 1;
       const workerEvidence =
-        activeWorkers.length === 1 && (normalReadyState || refreshedRunningState)
+        activeWorkers.length === 1 && (normalReadyState || staleRunningState)
           ? requireWorkerEvidence(activeWorkers[0])
           : undefined;
       const refreshConfirmed =
@@ -266,15 +293,53 @@ export async function prewarmStagingRunpodCandidate(input, dependencies) {
         (workerEvidence !== undefined &&
           workerEvidence.id === previousWorker.id &&
           workerEvidence.lastStartedAtMs > previousWorker.lastStartedAtMs);
-      if (
-        activeWorkers.length === 1 &&
-        (normalReadyState || refreshedRunningState) &&
-        refreshConfirmed &&
+      const zeroJobsAndAbnormalStates =
         inProgressJobCount === 0 &&
         initializingWorkerCount === 0 &&
         queuedJobCount === 0 &&
         throttledWorkerCount === 0 &&
-        unhealthyWorkerCount === 0
+        unhealthyWorkerCount === 0;
+      if (
+        staleRunningState &&
+        workerEvidence !== undefined &&
+        refreshConfirmed &&
+        zeroJobsAndAbnormalStates
+      ) {
+        if (
+          stableRunningEvidence?.id === workerEvidence.id &&
+          stableRunningEvidence.lastStartedAtMs === workerEvidence.lastStartedAtMs
+        ) {
+          stableRunningConfirmations += 1;
+        } else {
+          stableRunningEvidence = workerEvidence;
+          stableRunningConfirmations = 1;
+        }
+      } else {
+        stableRunningEvidence = undefined;
+        stableRunningConfirmations = 0;
+      }
+      const stableRunningReadyState =
+        staleRunningState &&
+        stableRunningConfirmations >= STAGING_RUNPOD_STALE_RUNNING_CONFIRMATIONS;
+      lastObservation = {
+        active: activeWorkers.length,
+        idle: idleWorkerCount,
+        initializing: initializingWorkerCount,
+        jobsInProgress: inProgressJobCount,
+        jobsInQueue: queuedJobCount,
+        mode: previousWorker === undefined ? "initial" : "post-refresh",
+        ready: readyWorkerCount,
+        refreshConfirmed,
+        running: runningWorkerCount,
+        stableRunning: stableRunningConfirmations,
+        throttled: throttledWorkerCount,
+        unhealthy: unhealthyWorkerCount,
+      };
+      if (
+        activeWorkers.length === 1 &&
+        (normalReadyState || stableRunningReadyState) &&
+        refreshConfirmed &&
+        zeroJobsAndAbnormalStates
       ) {
         validateRunpodEndpointCapacity(
           await dependencies.getCapacity({ endpointId: input.endpointId }),
@@ -289,7 +354,7 @@ export async function prewarmStagingRunpodCandidate(input, dependencies) {
         currentTime < startedAt ||
         currentTime - startedAt >= STAGING_RUNPOD_PREWARM_TIMEOUT_MS
       ) {
-        throw new Error("RunPod staging candidate worker did not become ready");
+        throw new RunpodPrewarmReadinessTimeoutError(lastObservation);
       }
       await sleep(
         Math.min(
@@ -306,8 +371,13 @@ export async function prewarmStagingRunpodCandidate(input, dependencies) {
         cause: rollbackError,
       });
     }
-    throw new Error("RunPod staging prewarm failed; scale-to-zero was restored", {
-      cause: error,
-    });
+    const readinessDetails =
+      error instanceof RunpodPrewarmReadinessTimeoutError ? `: ${error.message}` : "";
+    throw new Error(
+      `RunPod staging prewarm failed; scale-to-zero was restored${readinessDetails}`,
+      {
+        cause: error,
+      },
+    );
   }
 }
