@@ -233,6 +233,13 @@ remote preflightやmutationより前に固定rendererで再生成し、旧plan�
 拒否された場合は手でfieldを追記しない。再生成したplan、Cloudflare runtime、GitHub
 Environmentが同じendpointを参照することをread-backしてからworkflowへ進む。
 
+2026-07-31のstaging同期では固定rendererによるplan再生成後、recovery endpointの
+capacity、template、scale-to-zeroをexact read-backした。旧canonical endpointは削除せず
+support証跡名へrenameし、recovery endpointをcanonical名へrenameした。rename前後で両方の
+scale-to-zeroとrecovery capacityを再確認し、GitHub staging Environmentのendpoint secretを
+Cloudflare runtimeと同じIDへ同期した。値やresource IDは記録せず、workflowと同じread-only
+readinessとpromotion preflightの成功だけを記録する。
+
 digest付きimageから`--serverless` templateを新規作成する。Serverless templateは1 endpoint
 にだけ関連付けられ、persistent volumeをサポートしない。初期container diskは30 GiB、
 port公開なし、secretなしとし、次の非secret環境変数だけを渡す。

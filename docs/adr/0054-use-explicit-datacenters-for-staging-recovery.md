@@ -73,12 +73,18 @@ resource ID、image参照、録音、文字起こし本文は記録しない。
   provider設定を推測せずfail closedする。
 - compliance filterとSecure Cloudを混同せず、実Workerの`secureCloud=true`
   attestationをsecurity boundaryとして維持する。
-- Cloudflare staging runtimeとGitHub staging Environmentのendpoint設定は一時的に異なる。
-  このdriftが解消されるまでworkflowを実行せず、今回の手動E2Eをproduction evidenceへ
-  昇格しない。
+- 2026-07-31に追跡対象planを新schemaで再生成し、recovery endpointのcapacity、template、
+  scale-to-zeroをexact read-backした。旧canonical endpointはsupport証跡名へrenameし、
+  recovery endpointをcanonical名へrenameした。ID、template、capacity、worker設定は
+  変更せず、両endpointがscale-to-zeroであることをrename前後に確認した。
+- GitHub staging Environmentのendpoint secretをcanonical recovery endpointへ同期した。
+  secret値は表示せず、repository、environment、secret名、更新時刻だけをread-backした。
+  Cloudflare staging runtimeは同じendpoint IDを継続利用するため、両設定のdriftは解消した。
+- workflowと同じread-only release readiness、およびpromotionの`--preflight-only`が成功した。
+  この時点ではcandidate publication、staging acceptance、production promotionは未実行で、
+  手動E2Eをproduction evidenceへ昇格しない。
 - 旧endpointとrecovery endpointの2件を一時保持する。いずれも`workersMin=0`を維持するが、
   provider側の孤児Workerや課金表示はsupport回答まで監視対象とする。
-- data center設定のsource of truth化は追跡対象コードへ実装した。本例外の残る除去条件は、
-  staging設定の同期、旧endpointのsupport調査完了、同一candidateによる自動staging
-  acceptance成功である。これらが`v0.1.0` production promotionまでに満たせなければ、
-  releaseはBlockedを維持する。
+- data center設定のsource of truth化とstaging設定同期は完了した。本例外の残る除去条件は、
+  旧endpointのsupport調査完了と同一candidateによる自動staging acceptance成功である。
+  これらが`v0.1.0` production promotionまでに満たせなければ、releaseはBlockedを維持する。

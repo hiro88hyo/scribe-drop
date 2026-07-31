@@ -88,9 +88,10 @@ claim前配置attestation、manifest、3形式のartifact、D1 finalize、利用
 
 この結果でstagingの利用経路は回復した。data center selectionと空のcompliance filterは
 plan、deployment、rollback、drift testへ実装し、RESTのGPU情報とConsole-equivalent
-GraphQLのdata center/compliance情報を結合してexact read-backする。現時点ではGitHub
-staging Environmentが旧endpointを参照しているため、staging設定を同期し、同一candidateの
-自動acceptanceを完了するまでproduction promotionとrelease workflowを開始しない。
+GraphQLのdata center/compliance情報を結合してexact read-backする。追跡外planの再生成、
+旧endpointのsupport証跡名へのrename、recovery endpointのcanonical化、GitHub staging
+Environmentのsecret同期、read-only readinessとpromotion preflightまで成功した。
+同一candidateの自動acceptanceを完了するまでproduction promotionを開始しない。
 
 Phase 5では[ADR 0013](./adr/0013-reconciliation-and-fresh-attempt-retry.md)に従い、
 5分Cron、RunPod status観測、terminal状態の先行保存、manifest/artifact検証、
@@ -700,8 +701,9 @@ candidate 1本とstaging 1本に限定する。その後、同じPRをreopenし�
 recoveryは、実利用経路の回復確認であり、上記のcandidate acceptanceを代替しない。
 data center selectionと空のcompliance filterは追跡対象planとdeployment codeへ実装し、
 GPUの公式REST read-backとdata center/complianceのConsole-equivalent GraphQL read-backを
-結合する。次にGitHub staging EnvironmentとCloudflare staging runtimeのendpoint設定を
-同期する。GraphQL境界でexact read-backできなければproductionをBlockedのままにする。
+結合する。GitHub staging EnvironmentとCloudflare staging runtimeのendpoint設定は同じ
+canonical endpointへ同期済みである。次のcandidate workflowでもGraphQL境界をexact
+read-backできなければproductionをBlockedのままにする。
 
 初回production bootstrapではOrchestratorの必須secretであるRunPod endpoint IDを先に
 確定する必要があるため、
