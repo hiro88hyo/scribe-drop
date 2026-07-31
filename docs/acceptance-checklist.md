@@ -3,11 +3,10 @@
 ## 状態と範囲
 
 - 評価日: 2026-07-31 UTC
-- 対象: Phase 1からPhase 7のlocal、CI、staging checkpoint
-- 結果: Phase 7までのbaselineは確認済み。現行releaseはterminal失敗通知を含む
-  schema version 3のformal staging acceptanceとproduction smoke完了までBlocked
-- 対象外: production promotionの合格判定とAndroid Share Target。過去のproduction試験
-  deployは無効な証跡であり、Share Targetは仕様どおり別PRとする
+- 対象: Phase 1からPhase 7のlocal、CI、formal staging、`v0.1.0` production release
+- 結果: release commitのschema version 3 formal staging、exact production promotion、
+  production smoke、Git-flow統合、annotated tagまでPass
+- 対象外: Android Share Target。Share Targetは仕様どおり別PRとする
 - `Gate`はsource上の必須workflow checkを表し、実行時の合否はcandidateに結び付く短命
   staging acceptance artifactを正とする。
 
@@ -29,18 +28,25 @@ worker image照合を追加し、従来のstaging acceptance evidenceはrelease�
 release candidateで実service staging acceptanceと対象実機production smokeを完了するまで
 release判断をBlockedとする。
 
+その後、旧Worker drain、起動・配置attestation、GPU供給待ちのbounded failure、schema version 3
+失敗通知を含む修正を同じrelease commitへ集約した。最終candidate publication、formal staging、
+production promotion、strict required checksはすべて成功した。Pixel実機ではM4Aの選択とupload
+受付を確認し、認証済みproductionで成果物downloadと正常な文字起こしも確認した。最終証跡は
+[0.1.0 production readiness](./releases/0.1.0-production-readiness.md)と
+[production deployment record](./deployments/2026-07-31-v0.1.0-production.md)を正とする。
+
 ## UX
 
-| 受け入れ条件                              | 状態    | 主な証跡                                                                                                                                                                                  |
-| ----------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| PCでdrag-and-dropできる                   | Pass    | `apps/e2e/tests/input-accessibility.spec.ts`                                                                                                                                              |
-| Android相当環境でfile chooserを使用できる | Pending | Pixel実機で選択とupload受付、Playwrightで`.m4a` media type、Workerで補助data streamの回帰を確認。旧workerをdrainする新candidateの実service staging acceptanceとproduction完了を待つ       |
-| upload進捗を表示する                      | Pass    | `apps/e2e/tests/job-lifecycle.spec.ts`、`apps/web/src/client/multipart-uploader.test.ts`                                                                                                  |
-| 通信失敗から再試行できる                  | Pass    | `apps/e2e/tests/job-lifecycle.spec.ts`                                                                                                                                                    |
-| upload後に画面を閉じても処理が継続する    | Pass    | page close後に新pageの履歴・詳細から待機、実行、完了を復元する`apps/e2e/tests/job-lifecycle.spec.ts`、Queue/RunPodの[Phase 5 staging record](./deployments/2026-07-26-phase-5-staging.md) |
-| 後から履歴を確認できる                    | Pass    | `apps/e2e/tests/job-lifecycle.spec.ts`、`apps/web/tests/jobs.worker.spec.ts`                                                                                                              |
-| 完了時にDiscord通知が届く                 | Pass    | `apps/orchestrator/tests/notification-outbox.worker.spec.ts`、[Phase 5 staging record](./deployments/2026-07-26-phase-5-staging.md)                                                       |
-| 失敗時に安全なDiscord通知が届く           | Gate    | [ADR 0059](./adr/0059-require-real-staging-failure-notification-acceptance.md)に従い、合成破損M4A、exact FAILED、current-version outbox SENT、fixture削除をformal stagingで必須化         |
+| 受け入れ条件                              | 状態 | 主な証跡                                                                                                                                                                                  |
+| ----------------------------------------- | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PCでdrag-and-dropできる                   | Pass | `apps/e2e/tests/input-accessibility.spec.ts`                                                                                                                                              |
+| Android相当環境でfile chooserを使用できる | Pass | Pixel実機でM4A選択とupload受付、PlaywrightのAndroid相当viewport、補助data stream回帰、formal staging、production文字起こしを確認                                                          |
+| upload進捗を表示する                      | Pass | `apps/e2e/tests/job-lifecycle.spec.ts`、`apps/web/src/client/multipart-uploader.test.ts`                                                                                                  |
+| 通信失敗から再試行できる                  | Pass | `apps/e2e/tests/job-lifecycle.spec.ts`                                                                                                                                                    |
+| upload後に画面を閉じても処理が継続する    | Pass | page close後に新pageの履歴・詳細から待機、実行、完了を復元する`apps/e2e/tests/job-lifecycle.spec.ts`、Queue/RunPodの[Phase 5 staging record](./deployments/2026-07-26-phase-5-staging.md) |
+| 後から履歴を確認できる                    | Pass | `apps/e2e/tests/job-lifecycle.spec.ts`、`apps/web/tests/jobs.worker.spec.ts`                                                                                                              |
+| 完了時にDiscord通知が届く                 | Pass | `apps/orchestrator/tests/notification-outbox.worker.spec.ts`、[Phase 5 staging record](./deployments/2026-07-26-phase-5-staging.md)                                                       |
+| 失敗時に安全なDiscord通知が届く           | Pass | [ADR 0059](./adr/0059-require-real-staging-failure-notification-acceptance.md)の合成破損M4A、exact FAILED、current-version outbox SENT、Discord配送、fixture削除をformal stagingで確認    |
 
 ## Security
 
@@ -111,6 +117,6 @@ pnpm secrets:check
 pnpm security:audit
 ```
 
-Phase 7までのCIとstaging手動確認はPhase別deployment recordを正とする。現在のrelease
-candidateは変更後のrequired CI、container supply-chain、実service staging acceptanceを
-すべてやり直し、candidate manifestへ結び付けるまでproduction promotion evidenceとしない。
+Phase 7までのCIとstaging手動確認はPhase別deployment recordを正とする。`v0.1.0`は変更後の
+required CI、container supply-chain、実service staging acceptanceを同じcandidate manifestへ
+結び付け、exact production promotion、resource read-back、Git-flow統合まで完了した。

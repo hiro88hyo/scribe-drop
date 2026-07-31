@@ -93,6 +93,16 @@ GraphQLのdata center/compliance情報を結合してexact read-backする。追
 Environmentのsecret同期、read-only readinessとpromotion preflightまで成功した。
 同一candidateの自動acceptanceを完了するまでproduction promotionを開始しない。
 
+2026-07-31にADR 0062までを含む最終release commitでcandidateを再発行した。formal stagingは
+正常M4A、candidate Worker配置、manifestと3成果物、合成破損M4Aのexact `FAILED`、失敗通知、
+fixture削除、scale-to-zeroを同じschema version 3 acceptanceへ結び付けて成功した。その
+acceptanceとexact candidateだけをproductionへpromotionし、全resourceとscale-to-zeroを
+read-backした。strict required checks成功後にreleaseを`main`へmergeし、annotated `v0.1.0`
+tagを付け、同じrelease修正を`develop`へmerge commitで戻した。Phase 1からPhase 7の初回
+production releaseは完了している。詳細は
+[0.1.0 production readiness](./releases/0.1.0-production-readiness.md)と
+[production deployment record](./deployments/2026-07-31-v0.1.0-production.md)を正とする。
+
 Phase 5では[ADR 0013](./adr/0013-reconciliation-and-fresh-attempt-retry.md)に従い、
 5分Cron、RunPod status観測、terminal状態の先行保存、manifest/artifact検証、
 原子的finalize、notification outbox、Discord再送、所有者限定artifact URL、
