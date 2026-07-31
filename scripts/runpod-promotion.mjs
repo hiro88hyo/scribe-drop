@@ -168,6 +168,47 @@ function validateNoActiveJobsOrWorkersHealth(untrustedHealth) {
   return health;
 }
 
+function validateNoJobsOrBusyWorkersHealth(untrustedHealth) {
+  const health = requireRecord(untrustedHealth, "RunPod endpoint health response");
+  const jobs = requireRecord(health.jobs, "RunPod endpoint job health");
+  const workers = requireRecord(health.workers, "RunPod endpoint worker health");
+  if (
+    jobs.inProgress !== 0 ||
+    jobs.inQueue !== 0 ||
+    workers.initializing !== 0 ||
+    workers.running !== 0
+  ) {
+    throw new Error("RunPod production endpoint has active jobs or workers");
+  }
+  return health;
+}
+
+async function waitForDrainedHealth(input, endpointId) {
+  const sleep = input.sleep ?? defaultSleep;
+  let lastError;
+  for (let attempt = 0; attempt <= capacityReadBackDelaysMilliseconds.length; attempt += 1) {
+    const health = await input.getHealth({ endpointId });
+    validateNoJobsOrBusyWorkersHealth(health);
+    try {
+      return validateNoActiveJobsOrWorkersHealth(health);
+    } catch (error) {
+      lastError = error;
+      const delay = capacityReadBackDelaysMilliseconds[attempt];
+      if (delay === undefined) {
+        break;
+      }
+      if (typeof input.onDrainHealthReadBackRetry === "function") {
+        input.onDrainHealthReadBackRetry({
+          attempt: attempt + 2,
+          maximumAttempts: capacityReadBackDelaysMilliseconds.length + 1,
+        });
+      }
+      await sleep(delay);
+    }
+  }
+  throw lastError;
+}
+
 function validateNoActiveWorkers(untrustedWorkers) {
   const terminalStatuses = new Set(["EXITED", "TERMINATED"]);
   const workers = requireWorkers(untrustedWorkers);
@@ -254,6 +295,24 @@ function validateDrainedEndpoint(untrustedEndpoint, plan, effectiveTemplateId) {
   ) {
     throw new Error("RunPod endpoint did not drain all workers");
   }
+  validateCreatedRunpodEndpoint(
+    {
+      ...endpoint,
+      templateId: effectiveTemplateId,
+      workersMax: plan.endpoint.workersMax,
+    },
+    plan,
+    effectiveTemplateId,
+  );
+  return requireResourceId(endpoint.templateId, "RunPod current template ID");
+}
+
+function validateCapacityPreparationDrainedEndpoint(untrustedEndpoint, plan, effectiveTemplateId) {
+  const endpoint = requireRecord(untrustedEndpoint, "RunPod endpoint response");
+  if ((endpoint.workersMin ?? 0) !== 0 || (endpoint.workersMax ?? 0) !== 0) {
+    throw new Error("RunPod endpoint did not drain all workers");
+  }
+  validateNoActiveWorkers(endpoint.workers);
   validateCreatedRunpodEndpoint(
     {
       ...endpoint,
@@ -497,7 +556,7 @@ export async function prepareRunpodProductionCapacity(input) {
   if (typeof input.getHealth !== "function") {
     throw new Error("RunPod endpoint job and worker health read-back is unavailable");
   }
-  validateNoActiveJobsOrWorkersHealth(await input.getHealth({ endpointId }));
+  validateNoJobsOrBusyWorkersHealth(await input.getHealth({ endpointId }));
   const capacityBefore = await getCapacityEndpoint(input);
   const previousCapacity = providerCapacity(capacityBefore);
   validateImmutableCapacityPolicy(previousCapacity, plan);
@@ -512,8 +571,9 @@ export async function prepareRunpodProductionCapacity(input) {
   let preparationError;
   try {
     await setWorkersMaxAndReadBack(input, 0, getEndpoint, (endpoint) => {
-      validateDrainedEndpoint(endpoint, plan, currentTemplateId);
+      validateCapacityPreparationDrainedEndpoint(endpoint, plan, currentTemplateId);
     });
+    await waitForDrainedHealth(input, endpointId);
     await reconcileRunpodEndpointCapacity({
       ...input,
       endpointId,

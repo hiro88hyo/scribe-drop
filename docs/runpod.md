@@ -223,6 +223,9 @@ productionでは
 更新をcandidate promotion内で行わない。事前の明示承認付きcapacity移行で固定planへの
 完全一致を独立read-backし、通常preflightは不一致をremote mutation前に拒否する。
 capacity mutationは再送せず、反映待ちは読み取りだけを最大6回、合計30秒に限定する。
+事前移行ではjobとrunning/initializing Workerが0であることを確認してworker上限を0へ
+drainする。endpoint APIに残るterminal Worker履歴は許容するが、healthの
+idle/initializing/ready/runningがすべて0へ収束する前にcapacityを変更しない。
 
 ADR 0054のstaging recoveryでは、固定CLIの作成引数へ2 data centerを明示し、Consoleで
 exact selectionを手動確認した。作成応答とGETはfieldを省略したため、これは通常promotion

@@ -223,6 +223,7 @@ function productionPreparationHarness(options = {}) {
   let capacity = options.initialCapacity ?? productionCapacity();
   let healthReads = 0;
   const capacityRequests = [];
+  const sleepDelays = [];
   const workerMaximums = [];
   return {
     capacityRequests,
@@ -247,7 +248,7 @@ function productionPreparationHarness(options = {}) {
       plan: productionPlan,
       runCli(arguments_) {
         if (arguments_[0] === "serverless" && arguments_[1] === "get") {
-          return endpointForPlan(productionPlan, "template_old", [], workersMax);
+          return endpointForPlan(productionPlan, "template_old", options.workers ?? [], workersMax);
         }
         throw new Error("Unexpected fake CLI call");
       },
@@ -269,10 +270,12 @@ function productionPreparationHarness(options = {}) {
         workerMaximums.push(workersMax);
         return Promise.resolve();
       },
-      sleep() {
+      sleep(milliseconds) {
+        sleepDelays.push(milliseconds);
         return Promise.resolve();
       },
     },
+    sleepDelays,
     workerMaximums,
     get workersMax() {
       return workersMax;
@@ -665,6 +668,63 @@ test("production capacity preparation drains, reconciles once, and restores work
   assert.deepEqual(harness.capacity.gpuTypeIds, productionPlan.endpoint.gpuTypeIds);
 });
 
+test("production capacity preparation drains an idle ready worker before capacity mutation", async () => {
+  const harness = productionPreparationHarness({
+    getHealth({ attempt }) {
+      return attempt === 1
+        ? productionHealth({
+            workers: { idle: 1, initializing: 0, ready: 1, running: 0 },
+          })
+        : productionHealth();
+    },
+  });
+  const result = await prepareRunpodProductionCapacity(harness.input);
+
+  assert.equal(result.changed, true);
+  assert.deepEqual(harness.workerMaximums, [0, 1]);
+  assert.equal(harness.capacityRequests.length, 1);
+});
+
+test("production capacity preparation accepts provider-retained terminal worker history", async () => {
+  const harness = productionPreparationHarness({
+    workers: [{ desiredStatus: "EXITED" }],
+  });
+  const result = await prepareRunpodProductionCapacity(harness.input);
+
+  assert.equal(result.changed, true);
+  assert.deepEqual(harness.workerMaximums, [0, 1]);
+  assert.equal(harness.capacityRequests.length, 1);
+});
+
+test("production capacity preparation verifies drained health before capacity mutation", async () => {
+  const harness = productionPreparationHarness({
+    getHealth({ attempt }) {
+      return attempt === 1
+        ? productionHealth()
+        : productionHealth({
+            workers: { idle: 1, initializing: 0, ready: 1, running: 0 },
+          });
+    },
+  });
+  await assert.rejects(prepareRunpodProductionCapacity(harness.input), /active jobs or workers/u);
+
+  assert.equal(harness.capacityRequests.length, 0);
+  assert.deepEqual(harness.sleepDelays, [1_000, 2_000, 4_000, 8_000, 15_000]);
+  assert.deepEqual(harness.workerMaximums, [0, 1]);
+});
+
+test("production capacity preparation rejects a running worker before drain", async () => {
+  const harness = productionPreparationHarness({
+    health: productionHealth({
+      workers: { idle: 0, initializing: 0, ready: 0, running: 1 },
+    }),
+  });
+  await assert.rejects(prepareRunpodProductionCapacity(harness.input), /active jobs or workers/u);
+
+  assert.equal(harness.capacityRequests.length, 0);
+  assert.deepEqual(harness.workerMaximums, []);
+});
+
 test("production capacity preparation restores workers after capacity rollback", async () => {
   const previousCapacity = productionCapacity();
   const harness = productionPreparationHarness({
@@ -693,7 +753,7 @@ test("production capacity preparation rolls back when a job arrives while draine
   const previousCapacity = productionCapacity();
   const harness = productionPreparationHarness({
     getHealth({ attempt }) {
-      return attempt === 1
+      return attempt < 3
         ? productionHealth()
         : productionHealth({ jobs: { inProgress: 0, inQueue: 1 } });
     },

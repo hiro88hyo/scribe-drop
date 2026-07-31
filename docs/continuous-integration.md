@@ -247,7 +247,8 @@ GPU、data center、complianceが固定planへ完全一致した場合だけpref
 `capacity update pending`をproductionの成功条件にせず、capacity移行をD1、R2、
 candidate promotionと同じworkflow内で初めて試さない。capacity mutationは1回だけ送り、
 最大30秒のbounded read-backだけを行い、事前移行が失敗または未実施ならworkflowを
-dispatchしない。
+dispatchしない。事前移行はWorker上限0のread-back後、terminal Worker履歴ではなくhealthの
+idle/initializing/ready/runningがすべて0へ収束したことをcapacity mutation前に検証する。
 
 promotion workflowをdispatchする前に、少なくとも`pnpm check`、`pnpm test:e2e`、
 `pnpm secrets:check`、`pnpm security:audit`をlocalで成功させる。変更対象に応じた専用testと

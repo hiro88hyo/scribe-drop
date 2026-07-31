@@ -1393,6 +1393,18 @@ requireText(
   "bounded capacity convergence read-back",
 );
 requireText(
+  runpodPromotionLibraryContents,
+  "function validateCapacityPreparationDrainedEndpoint",
+  "runpod-promotion.mjs",
+  "terminal worker history-safe capacity drain",
+);
+requireText(
+  runpodPromotionLibraryContents,
+  "await waitForDrainedHealth(input, endpointId);",
+  "runpod-promotion.mjs",
+  "pre-capacity drained health read-back",
+);
+requireText(
   packageManifestContents,
   '"runpod:capacity:prepare:production": "node scripts/prepare-runpod-production-capacity.mjs"',
   "package.json",

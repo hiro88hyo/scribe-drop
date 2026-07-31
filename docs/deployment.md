@@ -361,20 +361,12 @@ capacity移行が必要な場合は、全local gateとread-only実resource確認
 pnpm run runpod:capacity:prepare:production -- --confirm-production-capacity-migration
 ```
 
-commandはactive job/Workerが0であることを確認し、worker上限0へのdrain、単一capacity
-mutation、bounded read-back、worker上限復旧を行う。失敗時は旧capacityへrollbackする。
-成功後に別のread-only preflightを通すまでproduction workflowをdispatchしない。
-capacity移行が必要な場合は、全local gateとread-only実resource確認の後、明示承認を得て
-次のlocal-only commandを1回だけ実行する。追跡外production planとcredentialを事前に
-生成・注入し、値をshell履歴や文書へ残さない。
-
-```bash
-pnpm run runpod:capacity:prepare:production -- --confirm-production-capacity-migration
-```
-
-commandはactive job/Workerが0であることを確認し、worker上限0へのdrain、単一capacity
-mutation、bounded read-back、worker上限復旧を行う。失敗時は旧capacityへrollbackする。
-成功後に別のread-only preflightを通すまでproduction workflowをdispatchしない。
+commandはactive jobとrunning/initializing Workerが0であることを確認してからworker上限を
+0へdrainする。endpoint APIに残るterminal Worker履歴は許容するが、healthの
+idle/initializing/ready/runningが最大30秒以内にすべて0へ収束するまでcapacityを変更しない。
+収束後に単一capacity mutation、bounded read-back、worker上限復旧を行う。失敗時は
+旧capacityへrollbackする。成功後に別のread-only preflightを通すまでproduction workflowを
+dispatchしない。
 
 RunPod publication workflowはapplication artifactをcandidateごとに一度だけbuildし、
 Worker imageは新規buildまたはADR 0038の固定digest再利用の一方だけを選ぶ。environment別

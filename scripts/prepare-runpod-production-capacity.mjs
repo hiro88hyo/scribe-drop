@@ -88,6 +88,13 @@ try {
         )})`,
       );
     },
+    onDrainHealthReadBackRetry({ attempt, maximumAttempts }) {
+      console.warn(
+        `Waiting for RunPod production drain health (${String(attempt)}/${String(
+          maximumAttempts,
+        )})`,
+      );
+    },
     plan,
     runCli,
     setEndpointCapacity({ dataCenterIds, endpointId: targetEndpointId, gpuTypeIds }) {

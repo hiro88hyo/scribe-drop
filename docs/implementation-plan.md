@@ -721,6 +721,10 @@ promotion前のRunPod capacity完全一致を独立した前提条件にする�
 mutation前に拒否し、capacity mutationは単一送信と最大30秒のbounded read-backを使う
 事前作業へ分離する。事前移行、独立read-back、local gateが成功するまでproduction
 workflowをdispatchしない。
+最初の事前移行はmutation前に停止した。endpoint APIはterminal Worker履歴だけを返したが、
+health APIは5秒のidle timeout後もready/idleを返した。terminal履歴をdrain失敗とせず、
+worker上限0の後にhealthが完全に0へ収束したことをcapacity mutation前に検証する回帰testと
+実装を追加する。この修正の全local gateが成功するまで事前移行を再実行しない。
 
 初回production bootstrapではOrchestratorの必須secretであるRunPod endpoint IDを先に
 確定する必要があるため、

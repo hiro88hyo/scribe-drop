@@ -25,6 +25,13 @@ OpenAPI enumだけでは実APIの保持結果を保証できないことを記�
 新規endpoint作成と実job成功を、既存production endpointのin-place capacity移行の証拠へ
 拡張してはならなかった。
 
+最初の事前移行実行はmutation前guardで停止した。jobは0、endpoint APIのWorker履歴は
+`desiredStatus=EXITED`だった一方、health APIは設定済み5秒のidle timeoutを超えて
+`ready=1`、`idle=1`を返し続けた。providerがterminal Worker履歴を保持することと、
+health由来のactive状態が遅延または不整合になり得ることを別々に扱う必要がある。
+terminal履歴の存在をdrain失敗とみなす一方、health未収束のままcapacityを更新する実装は、
+どちらも安全な事前移行にならない。
+
 ## Decision
 
 - productionのread-only promotion preflightはcapacity driftを「更新予定」として成功させない。
@@ -33,8 +40,15 @@ OpenAPI enumだけでは実APIの保持結果を保証できないことを記�
 - production candidate promotion本体にも同じguardを置く。preflightが迂回されても、
   capacity driftがあるendpointをdrain、PATCH、template切替しない。
 - production capacity移行はcandidate promotionと分離した、明示承認付きの事前作業とする。
-  対象endpointがscale-to-zeroでactive Workerとjobを持たないこと、旧capacityを完全に
-  read-backできること、固定planの両GPUが利用可能であることを先に確認する。
+  対象endpointがjob、`RUNNING` Worker、`INITIALIZING` Workerを持たないこと、旧capacityを
+  完全にread-backできること、固定planの両GPUが利用可能であることを先に確認する。
+  `READY`かつ`IDLE`のWorkerはjobがない場合だけdrain対象にできる。
+- Worker上限を0へ変更した後は、endpoint APIに残る`EXITED`、`TERMINATED`履歴を
+  active Workerと数えない。ただし未知statusまたはnon-terminal Workerは拒否する。
+  capacity mutationより前にhealthのqueue/in-progress jobと
+  idle/initializing/ready/running Workerがすべて0へ収束したことを、最大6回、合計30秒の
+  bounded read-backで確認する。収束しなければcapacityを変更せずWorker上限を復元して
+  失敗する。
 - capacity mutationは1回だけ送信する。mutation自体は再送せず、RESTのGPU情報と
   Console-equivalent GraphQLのdata center/compliance情報を最大6回、合計30秒の
   bounded backoffでread-backする。完全一致しなければ、同じbounded read-backを使って
@@ -44,8 +58,10 @@ OpenAPI enumだけでは実APIの保持結果を保証できないことを記�
   dispatchしない。
 - capacity移行はlocal-onlyの`runpod:capacity:prepare:production`で行う。明示confirmationを
   必須とし、GitHub Actions内の実行を拒否する。endpoint healthのqueue/in-progress jobと
-  active Workerが0であることを確認し、Worker上限を0へdrainしてから更新し、最後に上限を
-  復元する。drain中にもhealthを再確認し、新しいjobがqueueへ入った場合は旧capacityへ
+  running/initializing Workerが0であることを確認し、Worker上限を0へdrainする。drain後かつ
+  capacity更新前にidle/initializing/ready/running Workerがすべて0であることを再確認して
+  から更新し、最後に上限を復元する。更新後に新しいjobが
+  queueへ入った場合は旧capacityへ
   rollbackしてから上限を復元する。rollback、秘密値を含まない固定エラー、単一mutation、
   bounded read-backを
   回帰testとCI構造検査で固定する。capacity更新とrollbackの両方が失敗した場合は状態不明の
@@ -57,6 +73,8 @@ OpenAPI enumだけでは実APIの保持結果を保証できないことを記�
 - capacity不一致をD1、R2、RunPod、Cloudflareをまたぐ長いworkflowの途中で初めて検出せず、
   費用と待ち時間が発生する前に停止できる。
 - providerの反映遅延を即時失敗と誤認しない一方、mutationの自動再送と無期限pollは行わない。
+- providerがterminal Worker履歴を保持しても誤って失敗しない。逆にendpoint履歴がterminal
+  でもhealthがactiveなら、capacity更新前にdrain収束を待って安全停止できる。
 - capacity変更が必要なreleaseには事前作業が1段増える。通常のtemplate/imageだけのreleaseは
   endpoint capacityが固定planへ一致しているため追加作業を必要としない。
 - 今回のcandidateとstaging acceptanceは、promotion制御のcommitを変更した時点でそのまま
