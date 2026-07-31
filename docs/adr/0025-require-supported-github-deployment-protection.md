@@ -1,6 +1,9 @@
 # ADR 0025: 対応planなしでdeployment protectionを迂回しない
 
 > ADR 0034により、credentialless candidate publicationの例外は廃止した。
+> `main`・`develop`のsolo maintainer review policyは
+> [ADR 0063](./0063-use-solo-maintainer-pr-policy.md)により更新した。production Environmentの
+> required reviewerは本ADRどおり維持する。
 
 ## Context
 
@@ -30,8 +33,8 @@ secret非公開性を失う。workflow input、手動チェックボックス、
 - `release/*`、`develop`、`main`へ必要なbranch protectionを設定し、そのread-backが成功
   するまでcandidateをproduction-readyと扱わない。
 - 所有者がpublic repositoryへの変更を明示承認し、Environment protectionを利用可能に
-  した後もbranch protectionを省略しない。`main`と`develop`はPR、承認1名、最新head承認、
-  conversation解決、5 required checksを必須とする。
+  した後もbranch protectionを省略しない。`main`と`develop`はPR、conversation解決、
+  5 required checksを必須とする。独立maintainer不在時の承認人数はADR 0063を正とする。
 - 現行release branchはGit-flowのrelease修正を継続できるようPR/status checkを必須に
   せず、管理者を含むforce-pushとbranch削除を禁止する。production deploy自体は別途
   production Environmentのrequired reviewerと`release/*` policyで保護する。

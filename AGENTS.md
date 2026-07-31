@@ -90,7 +90,9 @@
 - Conventional Commits を使う。例: `feat(orchestrator): enforce atomic RunPod claims`。
 - 1コミットは1つの論理変更に限定し、生成物や無関係な整形を混在させない。
 - `docs/implementation-plan.md` の Phase をまたぐ差分を同じ feature branch に入れない。
-- feature branch は CI と review 後に `--no-ff` merge し、Phase の境界を履歴に残す。
+- feature branch は CI と review policy を満たした後に `--no-ff` merge し、Phase の境界を履歴に残す。
+  独立maintainer不在時は[ADR 0063](docs/adr/0063-use-solo-maintainer-pr-policy.md)に従い、承認を
+  偽装せず、PR、strict required checks、conversation解決、merge commitを必須とする。
 - release は SemVer を使い、`main` の release commit に `vX.Y.Z` tag を付ける。
 - `main` と `develop` への force-push、共有済み commit の書き換えは禁止する。
 - secret や大容量生成物を誤ってコミットした場合は、通常の revert だけで済ませず漏えい対応を行う。
@@ -100,6 +102,9 @@
 - PR は目的、設計上の判断、変更範囲、検証コマンド、残課題、関連 Phase/ADR を記載する。
 - DB migration、API contract、状態遷移、権限、ログ項目の変更は明示する。
 - CI が成功し、未解決の security/authorization 指摘がないことを merge 条件とする。
+- 独立したqualified maintainerが参加するまではapproving review countを0とし、参加後は別PRで
+  承認1名とlast push approvalを再有効化する。production Environmentのrequired reviewerは
+  この例外の対象外とする。
 - review 中の追加修正でも、無関係な変更を同じ PR に含めない。
 
 ## 4. アーキテクチャと依存方向

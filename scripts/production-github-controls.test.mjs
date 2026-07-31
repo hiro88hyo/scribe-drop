@@ -23,8 +23,8 @@ function branchProtection(branch) {
       ? {
           dismiss_stale_reviews: true,
           require_code_owner_reviews: false,
-          require_last_push_approval: true,
-          required_approving_review_count: 1,
+          require_last_push_approval: false,
+          required_approving_review_count: 0,
         }
       : null,
     required_status_checks: longLived

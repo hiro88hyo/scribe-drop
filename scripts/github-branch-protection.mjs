@@ -44,8 +44,8 @@ export function createBranchProtectionRequest(branchInput) {
       ? {
           dismiss_stale_reviews: true,
           require_code_owner_reviews: false,
-          require_last_push_approval: true,
-          required_approving_review_count: 1,
+          require_last_push_approval: false,
+          required_approving_review_count: 0,
         }
       : null,
     required_status_checks: isLongLivedBranch
@@ -81,8 +81,8 @@ function verifyLongLivedBranchProtection(branch, protection) {
   if (
     reviews.dismiss_stale_reviews !== true ||
     reviews.require_code_owner_reviews !== false ||
-    reviews.require_last_push_approval !== true ||
-    reviews.required_approving_review_count !== 1
+    reviews.require_last_push_approval !== false ||
+    reviews.required_approving_review_count !== 0
   ) {
     throw new Error(`${branch} pull request review policy does not match`);
   }
