@@ -48,16 +48,16 @@ R2 CORSは`pnpm cloudflare:config:staging:r2-cors`、R2 lifecycleは
 - `SCRIBE_DROP_STAGING_RUNPOD_IMAGE_VISIBILITY`: `private`または`public`
 - `SCRIBE_DROP_STAGING_RUNPOD_REGISTRY_AUTH_ID`: private image用のRunPod registry auth ID
 - `SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS`:
-  `NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090`の固定順
+  `NVIDIA GeForce RTX 5090,NVIDIA RTX PRO 4500 Blackwell,NVIDIA GeForce RTX 4090`の固定順
 
-GPU候補は
-[ADR 0053](./adr/0053-use-mixed-availability-gpus-with-runtime-attestation.md)で固定した
-2件を順序も含めて指定する。stagingとproductionで同じ候補を使用し、candidate
-publicationは両候補のSecure Cloud提供、promotion preflightはさらに両候補の利用可能性を
+GPU候補は[ADR 0064](./adr/0064-expand-runpod-placement-capacity.md)で固定した3件を
+順序も含めて指定する。stagingとproductionで同じ候補を使用し、candidate publicationは
+全候補のSecure Cloud提供、promotion preflightはさらに2候補以上の利用可能性を
 確認する。Community Cloudにも提供されるGPU種別であるため、各claimでは実Workerの
 `secureCloud=true`をwinner CASとR2 capability発行より前に検証する。promotionは公式REST
 APIの`gpuTypeIds`を完全一致でread-backする。data center selectionは環境変数にせず、
-追跡対象planで`EUR-IS-1`、`EU-RO-1`へ固定し、Compliance filterも空配列（`Any`）へ固定する。
+追跡対象planでは空配列を`Any Region`の明示値とし、Compliance filterも空配列（`Any`）へ
+固定する。
 GPUは公式REST API、data centerとcomplianceはConsole-equivalent GraphQLから取得して
 結合検証する。GitHub staging Environmentのendpoint設定を同期し、local gateを通すまで
 release workflowを実行しない。

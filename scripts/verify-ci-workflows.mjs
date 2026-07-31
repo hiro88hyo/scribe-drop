@@ -1584,13 +1584,17 @@ forbidText(
 );
 requireText(
   runpodEnvironmentConfigScriptContents,
-  'const fixedGpuTypeIds = ["NVIDIA GeForce RTX 5090", "NVIDIA GeForce RTX 4090"];',
+  `const fixedGpuTypeIds = [
+  "NVIDIA GeForce RTX 5090",
+  "NVIDIA RTX PRO 4500 Blackwell",
+  "NVIDIA GeForce RTX 4090",
+];`,
   "runpod-environment-config.mjs",
   "runtime-attested Secure GPU policy",
 );
 requireText(
   runpodEnvironmentConfigScriptContents,
-  'const fixedDataCenterIds = ["EUR-IS-1", "EU-RO-1"];',
+  "const fixedDataCenterIds = [];",
   "runpod-environment-config.mjs",
   "fixed RunPod data-center policy",
 );
@@ -1625,6 +1629,25 @@ requireText(
   "dynamic RunPod GPU inventory gate",
 );
 requireText(
+  runpodTemplateApiScriptContents,
+  'pathname: "/v1/openapi.json"',
+  "runpod-template-api.mjs",
+  "public Serverless OpenAPI GPU support boundary",
+);
+for (const [pathname, contents] of [
+  ["deploy-runpod-environment.mjs", runpodDeploymentScriptContents],
+  ["promote-runpod-candidate.mjs", runpodPromotionScriptContents],
+  ["prepare-runpod-production-capacity.mjs", runpodProductionCapacityPreparationContents],
+  ["verify-runpod-release-readiness.mjs", runpodReleaseReadinessScriptContents],
+]) {
+  requireText(
+    contents,
+    "verifyRunpodServerlessGpuTypes(",
+    pathname,
+    "Serverless OpenAPI GPU support preflight",
+  );
+}
+requireText(
   runpodPromotionScriptContents,
   "listRunpodTemplates(",
   "promote-runpod-candidate.mjs",
@@ -1650,7 +1673,7 @@ requireText(
 );
 requireText(
   runpodTemplateApiScriptContents,
-  'locations: dataCenterIds.join(",")',
+  'locations: dataCenterIds.length === 0 ? null : dataCenterIds.join(",")',
   "runpod-template-api.mjs",
   "GraphQL endpoint data-center mutation",
 );

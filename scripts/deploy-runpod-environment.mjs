@@ -17,6 +17,7 @@ import {
   getRunpodEndpointCapacity,
   setRunpodEndpointDataCenters,
   setRunpodEndpointGpuTypes,
+  verifyRunpodServerlessGpuTypes,
 } from "./runpod-template-api.mjs";
 
 const resourceIdPattern = /^[A-Za-z0-9_-]{3,128}$/u;
@@ -194,6 +195,7 @@ async function main() {
     throw new Error("runpodctl is not installed; run pnpm run runpodctl:install");
   }
   const plan = validateRunpodPlan(readJson(planPath, `RunPod ${environment} plan`), environment);
+  await verifyRunpodServerlessGpuTypes({ gpuTypeIds: plan.endpoint.gpuTypeIds });
   const planDigest = planSha256(plan);
   const state = loadState(planDigest);
 

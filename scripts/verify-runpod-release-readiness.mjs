@@ -4,7 +4,10 @@ import process from "node:process";
 
 import { runRunpodCliWithReadRetry } from "./runpod-cli-retry.mjs";
 import { validateRunpodGpuInventoryPolicyConfiguration } from "./runpod-environment-config.mjs";
-import { verifyRunpodReleaseReadiness } from "./runpod-template-api.mjs";
+import {
+  verifyRunpodReleaseReadiness,
+  verifyRunpodServerlessGpuTypes,
+} from "./runpod-template-api.mjs";
 
 const environment = process.argv[2];
 
@@ -62,6 +65,9 @@ try {
     process.env["SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS"],
     "staging",
   );
+  await verifyRunpodServerlessGpuTypes({
+    gpuTypeIds: process.env["SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS"]?.split(","),
+  });
   await verifyRunpodReleaseReadiness(
     { apiKey, endpointId },
     {

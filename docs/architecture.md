@@ -93,11 +93,12 @@ FAILEDをSUBMITTINGへ戻さず、Cronがcancelを再試行する。
 
 単一GPUの供給不足をCIだけの問題として扱わない。
 [ADR 0053](./adr/0053-use-mixed-availability-gpus-with-runtime-attestation.md)に従い、
-stagingとproductionは`RTX 5090`、`RTX 4090`の固定順を使用し、promotion時に公式REST
-APIでGPU順序の完全一致と両候補のSecure Cloud提供・利用可能性を確認する。両GPU種別は
-Community Cloudにも提供されるため、各claimではADR 0052の配置attestationによって
-実Workerの`secureCloud=true`を必須とする。data centerはADR 0054の2件へ固定し、
-Compliance filterは`Any`とする。GPUの公式REST read-backとdata center/complianceの
+stagingとproductionは`RTX 5090`、`RTX PRO 4500 Blackwell`、`RTX 4090`の固定順を使用し、
+promotion時に公式REST APIでGPU順序の完全一致、全候補のSecure Cloud提供、2候補以上の
+利用可能性を確認する。5090と4090はCommunity Cloudにも提供されるため、各claimでは
+ADR 0052の配置attestationによって
+実Workerの`secureCloud=true`を必須とする。data centerはADR 0064の`Any Region`とし、
+Compliance filterも`Any`とする。GPUの公式REST read-backとdata center/complianceの
 Console-equivalent GraphQL read-backを結合して完全一致を検証し、更新時は旧capacityを
 read-backできなければrollback不能としてmutation前に停止する。このfilterをSecure Cloud
 保証の代替にしない。

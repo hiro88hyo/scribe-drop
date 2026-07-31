@@ -12,6 +12,7 @@ import {
   setRunpodEndpointDataCenters,
   setRunpodEndpointGpuTypes,
   setRunpodEndpointWorkersMax,
+  verifyRunpodServerlessGpuTypes,
 } from "./runpod-template-api.mjs";
 
 const confirmation = "--confirm-production-capacity-migration";
@@ -62,6 +63,7 @@ try {
     throw new Error("RunPod production plan is missing");
   }
   const plan = validateRunpodPlan(JSON.parse(readFileSync(planPath, "utf8")), "production");
+  await verifyRunpodServerlessGpuTypes({ gpuTypeIds: plan.endpoint.gpuTypeIds });
   const apiKey = process.env["RUNPOD_API_KEY"];
   const endpointId = process.env["SCRIBE_DROP_PRODUCTION_RUNPOD_ENDPOINT_ID"];
   const result = await prepareRunpodProductionCapacity({

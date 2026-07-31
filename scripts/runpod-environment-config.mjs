@@ -15,8 +15,15 @@ const idleTimeoutSeconds = 5;
 const maxDurationSeconds = 8 * 60 * 60;
 const maxSourceBytes = 2 * 1024 * 1024 * 1024;
 const minimumAvailableGpuFallbacks = 2;
-const fixedGpuTypeIds = ["NVIDIA GeForce RTX 5090", "NVIDIA GeForce RTX 4090"];
-const fixedDataCenterIds = ["EUR-IS-1", "EU-RO-1"];
+const fixedGpuTypeIds = [
+  "NVIDIA GeForce RTX 5090",
+  "NVIDIA RTX PRO 4500 Blackwell",
+  "NVIDIA GeForce RTX 4090",
+];
+// An empty list is the explicit plan representation for RunPod's "Any Region"
+// placement. It is not missing configuration: GraphQL read-back normalizes a
+// null/empty locations field to this value and promotion compares it exactly.
+const fixedDataCenterIds = [];
 const fixedCompliance = [];
 
 function requirePattern(value, pattern, name) {
@@ -260,7 +267,7 @@ export function createRunpodTemplateArguments(untrustedPlan) {
 export function createRunpodEndpointArguments(untrustedPlan, templateId) {
   const plan = validateRunpodPlan(untrustedPlan);
   requirePattern(templateId, resourceIdPattern, "RunPod template ID");
-  return [
+  const arguments_ = [
     "serverless",
     "create",
     "--name",
@@ -273,8 +280,6 @@ export function createRunpodEndpointArguments(untrustedPlan, templateId) {
     plan.endpoint.gpuTypeIds[0],
     "--gpu-count",
     String(plan.endpoint.gpuCount),
-    "--data-center-ids",
-    plan.endpoint.dataCenterIds.join(","),
     "--workers-min",
     String(plan.endpoint.workersMin),
     "--workers-max",
@@ -291,6 +296,10 @@ export function createRunpodEndpointArguments(untrustedPlan, templateId) {
     "--execution-timeout",
     String(plan.endpoint.executionTimeoutSeconds),
   ];
+  if (plan.endpoint.dataCenterIds.length > 0) {
+    arguments_.push("--data-center-ids", plan.endpoint.dataCenterIds.join(","));
+  }
+  return arguments_;
 }
 
 function requireStringRecord(value, name) {
