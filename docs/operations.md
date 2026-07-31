@@ -194,6 +194,15 @@ terminal status、artifact、cancel request、notification outboxを同じservic
 回収する。Cronが重複しても期待status、active attempt、generation、winner、versionを
 含むCASで一度だけ状態を進める。
 
+通知dispatcherは送信前に、削除されていない`COMPLETED`または`FAILED`で
+`notified_at IS NULL`のjobを1件だけoutboxへ登録する。失敗通知は内部例外、error message、
+provider応答、録音・文字起こし本文を含めず、title、安全な再実行案内、Access保護済み
+詳細リンクだけを送る。失敗通知済みjobをretryすると`notified_at`を消去し、次のterminal
+状態で既存outbox行を再初期化する。outboxの`job_version`と現在のjob CAS versionが
+異なる場合は、旧通知が`PENDING`または`SENDING`でもattempt数、backoff、errorを次の
+通知へ引き継がない。通知は最大で次の5分Cron境界まで遅延し得る。
+未送信通知を手動SQLで作成したり、Discord障害を理由にjob状態を戻したりしない。
+
 10分開始SLOはsubmissionをstaleと判定する境界であり、provider cancel完了時刻ではない。
 実際のFAILED遷移とcancel開始は次の5分Cron境界になり得る。利用者表示、alert、staging
 timeoutでは「10分ちょうどでprovider queueから消える」と扱わない。

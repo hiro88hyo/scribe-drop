@@ -15,7 +15,7 @@ CloudflareとRunPodを利用し、以下の処理を行う個人向けWebアプ�
 5. RunPod ServerlessのGPU Workerで文字起こしする
 6. Markdown、JSON、SRTをR2へ保存する
 7. Web画面で処理状況と結果を確認できるようにする
-8. 処理完了時にDiscordへ通知する
+8. 処理完了または失敗時にDiscordへ通知する
 9. GPUは常時起動せず、RunPod Serverlessをゼロスケールで利用する
 
 本システムでは、特に以下を重視する。
@@ -549,6 +549,7 @@ ON job_events(job_id, created_at);
 CREATE TABLE notification_outbox (
     id TEXT PRIMARY KEY,
     job_id TEXT NOT NULL UNIQUE,
+    job_version INTEGER,
     status TEXT NOT NULL,
     attempt_count INTEGER NOT NULL DEFAULT 0,
     next_attempt_at TEXT,
@@ -559,6 +560,12 @@ CREATE TABLE notification_outbox (
     FOREIGN KEY(job_id) REFERENCES jobs(id)
 );
 ```
+
+outboxは1 jobにつき1行とし、現在のterminal状態に対する配送状態を表す。`FAILED`から
+新しいattemptへretryすると`jobs.notified_at`を消去し、次に`FAILED`または`COMPLETED`へ
+到達した時点で同じoutbox行を`PENDING`へ戻す。`job_version`は対象terminal状態のCAS
+versionを保持し、versionが変わった場合は未送信の旧通知であってもattempt数とbackoffを
+引き継がない。これにより履歴目的で配送行を増やさず、失敗通知後の成功通知も欠落させない。
 
 ---
 
@@ -1071,6 +1078,7 @@ CANCEL_REQUESTED
 * terminal状態をD1へ保存し、14章のfinalize処理を行う
 * heartbeatが一定時間ないものを確認
 * 実行期限を超えたものをFAILEDにする
+* `COMPLETED`または`FAILED`かつ未通知のjobをnotification outboxへ冪等に登録する
 * notification outboxを再送する
 * 中途半端なSUBMITTING状態を回復する
 * 期限切れのUPLOADINGをEXPIREDにする
@@ -1093,11 +1101,25 @@ RunPodのasync resultは完了後30分だけ保持されるため、その間に
 結果: https://transcribe.example.com/jobs/01J...
 ```
 
+失敗時は、音声時間、処理時間、内部例外、provider応答を含めず、安全な案内と同じ保護済み
+詳細リンクだけを送る。
+
+```text
+「週次定例」の文字起こしに失敗しました。
+
+詳細を確認し、必要に応じて新しい試行で再実行してください。
+詳細: https://transcribe.example.com/jobs/01J...
+```
+
 リンク先はCloudflare Accessで保護されたジョブ詳細画面とする。
 
 Discord Webhook URLはCloudflare secretに保存する。
 
 通知失敗時はnotification outboxから指数バックオフで再試行する。
+
+5分Cronはoutbox取得前に、削除されていない未通知の`COMPLETED`と`FAILED`を集中走査する。
+各失敗経路が個別に通知を作成する設計にはせず、新しい失敗遷移を追加しても通知漏れを
+起こさない。claim時にはjobが同じterminal状態であることを再確認する。
 
 通知は補助機能であり、アプリ内のジョブ状態を正とする。
 
@@ -1343,7 +1365,7 @@ FFPROBE_INVALID_CONTAINER
 * 通信失敗時に再試行できる
 * アップロード後に画面を閉じても処理が継続する
 * 後から履歴を確認できる
-* 完了時にDiscord通知が来る
+* 完了時と失敗時にDiscord通知が来る
 
 ### セキュリティ
 
@@ -1363,7 +1385,7 @@ FFPROBE_INVALID_CONTAINER
 * Queue再送でRunPod処理結果が二重反映されない
 * RunPod `/run`が重複成功してもwinnerは1つ
 * loser RunPod jobはWhisper処理を開始しない
-* status pollやCronが重複しても通知outboxは1件
+* status pollやCronが重複しても通知outboxは1件で、retry後の次terminal通知に再利用される
 * RunPod result保持期間内にterminal statusを保存し、未観測時は誤完了しない
 * 古いattemptの完了で新しいattemptが上書きされない
 * manifestがない処理をCOMPLETEDにしない

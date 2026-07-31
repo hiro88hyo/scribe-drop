@@ -459,8 +459,11 @@ temporary credentialのexact-object multipart/abort成功とaction/object拒否�
   - stale heartbeat と実行期限
   - 中途半端な submission
   - 期限切れ upload
+  - 未通知の`COMPLETED`と`FAILED`を集中走査してoutboxへ冪等登録
   - notification retry
 - Discord client と指数 backoff 付き outbox dispatcher を実装する。
+- forward-only migration `0009_notification_terminal_generation.sql`でoutboxにjob CAS
+  versionを保存し、retry前の配送attemptを次のterminal通知へ持ち越さない。
 - artifact API を実装し、所有権・COMPLETED・active attempt を検証して 5 分の GET URL を返す。
 - cancel API と RunPod `/cancel` 呼出しを実装する。
 - FAILED job の retry API を実装し、新しい generation、token、result prefix を発行する。
@@ -473,6 +476,8 @@ temporary credentialのexact-object multipart/abort成功とaction/object拒否�
 - 複数Cronまたは手動reconcileが同時にfinalizeしても状態更新とoutboxは一度だけである。
 - RunPod statusを観測できなかったjobはmanifestだけでCOMPLETEDにならない。
 - Discord 障害は job 完了を取り消さず、outbox から再試行される。
+- 失敗経路を個別列挙せず、terminal走査によってすべての`FAILED`を通知対象にする。
+- 失敗通知済みjobをretryした後も、次の`FAILED`または`COMPLETED`通知が1回だけ送られる。
 - artifact URL は所有者だけが取得でき、API 応答やログへ不要に保持されない。
 - stagingの実browser smokeでRunPod terminal、complete manifest、3形式のartifact、
   `COMPLETED` job、所有者限定artifact GET、`SENT` outboxとDiscord受信を確認する。

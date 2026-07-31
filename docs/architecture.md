@@ -56,8 +56,9 @@ AWS SDK、React、HTTP clientはdomainから外し、時刻、乱数、外部API
 5. RunPod workerはsourceを`/tmp`へstreaming downloadし、byte count、ffprobe、durationを
    再検証する。成果物とcomplete manifestをattempt固有prefixへ書き、一時領域を必ず消す。
 6. CronがRunPod terminal statusをD1へ保存し、manifest schemaと各artifactのR2 HEADを
-   検証する。active attemptとversionのCASを満たす一つだけがjobを`COMPLETED`にし、
-   notification outboxを作る。
+   検証する。active attemptとversionのCASを満たす一つだけがjobを`COMPLETED`にする。
+   同じCronの通知境界は未通知の`COMPLETED`と`FAILED`を集中走査してnotification outboxを
+   作り、失敗経路ごとのenqueue漏れを防ぐ。
 7. Browserはowner検証済みAPIから操作時だけexact artifact GET capabilityを取得して
    downloadする。API responseやartifact本文をservice workerへ渡さない。
 
@@ -77,6 +78,10 @@ loser、stale generation、古いattemptはcurrent jobを更新できない。�
 version、active attemptをWHERE条件に含むcompare-and-setであり、event、artifact、outboxは
 一意制約を併用する。duplicate/out-of-order messageは成功済み状態を再利用するか安全な
 conflictとして終了する。
+
+notification outboxはjobごとに1行を持ち、現在のterminal通知の配送状態として再利用する。
+FAILED通知後にretryしたjobは`notified_at`を消去し、次のFAILEDまたはCOMPLETEDで同じ行を
+PENDINGへ戻す。通知履歴を状態遷移の正とせず、jobとeventを正とする。
 
 RunPodがsubmissionを受理しても10分以内にwinner claimへ進まない場合は、
 [ADR 0043](./adr/0043-bound-runpod-start-slo-and-staging-wait.md)に従ってactive attemptを

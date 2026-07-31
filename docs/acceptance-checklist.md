@@ -38,6 +38,7 @@ release判断をBlockedとする。
 | upload後に画面を閉じても処理が継続する    | Pass    | page close後に新pageの履歴・詳細から待機、実行、完了を復元する`apps/e2e/tests/job-lifecycle.spec.ts`、Queue/RunPodの[Phase 5 staging record](./deployments/2026-07-26-phase-5-staging.md) |
 | 後から履歴を確認できる                    | Pass    | `apps/e2e/tests/job-lifecycle.spec.ts`、`apps/web/tests/jobs.worker.spec.ts`                                                                                                              |
 | 完了時にDiscord通知が届く                 | Pass    | `apps/orchestrator/tests/notification-outbox.worker.spec.ts`、[Phase 5 staging record](./deployments/2026-07-26-phase-5-staging.md)                                                       |
+| 失敗時に安全なDiscord通知が届く           | Pending | service/D1統合testはPass。新candidateの実service staging acceptanceを待つ                                                                                                                 |
 
 ## Security
 
@@ -62,6 +63,7 @@ release判断をBlockedとする。
 | 重複`/run`でもwinnerは1つ                                           | Pass | `apps/orchestrator/tests/runpod-control.worker.spec.ts`                                                           |
 | loserはWhisperを開始しない                                          | Pass | `apps/orchestrator/tests/runpod-control.worker.spec.ts`、`apps/runpod-worker/tests/test_service.py`               |
 | 重複status poll/Cronでもnotification outboxは1件                    | Pass | `apps/orchestrator/tests/completion.worker.spec.ts`、`apps/orchestrator/tests/notification-outbox.worker.spec.ts` |
+| 失敗通知後のretryでも次のterminal通知を欠落させない                 | Pass | `apps/orchestrator/tests/completion.worker.spec.ts`、`apps/orchestrator/tests/notification-outbox.worker.spec.ts` |
 | provider保持期間内にterminal statusを保存し、未観測を誤完了にしない | Pass | `apps/orchestrator/tests/completion.worker.spec.ts`                                                               |
 | 古いattemptの完了で現在attemptを上書きしない                        | Pass | `apps/orchestrator/tests/completion.worker.spec.ts`                                                               |
 | manifestなしを`COMPLETED`にしない                                   | Pass | `apps/orchestrator/tests/completion.worker.spec.ts`                                                               |

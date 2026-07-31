@@ -10,6 +10,7 @@ const repositoryRoot = path.resolve(scriptDirectory, "..");
 const orchestratorConfig = path.join(repositoryRoot, "apps", "orchestrator", "wrangler.toml");
 const webConfig = path.join(repositoryRoot, "apps", "web", "wrangler.toml");
 const persistenceDirectory = mkdtempSync(path.join(tmpdir(), "scribe-drop-d1-"));
+const upgradePersistenceDirectory = mkdtempSync(path.join(tmpdir(), "scribe-drop-d1-upgrade-"));
 const hash = "a".repeat(64);
 
 const requiredSchemaObjects = [
@@ -71,6 +72,8 @@ const requiredAttemptColumns = [
   "winning_runpod_job_id",
 ];
 
+const requiredNotificationColumns = ["job_id", "job_version", "status"];
+
 function runWrangler(args, expectFailure = false) {
   const result = spawnSync("pnpm", ["exec", "wrangler", ...args], {
     cwd: repositoryRoot,
@@ -112,6 +115,10 @@ function executeSql(sql) {
 }
 
 function executeJson(sql) {
+  return executeJsonAt(persistenceDirectory, sql);
+}
+
+function executeJsonAt(directory, sql) {
   const output = runWrangler([
     "d1",
     "execute",
@@ -120,7 +127,7 @@ function executeJson(sql) {
     "--config",
     orchestratorConfig,
     "--persist-to",
-    persistenceDirectory,
+    directory,
     "--command",
     sql,
     "--json",
@@ -133,6 +140,21 @@ function executeJson(sql) {
   }
 
   return batch.results;
+}
+
+function executeMigrationFile(directory, filename) {
+  runWrangler([
+    "d1",
+    "execute",
+    "SCRIBE_DROP_DB",
+    "--local",
+    "--config",
+    orchestratorConfig,
+    "--persist-to",
+    directory,
+    "--file",
+    path.join(repositoryRoot, "migrations", filename),
+  ]);
 }
 
 function expectSqlFailure(sql) {
@@ -237,6 +259,11 @@ try {
     executeJson("PRAGMA table_info(job_attempts)"),
     requiredAttemptColumns,
     "job_attempts columns",
+  );
+  assertNames(
+    executeJson("PRAGMA table_info(notification_outbox)"),
+    requiredNotificationColumns,
+    "notification_outbox columns",
   );
   if (
     executeJson("PRAGMA table_info(job_attempts)").some(
@@ -383,7 +410,68 @@ try {
     throw new Error("D1 job deletion did not cascade to attempts");
   }
 
+  const priorMigrationFiles = [
+    "0001_initial.sql",
+    "0002_job_admission_indexes.sql",
+    "0003_attempt_capability_lifecycle.sql",
+    "0004_runpod_claim_protocol.sql",
+    "0005_reconciliation_completion.sql",
+    "0006_phase6_failure_injection.sql",
+    "0007_user_deletion.sql",
+    "0008_retention_cleanup.sql",
+  ];
+  for (const filename of priorMigrationFiles) {
+    executeMigrationFile(upgradePersistenceDirectory, filename);
+  }
+  const upgradeJobId = "01ARZ3NDEKTSV4RRFFQ69G5FB1";
+  const upgradeOutboxId = "01ARZ3NDEKTSV4RRFFQ69G5FB2";
+  runWrangler([
+    "d1",
+    "execute",
+    "SCRIBE_DROP_DB",
+    "--local",
+    "--config",
+    orchestratorConfig,
+    "--persist-to",
+    upgradePersistenceDirectory,
+    "--command",
+    `
+      ${insertJobSql(upgradeJobId, `incoming/owner/${upgradeJobId}/nonce/source.m4a`)}
+      UPDATE jobs
+      SET
+        version = 3,
+        status = 'FAILED',
+        failed_at = '2026-07-25T00:03:00.000Z',
+        updated_at = '2026-07-25T00:03:00.000Z'
+      WHERE id = '${upgradeJobId}';
+      INSERT INTO notification_outbox (
+        id,
+        job_id,
+        status,
+        attempt_count,
+        next_attempt_at,
+        created_at
+      ) VALUES (
+        '${upgradeOutboxId}',
+        '${upgradeJobId}',
+        'PENDING',
+        2,
+        '2026-07-25T00:04:00.000Z',
+        '2026-07-25T00:03:00.000Z'
+      );
+    `,
+  ]);
+  executeMigrationFile(upgradePersistenceDirectory, "0009_notification_terminal_generation.sql");
+  const upgradedOutboxRows = executeJsonAt(
+    upgradePersistenceDirectory,
+    `SELECT job_version FROM notification_outbox WHERE id = '${upgradeOutboxId}'`,
+  );
+  if (upgradedOutboxRows[0]?.job_version !== 3) {
+    throw new Error("D1 notification outbox job version was not backfilled during upgrade");
+  }
+
   console.log("D1 migration verification passed.");
 } finally {
   rmSync(persistenceDirectory, { force: true, recursive: true });
+  rmSync(upgradePersistenceDirectory, { force: true, recursive: true });
 }

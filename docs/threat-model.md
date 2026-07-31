@@ -24,6 +24,8 @@ smokeでproduction probe、GPU推論、complete manifest、3形式のartifact、
 原子的finalizeとDiscord送信を確認した。Phase 6では決定的なR2/D1/Queue/RunPod/Discord
 障害、逆順・重複・stale generation・partial result・同時CronをCIで再現し、状態、
 監査event、allowlist logを自動検査する。
+notification outboxは未通知のCOMPLETEDとFAILEDを集中走査し、失敗本文には内部例外、
+provider応答、録音・文字起こし本文を含めない。
 この単一GPU確認は過去checkpointであり、現行releaseは
 [ADR 0053](./adr/0053-use-mixed-availability-gpus-with-runtime-attestation.md)の固定GPU
 候補、capacity read-back、各claimでのSecure Cloud配置attestationを必須とする。

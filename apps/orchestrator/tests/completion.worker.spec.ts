@@ -15,6 +15,7 @@ const ATTEMPT_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAW";
 const EVENT_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAX";
 const NOTIFICATION_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAY";
 const RETRY_ATTEMPT_ID = "01ARZ3NDEKTSV4RRFFQ69G5FB0";
+const PRIOR_NOTIFICATION_ID = "01ARZ3NDEKTSV4RRFFQ69G5FB1";
 const RUNPOD_JOB_ID = "runpod-job-id";
 const RETRY_RUNPOD_JOB_ID = "retry-runpod-job-id";
 const RESULT_PREFIX = `results/0123456789abcdef0123456789abcdef/${JOB_ID}/${ATTEMPT_ID}/`;
@@ -304,6 +305,67 @@ describe("RunPod completion reconciliation", () => {
         status: "PENDING",
       },
     ]);
+  });
+
+  it("rearms a pending failure notification when a retry later completes", async () => {
+    await seedRunningJob();
+    await putCompleteArtifacts();
+    await env.SCRIBE_DROP_DB.prepare(
+      `
+        INSERT INTO notification_outbox (
+          id,
+          job_id,
+          job_version,
+          status,
+          attempt_count,
+          next_attempt_at,
+          last_error,
+          created_at,
+          sent_at
+        ) VALUES (?1, ?2, 1, 'PENDING', 7, ?3, 'DISCORD_UNAVAILABLE', ?3, NULL)
+      `,
+    )
+      .bind(PRIOR_NOTIFICATION_ID, JOB_ID, "2026-07-25T00:30:00.000Z")
+      .run();
+
+    await expect(
+      reconcileRunpodCompletions(
+        {
+          RECORDINGS: env.RECORDINGS,
+          RUNPOD_API_KEY: "runpod-api-key-placeholder",
+          RUNPOD_ENDPOINT_ID: "endpoint-placeholder",
+          SCRIBE_DROP_DB: env.SCRIBE_DROP_DB,
+        },
+        logger(),
+        {
+          createEventId: () => EVENT_ID,
+          createNotificationId: () => NOTIFICATION_ID,
+          createRunpodClient: () => completionClient(),
+          now: () => NOW,
+        },
+      ),
+    ).resolves.toMatchObject({
+      completedCount: 1,
+    });
+
+    const outbox = await env.SCRIBE_DROP_DB.prepare(
+      `
+        SELECT id, job_version, status, attempt_count, next_attempt_at, created_at, sent_at
+        FROM notification_outbox
+        WHERE job_id = ?1
+      `,
+    )
+      .bind(JOB_ID)
+      .first();
+    expect(outbox).toEqual({
+      attempt_count: 0,
+      created_at: NOW.toISOString(),
+      id: PRIOR_NOTIFICATION_ID,
+      job_version: 2,
+      next_attempt_at: NOW.toISOString(),
+      sent_at: null,
+      status: "PENDING",
+    });
   });
 
   it("recovers deterministic R2 GET and HEAD failures on later Cron executions", async () => {

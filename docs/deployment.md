@@ -94,6 +94,12 @@ delete、retention、Cron recoveryを確認し、D1/R2の試験dataを全件清�
 production試験deployの証跡はADR 0023の同一candidate条件を満たさないため無効であり、
 Phase 7までの過去のstaging結果をproduction promotionの根拠には使用しない。
 
+terminal失敗通知では`0009_notification_terminal_generation.sql`を追加し、
+notification outboxへ対象jobのCAS versionを保存する。既存行は参照先jobの現在versionで
+backfillし、新applicationはclaimと送信ackでversion一致を要求する。nullable列の追加と
+backfillだけの後方互換migrationであり、Orchestrator deploy前に適用する。rollbackで旧
+Orchestratorへ戻しても追加列は残し、migration自体は戻さない。
+
 `apps/orchestrator/wrangler.toml`と`apps/web/wrangler.toml`の全ゼロIDおよびoriginは
 安全なplaceholderであり、remote操作には使用できない。実IDと実originは追跡対象へ
 書かず、対象accountを確認してから`pnpm cloudflare:config:staging`でgit ignoredの
