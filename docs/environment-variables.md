@@ -56,7 +56,12 @@ GPU候補は
 publicationは両候補のSecure Cloud提供、promotion preflightはさらに両候補の利用可能性を
 確認する。Community Cloudにも提供されるGPU種別であるため、各claimでは実Workerの
 `secureCloud=true`をwinner CASとR2 capability発行より前に検証する。promotionは公式REST
-APIの`gpuTypeIds`を完全一致でread-backする。検証不能なdata center変数は持たない。
+APIの`gpuTypeIds`を完全一致でread-backする。通常promotionでは検証不能なdata center
+変数を持たない。ADR 0054のstaging recoveryでは追跡外の一時作成入力へ2 data centerを
+明示し、Compliance filterは`Any`を維持している。これは通常のenvironment設定ではない。
+production promotionより前にdata center selectionと空の`compliance`配列をplan schemaと
+deployment codeへ追加し、自動read-backを確立する。確立するまでGitHub staging
+Environmentのendpoint設定を切り替えず、release workflowを実行しない。
 
 実originはCloudflareとgit ignoredの生成設定だけに保持し、追跡対象ファイルやdeployment
 記録へ保存しない。

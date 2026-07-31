@@ -88,7 +88,10 @@ FAILEDをSUBMITTINGへ戻さず、Cronがcancelを再試行する。
 stagingとproductionは`RTX 5090`、`RTX 4090`の固定順を使用し、promotion時に公式REST
 APIでGPU順序の完全一致と両候補のSecure Cloud提供・利用可能性を確認する。両GPU種別は
 Community Cloudにも提供されるため、各claimではADR 0052の配置attestationによって
-実Workerの`secureCloud=true`を必須とする。検証不能なdata center固定は行わない。
+実Workerの`secureCloud=true`を必須とする。通常promotionでは検証不能なdata center固定を
+行わない。ADR 0054のstaging recoveryだけは明示した2 data centerを手動read-backし、
+Compliance filterを`Any`とする。このfilterをSecure Cloud保証の代替にせず、source of
+truthと自動検証を確立するまでproductionへ適用しない。
 全候補が不足した場合も開始SLO、FAILEDへのCAS、exact cancelを維持し、無期限待機や
 同じattemptの自動再投入は行わない。
 

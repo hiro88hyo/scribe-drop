@@ -19,6 +19,16 @@ max workerは1へ復元した。実ID、image参照、originは追跡対象へ�
 `secureCloud=true`であることをclaim前に検証する。stagingの実GPU E2Eとexact endpoint
 read-backを通すまではproduction-readyとしない。
 
+2026-07-31に[ADR 0054](./adr/0054-use-explicit-datacenters-for-staging-recovery.md)の
+staging限定recovery endpointで、実audio/mp4 upload、claim前配置attestation、GPU推論、
+manifest、3形式のartifact、D1 finalize、利用者によるdownloadと文字起こし確認まで
+成功した。処理後はactive D1/provider job 0、`workersMin=0`へ収束した。このendpointは
+明示した2 data centerをConsoleで手動read-backした暫定例外であり、source of truthと
+GitHub staging Environmentが同期するまではproduction promotion evidenceに使用しない。
+Consoleの`Security & compliance`はdata centerのcertification filterであり、
+Secure Cloud切替ではない。現行要件に特定certificationはないため`Any`を維持し、
+実Workerの`secureCloud=true` attestationを省略しない。
+
 ## Image supply chain
 
 imageは`linux/amd64`専用のmulti-stage buildとする。選択値は
@@ -94,7 +104,12 @@ stagingとproductionは別endpoint、別template、別credentialを使用する�
 - 両候補がinventoryでSecure Cloud提供かつavailable。Community Cloudでの提供と
   stock tierはrelease invariantにしない
 - 各claimで実Workerの`secureCloud=true`をR2 capability発行前に検証する
-- 検証不能なdata center固定を行わず、特定regionで動くとは保証しない
+- 通常promotionでは、source of truthと自動read-backで検証できないdata center固定を
+  行わず、特定regionで動くとは保証しない
+- ADR 0054のstaging recoveryだけは`EUR-IS-1`と`EU-RO-1`を明示し、Consoleの
+  exact selectionを手動確認する。この例外をproductionへ適用しない
+- compliance filterは`Any`とする。特定certification要件は別ADRなしに追加せず、
+  Secure Cloudの代替条件として扱わない
 - Network Volumeなし
 - 永続diskなし
 - FlashBoot無効
@@ -203,6 +218,15 @@ promotion時も`workersMax=0`でdrainしてから同じ更新とread-backを行�
 旧template、旧worker上限へ戻す。さらに実job前後のworkerがcandidate template/imageと
 一致し、Secure Cloud提供・promotion availability・実Worker配置attestationを満たすまで
 production-readyとしない。
+
+ADR 0054のstaging recoveryでは、固定CLIの作成引数へ2 data centerを明示し、Consoleで
+exact selectionを手動確認した。作成応答とGETはfieldを省略したため、これは通常promotion
+手順ではなく期限付きの運用例外である。`Security & compliance`は`Any`であり、
+data center metadata上は両方がGDPRとHIPAA、片方がISO/IEC 27001とISO 14001にも対応する。
+これらはSecure Cloudの代替証跡にしない。production promotionより前にdata centerと
+空のcompliance filterをplan schema、renderer、create/update/rollback、drift testへ
+追加し、自動read-back可能なprovider境界を確立する。確立できない場合はproductionを
+Blockedのままにする。
 
 digest付きimageから`--serverless` templateを新規作成する。Serverless templateは1 endpoint
 にだけ関連付けられ、persistent volumeをサポートしない。初期container diskは30 GiB、

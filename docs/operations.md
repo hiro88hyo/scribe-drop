@@ -215,6 +215,10 @@ timeoutでは「10分ちょうどでprovider queueから消える」と扱わな
   [ADR 0051](./adr/0051-prewarm-staging-before-job-creation.md)に従い、job作成前に
   candidate Workerを最大8分prewarmする。ready evidenceを得られなければjobを作らず、
   `workersMin=0`のexact read-backまで確認する。cleanup失敗は課金継続のalert対象とする。
+- [ADR 0054](./adr/0054-use-explicit-datacenters-for-staging-recovery.md)のstaging recoveryは
+  明示した2 data centerとCompliance `Any`を使用する。Compliance filterはSecure Cloud
+  切替ではないため、実Workerの`secureCloud=true` attestationを必ず維持する。旧endpointは
+  support調査中にprewarmやjobを行わず、両endpointの`workersMin=0`を維持する。
 - 全候補が一時的に不足しても、利用者画面は`SUBMITTING`を「GPU起動中」と表示し、開始SLO
   超過後は`FAILED`と手動retryを提供する。同じattemptの自動再投入やclaim TTL延長はしない。
 - 利用者のretryは`FAILED` jobに新しいgeneration、attempt、token、result prefixを作る。
