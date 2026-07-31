@@ -3,8 +3,8 @@ import path from "node:path";
 
 import { verifyReleaseCandidate } from "./release-candidate.mjs";
 
-const schemaVersion = 2;
-const policyVersion = "adr-0023-v2";
+const schemaVersion = 3;
+const policyVersion = "adr-0059-v1";
 const sha256Pattern = /^[0-9a-f]{64}$/u;
 const commitShaPattern = /^[0-9a-f]{40}$/u;
 const runIdPattern = /^[1-9][0-9]*$/u;
@@ -14,6 +14,9 @@ const requiredCheckNames = [
   "candidateVerified",
   "cloudflareResourceReadback",
   "endToEndM4a",
+  "failedEndToEndM4a",
+  "failureJobCleanupRequested",
+  "failureNotificationDelivered",
   "jobCleanupRequested",
   "manifestLast",
   "migrationsApplied",

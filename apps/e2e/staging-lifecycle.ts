@@ -26,6 +26,24 @@ export async function waitForStagingJobCompletion(
   await expect(completed).toBeVisible();
 }
 
+export async function waitForStagingJobFailure(
+  page: Page,
+  timeout = STAGING_JOB_COMPLETION_TIMEOUT_MS,
+): Promise<void> {
+  const failed = page.getByText("失敗", { exact: true }).first();
+  const unexpectedTerminal = page
+    .getByText("完了", { exact: true })
+    .first()
+    .or(page.getByText("キャンセル済み", { exact: true }).first())
+    .or(page.getByText("期限切れ", { exact: true }).first())
+    .or(page.getByText("元ファイル変更", { exact: true }).first());
+  await expect(failed.or(unexpectedTerminal)).toBeVisible({ timeout });
+  if (!(await failed.isVisible())) {
+    throw new Error("Staging failure fixture did not reach FAILED");
+  }
+  await expect(failed).toBeVisible();
+}
+
 export async function deleteStagingFixtureJob(page: Page, jobId: string): Promise<void> {
   await page.goto(`/jobs/${encodeURIComponent(jobId)}`);
   const deleteTrigger = page.getByRole("button", { name: "ジョブを削除" });

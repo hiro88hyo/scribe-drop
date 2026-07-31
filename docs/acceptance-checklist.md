@@ -2,12 +2,14 @@
 
 ## 状態と範囲
 
-- 評価日: 2026-07-29 UTC
+- 評価日: 2026-07-31 UTC
 - 対象: Phase 1からPhase 7のlocal、CI、staging checkpoint
-- 結果: Phase 7までのbaselineは確認済み。Pixel M4Aの補助stream修正は新candidateで
-  staging再検証したが、旧RunPod worker再利用を検出したためpromotion保証の修正待ち
+- 結果: Phase 7までのbaselineは確認済み。現行releaseはterminal失敗通知を含む
+  schema version 3のformal staging acceptanceとproduction smoke完了までBlocked
 - 対象外: production promotionの合格判定とAndroid Share Target。過去のproduction試験
   deployは無効な証跡であり、Share Targetは仕様どおり別PRとする
+- `Gate`はsource上の必須workflow checkを表し、実行時の合否はcandidateに結び付く短命
+  staging acceptance artifactを正とする。
 
 実account、domain、resource/deployment ID、credential、利用者dataはこのchecklistへ
 保存しない。手動確認の詳細はenvironment別deployment recordを参照する。
@@ -38,7 +40,7 @@ release判断をBlockedとする。
 | upload後に画面を閉じても処理が継続する    | Pass    | page close後に新pageの履歴・詳細から待機、実行、完了を復元する`apps/e2e/tests/job-lifecycle.spec.ts`、Queue/RunPodの[Phase 5 staging record](./deployments/2026-07-26-phase-5-staging.md) |
 | 後から履歴を確認できる                    | Pass    | `apps/e2e/tests/job-lifecycle.spec.ts`、`apps/web/tests/jobs.worker.spec.ts`                                                                                                              |
 | 完了時にDiscord通知が届く                 | Pass    | `apps/orchestrator/tests/notification-outbox.worker.spec.ts`、[Phase 5 staging record](./deployments/2026-07-26-phase-5-staging.md)                                                       |
-| 失敗時に安全なDiscord通知が届く           | Pending | service/D1統合testはPass。新candidateの実service staging acceptanceを待つ                                                                                                                 |
+| 失敗時に安全なDiscord通知が届く           | Gate    | [ADR 0059](./adr/0059-require-real-staging-failure-notification-acceptance.md)に従い、合成破損M4A、exact FAILED、current-version outbox SENT、fixture削除をformal stagingで必須化         |
 
 ## Security
 

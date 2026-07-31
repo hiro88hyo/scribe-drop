@@ -82,6 +82,9 @@ conflictとして終了する。
 notification outboxはjobごとに1行を持ち、現在のterminal通知の配送状態として再利用する。
 FAILED通知後にretryしたjobは`notified_at`を消去し、次のFAILEDまたはCOMPLETEDで同じ行を
 PENDINGへ戻す。通知履歴を状態遷移の正とせず、jobとeventを正とする。
+formal stagingは合成破損M4Aを同じ境界へ通し、jobのexact `FAILED`と現在versionのoutbox
+`SENT`を確認する。短命acceptanceはこの実配送、failure fixture削除、scale-to-zero復元を
+独立checkとして含み、production workflowが再検証する。
 
 RunPodがsubmissionを受理しても10分以内にwinner claimへ進まない場合は、
 [ADR 0043](./adr/0043-bound-runpod-start-slo-and-staging-wait.md)に従ってactive attemptを

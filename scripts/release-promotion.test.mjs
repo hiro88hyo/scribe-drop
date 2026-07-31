@@ -112,10 +112,13 @@ test("creates and verifies short-lived staging acceptance evidence", () => {
     outputPath: acceptanceEvidencePath(evidenceDirectory),
     stagingRunId,
   });
-  assert.equal(evidence.schemaVersion, 2);
-  assert.equal(evidence.policyVersion, "adr-0023-v2");
+  assert.equal(evidence.schemaVersion, 3);
+  assert.equal(evidence.policyVersion, "adr-0059-v1");
   assert.equal(evidence.environment, "staging");
   assert.equal(evidence.checks.endToEndM4a, true);
+  assert.equal(evidence.checks.failedEndToEndM4a, true);
+  assert.equal(evidence.checks.failureNotificationDelivered, true);
+  assert.equal(evidence.checks.failureJobCleanupRequested, true);
 
   const verified = verifyStagingAcceptance({
     candidateDirectory,

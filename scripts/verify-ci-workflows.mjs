@@ -7,6 +7,7 @@ const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(scriptDirectory, "..");
 const workflowsDirectory = path.join(repositoryRoot, ".github", "workflows");
 const packageManifestPath = path.join(repositoryRoot, "package.json");
+const stagingE2ePackageManifestPath = path.join(repositoryRoot, "apps", "e2e", "package.json");
 const ciWorkflowPath = path.join(workflowsDirectory, "ci.yml");
 const publicationWorkflowPath = path.join(workflowsDirectory, "publish-runpod-worker.yml");
 const stagingWorkflowPath = path.join(workflowsDirectory, "deploy-staging-candidate.yml");
@@ -22,6 +23,20 @@ const stagingE2ePath = path.join(
   "e2e",
   "staging-tests",
   "release-candidate.spec.ts",
+);
+const stagingFailureE2ePath = path.join(
+  repositoryRoot,
+  "apps",
+  "e2e",
+  "staging-tests",
+  "failure-notification.spec.ts",
+);
+const stagingFailureCleanupPath = path.join(
+  repositoryRoot,
+  "apps",
+  "e2e",
+  "staging-tests",
+  "failure-cleanup.spec.ts",
 );
 const stagingReadinessTestPath = path.join(
   repositoryRoot,
@@ -198,12 +213,15 @@ const workflowContents = workflowFiles
   .map((filename) => readFileSync(path.join(workflowsDirectory, filename), "utf8"))
   .join("\n");
 const packageManifestContents = readFileSync(packageManifestPath, "utf8");
+const stagingE2ePackageManifestContents = readFileSync(stagingE2ePackageManifestPath, "utf8");
 const ciWorkflowContents = readFileSync(ciWorkflowPath, "utf8");
 const publicationWorkflowContents = readFileSync(publicationWorkflowPath, "utf8");
 const stagingWorkflowContents = readFileSync(stagingWorkflowPath, "utf8");
 const productionWorkflowContents = readFileSync(productionWorkflowPath, "utf8");
 const cloudflareReadbackScriptContents = readFileSync(cloudflareReadbackScriptPath, "utf8");
 const stagingE2eContents = readFileSync(stagingE2ePath, "utf8");
+const stagingFailureE2eContents = readFileSync(stagingFailureE2ePath, "utf8");
+const stagingFailureCleanupContents = readFileSync(stagingFailureCleanupPath, "utf8");
 const stagingReadinessTestContents = readFileSync(stagingReadinessTestPath, "utf8");
 const stagingAuthContents = readFileSync(stagingAuthPath, "utf8");
 const stagingAccessCredentialsContents = readFileSync(stagingAccessCredentialsPath, "utf8");
@@ -607,6 +625,13 @@ for (const [description, value] of Object.entries({
   "idempotent Pages promotion": "pnpm run cloudflare:pages:promote:staging pages-candidate",
   "live Cloudflare read-back": "pnpm run cloudflare:readback:staging",
   "real service E2E": "pnpm run test:e2e:staging",
+  "synthetic failure evidence in runner temp":
+    "STAGING_FAILURE_EVIDENCE_PATH: ${{ runner.temp }}/staging-failure-evidence.json",
+  "real failure notification verification":
+    'pnpm run staging:failure-notification:verify "${STAGING_FAILURE_EVIDENCE_PATH}"',
+  "real failure notification lifecycle":
+    "pnpm --filter @scribe-drop/e2e run test:staging:failure-notification",
+  "synthetic failure cleanup": "pnpm --filter @scribe-drop/e2e run test:staging:failure-cleanup",
   "staging-only Access client ID": "CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}",
   "staging-only Access client secret":
     "CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}",
@@ -649,6 +674,24 @@ requireText(
   '"staging:e2e:fixture:verify": "node scripts/verify-staging-e2e-fixture.mjs"',
   "package.json",
   "real staging E2E fixture preflight",
+);
+requireText(
+  packageManifestContents,
+  '"staging:failure-notification:verify": "node scripts/verify-staging-failure-notification.mjs"',
+  "package.json",
+  "real staging failure notification verifier",
+);
+requireText(
+  stagingE2ePackageManifestContents,
+  '"test:staging:failure-cleanup": "playwright test --config playwright.staging.config.ts staging-tests/failure-cleanup.spec.ts"',
+  "apps/e2e/package.json",
+  "synthetic staging failure cleanup test",
+);
+requireText(
+  stagingE2ePackageManifestContents,
+  '"test:staging:failure-notification": "playwright test --config playwright.staging.config.ts staging-tests/failure-notification.spec.ts"',
+  "apps/e2e/package.json",
+  "synthetic staging failure notification test",
 );
 requireTextOrder(
   stagingPreflightJob,
@@ -866,9 +909,9 @@ requireTextCount(
 requireTextCount(
   stagingWorkflowContents,
   "pnpm run runpod:verify-worker:staging",
-  1,
+  2,
   "deploy-staging-candidate.yml",
-  "post-lifecycle candidate worker evidence",
+  "post-success and post-failure candidate worker evidence",
 );
 requireText(
   packageManifestContents,
@@ -891,9 +934,9 @@ requireText(
 requireTextCount(
   stagingAcceptanceJob,
   "pnpm run runpod:prewarm:staging",
-  1,
+  2,
   "deploy-staging-candidate.yml acceptance job",
-  "single pre-job candidate worker allocation",
+  "idle candidate worker gate before both real jobs",
 );
 requireTextCount(
   stagingAcceptanceJob,
@@ -911,16 +954,51 @@ requireText(
 requireTextOrder(
   stagingAcceptanceJob,
   "Verify authenticated data plane, then run real staging M4A lifecycle",
-  "Verify the candidate RunPod worker handled the lifecycle",
+  "Verify the candidate RunPod worker handled the successful lifecycle",
   "deploy-staging-candidate.yml acceptance job",
   "candidate worker read-back after real staging E2E",
 );
 requireTextOrder(
   stagingAcceptanceJob,
-  "Verify the candidate RunPod worker handled the lifecycle",
+  "Verify the candidate RunPod worker handled the successful lifecycle",
+  "Wait for an idle candidate worker before the failure fixture",
+  "deploy-staging-candidate.yml acceptance job",
+  "successful worker evidence before second idle gate",
+);
+requireTextOrder(
+  stagingAcceptanceJob,
+  "Wait for an idle candidate worker before the failure fixture",
+  "Run real staging failure notification lifecycle",
+  "deploy-staging-candidate.yml acceptance job",
+  "second idle candidate gate before the failure fixture",
+);
+requireTextOrder(
+  stagingAcceptanceJob,
+  "Run real staging failure notification lifecycle",
+  "Verify the candidate RunPod worker handled the failure fixture",
+  "deploy-staging-candidate.yml acceptance job",
+  "failure lifecycle before candidate worker evidence",
+);
+requireTextOrder(
+  stagingAcceptanceJob,
+  "Verify the candidate RunPod worker handled the failure fixture",
+  "Verify the synthetic failure notification was delivered",
+  "deploy-staging-candidate.yml acceptance job",
+  "failure worker evidence before failure notification verification",
+);
+requireTextOrder(
+  stagingAcceptanceJob,
+  "Verify the synthetic failure notification was delivered",
+  "Delete the synthetic staging failure fixture",
+  "deploy-staging-candidate.yml acceptance job",
+  "failure notification delivery before fixture deletion",
+);
+requireTextOrder(
+  stagingAcceptanceJob,
+  "Delete the synthetic staging failure fixture",
   "Restore staging scale-to-zero",
   "deploy-staging-candidate.yml acceptance job",
-  "candidate worker evidence before scale-to-zero restoration",
+  "failure fixture cleanup before scale-to-zero restoration",
 );
 requireTextOrder(
   stagingAcceptanceJob,
@@ -1161,6 +1239,8 @@ requireTextOrder(
 );
 for (const [contents, location] of [
   [stagingE2eContents, "release-candidate.spec.ts"],
+  [stagingFailureE2eContents, "failure-notification.spec.ts"],
+  [stagingFailureCleanupContents, "failure-cleanup.spec.ts"],
   [stagingReadinessTestContents, "data-plane-readiness.spec.ts"],
 ]) {
   requireText(
@@ -1192,6 +1272,14 @@ for (const [description, value] of Object.entries({
   "immediate upload failure observation": "uploadAccepted.or(uploadError)",
 })) {
   requireText(stagingE2eContents, value, "release-candidate.spec.ts", description);
+}
+for (const [description, value] of Object.entries({
+  "synthetic invalid media fixture": "synthetic invalid media for staging failure acceptance",
+  "bounded exact FAILED observation": "waitForStagingJobFailure(page, STAGING_FAILURE_TIMEOUT_MS)",
+  "mode-600 ephemeral failure evidence":
+    "writeStagingFailureEvidence(evidencePath, createdJob.data.jobId)",
+})) {
+  requireText(stagingFailureE2eContents, value, "failure-notification.spec.ts", description);
 }
 requireText(
   releaseCandidateScriptContents,

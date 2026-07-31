@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-07-29
 - Refines: ADR 0043、ADR 0050のstaging release gate
+- Refined by: [ADR 0059](./0059-require-real-staging-failure-notification-acceptance.md)
 
 ## Context
 
@@ -49,6 +50,10 @@ cleanup後にprovider queueからも消えた。ADR 0043の開始SLOは10分だ�
 - ADR 0043の10分開始SLO、FAILEDへのCAS、exact provider job cancelは維持する。ただし
   5分Cron境界により収束完了は10分を超え得ることを運用文書と利用者表示で明示する。
 
+ADR 0059以降は`ready/running`条件を厳格化し、各synthetic job直前にprovider queueと
+in-progress jobが0、running Workerが0、idleまたはready Workerが1件以上であることを
+必須とする。成功job後のWorker refreshを考慮し、失敗fixture前にも同じprewarmを再実行する。
+
 ## Consequences
 
 - GPU供給不足は、実データ経路へsynthetic jobを作成する前に最大8分で検出できる。
@@ -57,5 +62,7 @@ cleanup後にprovider queueからも消えた。ADR 0043の開始SLOは10分だ�
 - prewarmはcandidate containerが実GPU上でreadyになったことを証明するが、将来の
   production Flex worker割り当てまでは保証しない。productionの低遅延を保証するには、
   常時Active worker、保証容量、または別providerへのfailover判断が別途必要である。
-- GitHub Actionsの最大時間はcleanup余裕を含め25分だが、GPU未割り当て時はE2Eを開始せず
-  prewarm上限で停止する。timeoutを延ばして同じprovider jobを待ち続けない。
+- ADR 0059以前の単一job acceptanceはGitHub Actions上限25分だった。二つのsynthetic jobを
+  直列実行する現行acceptanceはcleanup余裕を含め45分とするが、各prewarmは8分、成功jobは
+  10分、失敗jobは7分、通知read-backは1分で個別に停止する。同じprovider jobを上限まで
+  再投入または自動retryしない。

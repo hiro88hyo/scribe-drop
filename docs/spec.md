@@ -567,6 +567,15 @@ outboxは1 jobにつき1行とし、現在のterminal状態に対する配送状
 versionを保持し、versionが変わった場合は未送信の旧通知であってもattempt数とbackoffを
 引き継がない。これにより履歴目的で配送行を増やさず、失敗通知後の成功通知も欠落させない。
 
+production promotion前のformal stagingでは、音声を含まない合成破損M4Aを通常の
+upload/R2/Queue/RunPod経路へ投入し、jobがexact `FAILED`、現在versionのoutboxが`SENT`、
+jobとoutboxの送信時刻が設定済みになることを実D1とDiscord webhookで確認する。job IDは
+runnerのmode `0600`一時fileだけへ保存し、検証後にfixture jobを削除する。
+正常M4Aと合成破損M4Aの各job直前にprovider queue/in-progress 0、running Worker 0、
+idleまたはreadyのexact candidate Worker 1件以上を確認する。
+[ADR 0059](./adr/0059-require-real-staging-failure-notification-acceptance.md)の3 checkを
+含まない旧staging acceptanceをproductionへ使用しない。
+
 ---
 
 ## 8. ジョブ状態

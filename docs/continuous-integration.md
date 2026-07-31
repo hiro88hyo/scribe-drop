@@ -166,7 +166,11 @@ DLQ/retry、CORS、lifecycle、D1 migration、PagesのGit provider無効、activ
 binding、RunPod endpointをread-backする。Pagesはdeploy済みproduction
 `wrangler_config_hash`と生成した追跡外configのSHA-256も照合する。Access service tokenの
 claimと認証済み`GET /api/me`をupload前に検証し、実M4A、manifest-last、3成果物download、
-削除受付が成功した後だけ24時間有効なacceptance artifactを発行する。
+削除受付を確認する。続いて音声を含まない合成破損M4Aを同じ経路へ投入し、exact
+`FAILED`、現在versionのoutbox `SENT`、job/outbox送信時刻を固定Wranglerで確認する。
+failure job IDはmode `0600`のrunner一時fileだけで受け渡し、実配送確認後に同じAccess
+service principalで削除する。両fixture削除とscale-to-zero復元が成功した後だけ、
+schema version 3の24時間有効なacceptance artifactを発行する。
 acceptanceには実IDやoriginを含めず、retention、R2 policy、RunPod GPU・配置・runtime
 invariantをenvironment markerで正規化したpolicy hashを含める。
 [ADR 0043](./adr/0043-bound-runpod-start-slo-and-staging-wait.md)に従い、実E2Eは
@@ -176,9 +180,15 @@ SOURCE_MUTATEDは即時失敗とし、COMPLETEDだけを長時間待たない。
 自動retryせず、原因と供給状況を確認するまで次のworkflowを起動しない。
 [ADR 0051](./adr/0051-prewarm-staging-before-job-creation.md)に従い、upload前に
 `workersMin=1`を一時設定し、candidate template/imageのWorkerとhealth readinessを最大8分
-だけ待つ。readyにならなければsynthetic jobを作らず失敗し、prewarm内部とworkflowの
+だけ待つ。provider queue/in-progress/runningは0、idleまたはready Workerは1件以上を
+必須とする。成功jobのWorker refresh後、失敗fixture前にも同じprewarmを再実行する。
+idleにならなければsynthetic jobを作らず失敗し、prewarm内部とworkflowの
 `always()` cleanupの両方で`workersMin=0`をexact read-backする。candidate Workerの
 post-lifecycle evidenceとscale-to-zero復元が成功した後だけacceptanceを発行する。
+[ADR 0059](./adr/0059-require-real-staging-failure-notification-acceptance.md)のfailure
+notification確認またはfixture cleanupが失敗した場合も、`always()` cleanupで
+failure fixture削除とscale-to-zeroを試みる。実録音、job ID、D1 query fileをartifactへ
+保存しない。
 [ADR 0055](./adr/0055-separate-worker-evidence-from-idle-promotion-preflight.md)に従い、
 post-lifecycle evidenceはpromotion前のidle-only preflightを再利用しない。専用のread-only
 verifierがcandidate template/image、`RUNNING`・`EXITED`・`TERMINATED`だけのstatus、

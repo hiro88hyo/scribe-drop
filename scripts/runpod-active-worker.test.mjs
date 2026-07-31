@@ -51,13 +51,14 @@ function endpoint(workersMin, workerReady = false) {
   };
 }
 
-function health(state) {
+function health(state, jobs = { inProgress: 0, inQueue: 0 }) {
   return {
+    jobs,
     workers: {
       idle: 0,
       initializing: state === "initializing" ? 1 : 0,
       ready: state === "ready" ? 1 : 0,
-      running: 0,
+      running: state === "running" ? 1 : 0,
       throttled: 0,
       unhealthy: 0,
     },
@@ -100,6 +101,35 @@ test("prewarms the exact candidate before returning", async () => {
   assert.equal(workersMin, 1);
   assert.deepEqual(mutations, [{ endpointId, workersMin: 1 }]);
   assert.equal(healthReads, 2);
+});
+
+test("waits for queued and running work to clear before returning", async () => {
+  let healthReads = 0;
+  await prewarmStagingRunpodCandidate(input, {
+    getCapacity() {
+      return Promise.resolve(capacity());
+    },
+    getEndpoint() {
+      return Promise.resolve(endpoint(1, true));
+    },
+    getHealth() {
+      healthReads += 1;
+      if (healthReads === 1) {
+        return Promise.resolve(health("running", { inProgress: 1, inQueue: 0 }));
+      }
+      if (healthReads === 2) {
+        return Promise.resolve(health("ready", { inProgress: 0, inQueue: 1 }));
+      }
+      return Promise.resolve(health("ready"));
+    },
+    now: () => healthReads * 15_000,
+    setWorkersMin() {
+      return Promise.resolve();
+    },
+    sleep: () => Promise.resolve(),
+  });
+
+  assert.equal(healthReads, 3);
 });
 
 test("uses exact read-back when the prewarm mutation response is lost", async () => {

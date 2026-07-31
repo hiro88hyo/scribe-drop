@@ -344,6 +344,13 @@ production deployは成功したstaging evidenceが参照するcandidateだけ�
 commitまたはartifact digestが異なる場合、acceptance後にcode、dependency、migration、
 deployment設定が変更された場合、実resource parity checkが失敗した場合は停止する。
 mock E2Eやlocal testは実service staging acceptanceの代替にしない。
+terminal失敗通知を含むcandidateでは
+[ADR 0059](./adr/0059-require-real-staging-failure-notification-acceptance.md)に従い、
+正常な合成M4Aに続けて合成破損M4Aを通常経路へ投入する。exact `FAILED`、現在versionの
+outbox `SENT`、job/outbox送信時刻、failure fixture削除、scale-to-zero復元が成功した
+schema version 3のacceptanceだけをproduction入力にする。job IDはrunner一時fileだけで
+受け渡し、workflow log、artifact、deployment文書へ残さない。二つのjobの各作成前に
+queue/in-progress/running 0とidle/ready candidate Workerを確認する。
 
 RunPod promotionは
 [ADR 0047](./adr/0047-drain-stale-runpod-workers-before-promotion.md)に従い、旧terminal
@@ -401,11 +408,13 @@ imageと合成する。applicationの生成・再検証に失敗した場合はc
 2. release-to-main PRがclosedであることを確認し、
    `Publish RunPod release candidate`を`release/<version>`で実行する。
 3. 成功したcandidate run IDだけを`Deploy release candidate to staging`へ渡す。
-4. staging acceptance成功後に同じrelease-to-main PRをreopenし、release commitを
+4. stagingの正常M4A、合成失敗、Discord配送、両fixture削除、scale-to-zero復元を確認し、
+   schema version 3のacceptanceを発行する。
+5. staging acceptance成功後に同じrelease-to-main PRをreopenし、release commitを
    変更せず最終PR CIを一度だけ通す。
-5. 24時間以内に成功したstaging run IDだけを
+6. 24時間以内に成功したstaging run IDだけを
    `Promote staging-accepted candidate to production`へ渡す。
-6. production jobはGitHub Environmentのrequired reviewer承認後にもrun、candidate、
+7. production jobはGitHub Environmentのrequired reviewer承認後にもrun、candidate、
    evidence、digestを再検証し、正規化したenvironment policyがstagingと一致してから
    D1/R2、RunPod、Orchestrator、最後に利用者入口のPagesを更新する。更新後に実resourceを
    再検証する。最初のremote mutation前にacceptanceの残存時間が30分未満なら中止し、

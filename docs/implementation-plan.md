@@ -657,6 +657,13 @@ candidate作成後にcode、dependency、migration、deployment設定を変更�
 staging evidenceを無効とし、buildとstaging acceptanceをやり直す。mock E2Eやunit testだけ
 で実service staging acceptanceを代替しない。promotion workflowまたは実resource
 read-back verifierが欠落・失敗している間はproductionへdeployしない。
+terminal失敗通知を変更したcandidateでは
+[ADR 0059](./adr/0059-require-real-staging-failure-notification-acceptance.md)に従い、
+正常な合成M4Aだけでなく、合成破損M4Aのexact `FAILED`、現在versionのoutbox `SENT`、
+fixture削除、scale-to-zero復元をformal stagingの同じacceptance jobで必須にする。
+各job直前にqueue/in-progress/running 0とidle/ready candidate Workerを再確認し、成功job
+後のWorker refresh中に失敗fixtureを投入しない。
+schema version 3の短命acceptanceに3 checkがない場合はproductionへ進めない。
 Orchestrator artifactは
 [ADR 0027](./adr/0027-store-raw-orchestrator-module.md)のraw ES module条件をcandidate作成時と
 検証時に満たし、multipart upload bodyを同一artifactとして扱わない。

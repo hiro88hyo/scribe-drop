@@ -203,6 +203,14 @@ provider応答、録音・文字起こし本文を含めず、title、安全な�
 通知へ引き継がない。通知は最大で次の5分Cron境界まで遅延し得る。
 未送信通知を手動SQLで作成したり、Discord障害を理由にjob状態を戻したりしない。
 
+formal stagingでは[ADR 0059](./adr/0059-require-real-staging-failure-notification-acceptance.md)
+の合成破損M4Aを通常経路へ1件だけ投入する。exact `FAILED`、現在versionのoutbox `SENT`、
+job/outbox送信時刻を固定Wranglerのread-only remote D1 queryで確認する。job IDを
+consoleやartifactへ出さず、mode `0600`のrunner一時fileだけでE2E、検証、明示削除の間を
+受け渡す。正常/失敗jobの各作成前にqueue/in-progress/running 0とidle/ready candidate
+Workerを確認する。検証失敗時もfixture削除と`workersMin=0`復元を`always()`で行う。
+本番でこのfailure fixtureや手動SQLを使わない。
+
 10分開始SLOはsubmissionをstaleと判定する境界であり、provider cancel完了時刻ではない。
 実際のFAILED遷移とcancel開始は次の5分Cron境界になり得る。利用者表示、alert、staging
 timeoutでは「10分ちょうどでprovider queueから消える」と扱わない。

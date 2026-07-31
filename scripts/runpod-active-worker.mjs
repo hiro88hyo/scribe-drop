@@ -195,15 +195,20 @@ export async function prewarmStagingRunpodCandidate(input, dependencies) {
         requireRecord(health, "RunPod endpoint health").workers,
         "RunPod endpoint health workers",
       );
+      const jobs = requireRecord(
+        requireRecord(health, "RunPod endpoint health").jobs,
+        "RunPod endpoint health jobs",
+      );
+      const inProgressJobCount = requireCounter(jobs.inProgress, "RunPod in-progress job count");
+      const queuedJobCount = requireCounter(jobs.inQueue, "RunPod queued job count");
       const idleWorkerCount = requireCounter(workers.idle, "RunPod idle worker count");
       const initializingWorkerCount = requireCounter(
         workers.initializing,
         "RunPod initializing worker count",
       );
       const readyWorkerCount =
-        idleWorkerCount +
-        requireCounter(workers.ready, "RunPod ready worker count") +
-        requireCounter(workers.running, "RunPod running worker count");
+        idleWorkerCount + requireCounter(workers.ready, "RunPod ready worker count");
+      const runningWorkerCount = requireCounter(workers.running, "RunPod running worker count");
       const throttledWorkerCount = requireCounter(
         workers.throttled,
         "RunPod throttled worker count",
@@ -215,7 +220,10 @@ export async function prewarmStagingRunpodCandidate(input, dependencies) {
       if (
         activeWorkerCount === 1 &&
         readyWorkerCount >= 1 &&
+        inProgressJobCount === 0 &&
         initializingWorkerCount === 0 &&
+        queuedJobCount === 0 &&
+        runningWorkerCount === 0 &&
         throttledWorkerCount === 0 &&
         unhealthyWorkerCount === 0
       ) {
