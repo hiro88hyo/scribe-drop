@@ -239,21 +239,22 @@ timeoutでは「10分ちょうどでprovider queueから消える」と扱わな
   許可GPU、Secure Cloudをwinner CAS前に照合する。照合不能または不一致は通常の
   `CLAIM_REJECTED`としてfail closedにし、R2 URLを発行しない。provider body、worker ID、
   Pod IDをlogへ追加して調査しない。RunPod planとCloudflare bindingのread-backを先に確認する。
-- inventory preflightは固定GPU候補がすべてSecure Cloud専用かつavailableであることを
-  確認する。stock tierは運用シグナルでありreleaseの合否には使わない。条件を満たさない
-  場合はworkflowを開始せず、同じjobやworkflowを繰り返して供給待ちを隠さない。
+- inventory preflightは固定GPU候補がすべてSecure Cloudで提供され、2候補以上が
+  availableであることを確認する。stock tierは運用シグナルでありreleaseの合否には使わない。
+  live OpenAPIのendpoint create/update enumにも全候補が存在しなければならない。条件を
+  満たさない場合はworkflowを開始せず、同じjobやworkflowを繰り返して供給待ちを隠さない。
 - inventoryのavailableは実割り当てを保証しない。staging acceptanceは
   [ADR 0051](./adr/0051-prewarm-staging-before-job-creation.md)に従い、job作成前に
   candidate Workerを最大8分prewarmする。ready evidenceを得られなければjobを作らず、
   `workersMin=0`のexact read-backまで確認する。cleanup失敗は課金継続のalert対象とする。
-- [ADR 0054](./adr/0054-use-explicit-datacenters-for-staging-recovery.md)のstaging recoveryは
-  明示した2 data centerとCompliance `Any`を使用する。Compliance filterはSecure Cloud
-  切替ではないため、実Workerの`secureCloud=true` attestationを必ず維持する。追跡対象plan
+- [ADR 0064](./adr/0064-expand-runpod-placement-capacity.md)に従い、追跡対象planは
+  `Any Region`とCompliance `Any`を使用する。Compliance filterはSecure Cloud切替ではないため、
+  実Workerの`secureCloud=true` attestationを必ず維持する。追跡対象plan
   とpromotionはRESTのGPU情報とConsole-equivalent GraphQLのdata center/compliance情報を
   結合検証し、read-back不能またはdrift時はmutation前に停止する。recovery endpointは
   canonical化し、Cloudflare runtimeとGitHub staging Environmentを同じIDへ同期済みである。
-  旧endpointはsupport証跡名のまま、調査中にprewarmやjobを行わず、両endpointの
-  `workersMin=0`を維持する。
+  既存remote endpointは明示承認付きstaging移行まで旧2 data centerを維持し、通常releaseで
+  暗黙に変更しない。
 - productionは
   [ADR 0056](./adr/0056-require-production-capacity-before-promotion.md)に従い、promotion前に
   GPU順序、data center集合、complianceを固定planへ完全一致させる。production preflightの

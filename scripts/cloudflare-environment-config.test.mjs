@@ -19,7 +19,8 @@ const identifiers = {
   d1DatabaseId: "12345678-1234-4abc-8def-1234567890ab",
   orchestratorOrigin: "https://orchestrator-staging.example.invalid",
   pagesAccessAudience: "staging-pages-access-audience",
-  runpodAllowedGpuTypeIds: "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090",
+  runpodAllowedGpuTypeIds:
+    "NVIDIA GeForce RTX 5090,NVIDIA RTX PRO 4500 Blackwell,NVIDIA GeForce RTX 4090",
   runpodWorkerImage: "ghcr.io/example/scribe-drop-runpod-worker@sha256:" + "a".repeat(64),
   stagingE2eServiceTokenCommonName: "staging-e2e-token.access",
   webOrigin: "https://scribe-drop-staging.example.invalid",
@@ -31,7 +32,8 @@ const productionIdentifiers = {
   accountId: "b".repeat(32),
   d1DatabaseId: "abcdef12-1234-4abc-8def-1234567890ab",
   orchestratorOrigin: "https://orchestrator-production.example.invalid",
-  runpodAllowedGpuTypeIds: "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090",
+  runpodAllowedGpuTypeIds:
+    "NVIDIA GeForce RTX 5090,NVIDIA RTX PRO 4500 Blackwell,NVIDIA GeForce RTX 4090",
   runpodWorkerImage: "ghcr.io/example/scribe-drop-runpod-worker@sha256:" + "b".repeat(64),
   webOrigin: "https://scribe-drop-production.example.invalid",
 };
@@ -52,7 +54,7 @@ AUDIT_RETENTION_DAYS = "180"
 CLOUDFLARE_ACCOUNT_ID = "${"0".repeat(32)}"
 MULTIPART_RETENTION_HOURS = "24"
 RESULT_RETENTION_DAYS = "90"
-RUNPOD_ALLOWED_GPU_IDS = "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090"
+RUNPOD_ALLOWED_GPU_IDS = "NVIDIA GeForce RTX 5090,NVIDIA RTX PRO 4500 Blackwell,NVIDIA GeForce RTX 4090"
 RUNPOD_INTERNAL_BASE_URL = "https://replace-with-staging-orchestrator.example.invalid"
 RUNPOD_WORKER_IMAGE = "ghcr.io/example/scribe-drop-runpod-worker@sha256:${"0".repeat(64)}"
 SOURCE_RETENTION_DAYS = "7"
@@ -79,7 +81,7 @@ database_id = "00000000-0000-0000-0000-000000000101"
   );
   assert.match(
     rendered,
-    /RUNPOD_ALLOWED_GPU_IDS = "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090"/u,
+    /RUNPOD_ALLOWED_GPU_IDS = "NVIDIA GeForce RTX 5090,NVIDIA RTX PRO 4500 Blackwell,NVIDIA GeForce RTX 4090"/u,
   );
   assert.match(rendered, new RegExp(`RUNPOD_WORKER_IMAGE = "${identifiers.runpodWorkerImage}"`));
   assert.match(rendered, /WEB_BASE_URL = "https:\/\/scribe-drop-staging\.example\.invalid"/u);
@@ -261,7 +263,7 @@ AUDIT_RETENTION_DAYS = "180"
 CLOUDFLARE_ACCOUNT_ID = "${"0".repeat(32)}"
 MULTIPART_RETENTION_HOURS = "24"
 RESULT_RETENTION_DAYS = "90"
-RUNPOD_ALLOWED_GPU_IDS = "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090"
+RUNPOD_ALLOWED_GPU_IDS = "NVIDIA GeForce RTX 5090,NVIDIA RTX PRO 4500 Blackwell,NVIDIA GeForce RTX 4090"
 RUNPOD_INTERNAL_BASE_URL = "https://replace-with-production-orchestrator.example.invalid"
 RUNPOD_WORKER_IMAGE = "ghcr.io/example/scribe-drop-runpod-worker@sha256:${"0".repeat(64)}"
 SOURCE_RETENTION_DAYS = "7"
@@ -288,7 +290,7 @@ database_id = "00000000-0000-0000-0000-000000000201"
   );
   assert.match(
     rendered,
-    /RUNPOD_ALLOWED_GPU_IDS = "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090"/u,
+    /RUNPOD_ALLOWED_GPU_IDS = "NVIDIA GeForce RTX 5090,NVIDIA RTX PRO 4500 Blackwell,NVIDIA GeForce RTX 4090"/u,
   );
   assert.match(
     rendered,

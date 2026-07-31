@@ -14,7 +14,8 @@ max workerは1へ復元した。実ID、image参照、originは追跡対象へ�
 上記のRTX 4090単一構成は過去checkpointである。release acceptanceで同GPUの供給待ちが
 再現し、productionでも同じ単一構成だったため、現在のrelease policyは
 [ADR 0053](./adr/0053-use-mixed-availability-gpus-with-runtime-attestation.md)に従い、
-`NVIDIA GeForce RTX 5090`、`NVIDIA GeForce RTX 4090`の優先順位付きGPU候補へ更新した。
+`NVIDIA GeForce RTX 5090`、`NVIDIA RTX PRO 4500 Blackwell`、
+`NVIDIA GeForce RTX 4090`の優先順位付きGPU候補へ更新した。
 両GPU種別はCommunity Cloudにも提供されるため、個々の実Workerが
 `secureCloud=true`であることをclaim前に検証する。stagingの実GPU E2Eとexact endpoint
 read-backを通すまではproduction-readyとしない。
@@ -99,13 +100,13 @@ stagingとproductionは別endpoint、別template、別credentialを使用する�
 - active workers 0
 - max workers 1
 - GPU 1
-- 優先順位付きGPU候補は`NVIDIA GeForce RTX 5090`、
+- 優先順位付きGPU候補は`NVIDIA GeForce RTX 5090`、`NVIDIA RTX PRO 4500 Blackwell`、
   `NVIDIA GeForce RTX 4090`の順で固定する
-- 両候補がinventoryでSecure Cloud提供かつavailable。Community Cloudでの提供と
-  stock tierはrelease invariantにしない
+- 全候補がinventoryでSecure Cloud提供され、2候補以上がavailable。Community Cloudでの
+  提供とstock tierはrelease invariantにしない
 - 各claimで実Workerの`secureCloud=true`をR2 capability発行前に検証する
-- data centerは`EUR-IS-1`と`EU-RO-1`の2件へ固定し、Console-equivalent GraphQLで
-  exact selectionを自動read-backする
+- data centerは`Any Region`とし、GraphQLの`locations: null`または空文字を明示的な
+  空配列へ正規化してexact read-backする。field欠落は一致とみなさない
 - compliance filterは`Any`とする。特定certification要件は別ADRなしに追加せず、
   Secure Cloudの代替条件として扱わない
 - Network Volumeなし
@@ -168,7 +169,8 @@ rollbackを維持する。retry logへAPI応答と実IDを出さない。
 candidate workflowではRESTのtemplate listとendpoint getを高コスト処理前に並列実行し、
 その前に固定`runpodctl`のGPU inventoryでADR 0053のSecure Cloud提供属性を検証する。
 candidate publicationは瞬間的な在庫を合否にせず、staging/production promotionでは
-両候補availableを必須とする。staging promotionではcandidate固有planを再検証する。
+全候補のSecure Cloud提供と2候補以上のavailableを必須とする。staging promotionでは
+candidate固有planを再検証する。
 最初のremote mutationより前に`runpod:preflight:<environment>`を実行し、認証、templateの
 一意性、endpoint invariant、workerがidleであることをread-onlyで検証する。
 
@@ -239,7 +241,10 @@ data center metadata上は両方がGDPRとHIPAA、片方がISO/IEC 27001とISO 1
 schema、renderer、create/update/rollback、drift testへ追加し、RESTと
 Console-equivalent GraphQLを結合する自動read-back境界を確立した。次にstaging endpoint
 設定を同期し、formal acceptanceを完了する。read-backが成立しない場合はproductionを
-Blockedのままにする。
+Blockedのままにする。この復旧時の固定配置は
+[ADR 0064](./adr/0064-expand-runpod-placement-capacity.md)が恒久方針として置き換えた。
+新planは`dataCenterIds=[]`を`Any Region`の明示値とし、既存remote endpointは
+staging-firstのcapacity移行とacceptanceが完了するまで変更しない。
 
 このschema変更より前に生成したgit-ignoredのstaging/production planは再利用しない。
 remote preflightやmutationより前に固定rendererで再生成し、旧planが新しいvalidatorに

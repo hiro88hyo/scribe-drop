@@ -71,7 +71,7 @@ async function parseBoundedJsonResponse(response) {
 }
 
 async function readRunpodJson(input, dependencies) {
-  const apiKey = requireApiKey(input.apiKey);
+  const apiKey = input.public === true ? null : requireApiKey(input.apiKey);
   const fetchImplementation = dependencies.fetchImplementation ?? globalThis.fetch;
   const createTimeoutSignal =
     dependencies.createTimeoutSignal ?? ((milliseconds) => AbortSignal.timeout(milliseconds));
@@ -87,10 +87,13 @@ async function readRunpodJson(input, dependencies) {
     try {
       const response = await fetchImplementation(url, {
         ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          ...(input.body === undefined ? {} : { "Content-Type": "application/json" }),
-        },
+        headers:
+          apiKey === null
+            ? {}
+            : {
+                Authorization: `Bearer ${apiKey}`,
+                ...(input.body === undefined ? {} : { "Content-Type": "application/json" }),
+              },
         method: input.method ?? "GET",
         redirect: "error",
         signal: createTimeoutSignal(15_000),
@@ -121,6 +124,50 @@ async function readRunpodJson(input, dependencies) {
   throw new Error(`RunPod ${input.command} failed after bounded retries`, {
     cause: lastError,
   });
+}
+
+function validateOpenApiGpuTypeEnum(value, name) {
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.some((entry) => typeof entry !== "string" || !gpuTypeIdPattern.test(entry)) ||
+    new Set(value).size !== value.length
+  ) {
+    throw new Error(`RunPod ${name} GPU enum is missing or invalid`);
+  }
+  return value;
+}
+
+export function verifyRunpodServerlessGpuTypes(input, dependencies = {}) {
+  const gpuTypeIds = validateEndpointGpuTypes(input.gpuTypeIds);
+  return readRunpodJson(
+    {
+      command: "Serverless OpenAPI GPU policy",
+      pathname: "/v1/openapi.json",
+      public: true,
+      validate(value) {
+        const schemas = value?.components?.schemas;
+        const createGpuTypeIds = validateOpenApiGpuTypeEnum(
+          schemas?.EndpointCreateInput?.properties?.gpuTypeIds?.items?.enum,
+          "endpoint create",
+        );
+        const updateGpuTypeIds = validateOpenApiGpuTypeEnum(
+          schemas?.EndpointUpdateInput?.properties?.gpuTypeIds?.items?.enum,
+          "endpoint update",
+        );
+        if (
+          gpuTypeIds.some(
+            (gpuTypeId) =>
+              !createGpuTypeIds.includes(gpuTypeId) || !updateGpuTypeIds.includes(gpuTypeId),
+          )
+        ) {
+          throw new Error("RunPod Serverless OpenAPI does not support the fixed GPU policy");
+        }
+        return { configuredCount: gpuTypeIds.length };
+      },
+    },
+    dependencies,
+  );
 }
 
 export function listRunpodTemplates(input, dependencies = {}) {
@@ -213,26 +260,26 @@ export function getRunpodEndpointPlacement(input, dependencies = {}) {
         ) {
           throw new Error("RunPod endpoint placement response is missing or invalid");
         }
+        if (!Object.hasOwn(endpoint, "locations")) {
+          throw new Error("RunPod endpoint placement response is missing or invalid");
+        }
         const locations =
-          endpoint.locations === undefined ||
-          endpoint.locations === null ||
-          endpoint.locations === ""
-            ? undefined
+          endpoint.locations === null || endpoint.locations === ""
+            ? []
             : typeof endpoint.locations === "string"
               ? endpoint.locations.split(",").map((candidate) => candidate.trim())
               : null;
         if (
           locations === null ||
-          (locations !== undefined &&
-            (locations.length === 0 ||
-              locations.some((entry) => !dataCenterIdPattern.test(entry)) ||
+          (locations.length > 0 &&
+            (locations.some((entry) => !dataCenterIdPattern.test(entry)) ||
               new Set(locations).size !== locations.length))
         ) {
           throw new Error("RunPod endpoint placement response is missing or invalid");
         }
         return {
           compliance: [...endpoint.compliance],
-          ...(locations === undefined ? {} : { dataCenterIds: locations }),
+          dataCenterIds: locations,
           id: endpoint.id,
         };
       },
@@ -251,7 +298,7 @@ export async function getRunpodEndpointCapacity(input, dependencies = {}) {
   }
   return {
     compliance: placement.compliance,
-    ...(placement.dataCenterIds === undefined ? {} : { dataCenterIds: placement.dataCenterIds }),
+    dataCenterIds: placement.dataCenterIds,
     gpuTypeIds: endpoint.gpuTypeIds,
     id: endpoint.id,
   };
@@ -441,7 +488,6 @@ export async function setRunpodEndpointWorkersMin(input, dependencies = {}) {
 function validateEndpointDataCenters(value) {
   if (
     !Array.isArray(value) ||
-    value.length === 0 ||
     value.some((entry) => typeof entry !== "string" || !dataCenterIdPattern.test(entry)) ||
     new Set(value).size !== value.length
   ) {
@@ -641,7 +687,7 @@ export async function setRunpodEndpointDataCenters(input, dependencies = {}) {
     id: configuration.id,
     idleTimeout: configuration.idleTimeout,
     instanceIds: configuration.instanceIds,
-    locations: dataCenterIds.join(","),
+    locations: dataCenterIds.length === 0 ? null : dataCenterIds.join(","),
     ...(typeof configuration.minCudaVersion === "string" && configuration.minCudaVersion.length > 0
       ? { minCudaVersion: configuration.minCudaVersion }
       : {}),

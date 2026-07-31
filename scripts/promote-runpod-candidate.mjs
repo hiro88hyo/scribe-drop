@@ -21,6 +21,7 @@ import {
   setRunpodEndpointDataCenters,
   setRunpodEndpointGpuTypes,
   setRunpodEndpointWorkersMax,
+  verifyRunpodServerlessGpuTypes,
 } from "./runpod-template-api.mjs";
 
 const [environment, planPath, ...flags] = process.argv.slice(2);
@@ -127,6 +128,7 @@ try {
     JSON.parse(readFileSync(path.resolve(planPath), "utf8")),
     environment,
   );
+  await verifyRunpodServerlessGpuTypes({ gpuTypeIds: plan.endpoint.gpuTypeIds });
   if (preflightOnly) {
     const preflightInput = {
       endpointId,

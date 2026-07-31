@@ -18,7 +18,7 @@ import {
 
 const validInput = {
   accountId: "a".repeat(32),
-  gpuTypeIds: "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090",
+  gpuTypeIds: "NVIDIA GeForce RTX 5090,NVIDIA RTX PRO 4500 Blackwell,NVIDIA GeForce RTX 4090",
   image: "ghcr.io/example/scribe-drop-runpod-worker@sha256:" + "b".repeat(64),
   imageVisibility: "private",
   orchestratorOrigin: "https://orchestrator-staging.example.invalid",
@@ -35,9 +35,10 @@ test("creates a fixed staging plan without persistent storage or secrets", () =>
   assert.deepEqual(plan.template.ports, []);
   assert.deepEqual(plan.endpoint.gpuTypeIds, [
     "NVIDIA GeForce RTX 5090",
+    "NVIDIA RTX PRO 4500 Blackwell",
     "NVIDIA GeForce RTX 4090",
   ]);
-  assert.deepEqual(plan.endpoint.dataCenterIds, ["EUR-IS-1", "EU-RO-1"]);
+  assert.deepEqual(plan.endpoint.dataCenterIds, []);
   assert.deepEqual(plan.endpoint.compliance, []);
   assert.equal(plan.endpoint.workersMin, 0);
   assert.equal(plan.endpoint.workersMax, 1);
@@ -72,6 +73,7 @@ test("generates minimal template and endpoint CLI arguments", () => {
 
   assert.deepEqual(templateArguments.slice(0, 2), ["template", "create"]);
   assert.ok(templateArguments.includes("--serverless"));
+  assert.equal(endpointArguments.includes("--data-center-ids"), false);
   assert.ok(templateArguments.includes("--registry-auth-id"));
   assert.equal(templateArguments.includes("--volume-in-gb"), false);
   assert.equal(templateArguments.includes("--ports"), false);
@@ -88,8 +90,6 @@ test("generates minimal template and endpoint CLI arguments", () => {
     "NVIDIA GeForce RTX 5090",
     "--gpu-count",
     "1",
-    "--data-center-ids",
-    "EUR-IS-1,EU-RO-1",
     "--workers-min",
     "0",
     "--workers-max",
@@ -343,25 +343,25 @@ test("rejects ambiguous registry and GPU configuration", () => {
   );
 });
 
-test("requires both fixed GPU fallbacks to have Secure capacity available", () => {
+test("requires every fixed GPU fallback to offer Secure Cloud and two to be available", () => {
   const plan = createRunpodStagingPlan(validInput);
   const inventory = plan.endpoint.gpuTypeIds.map((gpuId, index) => ({
     available: true,
-    communityCloud: true,
+    communityCloud: index !== 1,
     gpuId,
     secureCloud: true,
     stockStatus: index === 0 ? "Low" : "High",
   }));
 
   assert.deepEqual(validateRunpodGpuInventory(inventory, plan), {
-    availableCount: 2,
-    configuredCount: 2,
+    availableCount: 3,
+    configuredCount: 3,
   });
   assert.deepEqual(
     validateRunpodGpuInventoryConfiguration(inventory, validInput.gpuTypeIds, "staging"),
     {
-      availableCount: 2,
-      configuredCount: 2,
+      availableCount: 3,
+      configuredCount: 3,
     },
   );
   assert.deepEqual(
@@ -371,7 +371,7 @@ test("requires both fixed GPU fallbacks to have Secure capacity available", () =
       "staging",
     ),
     {
-      configuredCount: 2,
+      configuredCount: 3,
     },
   );
   assert.throws(
@@ -381,6 +381,13 @@ test("requires both fixed GPU fallbacks to have Secure capacity available", () =
         plan,
       ),
     /does not offer Secure Cloud/u,
+  );
+  assert.deepEqual(
+    validateRunpodGpuInventory(
+      inventory.map((entry, index) => (index === 0 ? { ...entry, available: false } : entry)),
+      plan,
+    ),
+    { availableCount: 2, configuredCount: 3 },
   );
   assert.throws(
     () =>

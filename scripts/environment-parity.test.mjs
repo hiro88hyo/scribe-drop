@@ -14,7 +14,9 @@ function runpodPlan(environment, overrides = {}) {
     environment === "staging" ? createRunpodStagingPlan : createRunpodProductionPlan;
   return createPlan({
     accountId: environment === "staging" ? "a".repeat(32) : "b".repeat(32),
-    gpuTypeIds: overrides.gpuTypeIds ?? "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090",
+    gpuTypeIds:
+      overrides.gpuTypeIds ??
+      "NVIDIA GeForce RTX 5090,NVIDIA RTX PRO 4500 Blackwell,NVIDIA GeForce RTX 4090",
     image,
     imageVisibility: "private",
     orchestratorOrigin: `https://orchestrator-${environment}.example.invalid`,
