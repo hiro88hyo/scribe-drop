@@ -16,7 +16,7 @@ function runpodPlan(environment, overrides = {}) {
     accountId: environment === "staging" ? "a".repeat(32) : "b".repeat(32),
     gpuTypeIds:
       overrides.gpuTypeIds ??
-      "NVIDIA GeForce RTX 5090,NVIDIA RTX PRO 4500 Blackwell,NVIDIA GeForce RTX 4090",
+      "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090,NVIDIA RTX PRO 6000 Blackwell Server Edition",
     image,
     imageVisibility: "private",
     orchestratorOrigin: `https://orchestrator-${environment}.example.invalid`,

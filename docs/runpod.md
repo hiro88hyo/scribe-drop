@@ -14,9 +14,9 @@ max workerは1へ復元した。実ID、image参照、originは追跡対象へ�
 上記のRTX 4090単一構成は過去checkpointである。release acceptanceで同GPUの供給待ちが
 再現し、productionでも同じ単一構成だったため、現在のrelease policyは
 [ADR 0053](./adr/0053-use-mixed-availability-gpus-with-runtime-attestation.md)に従い、
-`NVIDIA GeForce RTX 5090`、`NVIDIA RTX PRO 4500 Blackwell`、
-`NVIDIA GeForce RTX 4090`の優先順位付きGPU候補へ更新した。
-両GPU種別はCommunity Cloudにも提供されるため、個々の実Workerが
+`NVIDIA GeForce RTX 5090`、`NVIDIA GeForce RTX 4090`、
+`NVIDIA RTX PRO 6000 Blackwell Server Edition`の優先順位付きGPU候補へ更新した。
+全GPU種別はCommunity Cloudにも提供されるため、個々の実Workerが
 `secureCloud=true`であることをclaim前に検証する。stagingの実GPU E2Eとexact endpoint
 read-backを通すまではproduction-readyとしない。
 
@@ -100,10 +100,11 @@ stagingとproductionは別endpoint、別template、別credentialを使用する�
 - active workers 0
 - max workers 1
 - GPU 1
-- 優先順位付きGPU候補は`NVIDIA GeForce RTX 5090`、`NVIDIA RTX PRO 4500 Blackwell`、
-  `NVIDIA GeForce RTX 4090`の順で固定する
+- 優先順位付きGPU候補は`NVIDIA GeForce RTX 5090`、`NVIDIA GeForce RTX 4090`、
+  `NVIDIA RTX PRO 6000 Blackwell Server Edition`の順で固定する
 - 全候補がinventoryでSecure Cloud提供され、2候補以上がavailable。Community Cloudでの
   提供とstock tierはrelease invariantにしない
+- 全候補が認証済みGraphQLの`serverlessGpuPools`へ一意に存在し、候補間でpool IDが重複しない
 - 各claimで実Workerの`secureCloud=true`をR2 capability発行前に検証する
 - data centerは`Any Region`とし、GraphQLの`locations: null`または空文字を明示的な
   空配列へ正規化してexact read-backする。field欠落は一致とみなさない
@@ -169,7 +170,9 @@ rollbackを維持する。retry logへAPI応答と実IDを出さない。
 candidate workflowではRESTのtemplate listとendpoint getを高コスト処理前に並列実行し、
 その前に固定`runpodctl`のGPU inventoryでADR 0053のSecure Cloud提供属性を検証する。
 candidate publicationは瞬間的な在庫を合否にせず、staging/production promotionでは
-全候補のSecure Cloud提供と2候補以上のavailableを必須とする。staging promotionでは
+全候補のSecure Cloud提供と2候補以上のavailableを必須とする。OpenAPI enumに加え、
+[ADR 0065](./adr/0065-validate-runpod-serverless-gpu-pools.md)の認証済み
+`serverlessGpuPools`で全候補の一意かつ相異なるpool対応を確認する。staging promotionでは
 candidate固有planを再検証する。
 最初のremote mutationより前に`runpod:preflight:<environment>`を実行し、認証、templateの
 一意性、endpoint invariant、workerがidleであることをread-onlyで検証する。

@@ -53,7 +53,7 @@ function runpodEnvironment(
     R2_BUCKET_NAME: "recording-transcriber-staging",
     R2_SECRET_ACCESS_KEY: "0000000000000000",
     RUNPOD_ALLOWED_GPU_IDS:
-      "NVIDIA GeForce RTX 5090,NVIDIA RTX PRO 4500 Blackwell,NVIDIA GeForce RTX 4090",
+      "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090,NVIDIA RTX PRO 6000 Blackwell Server Edition",
     RUNPOD_API_KEY: "runpod-api-key-placeholder",
     RUNPOD_ENDPOINT_ID: "endpoint-placeholder",
     RUNPOD_INTERNAL_BASE_URL: "https://orchestrator-staging.example.invalid",
@@ -67,8 +67,8 @@ describe("RunPod placement policy configuration", () => {
     expect(parseRunpodConfig(runpodEnvironment())).toMatchObject({
       runpodAllowedGpuTypeIds: [
         "NVIDIA GeForce RTX 5090",
-        "NVIDIA RTX PRO 4500 Blackwell",
         "NVIDIA GeForce RTX 4090",
+        "NVIDIA RTX PRO 6000 Blackwell Server Edition",
       ],
       runpodWorkerImage: WORKER_IMAGE,
     });

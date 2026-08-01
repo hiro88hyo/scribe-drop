@@ -1586,8 +1586,8 @@ requireText(
   runpodEnvironmentConfigScriptContents,
   `const fixedGpuTypeIds = [
   "NVIDIA GeForce RTX 5090",
-  "NVIDIA RTX PRO 4500 Blackwell",
   "NVIDIA GeForce RTX 4090",
+  "NVIDIA RTX PRO 6000 Blackwell Server Edition",
 ];`,
   "runpod-environment-config.mjs",
   "runtime-attested Secure GPU policy",
@@ -1634,6 +1634,12 @@ requireText(
   "runpod-template-api.mjs",
   "public Serverless OpenAPI GPU support boundary",
 );
+requireText(
+  runpodTemplateApiScriptContents,
+  "serverlessGpuPools",
+  "runpod-template-api.mjs",
+  "authenticated Serverless GPU pool support boundary",
+);
 for (const [pathname, contents] of [
   ["deploy-runpod-environment.mjs", runpodDeploymentScriptContents],
   ["promote-runpod-candidate.mjs", runpodPromotionScriptContents],
@@ -1645,6 +1651,12 @@ for (const [pathname, contents] of [
     "verifyRunpodServerlessGpuTypes(",
     pathname,
     "Serverless OpenAPI GPU support preflight",
+  );
+  requireText(
+    contents,
+    "verifyRunpodServerlessGpuPools(",
+    pathname,
+    "authenticated Serverless GPU pool support preflight",
   );
 }
 requireText(

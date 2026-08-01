@@ -18,7 +18,8 @@ import {
 
 const validInput = {
   accountId: "a".repeat(32),
-  gpuTypeIds: "NVIDIA GeForce RTX 5090,NVIDIA RTX PRO 4500 Blackwell,NVIDIA GeForce RTX 4090",
+  gpuTypeIds:
+    "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090,NVIDIA RTX PRO 6000 Blackwell Server Edition",
   image: "ghcr.io/example/scribe-drop-runpod-worker@sha256:" + "b".repeat(64),
   imageVisibility: "private",
   orchestratorOrigin: "https://orchestrator-staging.example.invalid",
@@ -35,8 +36,8 @@ test("creates a fixed staging plan without persistent storage or secrets", () =>
   assert.deepEqual(plan.template.ports, []);
   assert.deepEqual(plan.endpoint.gpuTypeIds, [
     "NVIDIA GeForce RTX 5090",
-    "NVIDIA RTX PRO 4500 Blackwell",
     "NVIDIA GeForce RTX 4090",
+    "NVIDIA RTX PRO 6000 Blackwell Server Edition",
   ]);
   assert.deepEqual(plan.endpoint.dataCenterIds, []);
   assert.deepEqual(plan.endpoint.compliance, []);

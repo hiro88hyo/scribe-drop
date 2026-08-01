@@ -48,12 +48,13 @@ R2 CORSは`pnpm cloudflare:config:staging:r2-cors`、R2 lifecycleは
 - `SCRIBE_DROP_STAGING_RUNPOD_IMAGE_VISIBILITY`: `private`または`public`
 - `SCRIBE_DROP_STAGING_RUNPOD_REGISTRY_AUTH_ID`: private image用のRunPod registry auth ID
 - `SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS`:
-  `NVIDIA GeForce RTX 5090,NVIDIA RTX PRO 4500 Blackwell,NVIDIA GeForce RTX 4090`の固定順
+  `NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090,NVIDIA RTX PRO 6000 Blackwell Server Edition`の固定順
 
-GPU候補は[ADR 0064](./adr/0064-expand-runpod-placement-capacity.md)で固定した3件を
+GPU候補は[ADR 0065](./adr/0065-validate-runpod-serverless-gpu-pools.md)で固定した3件を
 順序も含めて指定する。stagingとproductionで同じ候補を使用し、candidate publicationは
 全候補のSecure Cloud提供、promotion preflightはさらに2候補以上の利用可能性を
-確認する。Community Cloudにも提供されるGPU種別であるため、各claimでは実Workerの
+確認する。さらに全候補が認証済みGraphQLで相異なるServerless GPU poolへ一意に対応する
+ことをmutation前に検証する。Community Cloudにも提供されるGPU種別であるため、各claimでは実Workerの
 `secureCloud=true`をwinner CASとR2 capability発行より前に検証する。promotionは公式REST
 APIの`gpuTypeIds`を完全一致でread-backする。data center selectionは環境変数にせず、
 追跡対象planでは空配列を`Any Region`の明示値とし、Compliance filterも空配列（`Any`）へ

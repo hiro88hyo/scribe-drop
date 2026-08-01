@@ -17,6 +17,7 @@ import {
   getRunpodEndpointCapacity,
   setRunpodEndpointDataCenters,
   setRunpodEndpointGpuTypes,
+  verifyRunpodServerlessGpuPools,
   verifyRunpodServerlessGpuTypes,
 } from "./runpod-template-api.mjs";
 
@@ -196,6 +197,10 @@ async function main() {
   }
   const plan = validateRunpodPlan(readJson(planPath, `RunPod ${environment} plan`), environment);
   await verifyRunpodServerlessGpuTypes({ gpuTypeIds: plan.endpoint.gpuTypeIds });
+  await verifyRunpodServerlessGpuPools({
+    apiKey: process.env["RUNPOD_API_KEY"],
+    gpuTypeIds: plan.endpoint.gpuTypeIds,
+  });
   const planDigest = planSha256(plan);
   const state = loadState(planDigest);
 

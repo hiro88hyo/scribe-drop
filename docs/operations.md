@@ -241,13 +241,14 @@ timeoutでは「10分ちょうどでprovider queueから消える」と扱わな
   Pod IDをlogへ追加して調査しない。RunPod planとCloudflare bindingのread-backを先に確認する。
 - inventory preflightは固定GPU候補がすべてSecure Cloudで提供され、2候補以上が
   availableであることを確認する。stock tierは運用シグナルでありreleaseの合否には使わない。
-  live OpenAPIのendpoint create/update enumにも全候補が存在しなければならない。条件を
+  live OpenAPIのendpoint create/update enumと認証済みGraphQLの`serverlessGpuPools`にも
+  全候補が存在し、各候補が相異なるpoolへ一意に対応しなければならない。条件を
   満たさない場合はworkflowを開始せず、同じjobやworkflowを繰り返して供給待ちを隠さない。
 - inventoryのavailableは実割り当てを保証しない。staging acceptanceは
   [ADR 0051](./adr/0051-prewarm-staging-before-job-creation.md)に従い、job作成前に
   candidate Workerを最大8分prewarmする。ready evidenceを得られなければjobを作らず、
   `workersMin=0`のexact read-backまで確認する。cleanup失敗は課金継続のalert対象とする。
-- [ADR 0064](./adr/0064-expand-runpod-placement-capacity.md)に従い、追跡対象planは
+- [ADR 0065](./adr/0065-validate-runpod-serverless-gpu-pools.md)に従い、追跡対象planは
   `Any Region`とCompliance `Any`を使用する。Compliance filterはSecure Cloud切替ではないため、
   実Workerの`secureCloud=true` attestationを必ず維持する。追跡対象plan
   とpromotionはRESTのGPU情報とConsole-equivalent GraphQLのdata center/compliance情報を

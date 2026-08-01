@@ -12,6 +12,7 @@ import {
   setRunpodEndpointDataCenters,
   setRunpodEndpointGpuTypes,
   setRunpodEndpointWorkersMax,
+  verifyRunpodServerlessGpuPools,
   verifyRunpodServerlessGpuTypes,
 } from "./runpod-template-api.mjs";
 
@@ -64,6 +65,10 @@ try {
   }
   const plan = validateRunpodPlan(JSON.parse(readFileSync(planPath, "utf8")), "production");
   await verifyRunpodServerlessGpuTypes({ gpuTypeIds: plan.endpoint.gpuTypeIds });
+  await verifyRunpodServerlessGpuPools({
+    apiKey: process.env["RUNPOD_API_KEY"],
+    gpuTypeIds: plan.endpoint.gpuTypeIds,
+  });
   const apiKey = process.env["RUNPOD_API_KEY"];
   const endpointId = process.env["SCRIBE_DROP_PRODUCTION_RUNPOD_ENDPOINT_ID"];
   const result = await prepareRunpodProductionCapacity({
