@@ -30,6 +30,12 @@ Consoleの`Security & compliance`はdata centerのcertification filterであり�
 Secure Cloud切替ではない。現行要件に特定certificationはないため`Any`を維持し、
 実Workerの`secureCloud=true` attestationを省略しない。
 
+2026-08-01のADR 0065 staging prewarmでは、表示上の在庫と3つの実Serverless GPU poolが
+存在してもWorkerが作成されなかった。RunPod supportの保証範囲を確認している間、同じworkflowを
+再実行しない。必要な保証が提供されない場合に備え、現行runtimeを変更しないProposedな
+[一時GPU VM実行設計](./ephemeral-gpu-vm-design.md)を[ADR 0066](./adr/0066-design-ephemeral-gpu-vm-execution.md)
+で定義した。providerの採用、cloud resource作成、production変更はまだ承認していない。
+
 ## Image supply chain
 
 imageは`linux/amd64`専用のmulti-stage buildとする。選択値は

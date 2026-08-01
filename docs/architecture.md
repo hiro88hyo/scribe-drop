@@ -151,3 +151,16 @@ IndexedDBは中断uploadを利用者に案内する最小metadataだけを保持
   object key/prefixを含めない。
 - DLQ、replay、alert、手動回復は[operations.md](./operations.md)、secretとdeploy順序は
   [deployment.md](./deployment.md)を参照する。
+
+## Provider exit design（未採用）
+
+RunPod Serverlessが実Workerの事前attestationとauthoritativeなresource lifecycleを保証しない
+場合に備え、[ADR 0066](./adr/0066-design-ephemeral-gpu-vm-execution.md)と
+[一時GPU VM実行設計](./ephemeral-gpu-vm-design.md)をProposedとして保持する。これは現行data flowを
+変更しない。
+
+提案方式では、provider lifecycleを別execution aggregateに分離し、provider署名付きinstance
+identityとlive resource read-backに成功したVMだけへ短期R2 capabilityを発行する。terminal report、
+manifest、artifactに加え、exact VMの削除または不存在確認後にだけ`COMPLETED`へ遷移する。
+採用には別ADR、normative spec更新、forward-only migration、隔離probe、staging acceptance、
+利用者承認を必須とする。

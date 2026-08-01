@@ -117,6 +117,15 @@ global inventoryの5090 Medium、4090 High、PRO 6000 Lowおよびdata center別
 実Serverless配置が一致しないため、実Worker配置の証拠またはprovider回答を得るまで同じ
 workflowを再実行せず、staging acceptanceとproduction promotionをBlockedとする。
 
+RunPodが厳格な事前attestationとauthoritativeなresource lifecycleを保証しない場合に備え、
+[ADR 0066](./adr/0066-design-ephemeral-gpu-vm-execution.md)と
+[一時GPU VM実行設計](./ephemeral-gpu-vm-design.md)をProposedとして追加した。文字起こし処理、
+短期R2 capability、heartbeat、manifest-last、CAS finalizeは維持し、実行単位で作成・削除する
+GPU VM、provider署名付きidentity、provider-neutral execution aggregate、hard auto-delete、
+orphan reaperへRunPod固有境界だけを段階移行する設計である。現時点ではcode、migration、cloud
+resource、staging、productionを変更しない。RunPod support回答、provider比較、利用者による
+project/billing/quota/IAM/費用承認、CPU control-plane probe、合成GPU probeを実装開始条件とする。
+
 Phase 5では[ADR 0013](./adr/0013-reconciliation-and-fresh-attempt-retry.md)に従い、
 5分Cron、RunPod status観測、terminal状態の先行保存、manifest/artifact検証、
 原子的finalize、notification outbox、Discord再送、所有者限定artifact URL、
