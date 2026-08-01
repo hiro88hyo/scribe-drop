@@ -106,6 +106,17 @@ production releaseは完了している。詳細は
 [0.1.0 production readiness](./releases/0.1.0-production-readiness.md)と
 [production deployment record](./deployments/2026-07-31-v0.1.0-production.md)を正とする。
 
+2026-08-01に[ADR 0065](./adr/0065-validate-runpod-serverless-gpu-pools.md)の修正版`0.1.1`
+candidateを発行し、local/CIの全gateとartifact再検証を完了した。stagingはD1、Pages、R2、
+RunPod、Orchestratorのpromotionに成功し、`RTX 5090`、`RTX 4090`、
+`RTX PRO 6000 Blackwell Server Edition`の順、3つの相異なるServerless pool、`Any Region`、
+Compliance `Any`をexact read-backした。一方、実acceptance前の8分間prewarmではRunPodが
+Workerを作成せず、healthは全worker counter 0のままだった。実M4Aとprovider jobは作成せず、
+`workersMin=0`、active Worker 0、provider job 0、一時endpoint 0へのcleanupを独立確認した。
+global inventoryの5090 Medium、4090 High、PRO 6000 Lowおよびdata center別の在庫表示と
+実Serverless配置が一致しないため、実Worker配置の証拠またはprovider回答を得るまで同じ
+workflowを再実行せず、staging acceptanceとproduction promotionをBlockedとする。
+
 Phase 5では[ADR 0013](./adr/0013-reconciliation-and-fresh-attempt-retry.md)に従い、
 5分Cron、RunPod status観測、terminal状態の先行保存、manifest/artifact検証、
 原子的finalize、notification outbox、Discord再送、所有者限定artifact URL、

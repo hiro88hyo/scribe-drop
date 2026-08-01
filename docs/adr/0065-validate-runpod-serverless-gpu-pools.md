@@ -1,6 +1,6 @@
 # ADR 0065: 実Serverless GPU poolをmutation前に検証する
 
-- Status: Accepted（remote再移行は未実施）
+- Status: Accepted（staging capacity移行済み、実acceptanceはGPU配置待ち）
 - Date: 2026-08-01
 - Supersedes: ADR 0064のGPU候補選定とOpenAPI単独preflight
 - Retains: ADR 0064の`Any Region`配置、ADR 0052の実Worker attestation
@@ -62,3 +62,27 @@ endpointはmax Worker 1、idle timeout 5秒、scale-to-zeroを維持する。
   5秒idle timeout、10分開始SLOを維持し、常時Workerを有効化しない。
 - pool一覧は認証済みGraphQL境界であり、API障害やschema drift時はavailabilityより安全側へ
   fail closedする。
+
+## Staging result
+
+2026-08-01に修正版`0.1.1` candidateを発行し、全quality/security/container gateと
+artifactのローカル再検証を完了した。staging promotionはD1、Pages、R2、RunPod、
+Orchestratorまで成功し、endpointは次をexact read-backした。
+
+- GPU順序: RTX 5090、RTX 4090、RTX PRO 6000 Blackwell Server Edition
+- Serverless pool: `ADA_32_PRO`、`ADA_24`、`BLACKWELL_96`
+- data center: `Any Region`
+- Compliance: `Any`
+- `workersMax=1`
+
+実acceptance前のprewarmは2026-08-01 01:58:12 UTCから02:06:14 UTCまで実行したが、
+RunPodはWorkerを作成しなかった。終了時はactive Worker 0、job in progress 0、queue 0、
+idle、ready、running、initializing、throttled、unhealthyの全worker counterが0だった。
+実M4A、R2 capability、合成失敗jobは作成していない。workflowのfinally cleanupと独立した
+read-only検証で`workersMin=0`、`workersMax=1`、active Worker 0、provider job 0、
+一時probe endpoint 0を確認した。
+
+直後のglobal inventoryは5090 Medium、4090 High、PRO 6000 Lowを返し、data center別表示も
+`EU-RO-1`で5090 Medium、4090 Highを返した。表示上の在庫とServerless実配置が一致しないため、
+同じworkflowを再実行して成功扱いにしない。実Worker配置の証拠またはprovider側の説明を得るまで
+staging acceptanceとproduction promotionをBlockedとする。
