@@ -35,6 +35,7 @@ Secure Cloud切替ではない。現行要件に特定certificationはないた�
 再実行しない。必要な保証が提供されない場合に備え、現行runtimeを変更しないProposedな
 [一時GPU VM実行設計](./ephemeral-gpu-vm-design.md)を[ADR 0066](./adr/0066-design-ephemeral-gpu-vm-execution.md)
 で定義した。providerの採用、cloud resource作成、production変更はまだ承認していない。
+採用する場合は`0.2.0`として実装し、`0.1.1`は現行RunPod修正だけに限定する。
 
 ## Image supply chain
 

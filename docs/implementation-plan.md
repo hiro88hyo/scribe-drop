@@ -124,7 +124,12 @@ RunPodが厳格な事前attestationとauthoritativeなresource lifecycleを保�
 GPU VM、provider署名付きidentity、provider-neutral execution aggregate、hard auto-delete、
 orphan reaperへRunPod固有境界だけを段階移行する設計である。現時点ではcode、migration、cloud
 resource、staging、productionを変更しない。RunPod support回答、provider比較、利用者による
-project/billing/quota/IAM/費用承認、CPU control-plane probe、合成GPU probeを実装開始条件とする。
+project/billing/quota/IAM/費用承認、CPU control-plane probe、合成GPU probeをproduct migrationの
+開始条件とする。承認済みのbounded probe harnessだけはproduct runtimeと分離して先に実行する。
+採用する場合は`0.2.0`とし、現行RunPod修正の`0.1.1`へ混在させない。計画reviewで、probeと
+product実装の循環、Cloudflare request内での長時間provisioning待機、VM実行中の旧code rollback、
+権限と費用の逐次追加、最大8時間入力の未実測をblocking riskとして識別した。後述のPhase 8以降で
+順序と完了条件を定義する。
 
 Phase 5では[ADR 0013](./adr/0013-reconciliation-and-fresh-attempt-retry.md)に従い、
 5分Cron、RunPod status観測、terminal状態の先行保存、manifest/artifact検証、
@@ -824,3 +829,220 @@ rollback で古いコードが新しい schema を読めるよう、破壊的 mi
 Phase ごとに独立したコミットを作成するが、コミット実行はその Phase の差分と検証結果を提示したうえで行う。
 
 ブランチ、コミット、PR、言語別の詳細な開発標準は repository root の `AGENTS.md` に従う。初期文書コミット後に `develop` を作成し、Phase 1 は `feature/phase-1-foundation` から開始する。
+
+## 15. `0.2.0`: 一時GPU VMへのprovider移行（Proposed）
+
+### Plan review result（2026-08-01）
+
+| Severity | Finding                                                                   | Resolution / gate                                                                                |
+| -------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Blocker  | probe成功をproduct実装開始条件にするとprobe harness実装と循環する         | Phase 8承認後の隔離probeだけを先行し、product runtimeはPhase 10のadoption decision後に開始する   |
+| Blocker  | VM実行中に旧codeへrollbackするとresourceを回収できない                    | 新規投入停止、new-provider reaper維持、全resource不存在、最後にcode rollbackの順へ固定する       |
+| High     | Cloudflare request内でVM起動・削除完了を待つとtimeoutを誤って失敗扱いする | controllerはbounded受理だけ返し、Queue/Cronが同じoperation/resourceをreconcileする               |
+| High     | IAM、resource、費用を逐次追加すると手動作業と誤設定が反復する             | Phase 8で全permission/resource/cost/cleanupを一つのreview packetへ固定してから一度だけ承認を得る |
+| High     | 最大8時間入力の処理時間、capability、hard lifetime、費用が未実測          | Phase 10で実測するか、別ADRとspec変更でrelease前にadmission上限を下げる                          |
+| High     | controller、bootstrap、image/Worker統合が一つのPhaseではreview範囲が広い  | provider-neutral、controller、attested VM runtimeをPhase 11、12、13の独立PRへ分割する            |
+| Medium   | `0.1.1`とprovider移行を混在させるとrollbackとrelease証跡が曖昧になる      | ADR 0065のRunPod修正を`0.1.1`、provider移行を`0.2.0`へ分離する                                   |
+
+provider選定、quota/capacity、費用、data locationは文書reviewだけでは確定できず、Phase 8から
+Phase 10の外部gateとして残る。それ以外の実装順序上のblockerは以下の計画へ反映済みである。
+
+### Release boundary
+
+- `0.1.1`はADR 0065の現行RunPod GPU pool/preflight修正だけを対象とする。Android/Pixel M4A対応は
+  `0.1.0`でrelease済みであり、一時GPU VMのcode、migration、credential、cloud resource、workflowを
+  `0.1.1`へ入れない。
+- RunPodの保証とstaging acceptanceが得られれば`0.1.1`を通常どおりreleaseする。得られない場合は
+  main/tagへ入れず未releaseで閉じ、その事実をrelease recordへ残したうえで、再利用する変更を
+  review済みPRで`develop`へ戻す。同じworkflowを根拠なく再実行しない。
+- provider移行はPhase 8からPhase 13を`develop`上の独立feature branch/PRで完了してから
+  Phase 14で`release/0.2.0`を作る。root package versionはその時点でだけ`0.2.0`へ変更する。
+- Phase 14のdark deploymentとPhase 15のformal stagingを通ったexact candidateだけをPhase 16で
+  productionへ昇格する。
+- ADR 0066がProposedの間はPhase 8からPhase 10の文書と隔離probeだけを許可し、product runtime、
+  D1 schema、staging、productionを変更しない。
+
+### 共通launch rule
+
+- 各Phaseは一つのbranch/PRに限定し、後続Phaseのcode、migration、resourceを先取りしない。
+- remote workflowまたはcloud mutation前に、そのPhaseのformat、lint、typecheck、unit/integration、
+  build、migration、secret、dependency、container gateとconfig dry-runをlocalで成功させる。
+- resource、全IAM permission、credential/secret名、region、quota、GPU、hard lifetime、費用上限、
+  rollback、cleanupを一つのreview packetへ列挙してから利用者へ作業を依頼する。権限を逐次追加しない。
+- workflowはimmutable candidateごとに一度だけ起動する。failure時は同じcandidateを推測で再実行せず、
+  provider側の一時障害が解消したread-back証拠、またはlocal再現testと新commitのどちらかを先に得る。
+- provider raw response、resource ID、credential、署名付きidentity、録音、本文をlog、CI artifact、
+  screenshot、tracked deployment recordへ保存しない。
+
+### Phase 8: decision packet
+
+実装:
+
+- RunPod supportの保証範囲または保証不能と、`0.1.1`をrelease/closeする判断を記録する。support回答を
+  無期限に待つことはprovider比較の開始条件にしない。
+- GCP、AWS、Azureをmandatory capability、data処理/region、quota、GPU availability、起動時間、
+  hard delete、IAM、network、image supply chain、監査、費用で比較する。
+- probe候補について、作成する全resource、IAM permission、credential配置、固定policy、最大個数1、
+  hard lifetime、cleanup command、費用上限を事前に文書化する。
+- providerの管理者/hostを信頼する残余risk、instance identityがhost attestationではないこと、
+  recordingを扱う前に必要な契約・data location条件を明示する。
+
+完了条件:
+
+- cloud mutationなしでreview packetが完成し、利用者がCPU/GPU probeの範囲と最大費用を一度に承認する。
+- ADR 0066はProposedのまま維持し、provider採用を確定扱いにしない。
+
+### Phase 9: isolated CPU control-plane probe
+
+実装:
+
+- product runtimeと別の固定probe harnessで、最小CPU VMを最大1台だけ作成する。
+- create idempotency、effect-after-timeout、exact read-back、署名identity、no public IP、固定image、
+  hard lifetime、explicit delete、delete response loss、orphan reaperを検証する。
+- provider mutationはbounded responseだけを受け、VM起動完了をHTTP request内で待たない。同じ
+  idempotency key/resource nameをpollし、結果不明時に別VMを作らない。
+- recording、R2 capability、GPU、production credentialを使用しない。
+
+完了条件:
+
+- success、timeout、controller停止の全経路後にVM、disk、IP、snapshot、保留operationが0である。
+- provider billing/usageで課金終了を確認し、raw IDを残さないsanitized probe recordを作る。
+- 失敗した場合はPhase 10へ進まず、provider変更または設計変更をADRへ戻す。
+
+### Phase 10: isolated GPU feasibility and adoption decision
+
+実装:
+
+- 合成media、固定GPU 1基、max concurrency 1、短いhard lifetimeだけでGPU VMを検証する。
+- immutable boot image、driver/CUDA、model hash、offline起動、署名identity、live resource read-back、
+  transcription、artifact、terminal report、VM/disk削除、課金終了を一つのexecutionへ結び付ける。
+- boot time、capacity failure、VRAM、real-time factor、disk/egress/controllerを含む費用を測る。
+- 最大8時間入力を維持する場合は最大入力の処理時間、capability更新、hard lifetimeを実測する。
+  実測しない場合は別ADRとspec変更でadmission上限を下げる。
+
+完了条件:
+
+- Phase 8のmandatory capabilityと費用上限を実測で満たし、全resource不存在を独立確認する。
+- provider選定を新ADRへ記録し、ADR 0066をAcceptedへ変更し、spec、additional-spec、architecture、
+  threat modelを同期する。満たせなければproduct実装を開始しない。
+
+### Phase 11: provider-neutral compatibility layer
+
+実装:
+
+- `GpuExecutionProvider`、provider-neutral contract、error taxonomy、execution/cleanup state machineを
+  domainへ追加し、RunPod SDK型とCloudflare型を漏らさない。
+- forward-only expand migrationで`provider_executions`と必要なindex/CHECKを追加する。既存の
+  `runpod_submissions`、`winning_runpod_job_id`、`runpod_terminal_*`、実行時間列をrename/deleteせず、
+  RunPod adapterでdual-read/dual-writeする。
+- attempt作成時にprovider kind/policyを固定し、同じattemptを複数providerへ投入しない。
+- completion、cancel、retry、retention、user deletion、notificationをprovider-neutral portへ移し、
+  旧RunPod rowと新execution rowの不一致をfail closedする。
+
+完了条件:
+
+- current RunPod behaviorがlocal testで完全に維持され、migration後も旧codeが読める。
+- duplicate、out-of-order、create unknown、terminal conflict、concurrent cleanup、stale attempt、
+  partial artifactをD1 integrationで検証する。
+- cloud resourceとenvironment switchを追加せず、RunPod-only状態のまま全標準gateが成功する。
+
+### Phase 12: provider controller
+
+実装:
+
+- provider内の`GpuVmController`をenvironment別managed identityと固定policyで実装する。callerからの
+  任意image、GPU、network、metadata、startup、disk指定を拒否する。
+- controller request認証、replay拒否、rate/concurrency/hard-cost ceiling、async operation read-back、
+  exact delete、orphan reaperを実装する。
+
+完了条件:
+
+- provider API、clock、networkをfakeにし、create/delete timeout after effect、duplicate request、
+  stale operation、wrong environment、任意spec、上限超過、controller restartをlocalで検証する。
+- controllerはapplication data、job/attempt ID、R2 capabilityを受け取らず、raw provider bodyとresource
+  IDをlogへ出さない。
+- product Workerとboot imageを変更せず、controller単独で全標準gateが成功する。
+
+### Phase 13: attested one-shot VM runtime
+
+実装:
+
+- VM challenge、provider署名identity検証、live resource照合、HPKE grant、ack、heartbeat、terminal
+  reportを実装する。attestation前はR2 capabilityを発行しない。
+- 現行Python Workerのmedia/transcription/artifact coreを再利用し、VM entrypointだけを追加する。
+  runtime install/model downloadを行わない固定boot imageをbuild、SBOM、scanする。
+- completion条件へsession失効とexact VM/disk不存在を追加し、terminal reportだけで`COMPLETED`へ
+  遷移しない。
+
+完了条件:
+
+- metadata、identity signer、provider read-back、clock、network、D1をfakeにし、forged/stale/wrong
+  audience、resource drift、bootstrap response loss、grant replay、heartbeat stale、terminal conflict、
+  delete response lossをlocal integrationで検証する。
+- containerはnetwork none、read-only、非root、GPU mockで起動し、secret、URL、identity evidenceを
+  logしない。
+- staging resourceを作る前に、Phase 8のpermission/resource manifestとの差分が0である。
+
+### Phase 14: staging dark deployment
+
+実装:
+
+- Phase 8からPhase 13を`develop`へ統合後、`release/0.2.0`を作成してversionを更新し、local全gateと
+  candidate artifact再検証後に一度だけcandidate workflowを実行する。
+- staging専用controller、identity、network、image、quota、budget guardをsource-controlled configから
+  作成し、dashboardだけの設定を残さない。
+- additive D1 migrationとprovider-neutral Orchestratorを、new-provider switch disabledでdeployする。
+- UIと通常Queueから到達不能なshadow routeで、synthetic executionだけを最大1件実行する。
+- RunPodとVMへ同じattemptを二重投入せず、全resource削除後にenvironmentをdisabledへ戻す。
+
+完了条件:
+
+- exact config、identity、image、GPU、network、hard lifetime、execution、manifest/artifact、VM/disk不存在、
+  課金終了が一つの短命evidenceへ結び付く。
+- controller timeout、create response loss、bootstrap response loss、delete response loss、hard lifetime、
+  reaperを実環境で検証する。
+- stagingにactive VM、disk、IP、operation、fixture、capabilityが残らない。
+
+### Phase 15: `0.2.0` candidate and formal staging
+
+実装:
+
+- Phase 14のexact candidateを再利用し、provider switchをstagingだけで有効化する。release修正が
+  必要ならlocal回帰testと新commitを先に追加し、新candidateでPhase 14からやり直す。
+- 正常M4A、Android file picker/upload、破損M4A、capacity rejection、cancel、worker crash、heartbeat stale、
+  controller outage、通知成功/失敗、artifact download、利用者deleteを検証する。人の録音を使う場合は
+  明示的に非機密の一時fixtureだけとし、artifact/logへ残さない。
+
+完了条件:
+
+- candidate identity、migration、signed identity、exact VM、manifest/全artifact、通知、VM/disk不存在、
+  fixture cleanupを同じ期限付きacceptance evidenceへ結び付ける。
+- start SLO、処理SLO、費用上限を満たし、staging switch disabled、resource 0へ戻す。
+- acceptance失敗時はproduction workflowを起動せず、原因をlocal/fake testまたはprovider証拠へ還元して
+  新commitからcandidateを作り直す。
+
+### Phase 16: production cutover and `v0.2.0`
+
+実装:
+
+- Phase 15のexact candidateと未失効acceptanceだけをproduction workflowへ渡す。
+- migration適用後、new-provider switch disabledのままcontroller、Orchestrator、Web、policyをdeployし、
+  production read-backを先に完了する。
+- 新規executionを一時停止し、既存RunPod attemptがterminalまたは安全なpendingへ収束してから、
+  provider switchを新attemptにだけ有効化する。
+- synthetic production smoke 1件のidentity、artifact、通知、VM/disk不存在、費用guardを確認する。
+
+完了条件:
+
+- 自動fallbackを実装しない。rollback時は新規VM投入を止め、new-provider code/reaperを維持したまま
+  active execution、VM、disk、operationを0へ収束させる。両providerが安全でなければjobを
+  `SUBMISSION_PENDING`に保持する。
+- 旧codeへのrollbackは全provider resource不存在とadditive schema互換を確認後だけ許可する。
+- required checks、production read-back、synthetic smoke、cleanup、利用者確認後にmainへ`--no-ff` mergeし、
+  annotated `v0.2.0` tagを付け、developへback-mergeする。
+
+### Post-release contract cleanup
+
+RunPod adapter、`runpod_submissions`、RunPod固有列は`0.2.0`に残す。rollback期間、保持期限、進行中attempt、
+監査要件がすべて終了した後、別releaseとforward-only table rebuildで除去する。これは`0.2.0`の
+完了条件へ含めず、別ADRとPhaseで扱う。

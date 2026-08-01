@@ -164,3 +164,6 @@ identityとlive resource read-backに成功したVMだけへ短期R2 capability�
 manifest、artifactに加え、exact VMの削除または不存在確認後にだけ`COMPLETED`へ遷移する。
 採用には別ADR、normative spec更新、forward-only migration、隔離probe、staging acceptance、
 利用者承認を必須とする。
+
+採用時のtarget releaseは`0.2.0`とし、現行RunPod修正の`0.1.1`へcode、migration、cloud
+resourceを混在させない。

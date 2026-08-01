@@ -2,6 +2,8 @@
 
 - Status: Proposed
 - Date: 2026-08-01
+- Target release if accepted: `0.2.0`
+- Excluded release: `0.1.1`
 - Relates to: ADR 0043、ADR 0051、ADR 0052、ADR 0065
 - Does not supersede: 現行RunPod実装、`docs/spec.md`、`docs/additional-spec.md`
 
@@ -38,6 +40,9 @@ notification、保持期限、削除処理はGPU providerから分離できる�
 
 - [一時GPU VM実行設計](../ephemeral-gpu-vm-design.md)をprovider-neutralなexit designとして
   作成する。現行runtime、staging、productionは変更しない。
+- `0.1.1`は現行RunPod構成の修正に限定する。本方式のproduct code、migration、cloud resource、
+  credential、workflowは混在させず、採用する場合の最初のreleaseを`0.2.0`とする。version bumpは
+  provider移行のfeature Phaseを`develop`へ統合した後、`release/0.2.0`作成時にだけ行う。
 - 実行単位ごとに最大1 VMを作成し、処理後は停止ではなくresourceと自動削除対象diskを削除する。
   provider側hard lifetimeも必須とし、Orchestratorとprovider controllerのcleanupに加える第3の
   回収境界とする。
@@ -73,16 +78,31 @@ notification、保持期限、削除処理はGPU providerから分離できる�
 
 ## Adoption gates
 
-実装開始には次をすべて必要とする。
+probeとproduct migrationを同じ「実装開始条件」にせず、次の3段階に分ける。
 
-1. RunPod supportの回答から、現行方式の保証範囲を記録する。
-2. provider comparisonでmandatory capabilityをすべて満たす候補を選ぶ。
-3. project、billing、quota、IAM、region、GPU SKU、上限費用を利用者が承認する。
-4. CPU VMによるidentity、idempotent create、unknown outcome reconciliation、hard delete、
-   no-public-IPを先に検証する。
-5. 合成mediaだけを使う単一GPU probeで、起動SLO、固定image、GPU、identity、処理、削除、
+### Probe authorization
+
+1. RunPod supportの保証範囲または保証不能を記録し、`0.1.1`をreleaseするか未releaseで閉じるかを
+   明示する。support回答を無期限に待つことは`0.2.0`の設計継続条件にしない。
+2. provider comparison、data処理境界、region、quota、GPU SKU、見積上限費用を文書化する。
+3. 作成するresource、全IAM permission、credential配置、hard lifetime、cleanup、費用上限を
+   一覧にし、利用者が一度にreviewしてCPU/GPU probeを承認する。
+
+### Product migration entry
+
+1. CPU VMでidentity、idempotent create、unknown outcome reconciliation、no-public-IP、hard delete、
+   orphan cleanup、課金停止を確認する。
+2. 合成mediaだけを使う単一GPU probeで、起動SLO、固定image、GPU、identity、処理、削除、
    課金停止を確認する。
-6. local fault injectionとstaging acceptanceが成功するまでproductionを変更しない。
+3. probe結果とprovider選定を別ADRへ記録し、本ADRをAcceptedへ変更してnormative specを同期する。
+   ここまでproduct runtime、D1 schema、staging、productionを変更しない。
+
+### Production cutover
+
+1. provider-neutral compatibility、controller、VM adapterをPhaseごとにlocal検証する。
+2. local fault injection、staging shadow、formal staging acceptanceを順に成功させる。
+3. exact VMとdiskの不存在、capability失効、費用guard、rollback手順まで検証するまでproductionを
+   変更しない。
 
 ## Consequences
 
@@ -92,7 +112,9 @@ notification、保持期限、削除処理はGPU providerから分離できる�
   Serverlessより実装量は大きい。
 - cold startとGPU capacity shortage自体は消えない。ただし作成失敗、結果不明、RUNNING、削除、
   課金中resourceを同じexecution aggregateで観測・回収できる。
-- hard auto-delete、最大同時実行1、provider budget alertによって孤児課金の上限を定義できる。
+- hard auto-delete、最大同時実行1、controllerの独立hard ceilingによって孤児課金の上限を定義できる。
 - provider operatorとhostへの信頼は残る。署名付きinstance identityはcontrol planeの証言であり、
   暗号学的なGPU host attestationではない。
-- Proposedの間はコード、migration、cloud resource、CI/CD、production policyを変更しない。
+- Proposedの間はproduct code、migration、staging、production、通常CI/CDを変更しない。Probe
+  authorization後のPhase 9/10だけは、product runtimeから隔離したbounded harnessと一時resourceを
+  明示承認の範囲内で許可し、各probe終了時にresource不存在を確認する。

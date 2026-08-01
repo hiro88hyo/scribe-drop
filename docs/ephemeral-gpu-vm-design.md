@@ -6,6 +6,11 @@
 RunPod Serverlessの保証がScribeDropの要求に適合しない場合に備えたexit designであり、現行の
 `docs/spec.md`、`docs/additional-spec.md`、staging、productionを変更しない。
 
+採用する場合のtarget releaseは`0.2.0`とする。`0.1.1`は現行RunPod構成の修正だけを対象とし、
+本方式のcode、migration、cloud resource、credential、workflowを混在させない。root packageの
+versionは設計またはprobe時に変更せず、全product Phaseを`develop`へ統合した後に
+`release/0.2.0`で更新する。
+
 目的は、文字起こしattemptごとにGPU VMを最大1台だけ作成し、provider署名付きidentityと
 control-plane read-backを検証してから録音へアクセスさせ、処理後にresourceを確実に削除する
 実行方式を定義することである。
@@ -77,6 +82,9 @@ flowchart LR
 - timestamp、nonce、body digestを含む認証済みrequestを検証し、replayを拒否する。
 - application data、R2 capability、claim token、job ID、attempt IDを受け取らない。
 - provider operationとresourceをbounded schemaへ変換し、raw bodyを返さない。
+- create/delete request内でVM起動または削除完了を待たない。provider mutationのboundedな受理結果、
+  operation reference、既知のexact resourceだけを返し、OrchestratorのQueue/Cron reconciliationが
+  deadlineまでread-backする。Cloudflare request timeoutをprovisioning timeoutとして扱わない。
 
 Cloudflareへ広いcloud IAM private keyを保存しないことを優先する。controller認証用secretが必要な
 場合も、それは固定operationだけを要求できるcontrol capabilityとし、cloud IAM credentialでは
@@ -368,6 +376,8 @@ best-effort capacityであるため、RunPodと同様のavailability問題がな
 - provider port、state machine、strict schemas、safe error codesをfakeで検証する。
 - duplicate create、timeout after effect、stale execution、concurrent cleanup、terminal conflictを注入する。
 - provider SDKやCLIをapplication runtimeからsubprocess実行しない。
+- probe前にprovider比較、data処理境界、全resource/IAM permission、credential配置、quota、region、
+  GPU SKU、hard lifetime、cleanup、最大費用を一つのreview packetへ固定する。
 
 ### Gate B: CPU control-plane probe
 
@@ -375,6 +385,8 @@ best-effort capacityであるため、RunPodと同様のavailability問題がな
 - idempotent create、identity evidence、no public IP、fixed image、hard auto-delete、explicit delete、
   orphan reaper、課金停止を確認する。
 - recording、R2 capability、GPU、production credentialを使わない。
+- probe harnessはproduct runtimeから隔離し、resource名、idempotency、cleanup対象を固定する。これは
+  feasibility testであり、ADR Accepted前のapplication、D1 schema、staging変更を許可しない。
 
 ### Gate C: isolated GPU probe
 
@@ -382,6 +394,10 @@ best-effort capacityであるため、RunPodと同様のavailability問題がな
 - boot time、GPU/driver/model、offline container、real-time factor、最大VRAM、artifact、cleanup、
   provider operation logを測定する。
 - 失敗後はresource、disk、IP、snapshot、operation中resourceが0であることを独立確認する。
+- 最大8時間入力を維持する場合は、release前に最大入力の処理時間、capability更新、hard lifetime、
+  費用を実測する。実測しない場合は別ADRとspec変更でadmission上限を下げる。
+
+Gate C成功後にprovider選定ADRを作り、ADR 0066をAcceptedへ変更してからproduct migrationへ進む。
 
 ### Gate D: staging shadow path
 
@@ -401,6 +417,9 @@ best-effort capacityであるため、RunPodと同様のavailability問題がな
 - providerはenvironment固定設定で切り替え、UIやjob単位の自由選択を許さない。
 - RunPod adapterはrollback期間だけ保持し、自動fallbackには使用しない。
 - production read-backと最初のsynthetic smoke成功後もmax concurrency 1を維持する。
+- rollbackは先に新規VM投入を停止し、active execution、VM、disk、operationが0になるまで新codeの
+  reaperを維持する。RunPodへ自動fallbackせず、新providerもRunPodも安全に使えない場合はjobを
+  `SUBMISSION_PENDING`に保つ。旧codeへのrollbackはprovider resource不存在確認後だけ許可する。
 
 ## 13. Open questions
 
