@@ -30,6 +30,7 @@ CONTEXT_SAMPLES: Final = CONTEXT_SECONDS * SAMPLE_RATE
 MAX_DURATION_SAMPLES: Final = MAX_DURATION_SECONDS * SAMPLE_RATE
 MAX_WINDOW_SAMPLES: Final = (CORE_SECONDS + 2 * CONTEXT_SECONDS) * SAMPLE_RATE
 MAX_WINDOW_BYTES: Final = MAX_WINDOW_SAMPLES * PCM_BYTES_PER_SAMPLE
+MAX_NATIVE_TIMESTAMP_PADDING_SECONDS: Final = CONTEXT_SECONDS
 
 MAX_SEGMENTS: Final = 100_000
 MAX_RAW_SEGMENTS_PER_WINDOW: Final = 10_000
@@ -338,13 +339,14 @@ class WindowMergeSummary:
 
 
 class WindowSegmentMerger:
-    """Assign overlapping raw segments to exactly one ordered core."""
+    """Prefer earlier-window segments and reject overlap behind a monotonic watermark."""
 
     def __init__(self, spool: SegmentSpool, prompt: PromptTail) -> None:
         """Bind one spool and prompt to a sequential attempt."""
         self._spool = spool
         self._prompt = prompt
         self._next_window_index = 0
+        self._accepted_through_seconds: float | None = None
 
     def merge(
         self,
@@ -363,22 +365,33 @@ class WindowSegmentMerger:
             raw_count += 1
             if raw_count > MAX_RAW_SEGMENTS_PER_WINDOW:
                 raise WorkerError(TRANSCRIPTION_FAILED)
-            if segment.end > window.window_duration_seconds:
+            window_duration = window.window_duration_seconds
+            if (
+                segment.start > window_duration
+                or segment.end > window_duration + MAX_NATIVE_TIMESTAMP_PADDING_SECONDS
+            ):
                 raise WorkerError(TRANSCRIPTION_FAILED)
-            local_midpoint = (segment.start + segment.end) / 2
-            order = (local_midpoint, segment.start, segment.end, segment.id)
+            local_end = min(segment.end, window_duration)
+            raw_midpoint = (segment.start + segment.end) / 2
+            order = (raw_midpoint, segment.start, segment.end, segment.id)
             if previous_order is not None and order < previous_order:
                 raise WorkerError(TRANSCRIPTION_FAILED)
             previous_order = order
             global_start = window.window_start_seconds + segment.start
-            global_end = window.window_start_seconds + segment.end
-            global_midpoint = window.window_start_seconds + local_midpoint
-            owned = window.core_start_seconds <= global_midpoint < window.core_end_seconds
-            if window.is_last and global_midpoint == window.core_end_seconds:
-                owned = True
+            global_end = window.window_start_seconds + local_end
+            global_midpoint = window.window_start_seconds + (segment.start + local_end) / 2
+            owned = (
+                self._accepted_through_seconds is None
+                or global_midpoint > self._accepted_through_seconds
+            )
             if owned:
                 self._spool.append(start=global_start, end=global_end, text=segment.text)
-                self._prompt.append(segment.text)
+                if not window.is_last and global_end <= window.core_end_seconds - CONTEXT_SECONDS:
+                    self._prompt.append(segment.text)
+                self._accepted_through_seconds = max(
+                    self._accepted_through_seconds or 0,
+                    global_end,
+                )
                 accepted_count += 1
             if on_segment is not None:
                 on_segment()
@@ -395,6 +408,7 @@ __all__ = [
     "CORE_SAMPLES",
     "CORE_SECONDS",
     "MAX_DURATION_SAMPLES",
+    "MAX_NATIVE_TIMESTAMP_PADDING_SECONDS",
     "MAX_PROMPT_BYTES",
     "MAX_SEGMENTS",
     "MAX_SEGMENT_TEXT_BYTES",

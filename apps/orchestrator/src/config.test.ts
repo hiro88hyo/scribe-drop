@@ -1,11 +1,32 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  parseCloudRunRuntimeShadowConfig,
   parseRetentionConfig,
   parseRunpodConfig,
   type RetentionConfigEnvironment,
   type RunpodConfigEnvironment,
 } from "./config.js";
+
+describe("Cloud Run runtime shadow configuration", () => {
+  it("accepts only the exact staging synthetic mode", () => {
+    expect(
+      parseCloudRunRuntimeShadowConfig({
+        APP_ENV: "staging",
+        CLOUD_RUN_RUNTIME_MODE: "synthetic-shadow",
+      }),
+    ).toEqual({ appEnvironment: "staging", mode: "synthetic-shadow" });
+  });
+
+  it.each([
+    { APP_ENV: "local" },
+    { APP_ENV: "staging" },
+    { APP_ENV: "production", CLOUD_RUN_RUNTIME_MODE: "synthetic-shadow" },
+    { APP_ENV: "staging", CLOUD_RUN_RUNTIME_MODE: "enabled" },
+  ])("fails closed for an unavailable shadow route: %o", (environment) => {
+    expect(parseCloudRunRuntimeShadowConfig(environment)).toBeUndefined();
+  });
+});
 
 const WORKER_IMAGE = "ghcr.io/example/scribe-drop-runpod-worker@sha256:" + "a".repeat(64);
 

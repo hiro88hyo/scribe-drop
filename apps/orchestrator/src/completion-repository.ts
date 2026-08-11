@@ -22,6 +22,59 @@ const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
 const reconciliationLimitSchema = z.number().int().min(1).max(100);
 const updatedIdRowsSchema = z.array(z.object({ id: ulidSchema }).strict()).max(1);
 
+const PROVIDER_COMPATIBILITY_PREDICATE = `
+  (
+    (
+      attempts.provider_kind IS NULL
+      AND executions.id IS NULL
+    )
+    OR (
+      executions.id = attempts.id
+      AND executions.provider_kind = attempts.provider_kind
+      AND executions.provider_policy = attempts.provider_policy
+      AND executions.status = CASE attempts.status
+        WHEN 'SUBMISSION_PENDING' THEN 'PENDING'
+        WHEN 'SUBMITTING' THEN 'CREATING'
+        WHEN 'RUNNING' THEN 'RUNNING'
+        WHEN 'CANCEL_REQUESTED' THEN 'CANCEL_REQUESTED'
+        ELSE 'TERMINAL'
+      END
+      AND executions.create_outcome IS attempts.submission_outcome
+      AND executions.provider_handle IS attempts.winning_runpod_job_id
+      AND executions.terminal_status IS attempts.runpod_terminal_status
+    )
+  )
+`;
+
+const UPDATE_PROVIDER_COMPATIBILITY_PREDICATE = `
+  (
+    (
+      provider_kind IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM provider_executions WHERE attempt_id = job_attempts.id
+      )
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM provider_executions AS executions
+      WHERE executions.attempt_id = job_attempts.id
+        AND executions.id = job_attempts.id
+        AND executions.provider_kind = job_attempts.provider_kind
+        AND executions.provider_policy = job_attempts.provider_policy
+        AND executions.status = CASE job_attempts.status
+          WHEN 'SUBMISSION_PENDING' THEN 'PENDING'
+          WHEN 'SUBMITTING' THEN 'CREATING'
+          WHEN 'RUNNING' THEN 'RUNNING'
+          WHEN 'CANCEL_REQUESTED' THEN 'CANCEL_REQUESTED'
+          ELSE 'TERMINAL'
+        END
+        AND executions.create_outcome IS job_attempts.submission_outcome
+        AND executions.provider_handle IS job_attempts.winning_runpod_job_id
+        AND executions.terminal_status IS job_attempts.runpod_terminal_status
+    )
+  )
+`;
+
 const FIND_STATUS_POLL_CANDIDATES_SQL = `
   SELECT
     attempts.id AS attempt_id,
@@ -35,10 +88,12 @@ const FIND_STATUS_POLL_CANDIDATES_SQL = `
   FROM jobs
   INNER JOIN job_attempts AS attempts ON attempts.id = jobs.active_attempt_id
   INNER JOIN runpod_submissions AS submissions ON submissions.attempt_id = attempts.id
+  LEFT JOIN provider_executions AS executions ON executions.attempt_id = attempts.id
   WHERE jobs.status IN ('SUBMITTING', 'RUNNING', 'CANCEL_REQUESTED')
     AND jobs.deleted_at IS NULL
     AND attempts.status IN ('SUBMITTING', 'RUNNING', 'CANCEL_REQUESTED')
     AND attempts.runpod_terminal_status IS NULL
+    AND ${PROVIDER_COMPATIBILITY_PREDICATE}
     AND (
       (
         attempts.winning_runpod_job_id IS NOT NULL
@@ -69,6 +124,7 @@ const FAIL_UNOBSERVABLE_ATTEMPT_SQL = `
     AND job_id = ?2
     AND status IN ('SUBMITTING', 'RUNNING', 'CANCEL_REQUESTED')
     AND runpod_terminal_status IS NULL
+    AND ${UPDATE_PROVIDER_COMPATIBILITY_PREDICATE}
     AND (
       (
         ?6 = 'submission'
@@ -123,6 +179,7 @@ const RECORD_TERMINAL_STATUS_SQL = `
     AND job_id = ?2
     AND status IN ('SUBMITTING', 'RUNNING', 'CANCEL_REQUESTED')
     AND runpod_terminal_status IS NULL
+    AND ${UPDATE_PROVIDER_COMPATIBILITY_PREDICATE}
     AND EXISTS (
       SELECT 1
       FROM jobs
@@ -168,11 +225,13 @@ const FIND_TERMINAL_OUTCOMES_SQL = `
     jobs.status AS job_status
   FROM jobs
   INNER JOIN job_attempts AS attempts ON attempts.id = jobs.active_attempt_id
+  LEFT JOIN provider_executions AS executions ON executions.attempt_id = attempts.id
   WHERE jobs.status IN ('SUBMITTING', 'RUNNING', 'CANCEL_REQUESTED')
     AND jobs.deleted_at IS NULL
     AND attempts.status IN ('SUBMITTING', 'RUNNING', 'CANCEL_REQUESTED')
     AND attempts.runpod_terminal_status IS NOT NULL
     AND attempts.runpod_terminal_observed_at IS NOT NULL
+    AND ${PROVIDER_COMPATIBILITY_PREDICATE}
   ORDER BY attempts.runpod_terminal_observed_at, attempts.id
   LIMIT ?1
 `;
@@ -195,6 +254,7 @@ const FINALIZE_TERMINAL_ATTEMPT_SQL = `
     AND runpod_terminal_job_id = ?3
     AND runpod_terminal_status IS NOT NULL
     AND status IN ('SUBMITTING', 'RUNNING', 'CANCEL_REQUESTED')
+    AND ${UPDATE_PROVIDER_COMPATIBILITY_PREDICATE}
     AND (
       winning_runpod_job_id = ?3
       OR (
@@ -271,6 +331,7 @@ const INSERT_ARTIFACT_SQL = `
     AND job_attempts.runpod_terminal_status = 'COMPLETED'
     AND job_attempts.runpod_output_status = 'completed'
     AND job_attempts.runpod_manifest_written = 1
+    AND ${UPDATE_PROVIDER_COMPATIBILITY_PREDICATE}
   ON CONFLICT(attempt_id, format) DO NOTHING
 `;
 
@@ -294,6 +355,7 @@ const COMPLETE_ATTEMPT_SQL = `
     AND runpod_terminal_status = 'COMPLETED'
     AND runpod_output_status = 'completed'
     AND runpod_manifest_written = 1
+    AND ${UPDATE_PROVIDER_COMPATIBILITY_PREDICATE}
     AND EXISTS (
       SELECT 1
       FROM job_artifacts
@@ -361,10 +423,12 @@ const INSERT_NOTIFICATION_SQL = `
     NULL,
     ?3,
     NULL
-  FROM job_attempts
-  WHERE id = ?4
-    AND job_id = ?2
-    AND status = 'COMPLETED'
+  FROM job_attempts AS attempts
+  LEFT JOIN provider_executions AS executions ON executions.attempt_id = attempts.id
+  WHERE attempts.id = ?4
+    AND attempts.job_id = ?2
+    AND attempts.status = 'COMPLETED'
+    AND ${PROVIDER_COMPATIBILITY_PREDICATE}
     AND completed_at = ?3
   ON CONFLICT(job_id) DO UPDATE SET
     job_version = excluded.job_version,

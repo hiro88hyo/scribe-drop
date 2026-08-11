@@ -191,9 +191,79 @@ networkなしの`bounded_container_check`を追加する。Cloudで同じcoreを
 [bounded Cloud Run 8-hour re-probe](./cloud-run-bounded-eight-hour-reprobe.md)に隔離し、現行RunPod経路、D1、R2、
 staging、productionは変更しない。
 
-Phase 10Bの結果と採用ADRがAcceptedになるまでproduct providerは選定しない。したがってcontroller、
-execution identity、network、hard lifetime、resource削除をRunPod PodsまたはCloud Run固有仕様として
-先行実装せず、Phase 12以降はselected-providerのplaceholderとして扱う。
+Phase 10Cのnative CUDA/float16 quality gateとPhase 10Dのexact L4 revalidation後、
+[ADR 0076](./adr/0076-select-cloud-run-jobs-for-synthetic-provider-implementation.md)でCloud Run Jobsを
+synthetic-onlyの`Implementation selected`とした。production providerは未採用で、現行routingはRunPod
+Serverlessのままである。
+
+Phase 12の`apps/gpu-controller`はCloudflare Orchestratorから独立したcontrol-plane境界である。外部requestは
+environment別HMACとstrict schemaを通り、opaque handle以外のapplication dataやresource specを受けない。
+controllerはfixed L4 policyだけからJobを構築し、Cloud Run Admin APIとdurable control storeをport化する。
+createはdeterministic Job ID、runはdurable intent後exact 1 send、cancel/deleteはexact refとread-backで収束する。
+このPhaseのstoreはrestartを再現するin-memory fakeであり、Firestore adapter、service hosting、IAM、secret、
+staging接続はPhase 14まで導入しない。
+
+Phase 13では[Cloud Run one-shot runtime](./cloud-run-one-shot-runtime.md)をlocal実装した。runtimeはGoogle
+service identityの検証とcontroller live read-backが成功してもchallengeだけを受け取り、memory-only Ed25519署名を
+CAS消費した後に初めてsynthetic source/result capabilityを得る。ack前にsource download、CUDA discovery、model loadを
+行わず、bounded contract v2のlanguage、VAD、selected format、manifest v2をそのまま実行する。terminalはsessionを失効し
+exact cleanupをscheduleするが、provider absenceとartifact/finalize確認前にproduct `COMPLETED`へ遷移しない。
+service identityがExecution UIDを署名しない残余riskはsingle-activeとlive read-backで補償し、host attestationとは扱わない。
+
+Phase 14 local preparationではforward-only D1 runtime schemaとrepositoryを追加した。bootstrap/claim/session eventは
+`provider_executions`へ外部キーで結び、source/result ownershipとcontract v2をread時にも完全比較する。terminal payloadは
+allowlist counterだけを保存し、event INSERT triggerがsequence更新とrevokeを同じstatementへ閉じ込める。
+`/internal/cloud-run/*`はstagingのexact synthetic modeとservice注入が揃うまで404/503で閉じたままである。
+controllerは共有HMAC contractのlive attestation endpointでstore、Job、Executionを照合し、Orchestrator clientは
+HTTPS、bounded response、timeout、response identityとexact cleanup mutationを強制する。どちらもdefault runtime
+serviceへ未注入である。Google OAuth JWKSのbounded fetch/cacheとRS256 verifierは数値subject ID、verified email、
+issuer/audience/timeを別々に検証するが、同じくdefault serviceへ未注入である。controllerのFirestore adapterはnamed
+database、ADC、transaction callback再実行を前提に、environment singleton、request、executionをstrict schemaで永続化し、
+active 1、count/JPY reservation、rate、CAS、cleanup releaseを同一transactionへ閉じる。Firestore resource/TTL policy、
+service hosting、cloud resource、CI、product routingはまだ接続しない。local composition rootはmanifest、authorization、
+Firestoreのenvironment/projectを完全照合してstore/provider/HMAC handlerを結び、disabled authorizationをADC/provider call
+より前に強制する。Node process境界はallowlist environment parser、bounded ADC/HMAC adapter、固定authorityのHTTP transport、
+safe JSON log、graceful shutdownを提供する。controller runtime imageはNode 24.18.0実測済みのimmutable distroless
+`linux/amd64` manifest、production dependencyだけ、UID/GID 10001、固定entrypointへ閉じ、local inspect、hardened offline run、
+runtime `.js`だけのbundle、toolchain/shell/source/declaration/source map不在検証、CycloneDX SBOM、HIGH/CRITICAL
+fail-close scanを通した。Secret Manager binding、image publish、controller service deploymentは
+行わない。Cloud Run Serviceのlocal deployment planはSingapore/Gen2、immutable image、専用identity、bounded
+CPU/memory/concurrency/scaling/timeout、traffic 100%、public HMAC ingress、Binary Authorization default policy、固定secret version、
+environment allowlistを表現し、normalized read-backの完全一致だけを受ける。Cloud Run v2 raw responseをstrict parseして収束・ready・
+traffic・URIを検証するadapterと、IAM、Singapore Secret Manager fixed version、Binary Authorization default policyのstrict local
+observation verifierも追加し、必須observationを同一project/environmentのatomic local evidenceへ束ねる。read-only clientは固定Google
+API origin/pathへのGETと`getIamPolicy`だけのread-only POST、redirect拒否、10秒/256 KiB上限、同一access token、`x-goog-user-project`、2回のstable snapshotへ閉じ、Secret
+Manager payload accessを行わない。実credentialによるlive read-backとresource mutationは未接続である。詳細は
+[staging dark deployment](./cloud-run-staging-dark-deployment.md)を正とする。
+
+controller IAMは[ADR 0078](./adr/0078-split-controller-iam-by-resource-boundary.md)に従い、Cloud Run JobsとFirestoreのcustom roleを分離する。
+Cloud Run roleから未使用のJob listとExecution getを除き、Firestore roleはtransactionと固定document CRUDだけにする。project policyの
+controller principal binding、database condition、runtime service account `actAs`、Artifact Registry repository readerをresource identityと
+custom role raw definitionごとlocalで完全照合する。固定endpointのIAM read-only clientも追加し、custom role GET、project/repository/runtime
+accountの`getIamPolicy`を2回取得してstable snapshotだけを受ける。`setIamPolicy`、IAM APIのlive read-back、mutationは行わない。
+
+controller Firestore resourceは
+[ADR 0079](./adr/0079-fix-controller-firestore-database-and-ttl-policy.md)に従い、environment専用named database、Singapore、Native/
+Standard、pessimistic transaction、delete protection、API modeをpure planへ固定する。staging PITRはsynthetic cleanupを優先して無効、
+production PITRは有効とする。request/execution collection groupの`ttlExpiresAt`だけをoffset 0かつ`ACTIVE`で受けるstrict raw verifierと
+fixed GET clientを追加した。individual fieldに加えて`collectionGroups/-/fields?filter=ttlConfig:*&pageSize=3`のdatabase-wide listを読み、
+期待2件以外、重複、paginationを拒否する。2回のreadでlist順序だけをresource nameで正規化し、変化し得るoutput-only
+`earliestVersionTime`だけをdatabaseの安定性比較から除外する。他のconfig driftは拒否する。Service/security、IAM、Firestoreのstrict
+observationを同じdeployment expectationから導出するatomic evidence verifierへ束ね、
+別project/databaseのraw observationや未知sectionの混在を拒否する。deployment-level read-only clientは各個別clientと同じpure endpoint
+builderを共有し、全resourceを一つのaccess token/quota projectと一つのdouble-snapshot windowで並列取得してからatomic verifierへ渡す。
+database/TTL作成、実credential read-back、mutationは行わない。
+
+Phase 11では[ADR 0074](./adr/0074-expand-provider-execution-compatibility-without-mixing-contracts.md)に従い、
+provider固有SDK型を含まない`GpuExecutionProvider` port、execution/error/cleanup状態機械、attemptと1対1の
+`provider_executions` aggregateを追加する。現行RunPod列はrollback可能性のため保持し、triggerでaggregateへ
+dual-writeする。外部副作用を伴うsubmission、claim、completion、cancel、retention、delete、notificationは、
+legacy列とaggregateのprovider identity、状態、create outcome、opaque handle、terminal observationが一致する場合だけ
+進める。不一致時はどちらかを推測で正とせずfail closedする。
+
+新しいRunPod attemptはlanguage、VAD、model、selected output formatをimmutable snapshotへ固定する。ただし接続中の
+RunPod workerとmanifestはv1であるため、snapshotも明示的なcontract v1とする。offline検証済みv2を同じattemptへ混在
+させず、provider固有bootstrapからcompletionまで同時に接続できる後続Phaseの新attemptまで発行を停止する。
 
 採用時のtarget releaseは`0.2.0`とし、現行RunPod修正の`0.1.1`へcode、migration、cloud
 resourceを混在させない。

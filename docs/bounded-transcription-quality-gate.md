@@ -2,10 +2,11 @@
 
 ## 1. Status and scope
 
-- Status: Proposed、Phase 10C local implementation
+- Status: Proposed、Phase 10C local gate passed
 - Date: 2026-08-10
 - Decisions: [ADR 0069](./adr/0069-use-bounded-memory-transcription-windows.md)、
-  [ADR 0071](./adr/0071-separate-provider-selection-from-production-adoption.md)
+  [ADR 0071](./adr/0071-separate-provider-selection-from-production-adoption.md)、
+  [ADR 0073](./adr/0073-use-adaptive-final-window-lookbehind.md)
 - Cloud mutation: なし
 
 本書はbounded-memory windowがmemory上限だけでなく、15分境界の文字起こし品質を維持するかをproduct接続前に
@@ -33,15 +34,16 @@ auto detectionは証明していない。
 同じ固定model instanceに対して、次の2経路を順に一度ずつ実行する。
 
 1. reference: 現行full-file入力、`language=auto`、VAD有効。
-2. candidate: single FFmpeg decoder、15分core、前後30秒context、midpoint ownership、bounded prompt、
-   `language=auto`、VAD有効。
+2. candidate: single FFmpeg decoder、15分core、前後30秒context、monotonic overlap watermark、bounded prompt、
+   EOF adaptive final lookbehind、`language=auto`、VAD有効。
 
 referenceは将来残すproduct fallbackではなく、同じmodelとfixtureに対する比較oracleだけである。比較後に
 full-file経路を新providerへ接続しない。
 
 textはNFKC正規化後、Unicode letter、mark、numberだけを残して比較する。本文はmetric計算中だけmemoryに保持し、
-外へ返さない。Levenshtein distanceは長さ上限を検査し、global normalized character error rateと15分境界に
-交差する発話範囲のrateを計算する。
+外へ返さない。Levenshtein distanceは長さ上限を検査し、global normalized character error rateを計算する。
+boundaryはVAD segmentが無音を跨ぐことを考慮し、各segmentを既知の3 speech intervalのうち実overlap時間が
+最大の1区間へ帰属させ、15分境界に交差する発話だけのrateを計算する。
 
 事前に固定する合格条件は次のとおりである。結果を見て同じPhase内で閾値を緩めない。
 
@@ -51,11 +53,20 @@ textはNFKC正規化後、Unicode letter、mark、numberだけを残して比較
 - global character error rateが0.05以下。
 - boundary character error rateが0.10以下。
 - candidate segmentのtimestamp、順序、global ID、durationが既存strict contractを満たす。
+- native segment endのpaddingは最大30秒だけをactual window endへclampし、startのwindow外または上限超過を
+  拒否する。
 - model instance、FFmpeg process、fixture生成、reference、candidateを各1回より多く実行しない。
 - 成否にかかわらずtask directoryと全fileが削除される。
 
 native結果が閾値を外れた場合は`Reject`ではなくPhase 10Cを`Revise`とし、segment ownership、context、prompt、
 fixture発話配置のどこで差が生じたかを本文を出さないmetricで切り分ける。同じ結果を見て閾値だけを変更しない。
+
+2026-08-11の最初のGPU 0 native runはboundary 94,118 ppmを満たしたが、global 137,681 ppmで失敗し、
+[ADR 0072](./adr/0072-revise-bounded-boundary-quality.md)の`Revise`とした。interval別診断で終端partial coreの
+短いacoustic contextを原因と特定し、[ADR 0073](./adr/0073-use-adaptive-final-window-lookbehind.md)で最大window内の
+EOF lookbehindを採用した。再build後の公式runはglobal 47,101 ppm、boundary 94,118 ppmで成功した。
+referenceは276文字/18 segment、candidateは279文字/18 segmentで、両方`ja`、minimum text、cleanupを満たした。
+出力はerror ppm、文字数、segment数だけをallowlistし、音声、dummy text、transcript、native例外を含めない。
 
 ## 4. Structural matrix
 
@@ -87,5 +98,6 @@ evidenceまでBlockedとする。
 - [ADR 0069](./adr/0069-use-bounded-memory-transcription-windows.md)
 - [ADR 0070](./adr/0070-record-bounded-cloud-run-probe-as-adopt-candidate.md)
 - [ADR 0071](./adr/0071-separate-provider-selection-from-production-adoption.md)
+- [ADR 0073](./adr/0073-use-adaptive-final-window-lookbehind.md)
 - [eSpeak NG supported languages](https://github.com/espeak-ng/espeak-ng/blob/master/docs/languages.md)
 - [Ubuntu 24.04 espeak-ng package](https://packages.ubuntu.com/noble/espeak-ng)

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Final, Protocol
 
 from pydantic import Field
 
-from .bounded_transcription import RawWindowSegment
+from .bounded_transcription import CONTEXT_SAMPLES, RawWindowSegment
 from .contracts import LanguageCode, StrictModel
 from .errors import WorkerError
 
@@ -89,7 +89,7 @@ class BoundedInferenceCoordinator:
                 window.pcm,
                 beam_size=BEAM_SIZE,
                 condition_on_previous_text=True,
-                initial_prompt=self._prompt.value or None,
+                initial_prompt=self._initial_prompt(window),
                 language=requested_language,
                 log_progress=False,
                 vad_filter=self._options.vad,
@@ -107,6 +107,13 @@ class BoundedInferenceCoordinator:
             raise
         except Exception:  # noqa: BLE001 - normalize the lazy native model boundary.
             raise WorkerError(TRANSCRIPTION_FAILED) from None
+
+    def _initial_prompt(self, window: PcmWindow) -> str | None:
+        """Avoid duplicating prompt text when EOF expands the acoustic lookbehind."""
+        standard_start = max(0, window.spec.core_start_sample - CONTEXT_SAMPLES)
+        if window.spec.window_start_sample < standard_start:
+            return None
+        return self._prompt.value or None
 
     def _requested_language(self) -> str | None:
         if self._options.language == "ja":

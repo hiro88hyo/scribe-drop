@@ -118,6 +118,43 @@ pnpm check
 
 個別に調査するときは `pnpm format:check`、`pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build` を使う。Python コマンドは root script が `uv run --directory apps/runpod-worker ...` に統一して実行する。
 
+Phase 12のCloud Run controllerはlocal fakeだけで次のfocused gateを実行できる。Google credential、cloud
+resource、GPU、product Worker imageを使わず、default synthetic authorizationはcount/budget/rateすべて0である。
+
+```bash
+pnpm --filter @scribe-drop/gpu-controller run typecheck
+pnpm exec vitest run apps/gpu-controller/src
+pnpm --filter @scribe-drop/gpu-controller run build
+```
+
+Phase 13のone-shot imageは、更新済みworker imageから固定entrypointを作り、cloudへ接続せず検査する。SBOMは
+`/tmp`の追跡外artifactでありcommitしない。
+
+```bash
+pnpm container:build:runpod
+pnpm container:build:cloud-run
+pnpm container:check:cloud-run
+pnpm container:sbom:cloud-run
+pnpm container:scan:cloud-run
+```
+
+`container:check:cloud-run`はnetwork none、read-only、non-root、GPU count mockで起動し、8時間virtual bounded core、
+selected artifact、manifest-last、cleanupを検証する。実Cloud Run executionやnative CUDA quality gateの代替ではない。
+
+Phase 14 local preparationのD1 CASとdisabled shadow routeはcloudへ接続せず次で検証する。
+
+```bash
+pnpm --filter @scribe-drop/orchestrator test:workers
+pnpm exec vitest run apps/orchestrator/src/cloud-run-runtime-service.test.ts \
+  apps/orchestrator/src/cloud-run-runtime-http.test.ts \
+  apps/orchestrator/src/cloud-run-runtime-shadow.test.ts \
+  apps/orchestrator/src/cloud-run-runtime-capabilities.test.ts
+pnpm d1:verify
+```
+
+`CLOUD_RUN_RUNTIME_MODE`はlocal/staging/productionのWrangler設定へ追加しない。modeだけをshellやdashboardで設定しても
+default Workerにはruntime serviceが注入されず503となる。実service接続とremote D1適用はPhase 14 cloud review後だけ行う。
+
 既知の依存脆弱性は network を使う別ゲートで検査する。
 
 ```bash

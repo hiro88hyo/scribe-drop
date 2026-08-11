@@ -32,11 +32,28 @@ ESPEAK_RATE: Final = "140"
 ESPEAK_PITCH: Final = "50"
 ESPEAK_AMPLITUDE: Final = "100"
 
-# This text is synthetic test material, not user content. It is never emitted to logs or artifacts.
-SYNTHETIC_JAPANESE_TEXT: Final = (
-    "これは もじおこしの きょうかいを かくにんする ための ごうせいおんせいです。"
-    "じゅうごふんの まえと あとで、ことばが ぬけたり くりかえされたり しないことを たしかめます。"
-    "あんぜんせいと せいかくさを たいせつにして、さいごまで おなじ じゅんじょで よみあげます。"
+# These distinct texts are synthetic test material, not user content. They are never emitted to
+# logs or artifacts. Distinct utterances prevent repeated-speech hallucination from masking the
+# window-boundary behavior under test.
+SYNTHETIC_JAPANESE_TEXTS: Final = (
+    (
+        "これは もじおこしの かいしぶぶんを かくにんする ための ごうせいおんせいです。"
+        "あさの ひかりと しずかな へやを そうぞうしながら、"
+        "はじめの ことばを じゅんばんに よみます。"
+        "おんせいの いちと ながさが きめられた はんいに おさまることを たしかめます。"
+    ),
+    (
+        "じゅうごふんの きょうかいを またいで、"
+        "ながい ぶんしょうを とちゅうで きらずに よみあげます。"
+        "まえの まどと あとの まどで、"
+        "ことばが ぬけたり くりかえされたり しないことを たしかめます。"
+        "ぶんみゃくと じゅんじょを たもち、きょうかいの りょうがわを せいかくに つなぎます。"
+    ),
+    (
+        "これは ろくおんの しゅうりょうちかくを かくにんする ための べつの ごうせいおんせいです。"
+        "やまの みどりと かわの ながれを おもいうかべながら、さいごの ことばを ゆっくり よみます。"
+        "しゅうたんまで けっかを うしなわず、きめられた じゅんじょで かんりょうします。"
+    ),
 )
 
 FixtureErrorCode = Literal["FIXTURE_GENERATION_FAILED", "FIXTURE_INVALID"]
@@ -116,62 +133,78 @@ def generate_speech_quality_fixture(
     *,
     run_command: CommandRunner = _run_command,
 ) -> SpeechQualityFixture:
-    """Generate one fixed 16-minute WAV with repeated synthesized speech islands."""
+    """Generate one fixed 16-minute WAV with three distinct synthesized speech islands."""
     _validate_task_directory(task_directory)
-    source_wave = task_directory / "synthesized-source.wav"
-    source_pcm = task_directory / "synthesized-source.s16le"
+    source_waves = tuple(
+        task_directory / f"synthesized-source-{index}.wav"
+        for index in range(len(SYNTHETIC_JAPANESE_TEXTS))
+    )
+    source_pcms = tuple(
+        task_directory / f"synthesized-source-{index}.s16le"
+        for index in range(len(SYNTHETIC_JAPANESE_TEXTS))
+    )
     destination = task_directory / "speech-quality.wav"
-    if any(path.exists() or path.is_symlink() for path in (source_wave, source_pcm, destination)):
+    if any(
+        path.exists() or path.is_symlink() for path in (*source_waves, *source_pcms, destination)
+    ):
         raise SpeechQualityFixtureError(FIXTURE_INVALID)
     destination_created = False
     fixture: SpeechQualityFixture | None = None
     try:
-        run_command(
-            (
-                ESPEAK_PATH,
-                "-v",
-                ESPEAK_VOICE,
-                "-s",
-                ESPEAK_RATE,
-                "-p",
-                ESPEAK_PITCH,
-                "-a",
-                ESPEAK_AMPLITUDE,
-                "-w",
-                str(source_wave),
-                SYNTHETIC_JAPANESE_TEXT,
-            ),
-            SYNTHESIS_TIMEOUT_SECONDS,
-        )
-        _validate_generated_file(source_wave, max_bytes=MAX_SYNTHESIZED_PCM_BYTES * 2)
-        run_command(
-            (
-                FFMPEG_PATH,
-                "-nostdin",
-                "-v",
-                "error",
-                "-xerror",
-                "-i",
-                str(source_wave),
-                "-map",
-                "0:0",
-                "-vn",
-                "-sn",
-                "-dn",
-                "-ac",
-                "1",
-                "-ar",
-                str(SAMPLE_RATE),
-                "-f",
-                "s16le",
-                str(source_pcm),
-            ),
-            RESAMPLE_TIMEOUT_SECONDS,
-        )
-        _validate_generated_file(source_pcm, max_bytes=MAX_SYNTHESIZED_PCM_BYTES)
-        speech_pcm = source_pcm.read_bytes()
-        intervals = _fixture_intervals(len(speech_pcm))
-        _write_pcm_wave(destination, speech_pcm=speech_pcm, intervals=intervals)
+        speech_pcm_values: list[bytes] = []
+        for text, source_wave, source_pcm in zip(
+            SYNTHETIC_JAPANESE_TEXTS,
+            source_waves,
+            source_pcms,
+            strict=True,
+        ):
+            run_command(
+                (
+                    ESPEAK_PATH,
+                    "-v",
+                    ESPEAK_VOICE,
+                    "-s",
+                    ESPEAK_RATE,
+                    "-p",
+                    ESPEAK_PITCH,
+                    "-a",
+                    ESPEAK_AMPLITUDE,
+                    "-w",
+                    str(source_wave),
+                    text,
+                ),
+                SYNTHESIS_TIMEOUT_SECONDS,
+            )
+            _validate_generated_file(source_wave, max_bytes=MAX_SYNTHESIZED_PCM_BYTES * 2)
+            run_command(
+                (
+                    FFMPEG_PATH,
+                    "-nostdin",
+                    "-v",
+                    "error",
+                    "-xerror",
+                    "-i",
+                    str(source_wave),
+                    "-map",
+                    "0:0",
+                    "-vn",
+                    "-sn",
+                    "-dn",
+                    "-ac",
+                    "1",
+                    "-ar",
+                    str(SAMPLE_RATE),
+                    "-f",
+                    "s16le",
+                    str(source_pcm),
+                ),
+                RESAMPLE_TIMEOUT_SECONDS,
+            )
+            _validate_generated_file(source_pcm, max_bytes=MAX_SYNTHESIZED_PCM_BYTES)
+            speech_pcm_values.append(source_pcm.read_bytes())
+        speech_pcms = tuple(speech_pcm_values)
+        intervals = _fixture_intervals(tuple(len(value) for value in speech_pcms))
+        _write_pcm_wave(destination, speech_pcms=speech_pcms, intervals=intervals)
         destination_created = True
         _validate_fixture_file(destination)
         fixture = SpeechQualityFixture(
@@ -189,8 +222,8 @@ def generate_speech_quality_fixture(
             destination.unlink(missing_ok=True)
         raise SpeechQualityFixtureError(FIXTURE_GENERATION_FAILED) from None
     finally:
-        source_wave.unlink(missing_ok=True)
-        source_pcm.unlink(missing_ok=True)
+        for path in (*source_waves, *source_pcms):
+            path.unlink(missing_ok=True)
     if fixture is None:  # pragma: no cover - defensive invariant after successful generation.
         raise SpeechQualityFixtureError(FIXTURE_GENERATION_FAILED)
     return fixture
@@ -215,21 +248,27 @@ def _validate_generated_file(path: Path, *, max_bytes: int) -> None:
         raise SpeechQualityFixtureError(FIXTURE_GENERATION_FAILED)
 
 
-def _fixture_intervals(pcm_size_bytes: int) -> tuple[SpeechInterval, ...]:
-    if pcm_size_bytes % PCM_BYTES_PER_SAMPLE != 0:
+def _fixture_intervals(pcm_size_bytes: tuple[int, ...]) -> tuple[SpeechInterval, ...]:
+    if len(pcm_size_bytes) != len(SYNTHETIC_JAPANESE_TEXTS):
         raise SpeechQualityFixtureError(FIXTURE_INVALID)
-    speech_samples = pcm_size_bytes // PCM_BYTES_PER_SAMPLE
-    if not MIN_SPEECH_SECONDS * SAMPLE_RATE <= speech_samples <= MAX_SPEECH_SECONDS * SAMPLE_RATE:
+    if any(size % PCM_BYTES_PER_SAMPLE != 0 for size in pcm_size_bytes):
+        raise SpeechQualityFixtureError(FIXTURE_INVALID)
+    speech_samples = tuple(size // PCM_BYTES_PER_SAMPLE for size in pcm_size_bytes)
+    if any(
+        not MIN_SPEECH_SECONDS * SAMPLE_RATE <= samples <= MAX_SPEECH_SECONDS * SAMPLE_RATE
+        for samples in speech_samples
+    ):
         raise SpeechQualityFixtureError(FIXTURE_INVALID)
     total_samples = FIXTURE_DURATION_SECONDS * SAMPLE_RATE
     boundary_sample = BOUNDARY_SECONDS * SAMPLE_RATE
     starts = (
         10 * SAMPLE_RATE,
-        boundary_sample - speech_samples // 2,
-        total_samples - speech_samples - 10 * SAMPLE_RATE,
+        boundary_sample - speech_samples[1] // 2,
+        total_samples - speech_samples[2] - 10 * SAMPLE_RATE,
     )
     intervals = tuple(
-        SpeechInterval(start_sample=start, end_sample=start + speech_samples) for start in starts
+        SpeechInterval(start_sample=start, end_sample=start + samples)
+        for start, samples in zip(starts, speech_samples, strict=True)
     )
     if any(
         interval.start_sample < 0 or interval.end_sample > total_samples for interval in intervals
@@ -245,7 +284,7 @@ def _fixture_intervals(pcm_size_bytes: int) -> tuple[SpeechInterval, ...]:
 def _write_pcm_wave(
     destination: Path,
     *,
-    speech_pcm: bytes,
+    speech_pcms: tuple[bytes, ...],
     intervals: tuple[SpeechInterval, ...],
 ) -> None:
     data_size = FIXTURE_DURATION_SECONDS * SAMPLE_RATE * PCM_BYTES_PER_SAMPLE
@@ -283,7 +322,7 @@ def _write_pcm_wave(
                 current = zero_chunk[: min(len(zero_chunk), remaining)]
                 _require_full_write(output.write(current), expected_bytes=len(current))
                 remaining -= len(current)
-            for interval in intervals:
+            for speech_pcm, interval in zip(speech_pcms, intervals, strict=True):
                 output.seek(WAVE_HEADER_BYTES + interval.start_sample * PCM_BYTES_PER_SAMPLE)
                 _require_full_write(output.write(speech_pcm), expected_bytes=len(speech_pcm))
     except OSError:

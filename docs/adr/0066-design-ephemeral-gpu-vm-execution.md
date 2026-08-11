@@ -1,6 +1,6 @@
 # ADR 0066: 一時RunPod GPU Pod実行方式をprovider exit designとして準備する
 
-- Status: Proposed（RunPod Pods評価は停止、provider-neutral設計だけ維持。ADR 0067参照）
+- Status: Superseded for active provider implementation（provider-neutral原則だけ維持。ADR 0076参照）
 - Date: 2026-08-01
 - Last reviewed: 2026-08-10
 - Target release if accepted: `0.2.0`
@@ -8,6 +8,7 @@
 - Relates to: ADR 0043、ADR 0051、ADR 0052、ADR 0065
 - Does not supersede: 現行RunPod実装、`docs/spec.md`、`docs/additional-spec.md`
 - Partially superseded by: ADR 0067（現行probeをRunPod Podsだけに限定する決定）
+- Superseded for active implementation by: ADR 0076（Cloud Run Jobsをsynthetic-only実装選定）
 
 > 2026-08-10追記: 利用者承認により、最初の隔離probeをCloud Run GPU Jobへ変更した。
 > 本文のRunPod Pods固有packetは比較候補の履歴として残すが、mutation、support確認、product実装を

@@ -20,6 +20,7 @@ from scribe_drop_worker.speech_quality_fixture import (
     MAX_SPEECH_SECONDS,
     MIN_SPEECH_SECONDS,
     PCM_BYTES_PER_SAMPLE,
+    SYNTHETIC_JAPANESE_TEXTS,
     WAVE_HEADER_BYTES,
     SpeechQualityFixtureError,
     _fixture_intervals,
@@ -27,9 +28,11 @@ from scribe_drop_worker.speech_quality_fixture import (
     generate_speech_quality_fixture,
 )
 
-EXPECTED_COMMAND_COUNT: Final = 2
+EXPECTED_COMMAND_COUNT: Final = 6
+EXPECTED_FAILURE_COMMAND_COUNT: Final = 2
 EXPECTED_INTERVAL_COUNT: Final = 3
 SPEECH_SECONDS: Final = MIN_SPEECH_SECONDS
+VALID_PCM_SIZE: Final = SPEECH_SECONDS * SAMPLE_RATE * PCM_BYTES_PER_SAMPLE
 
 
 def _successful_runner(commands: list[tuple[str, ...]]) -> Callable[[tuple[str, ...], float], None]:
@@ -56,10 +59,18 @@ def test_generator_uses_fixed_commands_writes_exact_wave_and_removes_intermediat
     )
 
     assert len(commands) == EXPECTED_COMMAND_COUNT
-    assert commands[0][0] == ESPEAK_PATH
-    assert commands[0][1:3] == ("-v", "ja")
-    assert commands[1][0] == FFMPEG_PATH
-    assert commands[1][-2:] == ("s16le", str(tmp_path / "synthesized-source.s16le"))
+    for index in range(EXPECTED_INTERVAL_COUNT):
+        synthesize = commands[index * 2]
+        resample = commands[index * 2 + 1]
+        assert synthesize[0] == ESPEAK_PATH
+        assert synthesize[1:3] == ("-v", "ja")
+        assert synthesize[-1] == SYNTHETIC_JAPANESE_TEXTS[index]
+        assert resample[0] == FFMPEG_PATH
+        assert resample[-2:] == (
+            "s16le",
+            str(tmp_path / f"synthesized-source-{index}.s16le"),
+        )
+    assert len(set(SYNTHETIC_JAPANESE_TEXTS)) == EXPECTED_INTERVAL_COUNT
     assert fixture.path == tmp_path / "speech-quality.wav"
     assert fixture.duration_seconds == FIXTURE_DURATION_SECONDS
     assert len(fixture.speech_intervals) == EXPECTED_INTERVAL_COUNT
@@ -71,22 +82,32 @@ def test_generator_uses_fixed_commands_writes_exact_wave_and_removes_intermediat
     with fixture.path.open("rb") as source:
         assert source.read(4) == b"RIFF"
     assert fixture.path.stat().st_mode & 0o077 == 0
-    assert not (tmp_path / "synthesized-source.wav").exists()
-    assert not (tmp_path / "synthesized-source.s16le").exists()
+    assert not any(tmp_path.glob("synthesized-source-*"))
 
 
 @pytest.mark.parametrize(
-    "pcm_size",
+    "pcm_sizes",
     [
-        1,
-        (MIN_SPEECH_SECONDS * SAMPLE_RATE - 1) * PCM_BYTES_PER_SAMPLE,
-        (MAX_SPEECH_SECONDS * SAMPLE_RATE + 1) * PCM_BYTES_PER_SAMPLE,
+        (1, VALID_PCM_SIZE, VALID_PCM_SIZE),
+        (
+            VALID_PCM_SIZE,
+            (MIN_SPEECH_SECONDS * SAMPLE_RATE - 1) * PCM_BYTES_PER_SAMPLE,
+            VALID_PCM_SIZE,
+        ),
+        (
+            VALID_PCM_SIZE,
+            VALID_PCM_SIZE,
+            (MAX_SPEECH_SECONDS * SAMPLE_RATE + 1) * PCM_BYTES_PER_SAMPLE,
+        ),
+        (VALID_PCM_SIZE, VALID_PCM_SIZE),
     ],
 )
-def test_interval_planner_rejects_partial_short_and_long_synthesis(pcm_size: int) -> None:
+def test_interval_planner_rejects_partial_short_long_and_missing_synthesis(
+    pcm_sizes: tuple[int, ...],
+) -> None:
     """Synthesized audio cannot evade alignment or fixed duration bounds."""
     with pytest.raises(SpeechQualityFixtureError) as failure:
-        _fixture_intervals(pcm_size)
+        _fixture_intervals(pcm_sizes)
     assert failure.value.code == "FIXTURE_INVALID"
 
 
@@ -114,7 +135,7 @@ def test_generator_rejects_foreign_task_directory_and_cleans_partial_output(
         generate_speech_quality_fixture(tmp_path, run_command=fail_second)
     assert generation.value.code == "FIXTURE_GENERATION_FAILED"
     assert "native" not in str(generation.value)
-    assert calls == EXPECTED_COMMAND_COUNT
+    assert calls == EXPECTED_FAILURE_COMMAND_COUNT
     assert tuple(tmp_path.iterdir()) == ()
 
 

@@ -1,0 +1,27 @@
+{
+  "name": "@scribe-drop/gpu-controller",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json",
+    "start": "node dist/entrypoint.js",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@google-cloud/firestore": "8.7.1",
+    "@scribe-drop/contracts": "workspace:*",
+    "@scribe-drop/domain": "workspace:*",
+    "google-auth-library": "10.5.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.1"
+  }
+}

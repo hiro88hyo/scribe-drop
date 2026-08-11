@@ -15,6 +15,7 @@ from scribe_drop_worker.bounded_transcription import (
     CONTEXT_SAMPLES,
     CORE_SAMPLES,
     MAX_DURATION_SAMPLES,
+    MAX_NATIVE_TIMESTAMP_PADDING_SECONDS,
     MAX_PROMPT_BYTES,
     MAX_SEGMENT_TEXT_BYTES,
     MAX_SEGMENTS,
@@ -34,8 +35,8 @@ from scribe_drop_worker.errors import WorkerError
 MAX_TEST_PROMPT_BYTES: Final = 16
 SECURE_FILE_MODE: Final = 0o600
 EXPECTED_MAX_SEGMENTS: Final = 100_000
-EXPECTED_RAW_SEGMENTS: Final = 2
-EXPECTED_CALLBACKS: Final = 4
+EXPECTED_FIRST_RAW_SEGMENTS: Final = 3
+EXPECTED_CALLBACKS: Final = 5
 
 
 @pytest.mark.parametrize(
@@ -159,8 +160,8 @@ def test_spool_rejects_untrusted_root_text_and_corrupt_rows(tmp_path: Path) -> N
             tuple(spool.iter_segments())
 
 
-def test_segment_ownership_deduplicates_overlap_and_builds_prompt(tmp_path: Path) -> None:
-    """A midpoint on the core boundary belongs only to the following core."""
+def test_segment_ownership_uses_monotonic_watermark_and_stable_prompt(tmp_path: Path) -> None:
+    """The earlier window closes drift gaps without prompting duplicated overlap."""
     first, second = plan_windows(2 * CORE_SAMPLES)
     callback_count = 0
 
@@ -174,13 +175,14 @@ def test_segment_ownership_deduplicates_overlap_and_builds_prompt(tmp_path: Path
         first_summary = merger.merge(
             first,
             (
-                RawWindowSegment(id=0, start=899.0, end=899.5, text="before"),
-                RawWindowSegment(id=1, start=899.5, end=900.5, text="boundary"),
+                RawWindowSegment(id=0, start=10.0, end=11.0, text="stable"),
+                RawWindowSegment(id=1, start=899.0, end=899.5, text="before"),
+                RawWindowSegment(id=2, start=899.5, end=900.5, text="boundary"),
             ),
             on_segment=callback,
         )
-        assert first_summary.accepted_segment_count == 1
-        assert prompt.value == "before"
+        assert first_summary.accepted_segment_count == EXPECTED_FIRST_RAW_SEGMENTS
+        assert prompt.value == "stable"
 
         second_summary = merger.merge(
             second,
@@ -192,10 +194,11 @@ def test_segment_ownership_deduplicates_overlap_and_builds_prompt(tmp_path: Path
         )
         rows = tuple(spool.iter_segments())
 
-    assert first_summary.raw_segment_count == EXPECTED_RAW_SEGMENTS
-    assert second_summary.accepted_segment_count == EXPECTED_RAW_SEGMENTS
-    assert [row.text for row in rows] == ["before", "boundary", "after"]
-    assert [row.id for row in rows] == [0, 1, 2]
+    assert first_summary.raw_segment_count == EXPECTED_FIRST_RAW_SEGMENTS
+    assert second_summary.accepted_segment_count == 1
+    assert [row.text for row in rows] == ["stable", "before", "boundary", "after"]
+    assert [row.id for row in rows] == [0, 1, 2, 3]
+    assert prompt.value == "stable"
     assert callback_count == EXPECTED_CALLBACKS
 
 
@@ -220,7 +223,7 @@ def test_merger_rejects_out_of_order_range_drift_and_window_replay(tmp_path: Pat
         with pytest.raises(WorkerError, match="TRANSCRIPTION_FAILED"):
             merger.merge(
                 window,
-                (RawWindowSegment(id=0, start=0.0, end=901.0, text="outside"),),
+                (RawWindowSegment(id=0, start=901.0, end=901.0, text="outside"),),
             )
 
     replay_root = tmp_path / "replay"
@@ -232,15 +235,15 @@ def test_merger_rejects_out_of_order_range_drift_and_window_replay(tmp_path: Pat
             merger.merge(window, ())
 
 
-def test_merger_caps_raw_segments_and_owns_final_endpoint(tmp_path: Path) -> None:
-    """A hostile lazy iterator is capped and the final endpoint is not dropped."""
+def test_merger_caps_raw_segments_and_accepts_final_endpoint(tmp_path: Path) -> None:
+    """A hostile lazy iterator is capped and attempt cleanup owns any partial spool."""
     first = plan_windows(2 * CORE_SAMPLES)[0]
     boundary = RawWindowSegment(id=0, start=900.0, end=900.0, text="boundary")
     with SegmentSpool(tmp_path) as spool:
         merger = WindowSegmentMerger(spool, PromptTail())
         with pytest.raises(WorkerError, match="TRANSCRIPTION_FAILED"):
             merger.merge(first, (boundary for _ in range(10_001)))
-        assert spool.segment_count == 0
+        assert spool.segment_count == 1
 
     final_root = tmp_path / "final"
     final_root.mkdir()
@@ -248,6 +251,54 @@ def test_merger_caps_raw_segments_and_owns_final_endpoint(tmp_path: Path) -> Non
     with SegmentSpool(final_root) as spool:
         WindowSegmentMerger(spool, PromptTail()).merge(final, (boundary,))
         assert [segment.text for segment in spool.iter_segments()] == ["boundary"]
+
+
+def test_merger_clamps_bounded_final_timestamp_padding(tmp_path: Path) -> None:
+    """Known native padding is bounded and cannot escape the actual final window."""
+    final = plan_windows(CORE_SAMPLES)[0]
+    with SegmentSpool(tmp_path) as spool:
+        summary = WindowSegmentMerger(spool, PromptTail()).merge(
+            final,
+            (
+                RawWindowSegment(
+                    id=0,
+                    start=CORE_SAMPLES / SAMPLE_RATE - 1,
+                    end=CORE_SAMPLES / SAMPLE_RATE + MAX_NATIVE_TIMESTAMP_PADDING_SECONDS,
+                    text="padded",
+                ),
+            ),
+        )
+        rows = tuple(spool.iter_segments())
+
+    assert summary.accepted_segment_count == 1
+    assert rows[0].end == CORE_SAMPLES / SAMPLE_RATE
+
+
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [
+        (CORE_SAMPLES / SAMPLE_RATE + 1, CORE_SAMPLES / SAMPLE_RATE + 1),
+        (
+            CORE_SAMPLES / SAMPLE_RATE - 1,
+            CORE_SAMPLES / SAMPLE_RATE + MAX_NATIVE_TIMESTAMP_PADDING_SECONDS + 0.001,
+        ),
+    ],
+)
+def test_merger_rejects_native_timestamps_outside_padding_bound(
+    tmp_path: Path,
+    start: float,
+    end: float,
+) -> None:
+    """Padding normalization never admits a segment wholly beyond the window or over its cap."""
+    final = plan_windows(CORE_SAMPLES)[0]
+    with (
+        SegmentSpool(tmp_path) as spool,
+        pytest.raises(WorkerError, match="TRANSCRIPTION_FAILED"),
+    ):
+        WindowSegmentMerger(spool, PromptTail()).merge(
+            final,
+            (RawWindowSegment(id=0, start=start, end=end, text="invalid"),),
+        )
 
 
 @pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf])

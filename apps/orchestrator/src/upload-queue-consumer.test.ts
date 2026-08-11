@@ -36,6 +36,12 @@ const JOB = {
   expectedSizeBytes: 1024,
   generationOneAttemptId: null,
   id: JOB_ID,
+  options: {
+    language: "auto",
+    model: "large-v3-turbo",
+    outputFormats: ["markdown", "json", "srt"],
+    vad: true,
+  },
   sourceBucket: EVENT.bucket,
   sourceEtag: null,
   sourceKey: SOURCE_KEY,

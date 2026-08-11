@@ -1,0 +1,69 @@
+{
+  "bootstrapRequest": {
+    "bootstrapRequestId": "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+    "environment": "staging",
+    "executionHandle": "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh",
+    "executionName": "sd-stg-execution-1",
+    "identityToken": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.cccccccccccccccccccccccccccccccccccccccc",
+    "jobName": "sd-stg-job-1",
+    "policyId": "cloud_run_jobs_l4_v1",
+    "publicKey": "ppppppppppppppppppppppppppppppppppppppppppp",
+    "taskAttempt": 0,
+    "taskCount": 1,
+    "taskIndex": 0
+  },
+  "bootstrapResponse": {
+    "challenge": "ccccccccccccccccccccccccccccccccccccccccccc",
+    "challengeId": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+    "expiresAt": "2026-08-11T00:05:00.000Z"
+  },
+  "claimRequest": {
+    "bootstrapRequestId": "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+    "challengeId": "01ARZ3NDEKTSV4RRFFQ69G5FAY",
+    "environment": "staging",
+    "executionHandle": "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh",
+    "executionName": "sd-stg-execution-1",
+    "jobName": "sd-stg-job-1",
+    "policyId": "cloud_run_jobs_l4_v1",
+    "signature": "ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss",
+    "taskAttempt": 0,
+    "taskCount": 1,
+    "taskIndex": 0
+  },
+  "claimResponse": {
+    "attemptId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+    "jobId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    "options": {
+      "contractVersion": 2,
+      "language": "ja",
+      "model": "large-v3-turbo",
+      "outputFormats": ["markdown", "json"],
+      "vad": false
+    },
+    "results": {
+      "artifacts": [
+        {
+          "format": "markdown",
+          "key": "results/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/01ARZ3NDEKTSV4RRFFQ69G5FAV/01ARZ3NDEKTSV4RRFFQ69G5FAW/transcript.md",
+          "putUrl": "https://storage.example.invalid/transcript.md?signature=dummy"
+        },
+        {
+          "format": "json",
+          "key": "results/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/01ARZ3NDEKTSV4RRFFQ69G5FAV/01ARZ3NDEKTSV4RRFFQ69G5FAW/transcript.json",
+          "putUrl": "https://storage.example.invalid/transcript.json?signature=dummy"
+        }
+      ],
+      "manifestPutUrl": "https://storage.example.invalid/manifest.json?signature=dummy"
+    },
+    "session": {
+      "expiresAt": "2026-08-11T01:00:00.000Z",
+      "sessionId": "01ARZ3NDEKTSV4RRFFQ69G5FAZ",
+      "token": "ttttttttttttttttttttttttttttttttttttttttttt"
+    },
+    "source": {
+      "expectedEtag": "dummy-etag",
+      "expectedSizeBytes": 100,
+      "getUrl": "https://storage.example.invalid/source.wav?signature=dummy"
+    }
+  }
+}

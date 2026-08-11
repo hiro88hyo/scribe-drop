@@ -36,6 +36,10 @@ staging/production resourceは使用していない。
   running task 0を確認した。成功を理由に追加executionを作らない。
 - この判定はbounded-memory方式と固定Cloud Run candidateの技術的feasibilityだけを採用候補とする。
   Cloud Runをproduct providerとして採用せず、ADR 0069はproduct採用判断まで`Proposed`のまま維持する。
+- 2026-08-11のADR 0073でfinal window algorithmが変更されたため、上記数値は実行済み旧imageのhistorical
+  evidenceとしてだけ保持する。変更後candidateのperformance evidenceへ流用せず、`Adopt candidate`判定を
+  新digestへ継承しない。追加cloud実行には[ADR 0075](./0075-revalidate-adaptive-eof-worker-before-provider-selection.md)と
+  新review packet、明示承認を要求する。
 
 ## Consequences
 
@@ -55,6 +59,8 @@ staging/production resourceは使用していない。
 - [ADR 0067](./0067-evaluate-cloud-run-gpu-jobs.md)
 - [ADR 0068](./0068-benchmark-cloud-run-eight-hour-input.md)
 - [ADR 0069](./0069-use-bounded-memory-transcription-windows.md)
+- [ADR 0073](./0073-use-adaptive-final-window-lookbehind.md)
+- [ADR 0075](./0075-revalidate-adaptive-eof-worker-before-provider-selection.md)
 - [Bounded Cloud Run re-probe](../cloud-run-bounded-eight-hour-reprobe.md)
 - [Cloud Run metrics](https://docs.cloud.google.com/monitoring/api/metrics_gcp_p_z)
 - [Cloud Run pricing](https://cloud.google.com/run/pricing)

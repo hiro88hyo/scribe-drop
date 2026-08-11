@@ -14,7 +14,7 @@ export const BOUNDED_EXECUTION_CONTRACT_VERSION = 2;
 export const BOUNDED_RESULT_MANIFEST_SCHEMA_VERSION = 2;
 export const MAX_BOUNDED_ARTIFACT_BYTES = 128 * 1024 * 1024;
 
-const boundedArtifactFilename = {
+export const BOUNDED_ARTIFACT_FILENAMES = {
   json: "transcript.json",
   markdown: "transcript.md",
   srt: "transcript.srt",
@@ -59,16 +59,18 @@ export const boundedResultCapabilitiesSchema = z
     "Artifact capabilities must use canonical unique formats",
   );
 
+export const boundedResultObjectKeySchema = z
+  .string()
+  .min(1)
+  .max(1024)
+  .regex(
+    /^results\/[0-9a-f]{32}\/[0-9A-HJKMNP-TV-Z]{26}\/[0-9A-HJKMNP-TV-Z]{26}\/transcript\.(?:md|json|srt)$/u,
+  );
+
 export const boundedManifestArtifactSchema = z
   .object({
     format: outputFormatSchema,
-    key: z
-      .string()
-      .min(1)
-      .max(1024)
-      .regex(
-        /^results\/[0-9a-f]{32}\/[0-9A-HJKMNP-TV-Z]{26}\/[0-9A-HJKMNP-TV-Z]{26}\/transcript\.(?:md|json|srt)$/u,
-      ),
+    key: boundedResultObjectKeySchema,
     sha256: sha256Schema,
     sizeBytes: z.number().int().nonnegative().max(MAX_BOUNDED_ARTIFACT_BYTES),
   })
@@ -94,7 +96,7 @@ export const boundedResultManifestSchema = z
   .refine(
     ({ artifacts, attemptId, jobId }) =>
       artifacts.every(({ format, key }) =>
-        key.endsWith(`/${jobId}/${attemptId}/${boundedArtifactFilename[format]}`),
+        key.endsWith(`/${jobId}/${attemptId}/${BOUNDED_ARTIFACT_FILENAMES[format]}`),
       ),
     "Manifest artifact key must match its attempt and format",
   );

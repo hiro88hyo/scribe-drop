@@ -841,7 +841,7 @@ Phase ごとに独立したコミットを作成するが、コミット実行�
 
 ブランチ、コミット、PR、言語別の詳細な開発標準は repository root の `AGENTS.md` に従う。初期文書コミット後に `develop` を作成し、Phase 1 は `feature/phase-1-foundation` から開始する。
 
-## 15. `0.2.0`: GPU execution provider移行（Cloud Run隔離probe成功、provider採用未決定）
+## 15. `0.2.0`: GPU execution provider移行（Cloud Runをsynthetic-only実装選定、production未採用）
 
 ### Plan review result（2026-08-01、2026-08-10更新）
 
@@ -877,9 +877,10 @@ Phase 10の外部gateとして残る。それ以外の実装順序上のblocker�
   productionへ昇格する。
 - ADR 0066がProposedの間はPhase 8からPhase 10の文書と隔離probeだけを許可し、product runtime、
   D1 schema、staging、productionを変更しない。
-- Phase 12からPhase 16はprovider採用前の順序と共通gateだけを示すplaceholderである。Phase 10Bの結果を
-  採用ADRへ記録し、selected providerのAPI、identity、network、data location、lifecycle、費用を再reviewする
-  まで、provider固有のcontroller、runtime、resource、workflowを実装しない。
+- Phase 12からPhase 16はprovider実装選定後もproduction採用前の順序と共通gateを示す。
+  [ADR 0076](./adr/0076-select-cloud-run-jobs-for-synthetic-provider-implementation.md)でCloud Run Jobsを
+  `Implementation selected`に固定したためPhase 12のlocal controller実装だけを開始できる。resource、workflow、
+  staging、productionは各後続Phaseのgateまで実装または変更しない。
 
 ### 共通launch rule
 
@@ -1068,6 +1069,36 @@ Phase 10の外部gateとして残る。それ以外の実装順序上のblocker�
 
 #### Phase 10C: speech-like boundary quality gate
 
+進捗（2026-08-11、local gate完了）:
+
+- DockerからGPU 0（RTX 5070 Ti）を確認し、同じbuild runのrelease worker imageからquality imageを派生した。
+  GPU 0限定、networkなし、read-only、CUDA/float16でnative比較を実行した。
+- reference固有のtimestamp過剰制約、同一PCMを3回使うfixture不整合、fixed midpointのsegmentation drift、
+  VAD segmentによるboundary metric混入を再現し、[ADR 0072](./adr/0072-revise-bounded-boundary-quality.md)へ
+  revision候補と非機密metricを記録した。閾値は変更していない。
+- ADR 0072候補のrunはreference 276文字/18 segment、candidate 262文字/12 segment、boundary 94,118 ppmで
+  合格したが、
+  global 137,681 ppmで上限50,000 ppmを超えた。Phase 10Cは未完了の`Revise`とし、provider選定、cloud
+  mutation、production routingへ進まない。CIとcloud resourceは変更していない。
+- `pnpm check`、release workerの通常/8時間bounded container check、dependency audit、Git履歴126 commitと
+  worktreeのsecret scan、release/quality imageのTrivy High/Critical scanは成功した。Node Moderate 1件は
+  既存findingであり、Python 113 packageに既知脆弱性はなかった。このrevision時点ではnative global gateだけが
+  未達だった。
+- interval別診断で終端partial coreの短いacoustic contextを主因と特定した。path入力と同じ全長FFmpeg
+  ndarray入力はglobal/boundaryとも0 ppmであり、decoder差ではなかった。
+- [ADR 0073](./adr/0073-use-adaptive-final-window-lookbehind.md)で、最大960秒のrolling buffer内でEOF final
+  windowだけを過去側へ拡張し、重複promptを抑止し、最大30秒のnative end paddingをactual endへclampした。
+  window、decode buffer、model/FFmpeg process数、quality閾値は増やしていない。
+- 再buildしたworker image `sha256:a7a4c13de205...`からquality image
+  `sha256:910c88e86775...`を派生した。公式GPU 0 native runはreference 276文字/18 segment、candidate
+  279文字/18 segment、global 47,101 ppm、boundary 94,118 ppmで成功し、Phase 10C local gateを完了した。
+- decoder変更後のimageはPhase 10BでCloud実行したdigestと異なる。ADR 0070のperformance evidenceを
+  新candidateへ継承せず、provider implementation selectionと追加cloud mutationは新review packet、明示承認、
+  必要な再測定までBlockedとする。今回CI workflowとcloud resourceは変更していない。
+- 変更後の`pnpm check`、Python 237件/coverage 90.52%、通常/8時間bounded container check、dependency audit、
+  Git履歴126 commitとworktreeのsecret scan、release/quality imageのTrivy High/Critical scanはすべて成功した。
+  Node Moderate 1件は既存findingで、Python 113 packageに既知脆弱性はない。
+
 設計:
 
 - [ADR 0071](./adr/0071-separate-provider-selection-from-production-adoption.md)に従い、技術候補、実装選定、
@@ -1097,7 +1128,93 @@ Phase 10の外部gateとして残る。それ以外の実装順序上のblocker�
   固定する別ADRで`Implementation selected`を判断し、次のcloud mutationには別packetと明示承認を要求する。
 - 失敗時は結果を見て閾値だけを緩めず、Phase 10CをReviseとしてbounded algorithmまたはfixture設計を再reviewする。
 
+#### Phase 10D: adaptive EOF candidate technical revalidation
+
+進捗（2026-08-11、exact one execution完了、`Adopt candidate`、全専用resource 0）:
+
+- ADR 0073後のworker imageはPhase 10Bの実測digestと異なるため、旧performance evidenceと`Adopt candidate`を
+  継承しない。[ADR 0075](./adr/0075-revalidate-adaptive-eof-worker-before-provider-selection.md)と
+  [adaptive EOF revalidation packet](./cloud-run-adaptive-eof-revalidation.md)へexact candidate、権限、費用、
+  preparation、execution、decision、cleanupを固定した。
+- exact `linux/amd64` worker imageをGPU 0、networkなし、read-only、3 GiB tmpfsで8時間bounded benchmarkへ通し、
+  約108秒、exit 0、success marker 1、failure marker 0を確認した。local RTX 5070 Tiの時間をCloud Run L4へ
+  換算しない。
+- 2026-08-11時点のGoogle Cloud公式文書でL4のregion、4 vCPU/16 GiB、driver、GPU 1、no-zonal pricing、
+  1時間以下の推奨timeout、size-limited in-memory volume、service identityを再確認した。実quota、JPY単価、IAM、
+  resource 0はmutation直前のAPI read-backを必須とする。
+- Phase 11はprovider switchなしで独立完了済みである。Phase 10Dのcloud revalidationと別の
+  `Implementation selected` ADRがAcceptedになるまでPhase 12はBlockedとした。この条件は2026-08-11に
+  [ADR 0076](./adr/0076-select-cloud-run-jobs-for-synthetic-provider-implementation.md)で満たした。
+- resource preparationの明示承認後、固定project/operator、billing、API 6/6、capability 23/23、L4 no-zonal quota 3、
+  同名resource各0、local image一致をmutation前にread-backした。通常JobsのJPY単価では55分computeだけで188.499円、
+  10%税を含め207.349円となり、repository reserve前に200円上限を超えたためpreparationを停止した。
+- repository、runtime service account、image push、Job、executionはすべて0のままである。CI、environment、staging、
+  productionも変更していない。費用上限、timeout、region、pricing modelを変更する場合はpacket/ADRの再reviewと別承認を
+  必須とする。
+- 利用者の別の明示承認後、費用上限だけを220円へ改定した。有料storage tier、free tierなし、remote圧縮なし、30日月の
+  24時間reserveは3.635円であり、55分computeとの小計192.133円、10%税後211.347円は新上限以内である。GPU、region、
+  timeout、pricing modelは変更せず、GPU executionは未承認のままとする。
+- 最初のpreparation attemptはexact image push後、Artifact Registry REST `tags[]`の表現を完全URLと仮定したlocal
+  validatorがdigestを確定できず、Job作成前に停止した。全作成resourceを補償削除し、別processで各0を確認した。公式
+  gcloud describeのdocumented digest/fully-qualified digest同時照合へ修正し、合成fixture後にresource 0から再開した。
+- corrected preparationではrepository、remote image、無権限runtime service account、未実行Jobを各1件作成した。
+  exact local imageを再buildせずsuccessful repositoryへ一度pushし、immutable digestでJobを固定した。作成処理と別の
+  read-only verifierがともにmanifest 27/27、runtime project role 0、execution 0を確認し、独立verifierはuser-managed
+  key 0も確認した。GPU executionは開始していない。
+- repositoryのcleanup deadlineは`2026-08-12T04:55:00Z`、execution開始cutoffは`2026-08-12T03:55:00Z`である。
+  cutoff後はfresh cost reviewなしに実行せず、deadlineまでに全専用resourceをcleanupする。
+- exact one executionの別承認後、manifest 27/27、digest、role/key 0、execution 0、最新費用211.347円以内を再確認し、
+  durable local intent後にexecute requestを一度だけ送った。最初のmonitorはpending conditionをterminal failureと誤分類したが、
+  requestを再送せず同一executionだけをcorrected classifierで回収した。
+- executionは271.965秒でsuccess、succeeded/attempt/marker各1、failed/cancelled/retried/failure marker/platform error各0
+  だった。Cloud Monitoringはbillable 242.318秒、peak container memory 0.818119 GiB、tmpfs 0.007904 GiB、GPU
+  memory 2.363281 GiB、GPU utilization 100%、必須metric 7/7だった。
+- exact-label log pollの3分境界ではmarkerの可視化が遅れたが、直後のtime-bounded diagnosticで全3 logが同一execution
+  labelへ一致し、success marker 1、failure/unexpected line 0を確認した。必要metricは欠測していない。
+- 事前decision tableの30分、12 GiB、3 GiB、success/attempt/marker、native/OOM failure条件をすべて満たすため、結果を
+  `Adopt candidate`とする。evidence後にJob/execution、repository/image、runtime service accountを削除し、別processで
+  各0とrunning task 0を確認した。local remote tagとtemporary execution identityも削除し、追加executionは作成していない。
+
+実装:
+
+- Phase 10Cで確定した同じworker imageを再buildせず、Phase 10Bと同じL4、4 vCPU、16 GiB、3 GiB scratch、
+  task/parallelism 1、retry 0、timeout 55分でexact one revalidationする。
+- preparation前にbilling、API、IAM、quota、同名resource 0、220円相当上限を一括read-backする。別承認後に
+  repository、runtime identity、未実行Jobを準備し、manifest parityとexecution 0を別processでも確認して停止する。
+- execution直前の再read-backと別承認後だけexact one executionを作成する。response不明、timeout、failure、
+  metric欠測でも再実行しない。
+- decision tableとcleanupはPhase 10Bから緩めず、全専用resource 0と課金停止を独立確認する。
+
+完了条件:
+
+- 新digestがsuccess/attempt/marker各1、30分以下、container memory 12 GiB以下、tmpfs 3 GiB未満、OOM/native
+  failure 0を満たし、必要なbillable/container/tmpfs/GPU metricが欠測なく取得できる。
+- Job/execution、repository/image、runtime service account、running taskがすべて0で、課金停止を確認する。
+- 結果をADR 0075へ記録する。成功してもprovider implementation selection、staging、productionを許可しない。
+
 ### Phase 11: provider-neutral compatibility layer
+
+進捗（2026-08-11、local完了）:
+
+- domainへprovider-neutralな`GpuExecutionProvider`、create outcome/error taxonomy、executionとcleanupを分離した
+  状態機械を追加した。provider SDK型とCloudflare型はdomainへ含めていない。
+- forward-only migrationでimmutable attempt bindingと`provider_executions` aggregate、index、CHECK、dual-write
+  triggerを追加した。既存attemptを明示的なRunPod contract v1へbackfillし、旧RunPod列と
+  `runpod_submissions`はrename/deleteしていない。
+- submission、claim、completion/cancel、retention、user deletion、notificationは、legacy列とaggregateのexact
+  mirrorだけを処理する。drift時はRunPod、R2、Discordへ副作用を出さずfail closedする。
+- cleanup request/claim/finishをversion CASで直列化し、duplicate aggregate、create unknown、out-of-order、
+  concurrent cleanup、stale version、terminal/active attempt conflict、partial artifactをD1 integrationで検証した。
+- [ADR 0074](./adr/0074-expand-provider-execution-compatibility-without-mixing-contracts.md)に従い、現行RunPod workerと
+  manifestがv1である間は新規RunPod attemptもimmutable v1 snapshotへ固定する。contract v2を格納・strict parse
+  できるが発行せず、bootstrapからcompletionまで同時に接続する後続Phaseの新attemptへ延期する。
+- `pnpm check`はscript 226件、Vitest 225件、Web Workers 54件、Orchestrator Workers 44件、Python 237件を
+  含めて成功した。fresh/idempotent/旧schema upgradeのD1 migration、format、lint、strict typecheck、build、
+  Pages Functions candidate、CI policy verificationも同じgateで成功した。
+- Git履歴126 commitとworktreeのsecret scanはleak 0、Node High以上0（既存Moderate 1）、Python 113 packageの
+  既知脆弱性0、既存release/quality imageのTrivy High/Critical 0を確認した。Phase 11はworker imageを変更して
+  いないためimageを再buildせず、Phase 10CのGPU 0 CUDA/float16 native quality結果とdigestを維持する。
+- cloud resource、environment switch、CI workflowはこのPhaseで変更しない。
 
 実装:
 
@@ -1120,11 +1237,29 @@ Phase 10の外部gateとして残る。それ以外の実装順序上のblocker�
   partial artifactをD1 integrationで検証する。
 - cloud resourceとenvironment switchを追加せず、RunPod-only状態のまま全標準gateが成功する。
 
-### Phase 12: selected-provider control plane（採用ADRまでBlocked）
+### Phase 12: selected-provider control plane（local実装完了）
+
+進捗（2026-08-11、完了）:
+
+- Phase 10CのCUDA/float16 native quality gateとPhase 10Dのexact Cloud Run L4 revalidationが成功し、
+  全専用resource 0を独立確認した。
+- [ADR 0076](./adr/0076-select-cloud-run-jobs-for-synthetic-provider-implementation.md)でCloud Run Jobsを
+  `Implementation selected`とし、provider API、identity、IAM、create/run reconciliation、network、data location、
+  hard timeout、cleanup、quota、synthetic費用上限とPhase 8との差分を固定した。
+- [Cloud Run provider control-plane設計](./cloud-run-provider-control-plane.md)をPhase 12からPhase 14の
+  synthetic-only source of truthとする。production採用、cloud resource、credential、CI、実録音は許可していない。
+- `apps/gpu-controller`へstrict request/HMAC境界、fixed L4 Job manifest、bounded Cloud Run v2 REST adapter、
+  durable store port、budget/rate/concurrency admission、create/run/cancel/delete reconciliation、orphan reaperを実装した。
+- `jobs.run`はdurable intent後に1回だけ送り、response loss、0件観測、controller restartでも再送しない。
+  createはdeterministic同一Job IDだけへ収束し、manifest driftまたはExecution 2件以上では実行を拒否してcleanupへ送る。
+- provider API、operation read-back、network、clock、HMAC key store、Firestore相当storeをlocal fakeにし、23件の
+  focused testでtimeout after effect、changed replay、stale version、wrong environment、任意spec、rate/budget、restart、
+  raw response bounding、absence-confirmed cleanupを検証した。cloud resource、credential、CI、product Worker/imageは変更していない。
 
 開始条件:
 
-- Phase 10AとPhase 10Bを完了し、結果をAdoptとして記録したprovider採用ADRがAcceptedである。
+- Phase 10A、Phase 10C、Phase 10Dを完了し、exact current imageをAdopt candidateとして記録した
+  `Implementation selected` ADRがAcceptedである。
 - 採用ADRがprovider API、resource identity、create冪等性、credential scope、network、data location、
   hard timeout、cleanup、quota、費用上限を固定し、Phase 8のreview packetとの差分を列挙している。
 - 条件を満たさない間はRunPod Pod、Cloud Run Jobを含むprovider固有controllerを実装しない。
@@ -1146,7 +1281,17 @@ Phase 10の外部gateとして残る。それ以外の実装順序上のblocker�
   出さない。provider operationとの対応にはopaque execution handleだけを使う。
 - product Workerとcontainer imageを変更せず、controller単独で全標準gateが成功する。
 
-### Phase 13: selected-provider one-shot runtime
+完了 evidence:
+
+```bash
+pnpm --filter @scribe-drop/gpu-controller run typecheck
+pnpm exec eslint apps/gpu-controller packages/domain/src/gpu-execution.ts packages/domain/src/gpu-execution.test.ts --max-warnings 0
+pnpm exec vitest run apps/gpu-controller/src packages/domain/src/gpu-execution.test.ts
+pnpm --filter @scribe-drop/gpu-controller run build
+pnpm check
+```
+
+### Phase 13: selected-provider one-shot runtime（local実装完了）
 
 実装:
 
@@ -1168,7 +1313,33 @@ Phase 10の外部gateとして残る。それ以外の実装順序上のblocker�
 - language、VAD、選択format、manifest v2、8時間bounded-memory経路をprovider非依存testで再検証する。
 - staging resourceを作る前に、採用ADRのpermission/resource manifestとの差分が0である。
 
-### Phase 14: staging dark deployment
+完了 evidence:
+
+```bash
+pnpm exec vitest run packages/contracts/src/cloud-run-runtime.test.ts \
+  apps/orchestrator/src/cloud-run-runtime-service.test.ts \
+  apps/orchestrator/src/cloud-run-runtime-http.test.ts
+uv run --directory apps/runpod-worker pytest
+pnpm container:build:runpod
+pnpm container:build:cloud-run
+pnpm container:check:cloud-run
+pnpm container:sbom:cloud-run
+pnpm container:scan:cloud-run
+pnpm check
+```
+
+- [ADR 0077](./adr/0077-use-two-step-runtime-bootstrap-challenge.md)で二段階challenge、exact replay、session失効、
+  service identityの残余riskを固定した。詳細とlocal image evidenceは
+  [Cloud Run one-shot runtime](./cloud-run-one-shot-runtime.md)を正とする。
+- fixed manifestとcontroller read-back schemaは`cloud_run_jobs_l4_v1`のtask 1、retry 0、L4 1、resource、command、
+  non-secret runtime environmentを完全比較する。permission set、region、GPU、CPU、memory、timeout、volume、service
+  accountにPhase 12からの拡張はない。
+- Firestore resourceとservice wiring、実Google identity接続、service hosting、IAM、cloud resource、CI、product routingは
+  Phase 14の実staging gateまで未実装である。D1 runtime adapter、disabled shadow namespace、controller live attestation、
+  Orchestrator HMAC client、Firestore control-store adapterはPhase 14 local preparationで追加したが、default service
+  wiringには接続していない。
+
+### Phase 14: staging dark deployment（local preparation中）
 
 実装:
 
@@ -1180,6 +1351,83 @@ Phase 10の外部gateとして残る。それ以外の実装順序上のblocker�
 - UIと通常Queueから到達不能なshadow routeで、synthetic executionだけを最大1件実行する。
 - 現行RunPod Serverlessとselected providerへ同じattemptを二重投入せず、全resource削除後にenvironmentを
   disabledへ戻す。
+
+local preparation（2026-08-11）:
+
+- forward-only `0011_cloud_run_runtime_protocol.sql`でbootstrap、challenge/session、allowlist terminal eventを
+  provider executionへ外部キーで固定した。challenge消費、sequence、terminal revokeはD1 CAS/triggerへ収束する。
+- D1 production repositoryはactive attempt、provider kind/policy、contract v2、source key/ETag/size、result prefixを
+  完全比較し、bootstrap/claim/sessionのexact replayだけを許可する。local Workers integration 49件とfresh、二重適用、
+  `0010`からのupgrade migrationを検証した。
+- Workerの`/internal/cloud-run/*` namespaceは、stagingかつexact `synthetic-shadow` modeかつruntime service注入時だけ
+  dispatchする。source-controlled modeは未設定で、default wiringに実serviceを注入していないため、local/staging/
+  productionの既定状態は404、誤ってmodeだけ設定しても503でfail closedする。通常RunPod routeは変更しない。
+- selected formatだけをexact result keyへ写すR2 capability adapterを追加し、capability expiryがsessionより短い場合は
+  発行を拒否する。
+- controller mutation/attestationのrequest、response、HMAC canonicalizationを共有contractへ移し、controllerの
+  `/v1/executions/attest`はdurable recordだけを信頼せず、JobとExecutionを毎回live read-backする。exact 1 execution、
+  fixed manifest、Job/Execution UID、service account、task 1、retry上限が一致しない場合は`found`へしない。
+- Orchestratorのcontroller clientはHTTPS、10秒timeout、redirect拒否、16 KiB response上限、strict response identityを
+  強制する。cleanupは直前のlive attestationからversionを取得してexact 1 mutationだけを送り、response lossを
+  自動再送しない。clientとendpointはdefault runtime serviceへ未注入である。
+- Google OAuth JWKSのURL、RS256、issuer、audience、time、`sub == azp`、verified service-account emailを固定するidentity
+  verifierを追加した。JWKSはredirectを拒否し、64 KiB、5秒、Cache-Control上限、unknown-key refresh cooldown、同時fetch
+  coalescingを強制する。Google tokenの数値`sub`をservice-account emailと誤認せず別々に返す。default runtime serviceには
+  未注入である。
+- `@google-cloud/firestore`のnamed-database adapterを追加した。environment singleton、request replay、execution recordを
+  一つのtransactionへ閉じ、active 1、finite count/JPY reservation、rate window、version CAS、cleanup時だけのactive slot
+  releaseを永続化する。SDK transaction callbackの再実行、並行admission/CAS、adapter restart、authorization/path/TTL/
+  singleton driftをlocal fakeで検証し、strict persisted schema違反はfail closedにする。TTL fieldは保存するがTTL policyは
+  cloud側へ未設定である。
+- strict composition rootでmanifest、authorization、Firestoreのenvironment/project、image repository、runtime service
+  accountを完全照合し、Firestore store、Cloud Run client、HMAC HTTP handlerをlocal結線した。default disabled
+  authorizationでは署名済みcreateもADC token取得/Cloud Run call前に停止する。Google ADC access tokenはvisible ASCIIかつ
+  8 KiB以下、HMAC rotation secretはcanonical base64urlの32〜64 byteかつprimary/secondary非同一だけを受ける。process
+  configurationとNode HTTP entrypointもlocal実装し、authorization全欠落をdisabled、部分指定を起動失敗にする。request
+  targetを固定authorityへ閉じ、body/header/timeout/socket reuseを制限する。Secret Manager binding、image publish、service
+  deploymentは未実装である。
+- controller production bundleだけを入れる`linux/amd64` imageを追加した。runtimeはNode 24.18.0を実測した
+  distroless Debian 13のimmutable amd64 manifestへ固定し、UID/GID 10001、`HOME=/nonexistent`、read-only前提、固定
+  entrypointにした。production deployはtask固有の複製workspaceへ隔離し、root install stateの変更を拒否する。local gateは
+  image metadataとbase digestを照合し、network none、全capability drop、
+  `no-new-privileges`、PID/memory/CPU上限、noexec tmpfsでcontainer invariantを実行する。CycloneDX SBOMは`/tmp`だけへ
+  生成し、TrivyのHIGH/CRITICAL fail-close scanを通過した。bundleはregular `.js`だけを選び、shell、BusyBox、npm/pnpm、
+  TypeScript、`@types/node`、source tree、declaration、source mapの不在とproduction runtime dependencyの存在をcontainer内で
+  検証する。image publish、registry、CI、service deploymentは変更していない。
+- controller Cloud Run Serviceのpure deployment planとnormalized read-back verifierを追加した。Singapore、Gen2、immutable
+  controller image、専用service account、1 vCPU/512 MiB、request-based CPU、service/revision max instance 1、min 0、concurrency
+  8、60秒timeout、latest revision 100%、volume/VPCなし、default URI有効、IAP無効、public ingressとapplication HMAC、Binary
+  Authorization default policyをexact値へ固定する。runtime environmentはallowlistと重複禁止を課し、zero-budget authorizationを
+  明示し、HMAC secretはenvironment名を含むdistinct secretの数値versionだけを参照する。Cloud Run v2 raw response adapterは
+  generation収束、ready revision、latest 100% traffic、canonical `run.app` URIを検証してnormalized planへ変換し、未知fieldや
+  breakglassを拒否する。`threatDetectionEnabled`はproject設定由来のoutput-only evidenceとしてdesired-state比較から分離した。
+  IAMはpublic/excess bindingを、Secret ManagerはSingapore user-managed replica、fixed `ENABLED` version、exact accessorを、Binary
+  Authorizationはallowlist/specialized ruleなしのexact attestor強制をlocal raw schemaで検証する。Service、空のService resource IAM、
+  primary/secondary secret、Binary Authorizationを同一project/
+  environmentの単一検証へ束ね、secondary observationの欠落・余剰を拒否し、secret payloadを含まないevidenceだけを返す。固定
+  Google API originとresource pathだけへGETし、redirect、非JSON、256 KiB超過、10秒timeoutを拒否するread-only clientもlocal実装した。
+  Secret Managerは`:access`を呼ばずmetadataだけを取得し、全resourceを2回readして途中変更を拒否する。実credentialでの呼び出し、
+  authoritative evidence取得、resource作成、deployは行わない。
+- [ADR 0078](./adr/0078-split-controller-iam-by-resource-boundary.md)に従いcontroller IAM pure planを追加した。Cloud Run Jobs custom roleは
+  実clientが使うJob create/get/delete/run、Execution list/cancel/delete、Operation getだけ、Firestore custom roleはtransactionと
+  entity get/create/update/deleteだけへ固定する。project binding、database完全一致condition、runtime account上の
+  `roles/iam.serviceAccountUser`、worker repository上の`roles/artifactregistry.reader`をresource identity付きで照合する。他principalの
+  project bindingは許容するが、controller principalの追加role、混在binding、condition/permission/resource driftを拒否する。IAM expectation
+  自体もexact permission、role metadata、同projectのrepository/controller/runtime identityへ固定する。固定custom role GETとproject/repository/
+  runtime accountの`getIamPolicy`だけを許すclientは同じtoken/quota projectで2回readし、途中変更、外部origin、`setIamPolicy`、不正POST bodyを
+  拒否する。role作成、IAM mutation、実credentialでのlive read-backは行わない。
+- [ADR 0079](./adr/0079-fix-controller-firestore-database-and-ttl-policy.md)に従いFirestore pure resource planとstrict raw read-backを追加した。
+  environment専用named databaseをSingapore/Native/Standard、pessimistic transaction、delete protection、Firestore-only accessへ固定する。
+  staging PITR無効/1時間retention、production PITR有効/7日retentionを分離し、request/execution collection groupの`ttlExpiresAt`だけを
+  offset 0かつ`ACTIVE`で受ける。fixed database/field GETとdatabase-wide `ttlConfig:*` listを同じtoken/quota projectで2回実行し、
+  期待2件以外、重複、paginationを拒否する。list順序だけを正規化し、継続変化するoutput-only `earliestVersionTime`だけを安定性比較から
+  除外するlocal clientも追加した。Service/security、IAM、Firestoreを同じdeployment expectationから
+  導出するatomic evidence verifierでcross-project/database mixと未知sectionを拒否する。deployment-level read-only clientは個別clientと
+  pure endpoint builderを共有し、全resourceを一つのtoken/quota projectと同じdouble-snapshot windowで取得する。実credential、database/TTL
+  作成、mutationは行わない。
+- release branch/version、candidate workflow、CI、Firestore database/TTL policy、identity/controller deployment wiring、service
+  hosting、IAM、secret resource、cloud resource、deploy、product routingは変更していない。このためPhase 14の完了条件は
+  未達である。
 
 完了条件:
 

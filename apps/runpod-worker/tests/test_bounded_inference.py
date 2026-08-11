@@ -126,6 +126,39 @@ def test_auto_language_is_detected_once_then_fixed_with_bounded_prompt(tmp_path:
     assert model.calls[1]["initial_prompt"] == "window 0"
 
 
+def test_adaptive_final_lookbehind_does_not_duplicate_prompt_text(tmp_path: Path) -> None:
+    """An EOF-expanded window relies on acoustic history instead of overlapping text."""
+    model = FakeWindowModel(("ja", "ja"))
+    prompt = PromptTail()
+    with SegmentSpool(tmp_path) as spool:
+        coordinator = BoundedInferenceCoordinator(
+            model=model,
+            options=_options(language="auto", vad=True),
+            merger=WindowSegmentMerger(spool, prompt),
+            prompt=prompt,
+        )
+        first = _pcm_window(0)
+        final = _pcm_window(1)
+        adaptive_spec = final.spec.__class__(
+            index=final.spec.index,
+            core_start_sample=final.spec.core_start_sample,
+            core_end_sample=final.spec.core_end_sample,
+            window_start_sample=0,
+            window_end_sample=final.spec.window_end_sample,
+            is_last=True,
+        )
+        adaptive = PcmWindow(spec=adaptive_spec, pcm=final.pcm)
+        try:
+            coordinator.consume(first)
+            coordinator.consume(adaptive)
+        finally:
+            first.pcm.release()
+            final.pcm.release()
+
+    assert model.calls[0]["initial_prompt"] is None
+    assert model.calls[1]["initial_prompt"] is None
+
+
 def test_japanese_and_vad_are_applied_to_every_window(tmp_path: Path) -> None:
     """The fixed Japanese path never silently falls back to auto or disables VAD."""
     model = FakeWindowModel(("ja",))

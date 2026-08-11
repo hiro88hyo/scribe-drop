@@ -1,3 +1,7 @@
+import {
+  handleCloudRunRuntimeShadowRequest,
+  type CloudRunRuntimeShadowEnvironment,
+} from "./cloud-run-runtime-shadow.js";
 import { handleUploadQueueBatch, type UploadQueueEnvironment } from "./upload-queue-consumer.js";
 import { handleRunpodHttpRequest, type RunpodHttpEnvironment } from "./runpod-http-handler.js";
 import { reconcileJobs, type ReconciliationEnvironment } from "./reconciliation-service.js";
@@ -7,6 +11,8 @@ export const ORCHESTRATOR_APPLICATION_ID = "scribe-drop-orchestrator";
 
 export default {
   async fetch(request, environment): Promise<Response> {
+    const shadowResponse = await handleCloudRunRuntimeShadowRequest(request, environment);
+    if (shadowResponse !== undefined) return shadowResponse;
     return handleRunpodHttpRequest(request, environment);
   },
 
@@ -29,5 +35,8 @@ export default {
     await reconcileJobs(environment);
   },
 } satisfies ExportedHandler<
-  UploadQueueEnvironment & RunpodHttpEnvironment & ReconciliationEnvironment
+  UploadQueueEnvironment &
+    RunpodHttpEnvironment &
+    ReconciliationEnvironment &
+    CloudRunRuntimeShadowEnvironment
 >;

@@ -1,10 +1,10 @@
 # ADR 0069: 最大8時間入力をbounded-memory windowで逐次文字起こしする
 
-- Status: Proposed
+- Status: Accepted（synthetic-only実装。production routingは未採用）
 - Date: 2026-08-10
 - Target release if accepted: `0.2.0`
 - Relates to: ADR 0068
-- Outcome evidence: ADR 0070
+- Outcome evidence: ADR 0070、ADR 0072、ADR 0073、ADR 0075、ADR 0076
 - Does not change yet: 現行RunPod runtime、staging/production、最大録音時間8時間
 
 ## Context
@@ -35,12 +35,16 @@ attemptへ結び付ける方式をofflineで検証する必要がある。
 - transcription coreは15分のhalf-open core intervalと前後30秒contextからなるwindowを順番に処理する。
   最大windowは16分、float32 PCMは61,440,000 bytes（約58.6 MiB）である。decoder stdout、current
   window、次windowを無制限にprefetchしない。
+- decoderは直近最大16分をrolling保持し、EOFで確定する最終partial coreだけを過去側へ最大windowまで
+  adaptiveに拡張する。拡張windowではacoustic inputと重複する`initial_prompt`を渡さない。
 - `condition_on_previous_text=true`は各window内で維持する。次windowには、直前までに採用したsegmentから
   作る最大8 KiB UTF-8の`initial_prompt`だけを渡す。prompt、segment、本文をlogへ出さない。
-- windowのraw segmentはlocal timestampをstrict検証してglobal timestampへ変換する。segment midpointが
-  属するhalf-open coreだけがそのsegmentを所有し、最終coreだけ終端を含む。採用後はglobal timestamp順を
-  仮定せず、owner core、midpoint、start、end、raw idの決定的順序で連番IDを再発行し、overlap由来の
-  同一segmentを二重採用しない。raw segmentは1 window 10,000件で打ち切る。
+- windowのraw segmentはlocal timestampをstrict検証してglobal timestampへ変換する。Phase 10Cで固定core
+  midpointのsegmentation driftによるcoverage holeを確認したため、[ADR 0072](./0072-revise-bounded-boundary-quality.md)
+  の候補では先行windowを優先し、最後に採用したglobal endをmonotonic watermarkとして後続overlapを除く。
+  採用時に連番IDを再発行し、raw segmentは1 window 10,000件で打ち切る。
+- native segmentがwindow末尾を最大30秒paddingした場合はendだけをactual window endへclampする。startが
+  window外、またはpadding上限超過は拒否し、永続化timestampをmedia duration内に保つ。
 - attempt作成時にjob optionsをimmutable snapshotとして保存する。execution contract v2は固定model、
   `language: ja | auto`、`vad`、canonical `outputFormats`を含む。`ja`は全windowへ固定し、`auto`は最初の
   windowで一度だけ検出して後続へ固定する。
@@ -69,7 +73,15 @@ Phase 10Bは2026-08-10にexact one executionで成功し、処理時間254秒、
 peak container memory 0.578 GiB、peak tmpfs 0.0079 GiB、peak GPU memory 2.363 GiBだった。executionと
 task attemptは各1、success marker 1、failure/retry/OOM 0で、全専用resourceを0件へcleanupした。この結果は
 [ADR 0070](./0070-record-bounded-cloud-run-probe-as-adopt-candidate.md)で`Adopt candidate`と判定した。
-boundary品質とproduct provider採用は未決定のため、このADRのStatusは`Proposed`のまま維持する。
+Phase 10B時点ではboundary品質とproduct provider採用が未決定だったため、このADRのStatusを`Proposed`のまま
+維持した。
+
+Phase 10Cは[ADR 0073](./0073-use-adaptive-final-window-lookbehind.md)のadaptive final windowでlocal native
+quality gateを満たした。ただしalgorithm変更後のimageはPhase 10Bで実行したdigestと異なるため、ADR 0070の
+performance値を新candidateへ継承しなかった。後続[ADR 0075](./0075-revalidate-adaptive-eof-worker-before-provider-selection.md)
+でexact current imageのCloud Run L4 revalidationを完了し、[ADR 0076](./0076-select-cloud-run-jobs-for-synthetic-provider-implementation.md)
+がCloud Run Jobsを`Implementation selected`としたため、本ADRをsynthetic-only実装についてAcceptedへ変更する。
+実録音、staging/production接続、production routingは引き続き別gateである。
 
 詳細な境界、algorithm、contract移行、test matrixは
 [bounded-memory transcription design](../bounded-memory-transcription-design.md)を正とする。
@@ -98,3 +110,6 @@ boundary品質とproduct provider採用は未決定のため、このADRのStatu
 - [Cloud Run Jobs](https://cloud.google.com/run/docs/create-jobs)
 - [Cloud Run metrics](https://docs.cloud.google.com/monitoring/api/metrics_gcp_p_z)
 - [ADR 0070](./0070-record-bounded-cloud-run-probe-as-adopt-candidate.md)
+- [ADR 0073](./0073-use-adaptive-final-window-lookbehind.md)
+- [ADR 0075](./0075-revalidate-adaptive-eof-worker-before-provider-selection.md)
+- [ADR 0076](./0076-select-cloud-run-jobs-for-synthetic-provider-implementation.md)

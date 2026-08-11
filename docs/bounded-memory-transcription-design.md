@@ -2,7 +2,7 @@
 
 ## 1. Status and scope
 
-- Status: Proposed、offline design review
+- Status: Proposed、Phase 10C local quality gate passed
 - Date: 2026-08-10
 - Decision: [ADR 0069](./adr/0069-use-bounded-memory-transcription-windows.md)
 - Trigger: [8時間full-scan benchmark](./cloud-run-eight-hour-benchmark.md)の16 GiB OOM
@@ -28,27 +28,27 @@ R2、Cloud Run resourceをまだ変更しない。Cloud Run skillのresource mod
 
 ## 3. Fixed resource and memory boundaries
 
-| Boundary                   | Fixed value                                    |
-| -------------------------- | ---------------------------------------------- |
-| Provider execution         | 1 attempt = 1 execution = 1 task = 1 GPU       |
-| Source duration            | 最大28,800秒                                   |
-| Source object              | 最大2 GiB、download後にsize/ETagを再検証       |
-| Cloud Run scratch volume   | `/tmp`へ専用in-memory volume、size limit 3 GiB |
-| Decode output              | 16 kHz、mono、little-endian float32            |
-| Core interval              | 900秒                                          |
-| Context overlap            | core前30秒、core後30秒                         |
-| Maximum inference window   | 960秒、61,440,000 bytes、約58.6 MiB            |
-| Retained decode lookbehind | 60秒、3,840,000 bytes、約3.7 MiB               |
-| Prompt                     | 最大8 KiB UTF-8                                |
-| Segment count              | 最大100,000                                    |
-| Raw segments per window    | 最大10,000                                     |
-| Segment text               | 1件16 KiB、全体64 MiB                          |
-| Internal segment spool     | 最大128 MiB、mode 0600                         |
-| Internal spool row         | 最大40 KiB                                     |
-| Artifact                   | 1形式128 MiB、同時に生成するartifactは1件      |
-| FFmpeg processes           | 1                                              |
-| Model instances            | 1                                              |
-| Cloud execution retry      | 0                                              |
+| Boundary                 | Fixed value                                    |
+| ------------------------ | ---------------------------------------------- |
+| Provider execution       | 1 attempt = 1 execution = 1 task = 1 GPU       |
+| Source duration          | 最大28,800秒                                   |
+| Source object            | 最大2 GiB、download後にsize/ETagを再検証       |
+| Cloud Run scratch volume | `/tmp`へ専用in-memory volume、size limit 3 GiB |
+| Decode output            | 16 kHz、mono、little-endian float32            |
+| Core interval            | 900秒                                          |
+| Context overlap          | core前30秒、core後30秒                         |
+| Maximum inference window | 960秒、61,440,000 bytes、約58.6 MiB            |
+| Rolling decode history   | 最大960秒、windowと合わせて約58.6 MiB          |
+| Prompt                   | 最大8 KiB UTF-8                                |
+| Segment count            | 最大100,000                                    |
+| Raw segments per window  | 最大10,000                                     |
+| Segment text             | 1件16 KiB、全体64 MiB                          |
+| Internal segment spool   | 最大128 MiB、mode 0600                         |
+| Internal spool row       | 最大40 KiB                                     |
+| Artifact                 | 1形式128 MiB、同時に生成するartifactは1件      |
+| FFmpeg processes         | 1                                              |
+| Model instances          | 1                                              |
+| Cloud execution retry    | 0                                              |
 
 3 GiB scratchは追加memoryではなくcontainerの16 GiBから消費する。source最大2 GiB、spool 128 MiB、current
 artifact 128 MiBを同時に保持してもvolume limit内に収める。volume fullはwrite failureとして捕捉し、container
@@ -95,27 +95,32 @@ sourceをwindowごとにseekして再decodeしない。これによりcontainer�
 
 ## 6. Window and merge algorithm
 
-core `i`は`[i * 900, min((i + 1) * 900, duration))`である。inference windowは利用可能な範囲でcoreの
-前後30秒を含む。最初と最後だけ片側contextが短い。FFmpeg streamから次のcoreに必要な60秒を保持し、
-残りを解放する。
+core `i`は`[i * 900, min((i + 1) * 900, duration))`である。通常inference windowは利用可能な範囲でcoreの
+前後30秒を含む。decoderは次の通常window開始と直近960秒のうち早い位置までをrolling保持し、残りを解放する。
+EOFで最終partial coreが確定した場合だけ、最終windowを`max(0, actual end - 960秒)`まで過去側へ拡張する。
+windowとdecode bufferのpeakは引き続き`MAX_WINDOW_BYTES + READ_CHUNK_BYTES`以内であり、8時間全体を保持しない。
 
 各raw segmentについて次を順に検証する。
 
 1. id、start、end、textをPydantic strict schemaで検証する。
-2. timestampがfiniteで、`0 <= start <= end <= window duration`であることを確認する。
+2. timestampがfiniteで、`0 <= start <= end`、`start <= window duration`、
+   `end <= window duration + 30秒`を確認する。許可したnative end paddingだけをwindow endへclampする。
 3. window offsetを加えてglobal timestampへ変換し、全体duration内であることを確認する。
-4. midpoint `(start + end) / 2`がcoreのhalf-open intervalに属するsegmentだけを採用する。最終coreだけ
-   全体durationと等しいmidpointを許可する。
-5. raw iteratorを`(midpoint, start, end, raw id)`の非減少順として検証する。owner coreは順次処理されるため、
-   全体は`(owner core, midpoint, start, end, raw id)`の決定的順序となり、採用時に0からglobal idを再発行する。
-   1 windowが10,000件を超えた場合はlazy iteratorをそれ以上消費せず失敗する。
+4. raw iteratorを`(midpoint, start, end, raw id)`の非減少順として検証する。先行windowのsegmentを優先し、
+   最後に採用したglobal endをmonotonic watermarkとして保持する。後続windowではglobal midpointがwatermarkを
+   越えるsegmentだけを採用し、採用後にwatermarkをglobal endの最大値へ進める。
+5. windowは順次処理し、採用時に0からglobal idを再発行する。1 windowが10,000件を超えた場合はlazy
+   iteratorをそれ以上消費せず失敗する。
 
 text比較によるfuzzy dedupは行わない。本文内容に依存する曖昧な削除を避け、同じacoustic contextを持つ
 windowとtimestamp ownershipで重複を制御する。boundary fixtureでduplicate、欠落、逆順を検証する。
 
 `condition_on_previous_text=true`は各windowの内部30秒frame間で維持する。次windowの`initial_prompt`は、
-採用済みtextをwhitespace正規化し、UTF-8末尾からcode pointを壊さず最大8 KiBに切った値とする。promptは
+次windowのacoustic context開始より前に終了した採用textだけをwhitespace正規化し、UTF-8末尾からcode
+pointを壊さず最大8 KiBに切った値とする。同じ発話をoverlap音声とpromptの両方へ渡さない。promptは
 spoolから必要な末尾だけを保持し、logやartifact metadataへ複製しない。
+EOFで通常より過去側へ拡張した最終windowには、保持済みpromptとacoustic historyの重複を避けるため
+`initial_prompt`を渡さない。検出済みlanguageとVAD設定はそのまま固定する。
 
 ## 7. Language, VAD, and execution options
 
@@ -187,7 +192,8 @@ product serviceへ接続する前に、isolated moduleとbenchmark entrypointで
 
 - planner: 1秒、900秒境界、901秒、8時間、最終partial core、sample端数
 - decoder: exact stream、multi-stream、corrupt input、zero/over-limit/non-frame output、timeout、cancel、cleanup
-- merge: boundary跨ぎ、30秒overlap、midpoint境界、逆順、重複、範囲外、NaN/Infinity、global ID
+- merge: boundary跨ぎ、30秒overlap、monotonic watermark、segmentation drift、逆順、重複、範囲外、
+  NaN/Infinity、global ID
 - prompt: 8 KiB、multi-byte UTF-8、空text、本文のlog不在
 - options: ja/auto、VAD true/false、1～3 output formats、snapshot drift、contract v1/v2混同拒否
 - limits: segment数、per-text、total text、spool、artifact、volume full
@@ -203,7 +209,7 @@ Phase 10Aのisolated実装は次で構成する。
 
 - `bounded_decoder.py`: exact streamを一つのFFmpeg processでdecodeし、actual EOF sample数から最大32 windowを
   動的に確定する。8時間float32全体を事前確保しない。
-- `bounded_transcription.py`: pure planner、midpoint ownership、8 KiB prompt、mode 0600 JSON Lines spool。
+- `bounded_transcription.py`: pure planner、monotonic overlap watermark、8 KiB prompt、mode 0600 JSON Lines spool。
 - `bounded_inference.py`: model instance一つ、逐次window、ja/auto一度固定、exact VAD。
 - `bounded_artifacts.py`: 選択形式だけを一件ずつfile-backed生成し、hash/size付きでuploadしてmanifest v2を最後に
   書く。
@@ -257,14 +263,14 @@ timeout、OOM、native failureはRejectとする。synthetic成功後も非機�
 
 ## 13. Plan review result
 
-| Severity | Finding                                                                     | Resolution                                                                                      |
-| -------- | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Blocker  | 8時間入力をpathのままfaster-whisperへ渡すと入力時間比例のmemoryを使う       | single-pass decoderと最大16分windowへ制限し、同じ経路のmemory増量retryを禁止する                |
-| Blocker  | job optionsがclaimへ渡らず、利用者のlanguage、VAD、formatと実行が一致しない | immutable execution contract v2とmanifest v2をPhase 11のmigration、capability、completionへ通す |
-| Blocker  | Phase 12以降が停止済みのRunPod Podsを採用済みとしていた                     | 採用ADRまでprovider固有実装をBlockedにし、selected-provider control plane/runtimeへ一般化した   |
-| High     | source、segment、3 artifactを同時に保持すると別のmemory amplificationが残る | 3 GiB scratch、128 MiB spool、1 artifactずつのstreaming uploadとhard limitを固定した            |
-| High     | window境界で重複、欠落、言語driftが起こり得る                               | 30秒context、midpoint ownership、bounded prompt、auto language一度固定をfixtureでacceptanceする |
-| High     | 複数Cloud Run taskは順序、winner、manifest、cancelを分散させる              | 初期実装は1 attempt、1 execution、1 taskに固定し、chunk checkpointと並列taskを採用しない        |
+| Severity | Finding                                                                     | Resolution                                                                                       |
+| -------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Blocker  | 8時間入力をpathのままfaster-whisperへ渡すと入力時間比例のmemoryを使う       | single-pass decoderと最大16分windowへ制限し、同じ経路のmemory増量retryを禁止する                 |
+| Blocker  | job optionsがclaimへ渡らず、利用者のlanguage、VAD、formatと実行が一致しない | immutable execution contract v2とmanifest v2をPhase 11のmigration、capability、completionへ通す  |
+| Blocker  | Phase 12以降が停止済みのRunPod Podsを採用済みとしていた                     | 採用ADRまでprovider固有実装をBlockedにし、selected-provider control plane/runtimeへ一般化した    |
+| High     | source、segment、3 artifactを同時に保持すると別のmemory amplificationが残る | 3 GiB scratch、128 MiB spool、1 artifactずつのstreaming uploadとhard limitを固定した             |
+| High     | window境界で重複、欠落、言語driftが起こり得る                               | 30秒context、monotonic watermark、bounded prompt、auto language一度固定をfixtureでacceptanceする |
+| High     | 複数Cloud Run taskは順序、winner、manifest、cancelを分散させる              | 初期実装は1 attempt、1 execution、1 taskに固定し、chunk checkpointと並列taskを採用しない         |
 
 このreviewに従うPhase 10Aのisolated code、contract、全local gateは完了したが、product code、migration、
 cloud resource、staging、productionには接続していない。Phase 10Bは別review packetの確認と明示承認が揃うまで

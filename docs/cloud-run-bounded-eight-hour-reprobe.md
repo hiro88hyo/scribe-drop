@@ -8,6 +8,9 @@
 - Previous evidence: [8時間full-scan benchmark](./cloud-run-eight-hour-benchmark.md)
 - Product adoption: 未決定。結果の判定は[ADR 0070](./adr/0070-record-bounded-cloud-run-probe-as-adopt-candidate.md)
 
+> 2026-08-11: ADR 0073後のworker imageにはこのpacketとPhase 10B performance evidenceを再利用しない。
+> 新digestの再測定は[adaptive EOF revalidation packet](./cloud-run-adaptive-eof-revalidation.md)を正とする。
+
 このpacketはPhase 10Bの候補を一つに固定する。local gateがすべて成功し、その結果を提示した後の別の明示承認
 だけがcloud mutationを許可する。この文書の作成、review、local testはexecution承認ではない。現行RunPod、
 Cloudflare、R2、D1、staging、production、実録音を変更または使用しない。

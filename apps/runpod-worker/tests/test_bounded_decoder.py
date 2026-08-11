@@ -148,20 +148,29 @@ def test_decoder_reports_bounded_read_progress() -> None:
 
 
 def test_boundary_stream_emits_context_windows_in_order() -> None:
-    """A partial second core retains only the required sixty-second overlap."""
+    """A partial final core reuses the rolling maximum window at EOF."""
     total_samples = CORE_SAMPLES + SAMPLE_RATE
     stream = VirtualZeroPcmStream(total_samples * PCM_BYTES_PER_SAMPLE)
-    observed: list[tuple[int, int, bool]] = []
+    observed: list[tuple[int, int, int, bool]] = []
 
     def consume(window: PcmWindow) -> None:
-        observed.append((window.spec.core_end_sample, window.size_bytes, window.spec.is_last))
+        observed.append(
+            (
+                window.spec.window_start_sample,
+                window.spec.core_end_sample,
+                window.size_bytes,
+                window.spec.is_last,
+            )
+        )
 
     summary = decode_pcm_windows(stream, consume)
 
     assert summary.window_count == EXPECTED_BOUNDARY_WINDOWS
-    assert observed[0][2] is False
-    assert observed[1][2] is True
-    assert observed[1][0] == total_samples
+    assert observed[0][3] is False
+    assert observed[1][3] is True
+    assert observed[1][0] == 0
+    assert observed[1][1] == total_samples
+    assert observed[1][2] == total_samples * PCM_BYTES_PER_SAMPLE
 
 
 def test_eight_hour_virtual_stream_respects_production_buffer_ceiling() -> None:

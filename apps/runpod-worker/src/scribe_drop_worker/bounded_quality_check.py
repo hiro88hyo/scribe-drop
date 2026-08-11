@@ -20,6 +20,7 @@ from .bounded_inference import (
     WindowTranscriptionInfo,
 )
 from .bounded_transcription import (
+    CORE_SECONDS,
     MAX_RAW_SEGMENTS_PER_WINDOW,
     PromptTail,
     RawWindowSegment,
@@ -70,10 +71,11 @@ REFERENCE_FAILED: Final[QualityErrorCode] = "REFERENCE_FAILED"
 class BoundedQualityCheckError(Exception):
     """Allowlisted quality failure without transcript or native details."""
 
-    def __init__(self, code: QualityErrorCode) -> None:
+    def __init__(self, code: QualityErrorCode, *, metrics: QualityMetrics | None = None) -> None:
         """Retain only a stable code."""
         super().__init__(code)
         self.code = code
+        self.metrics = metrics
 
 
 class QualityWhisperModelPort(Protocol):
@@ -205,7 +207,7 @@ def run_full_file_reference(
             word_timestamps=False,
         )
         info = WindowTranscriptionInfo.model_validate(raw_info, from_attributes=True)
-        segments = _validate_reference_segments(raw_segments, duration_seconds=duration_seconds)
+        segments = _validate_reference_segments(raw_segments)
         return QualityTranscript(
             language=info.language,
             language_probability=info.language_probability,
@@ -220,8 +222,6 @@ def run_full_file_reference(
 
 def _validate_reference_segments(
     raw_segments: Iterable[object],
-    *,
-    duration_seconds: float,
 ) -> tuple[TranscriptSegment, ...]:
     segments: list[TranscriptSegment] = []
     previous_order: tuple[float, float, float, int] | None = None
@@ -232,8 +232,6 @@ def _validate_reference_segments(
             parsed = RawWindowSegment.model_validate(raw, from_attributes=True)
         except ValueError:
             raise BoundedQualityCheckError(REFERENCE_FAILED) from None
-        if parsed.end > duration_seconds:
-            raise BoundedQualityCheckError(REFERENCE_FAILED)
         midpoint = (parsed.start + parsed.end) / 2
         order = (midpoint, parsed.start, parsed.end, parsed.id)
         if previous_order is not None and order < previous_order:
@@ -313,7 +311,7 @@ def _execute_quality_check(ports: QualityCheckPorts, task_directory: Path) -> Qu
     fixture, media = _create_fixture_and_media(ports, task_directory)
     reference = _run_reference(ports, model, fixture, media.duration_seconds)
     candidate = _run_candidate(ports, model, fixture, media, task_directory)
-    return evaluate_quality(reference, candidate, fixture.boundary_interval)
+    return evaluate_quality(reference, candidate, fixture.speech_intervals)
 
 
 def _create_fixture_and_media(
@@ -399,11 +397,14 @@ def _validate_fixture_metadata(fixture: SpeechQualityFixture, task_directory: Pa
 def evaluate_quality(
     reference: QualityTranscript,
     candidate: QualityTranscript,
-    boundary_interval: SpeechInterval,
+    speech_intervals: tuple[SpeechInterval, ...],
 ) -> QualityMetrics:
     """Apply pre-registered quality thresholds without returning either transcript."""
-    _validate_transcript(reference)
-    _validate_transcript(candidate)
+    # The oracle mirrors the current full-file adapter, which validates native
+    # timestamps but does not reject model padding beyond the probed duration.
+    # Only the bounded candidate is required to satisfy the strict media bound.
+    _validate_transcript(reference, enforce_media_bounds=False)
+    _validate_transcript(candidate, enforce_media_bounds=True)
     if (
         reference.language != "ja"
         or candidate.language != "ja"
@@ -420,8 +421,17 @@ def evaluate_quality(
 
     reference_global = normalize_segments(reference.segments)
     candidate_global = normalize_segments(candidate.segments)
-    reference_boundary = normalize_segments(reference.segments, interval=boundary_interval)
-    candidate_boundary = normalize_segments(candidate.segments, interval=boundary_interval)
+    boundary_index = _boundary_interval_index(speech_intervals)
+    reference_boundary = normalize_assigned_interval(
+        reference.segments,
+        speech_intervals=speech_intervals,
+        target_index=boundary_index,
+    )
+    candidate_boundary = normalize_assigned_interval(
+        candidate.segments,
+        speech_intervals=speech_intervals,
+        target_index=boundary_index,
+    )
     if (
         len(reference_global) < MIN_GLOBAL_CHARACTERS
         or len(candidate_global) < MIN_GLOBAL_CHARACTERS
@@ -442,11 +452,50 @@ def evaluate_quality(
         candidate_segments=len(candidate.segments),
     )
     if global_rate > MAX_GLOBAL_ERROR_RATE or boundary_rate > MAX_BOUNDARY_ERROR_RATE:
-        raise BoundedQualityCheckError(QUALITY_REJECTED)
+        raise BoundedQualityCheckError(QUALITY_REJECTED, metrics=metrics)
     return metrics
 
 
-def _validate_transcript(transcript: QualityTranscript) -> None:
+def _boundary_interval_index(speech_intervals: tuple[SpeechInterval, ...]) -> int:
+    matches = tuple(
+        index
+        for index, interval in enumerate(speech_intervals)
+        if interval.start_seconds < CORE_SECONDS < interval.end_seconds
+    )
+    if len(speech_intervals) != EXPECTED_SPEECH_INTERVALS or len(matches) != 1:
+        raise BoundedQualityCheckError(QUALITY_REJECTED)
+    return matches[0]
+
+
+def normalize_assigned_interval(
+    segments: tuple[TranscriptSegment, ...],
+    *,
+    speech_intervals: tuple[SpeechInterval, ...],
+    target_index: int,
+) -> str:
+    """Normalize segments assigned to the known speech interval with maximum overlap."""
+    if not 0 <= target_index < len(speech_intervals):
+        raise BoundedQualityCheckError(QUALITY_REJECTED)
+    assigned: list[TranscriptSegment] = []
+    for segment in segments:
+        overlaps = tuple(
+            max(
+                0.0,
+                min(segment.end, interval.end_seconds) - max(segment.start, interval.start_seconds),
+            )
+            for interval in speech_intervals
+        )
+        maximum_overlap = max(overlaps, default=0.0)
+        if maximum_overlap > 0 and overlaps.index(maximum_overlap) == target_index:
+            assigned.append(segment)
+    return normalize_segments(tuple(assigned))
+
+
+def _validate_transcript(
+    transcript: QualityTranscript,
+    *,
+    enforce_media_bounds: bool,
+) -> None:
     if (
         not math.isfinite(transcript.language_probability)
         or not 0 <= transcript.language_probability <= 1
@@ -456,7 +505,9 @@ def _validate_transcript(transcript: QualityTranscript) -> None:
         raise BoundedQualityCheckError(QUALITY_REJECTED)
     previous_order: tuple[float, float, float, int] | None = None
     for expected_id, segment in enumerate(transcript.segments):
-        if segment.id != expected_id or segment.end > transcript.duration_seconds:
+        if segment.id != expected_id or (
+            enforce_media_bounds and segment.end > transcript.duration_seconds
+        ):
             raise BoundedQualityCheckError(QUALITY_REJECTED)
         midpoint = (segment.start + segment.end) / 2
         order = (midpoint, segment.start, segment.end, segment.id)
@@ -513,19 +564,28 @@ def character_error_rate(reference: str, candidate: str) -> float:
     return previous[-1] / len(reference)
 
 
-def _metrics_line(metrics: QualityMetrics) -> str:
+def _metrics_fields(metrics: QualityMetrics) -> str:
     global_ppm = round(metrics.global_error_rate * MAX_ERROR_RATE_PPM)
     boundary_ppm = round(metrics.boundary_error_rate * MAX_ERROR_RATE_PPM)
     return (
-        f"{QUALITY_CHECK_OK} global_error_ppm={global_ppm}"
+        f" global_error_ppm={global_ppm}"
         f" boundary_error_ppm={boundary_ppm}"
         f" reference_characters={metrics.reference_characters}"
         f" candidate_characters={metrics.candidate_characters}"
         f" reference_boundary_characters={metrics.reference_boundary_characters}"
         f" candidate_boundary_characters={metrics.candidate_boundary_characters}"
         f" reference_segments={metrics.reference_segments}"
-        f" candidate_segments={metrics.candidate_segments}\n"
+        f" candidate_segments={metrics.candidate_segments}"
     )
+
+
+def _metrics_line(metrics: QualityMetrics) -> str:
+    return f"{QUALITY_CHECK_OK}{_metrics_fields(metrics)}\n"
+
+
+def _failure_line(failure: BoundedQualityCheckError) -> str:
+    fields = "" if failure.metrics is None else _metrics_fields(failure.metrics)
+    return f"{QUALITY_CHECK_FAILED}:{failure.code}{fields}\n"
 
 
 def main() -> None:
@@ -533,7 +593,7 @@ def main() -> None:
     try:
         metrics = run_bounded_quality_check()
     except BoundedQualityCheckError as failure:
-        sys.stderr.write(f"{QUALITY_CHECK_FAILED}:{failure.code}\n")
+        sys.stderr.write(_failure_line(failure))
         raise SystemExit(1) from None
     except Exception:  # noqa: BLE001 - prevent transcript or native detail disclosure.
         sys.stderr.write(f"{QUALITY_CHECK_FAILED}:CLEANUP_FAILED\n")
@@ -553,6 +613,7 @@ __all__ = [
     "character_error_rate",
     "create_quality_options",
     "evaluate_quality",
+    "normalize_assigned_interval",
     "normalize_segments",
     "run_bounded_quality_check",
 ]

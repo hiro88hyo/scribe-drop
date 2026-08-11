@@ -303,6 +303,21 @@ timeoutでは「10分ちょうどでprovider queueから消える」と扱わな
 - retentionはterminal jobだけを対象に、source、attempt result、監査情報を7日、90日、
   180日の独立したcutoffで回収する。値はenvironment変数で変更できるが、
   `source <= result <= audit`を崩さない。監査期限はuser deletionと同じ物理削除へ渡す。
+- Phase 11 migration後は、RunPod旧列と`provider_executions`のprovider kind/policy、状態、create outcome、
+  opaque handle、terminal observationが一致しないattemptへsubmission、status/cancel、R2 cleanup、notificationを
+  実行しない。どちらかを手動SQLで合わせたり、aggregateだけを削除してlegacy扱いへ戻したりしない。まずread-onlyで
+  attempt ID、両status、両outcome、handleの一致有無だけを確認し、値そのものをincident logへ残さない。repairが必要なら
+  dry-run、CAS、監査eventを持つ専用commandを別変更で実装する。
+- cleanupの`PENDING`、`IN_PROGRESS`、`SUCCEEDED`、`FAILED`はexecution statusと別の状態機械である。stale versionや
+  concurrent claimがfalseを返すのは正常な競合であり、手動でversionを増減しない。`FAILED`からの再要求だけを許可する。
+- Phase 13のCloud Run one-shotはlocal implementationだけであり、運用対象resourceは存在しない。local evidenceは
+  `pnpm container:check:cloud-run`、`container:sbom:cloud-run`、`container:scan:cloud-run`で再生成する。SBOMを
+  repositoryへ追加せず、local imageをregistryへpushしない。terminal reportはcleanup pendingであり、provider
+  Execution/Job不存在とartifact/finalizeを確認するまで手動で`COMPLETED`へ変更しない。
+- Phase 14 local preparationで`0011` migrationとshadow namespaceを追加したが、remote D1へ未適用で運用対象ではない。
+  `CLOUD_RUN_RUNTIME_MODE`をWrangler、dashboard、secretへ手動設定しない。local D1 eventのsequenceやrevokeを直接更新せず、
+  repository経由のexact replayだけを使う。実staging運用は[dark deployment](./cloud-run-staging-dark-deployment.md)の残gateを
+  同一candidateで満たしてから別途開始する。
 - terminal statusをD1で観測していないjobは、manifestが存在しても`COMPLETED`にしない。
 - 手動修復が必要でもjob/attempt/outboxを直接SQLで更新しない。同じrepositoryとserviceを
   使う専用repair commandを先に実装し、dry-run、CAS、監査eventを必須とする。

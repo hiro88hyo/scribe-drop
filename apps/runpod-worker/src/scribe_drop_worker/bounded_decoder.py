@@ -14,6 +14,7 @@ from .bounded_transcription import (
     CONTEXT_SAMPLES,
     CORE_SAMPLES,
     MAX_DURATION_SAMPLES,
+    MAX_WINDOW_SAMPLES,
     PCM_BYTES_PER_SAMPLE,
     SAMPLE_RATE,
     WindowSpec,
@@ -297,6 +298,18 @@ class _DecodeState:
             raise WorkerError(INVALID_MEDIA)
         return self.total_bytes // PCM_BYTES_PER_SAMPLE
 
+    def trim_history(self) -> None:
+        """Keep enough rolling history for either the next core or an early EOF."""
+        available_end_sample = self.buffer_start_sample + len(self.buffer) // PCM_BYTES_PER_SAMPLE
+        rolling_start = max(0, available_end_sample - MAX_WINDOW_SAMPLES)
+        next_standard_start = max(0, self.next_core_start - CONTEXT_SAMPLES)
+        keep_from = min(rolling_start, next_standard_start)
+        discard_bytes = (keep_from - self.buffer_start_sample) * PCM_BYTES_PER_SAMPLE
+        if discard_bytes < 0 or discard_bytes > len(self.buffer):
+            raise WorkerError(INVALID_MEDIA)
+        del self.buffer[:discard_bytes]
+        self.buffer_start_sample = keep_from
+
     def consume_ready(
         self,
         consume: Callable[[PcmWindow], None],
@@ -319,7 +332,11 @@ class _DecodeState:
                     return
                 window_end = required_end
                 is_last = False
-            window_start = max(0, self.next_core_start - CONTEXT_SAMPLES)
+            window_start = (
+                max(0, window_end - MAX_WINDOW_SAMPLES)
+                if is_last
+                else max(0, self.next_core_start - CONTEXT_SAMPLES)
+            )
             start_offset = (window_start - self.buffer_start_sample) * PCM_BYTES_PER_SAMPLE
             end_offset = (window_end - self.buffer_start_sample) * PCM_BYTES_PER_SAMPLE
             if start_offset < 0 or end_offset > len(self.buffer):
@@ -339,12 +356,7 @@ class _DecodeState:
                 view.release()
             self.window_count += 1
             self.next_core_start = core_end
-            keep_from = max(0, self.next_core_start - CONTEXT_SAMPLES)
-            discard_bytes = (keep_from - self.buffer_start_sample) * PCM_BYTES_PER_SAMPLE
-            if discard_bytes < 0 or discard_bytes > len(self.buffer):
-                raise WorkerError(INVALID_MEDIA)
-            del self.buffer[:discard_bytes]
-            self.buffer_start_sample = keep_from
+            self.trim_history()
             available_end_sample = (
                 self.buffer_start_sample + len(self.buffer) // PCM_BYTES_PER_SAMPLE
             )
@@ -412,6 +424,7 @@ def _read_stream(
         if on_progress is not None:
             on_progress()
         state.consume_ready(consume, is_eof=False)
+        state.trim_history()
 
 
 __all__ = [

@@ -27,15 +27,21 @@ const requiredSchemaObjects = [
   "idx_jobs_owner_status",
   "idx_jobs_status_updated",
   "idx_notification_outbox_pending",
+  "idx_provider_executions_handle",
+  "idx_provider_executions_status_updated",
   "idx_runpod_submissions_attempt",
   "job_attempts",
   "job_artifacts",
   "job_events",
   "jobs",
   "notification_outbox",
+  "provider_executions",
   "runpod_submissions",
   "trg_jobs_active_attempt_insert",
   "trg_jobs_active_attempt_update",
+  "trg_attempt_execution_identity_immutable",
+  "trg_attempt_provider_execution_insert",
+  "trg_attempt_provider_execution_update",
 ];
 
 const requiredJobColumns = [
@@ -59,6 +65,10 @@ const requiredAttemptColumns = [
   "heartbeat_revoked_at",
   "heartbeat_token_hash",
   "media_duration_seconds",
+  "execution_contract_version",
+  "execution_options_json",
+  "provider_kind",
+  "provider_policy",
   "runpod_manifest_written",
   "runpod_output_error_code",
   "runpod_output_status",
@@ -73,6 +83,17 @@ const requiredAttemptColumns = [
 ];
 
 const requiredNotificationColumns = ["job_id", "job_version", "status"];
+const requiredProviderExecutionColumns = [
+  "attempt_id",
+  "cleanup_status",
+  "create_outcome",
+  "provider_handle",
+  "provider_kind",
+  "provider_policy",
+  "status",
+  "terminal_status",
+  "version",
+];
 
 function runWrangler(args, expectFailure = false) {
   const result = spawnSync("pnpm", ["exec", "wrangler", ...args], {
@@ -265,6 +286,11 @@ try {
     requiredNotificationColumns,
     "notification_outbox columns",
   );
+  assertNames(
+    executeJson("PRAGMA table_info(provider_executions)"),
+    requiredProviderExecutionColumns,
+    "provider_executions columns",
+  );
   if (
     executeJson("PRAGMA table_info(job_attempts)").some(
       (column) => column.name === "webhook_token_hash",
@@ -398,6 +424,27 @@ try {
     SET active_attempt_id = '${attemptId}'
     WHERE id = '${secondJobId}';
   `);
+  expectSqlFailure(`
+    INSERT INTO job_attempts (
+      id,
+      job_id,
+      generation,
+      status,
+      result_prefix,
+      provider_kind,
+      created_at,
+      updated_at
+    ) VALUES (
+      '01ARZ3NDEKTSV4RRFFQ69G5FB4',
+      '${secondJobId}',
+      1,
+      'SUBMISSION_PENDING',
+      'results/owner/${secondJobId}/01ARZ3NDEKTSV4RRFFQ69G5FB4/',
+      'runpod_serverless',
+      '2026-07-25T00:00:00.000Z',
+      '2026-07-25T00:00:00.000Z'
+    );
+  `);
 
   const foreignKeyViolations = executeJson("PRAGMA foreign_key_check");
   if (foreignKeyViolations.length > 0) {
@@ -425,6 +472,7 @@ try {
   }
   const upgradeJobId = "01ARZ3NDEKTSV4RRFFQ69G5FB1";
   const upgradeOutboxId = "01ARZ3NDEKTSV4RRFFQ69G5FB2";
+  const upgradeAttemptId = "01ARZ3NDEKTSV4RRFFQ69G5FB3";
   runWrangler([
     "d1",
     "execute",
@@ -459,15 +507,57 @@ try {
         '2026-07-25T00:04:00.000Z',
         '2026-07-25T00:03:00.000Z'
       );
+      INSERT INTO job_attempts (
+        id,
+        job_id,
+        generation,
+        status,
+        result_prefix,
+        created_at,
+        updated_at
+      ) VALUES (
+        '${upgradeAttemptId}',
+        '${upgradeJobId}',
+        1,
+        'SUBMISSION_PENDING',
+        'results/owner/${upgradeJobId}/${upgradeAttemptId}/',
+        '2026-07-25T00:03:00.000Z',
+        '2026-07-25T00:03:00.000Z'
+      );
     `,
   ]);
   executeMigrationFile(upgradePersistenceDirectory, "0009_notification_terminal_generation.sql");
+  executeMigrationFile(upgradePersistenceDirectory, "0010_provider_execution_compatibility.sql");
   const upgradedOutboxRows = executeJsonAt(
     upgradePersistenceDirectory,
     `SELECT job_version FROM notification_outbox WHERE id = '${upgradeOutboxId}'`,
   );
   if (upgradedOutboxRows[0]?.job_version !== 3) {
     throw new Error("D1 notification outbox job version was not backfilled during upgrade");
+  }
+  const upgradedExecutionRows = executeJsonAt(
+    upgradePersistenceDirectory,
+    `
+      SELECT
+        attempts.provider_kind,
+        attempts.provider_policy,
+        attempts.execution_contract_version,
+        executions.id,
+        executions.status
+      FROM job_attempts AS attempts
+      INNER JOIN provider_executions AS executions ON executions.attempt_id = attempts.id
+      WHERE attempts.id = '${upgradeAttemptId}'
+    `,
+  );
+  if (
+    upgradedExecutionRows.length !== 1 ||
+    upgradedExecutionRows[0]?.id !== upgradeAttemptId ||
+    upgradedExecutionRows[0]?.provider_kind !== "runpod_serverless" ||
+    upgradedExecutionRows[0]?.provider_policy !== "runpod_serverless_v1" ||
+    upgradedExecutionRows[0]?.execution_contract_version !== 1 ||
+    upgradedExecutionRows[0]?.status !== "PENDING"
+  ) {
+    throw new Error("D1 provider execution compatibility was not backfilled during upgrade");
   }
 
   console.log("D1 migration verification passed.");

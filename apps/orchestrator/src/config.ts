@@ -126,6 +126,13 @@ const retentionConfigSchema = z
     },
   );
 
+const cloudRunRuntimeShadowConfigSchema = z
+  .object({
+    appEnvironment: z.literal("staging"),
+    mode: z.literal("synthetic-shadow"),
+  })
+  .strict();
+
 function isAllowedWebBaseUrl(value: string, environment: DeploymentEnvironment): boolean {
   if (environment !== "local") {
     return isAllowedInternalBaseUrl(value);
@@ -176,6 +183,11 @@ export interface RetentionConfigEnvironment {
   readonly SOURCE_RETENTION_DAYS: string;
 }
 
+export interface CloudRunRuntimeShadowConfigEnvironment {
+  readonly APP_ENV: string;
+  readonly CLOUD_RUN_RUNTIME_MODE?: string;
+}
+
 export interface OrchestratorConfig {
   readonly appEnvironment: DeploymentEnvironment;
   readonly cloudflareAccountId: string;
@@ -202,6 +214,11 @@ export interface RetentionConfig {
   readonly multipartRetentionHours: number;
   readonly resultRetentionDays: number;
   readonly sourceRetentionDays: number;
+}
+
+export interface CloudRunRuntimeShadowConfig {
+  readonly appEnvironment: "staging";
+  readonly mode: "synthetic-shadow";
 }
 
 export function parseOrchestratorConfig(
@@ -254,6 +271,16 @@ export function parseRetentionConfig(
     multipartRetentionHours: environment.MULTIPART_RETENTION_HOURS,
     resultRetentionDays: environment.RESULT_RETENTION_DAYS,
     sourceRetentionDays: environment.SOURCE_RETENTION_DAYS,
+  });
+  return result.success ? result.data : undefined;
+}
+
+export function parseCloudRunRuntimeShadowConfig(
+  environment: CloudRunRuntimeShadowConfigEnvironment,
+): CloudRunRuntimeShadowConfig | undefined {
+  const result = cloudRunRuntimeShadowConfigSchema.safeParse({
+    appEnvironment: environment.APP_ENV,
+    mode: environment.CLOUD_RUN_RUNTIME_MODE,
   });
   return result.success ? result.data : undefined;
 }

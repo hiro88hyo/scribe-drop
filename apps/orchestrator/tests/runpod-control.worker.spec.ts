@@ -22,6 +22,13 @@ const SECOND_ATTEMPT_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAY";
 const FIRST_EVENT_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAZ";
 const SECOND_EVENT_ID = "01ARZ3NDEKTSV4RRFFQ69G5FB0";
 const CLAIM_TOKEN = "c".repeat(43);
+const EXECUTION_OPTIONS = JSON.stringify({
+  contractVersion: 1,
+  language: "auto",
+  model: "large-v3-turbo",
+  outputFormats: ["markdown", "json", "srt"],
+  vad: true,
+});
 
 beforeAll(async () => {
   await applyD1Migrations(env.SCRIBE_DROP_DB, env.TEST_MIGRATIONS);
@@ -36,7 +43,11 @@ beforeEach(async () => {
   `);
 });
 
-async function seedPendingJob(jobId: string, attemptId: string): Promise<void> {
+async function seedPendingJob(
+  jobId: string,
+  attemptId: string,
+  executionOptions = EXECUTION_OPTIONS,
+): Promise<void> {
   await env.SCRIBE_DROP_DB.batch([
     env.SCRIBE_DROP_DB.prepare(
       `
@@ -87,11 +98,27 @@ async function seedPendingJob(jobId: string, attemptId: string): Promise<void> {
           generation,
           status,
           result_prefix,
+          provider_kind,
+          provider_policy,
+          execution_contract_version,
+          execution_options_json,
           created_at,
           updated_at
-        ) VALUES (?1, ?2, 1, 'SUBMISSION_PENDING', ?3, ?4, ?4)
+        ) VALUES (
+          ?1,
+          ?2,
+          1,
+          'SUBMISSION_PENDING',
+          ?3,
+          'runpod_serverless',
+          'runpod_serverless_v1',
+          1,
+          ?4,
+          ?5,
+          ?5
+        )
       `,
-    ).bind(attemptId, jobId, `results/owner/${jobId}/${attemptId}/`, NOW),
+    ).bind(attemptId, jobId, `results/owner/${jobId}/${attemptId}/`, executionOptions, NOW),
     env.SCRIBE_DROP_DB.prepare("UPDATE jobs SET active_attempt_id = ?2 WHERE id = ?1").bind(
       jobId,
       attemptId,
@@ -145,6 +172,47 @@ describe("D1 RunPod control repository", () => {
         status: "SUBMISSION_PENDING",
       },
     ]);
+  });
+
+  it("defers before submission when the provider aggregate drifts", async () => {
+    await env.SCRIBE_DROP_DB.prepare(
+      "UPDATE provider_executions SET status = 'RUNNING' WHERE attempt_id = ?1",
+    )
+      .bind(SECOND_ATTEMPT_ID)
+      .run();
+
+    await expect(
+      createD1RunpodControlRepository(env.SCRIBE_DROP_DB).prepareSubmission({
+        claimExpiresAt: "2026-07-25T00:15:00.000Z",
+        claimTokenHash: await hashCapabilityToken(CLAIM_TOKEN),
+        jobId: SECOND_JOB_ID,
+        timestamp: NOW,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("defers before submission when the immutable contract snapshot is invalid", async () => {
+    await env.SCRIBE_DROP_DB.prepare("DELETE FROM jobs WHERE id = ?1").bind(SECOND_JOB_ID).run();
+    await seedPendingJob(
+      SECOND_JOB_ID,
+      SECOND_ATTEMPT_ID,
+      JSON.stringify({
+        contractVersion: 1,
+        language: "auto",
+        model: "large-v3-turbo",
+        outputFormats: ["markdown", "markdown"],
+        vad: true,
+      }),
+    );
+
+    await expect(
+      createD1RunpodControlRepository(env.SCRIBE_DROP_DB).prepareSubmission({
+        claimExpiresAt: "2026-07-25T00:15:00.000Z",
+        claimTokenHash: await hashCapabilityToken(CLAIM_TOKEN),
+        jobId: SECOND_JOB_ID,
+        timestamp: NOW,
+      }),
+    ).resolves.toBeUndefined();
   });
 
   it("fails only an expired unknown submission with no recorded RunPod job", async () => {

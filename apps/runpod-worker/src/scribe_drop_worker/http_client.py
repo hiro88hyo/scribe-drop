@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import os
 import re
+import stat
 from dataclasses import dataclass
 from threading import Lock
 from typing import TYPE_CHECKING, Final, Literal, cast
@@ -27,6 +30,7 @@ from .url_policy import UrlPolicy, UrlPurpose, ValidatedUrl
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
     from pathlib import Path
+    from typing import BinaryIO
 
     TransportFactory = Callable[[str, str], httpx.BaseTransport]
 
@@ -45,6 +49,7 @@ SOURCE_ETAG_MISMATCH: Final[WorkerErrorCode] = "SOURCE_ETAG_MISMATCH"
 INTERNAL_ERROR: Final[WorkerErrorCode] = "INTERNAL_ERROR"
 
 UploadErrorCode = Literal["ARTIFACT_UPLOAD_FAILED", "MANIFEST_UPLOAD_FAILED"]
+ARTIFACT_UPLOAD_FAILED: Final[UploadErrorCode] = "ARTIFACT_UPLOAD_FAILED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -315,6 +320,24 @@ class CapabilityHttpClient:
         """Write one exact result artifact."""
         self._put(url, content, content_type, "ARTIFACT_UPLOAD_FAILED")
 
+    def put_file(
+        self,
+        url: str,
+        content: BinaryIO,
+        *,
+        content_type: str,
+        size_bytes: int,
+        sha256: str,
+    ) -> None:
+        """Verify and stream one regular task-local artifact with fixed length."""
+        try:
+            _validate_streaming_artifact(content, size_bytes=size_bytes, sha256=sha256)
+            self._put_stream(url, content, content_type, size_bytes)
+        except WorkerError:
+            raise
+        except (OSError, ValueError):
+            raise WorkerError(ARTIFACT_UPLOAD_FAILED) from None
+
     def put_manifest(self, url: str, content: bytes) -> None:
         """Write the manifest completion marker last."""
         self._put(url, content, "application/json", "MANIFEST_UPLOAD_FAILED")
@@ -404,6 +427,64 @@ class CapabilityHttpClient:
             raise
         except (OSError, httpx.HTTPError, ValueError):
             raise WorkerError(error_code) from None
+
+    def _put_stream(
+        self,
+        url: str,
+        content: BinaryIO,
+        content_type: str,
+        size_bytes: int,
+    ) -> None:
+        extensions = {URL_PURPOSE_EXTENSION: UrlPurpose.RESULT.value}
+
+        def chunks() -> Iterable[bytes]:
+            remaining = size_bytes
+            while remaining > 0:
+                chunk = content.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    raise WorkerError(ARTIFACT_UPLOAD_FAILED)
+                remaining -= len(chunk)
+                yield chunk
+            if content.read(1):
+                raise WorkerError(ARTIFACT_UPLOAD_FAILED)
+
+        try:
+            with self._client.stream(
+                "PUT",
+                url,
+                content=chunks(),
+                headers={
+                    "content-length": str(size_bytes),
+                    "content-type": content_type,
+                },
+                extensions=extensions,
+            ) as response:
+                _validate_put_response(response, ARTIFACT_UPLOAD_FAILED)
+                _read_limited(response.iter_bytes(), MAX_CONTROL_RESPONSE_BYTES)
+        except WorkerError:
+            raise
+        except (OSError, httpx.HTTPError, ValueError):
+            raise WorkerError(ARTIFACT_UPLOAD_FAILED) from None
+
+
+def _validate_streaming_artifact(
+    content: BinaryIO,
+    *,
+    size_bytes: int,
+    sha256: str,
+) -> None:
+    """Verify a regular descriptor and its declared integrity before upload."""
+    descriptor = content.fileno()
+    file_info = os.fstat(descriptor)
+    if not stat.S_ISREG(file_info.st_mode) or file_info.st_size != size_bytes:
+        raise WorkerError(ARTIFACT_UPLOAD_FAILED)
+    digest = hashlib.sha256()
+    content.seek(0)
+    while chunk := content.read(1024 * 1024):
+        digest.update(chunk)
+    if digest.hexdigest() != sha256:
+        raise WorkerError(ARTIFACT_UPLOAD_FAILED)
+    content.seek(0)
 
 
 def _read_limited(chunks: Iterable[bytes], limit: int) -> bytes:

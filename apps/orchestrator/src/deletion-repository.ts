@@ -98,6 +98,36 @@ const FIND_RUNPOD_JOB_IDS_SQL = `
   LIMIT ?3
 `;
 
+const FIND_PROVIDER_EXECUTION_DRIFT_SQL = `
+  SELECT attempts.id
+  FROM job_attempts AS attempts
+  LEFT JOIN provider_executions AS executions ON executions.attempt_id = attempts.id
+  WHERE attempts.job_id = ?1
+    AND (
+      (attempts.provider_kind IS NULL AND executions.id IS NOT NULL)
+      OR (
+        attempts.provider_kind IS NOT NULL
+        AND (
+          executions.id IS NULL
+          OR executions.id <> attempts.id
+          OR executions.provider_kind <> attempts.provider_kind
+          OR executions.provider_policy <> attempts.provider_policy
+          OR executions.status <> CASE attempts.status
+            WHEN 'SUBMISSION_PENDING' THEN 'PENDING'
+            WHEN 'SUBMITTING' THEN 'CREATING'
+            WHEN 'RUNNING' THEN 'RUNNING'
+            WHEN 'CANCEL_REQUESTED' THEN 'CANCEL_REQUESTED'
+            ELSE 'TERMINAL'
+          END
+          OR executions.create_outcome IS NOT attempts.submission_outcome
+          OR executions.provider_handle IS NOT attempts.winning_runpod_job_id
+          OR executions.terminal_status IS NOT attempts.runpod_terminal_status
+        )
+      )
+    )
+  LIMIT 1
+`;
+
 const DEFER_DELETION_SQL = `
   UPDATE jobs
   SET
@@ -162,6 +192,7 @@ export interface RunpodJobIdPage {
 export type DeleteJobRecordResult = "conflict" | "deleted" | "not_found";
 
 export interface DeletionRepository {
+  assertProviderCompatibility(jobId: string): Promise<void>;
   deferDeletion(input: {
     readonly expectedVersion: number;
     readonly jobId: string;
@@ -199,6 +230,15 @@ function parseLimit(limit: number, maximum: number): number {
 
 export function createD1DeletionRepository(database: D1Database): DeletionRepository {
   return {
+    async assertProviderCompatibility(jobId) {
+      const row = await database
+        .prepare(FIND_PROVIDER_EXECUTION_DRIFT_SQL)
+        .bind(ulidSchema.parse(jobId))
+        .first();
+      if (row !== null) {
+        throw new Error("Provider execution compatibility check failed");
+      }
+    },
     async deferDeletion(input) {
       const rows = await database
         .prepare(DEFER_DELETION_SQL)

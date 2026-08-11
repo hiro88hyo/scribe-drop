@@ -182,6 +182,110 @@ artifact/finalize/notificationのend-to-end経路もPhase 5のstaging smokeで�
 - RunPod Workerに長期credentialを渡さず、runtime downloadやpackage installを許可しない。
 - 録音、本文、token、URL、raw exceptionをRunPod output、application log、CI artifactへ残さない。
 
+## Phase 11 provider compatibility threats
+
+[ADR 0074](./adr/0074-expand-provider-execution-compatibility-without-mixing-contracts.md)に従い、
+現行RunPod-only経路へprovider-neutral aggregateをexpandする。provider追加やcontract v2 routingは
+このcontrolの成立から推測しない。
+
+| Threat                                 | Control                                                                                                                        | Required evidence                                                              |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| 同じattemptの別provider投入            | attempt insert時にprovider kind/policyを固定し、4つのbinding列を全NULL/全非NULLに制約、以後の変更をtriggerで拒否               | duplicate aggregate、partial binding、binding更新                              |
+| 旧RunPod列とexecution aggregateのdrift | identity、status、create outcome、opaque handle、terminal observationを副作用直前のSQLで完全一致させ、不一致はfail closed      | submission、completion、cancel、retention、delete、notificationのdrift         |
+| contract v1/v2混同                     | snapshotにversionを含めてversion別strict schemaでparseし、v1 RunPod attemptをv2へ昇格またはfallbackしない                      | immutable version、未知field、v1/v2 schema不一致、別attempt                    |
+| cleanupの重複・順序逆転                | executionとcleanup状態を分離し、request、claim、finishをaggregate versionのCASで直列化                                         | duplicate、out-of-order、concurrent claim、stale version、failure後の明示retry |
+| migration rollback中の観測・cancel喪失 | 旧列と`runpod_submissions`を保持し、既存rowをv1としてbackfill。新列なしlegacy rowは旧code互換範囲でだけ読み、新rowはdual-write | fresh DB、旧schemaからのupgrade、旧code向け列、active attemptのRunPod-only回帰 |
+
+## Phase 12 selected Cloud Run control-plane threats（local control実装済み）
+
+[ADR 0076](./adr/0076-select-cloud-run-jobs-for-synthetic-provider-implementation.md)でCloud Run Jobsを
+synthetic-onlyの`Implementation selected`とした。Phase 12ではstrict HMAC HTTP境界、fixed policy、bounded REST
+adapter、durable store port、fail-closed reconciliationをlocal実装し、network/provider/store fakeで検証した。
+実service上のIAM、Secret Manager、Firestore transaction、public URL、DoS、billingは未検証なので、production採用、
+cloud resource、credential、実録音を引き続き許可しない。
+
+| Threat                                        | Selected control                                                                                                                                                           | Required evidence                                                                         |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| CloudflareからGCP credential漏えい            | GCP内の専用controller Serviceだけがservice identityを持ち、Orchestratorはcontroller専用HMAC secretだけを保持                                                               | Google key/refresh token不在、wrong environment、secret redaction、rotation               |
+| public controllerへの偽mutation               | method/path/time/request ID/body digestをenvironment別HMACで認証し、invalid requestはprovider call前に拒否                                                                 | missing/forged/wrong key、body/path改変、direct URL、rotation                             |
+| request replayと改変再利用                    | Firestoreにrequest IDとcanonical digestをtransaction保存。同一digestだけ同一response、変更再利用はconflict                                                                 | exact retry、changed body、expired token、concurrent replay、restart                      |
+| 任意GPU resource作成                          | fixed `cloud_run_jobs_l4_v1`だけからmanifestを生成し、image/GPU/network/command/metadata/volume overrideをschemaで拒否                                                     | unknown field、all override classes、manifest drift、wrong policy/environment             |
+| Job create timeout後の重複                    | deterministic caller指定`jobId`、durable `create_intent`、同じ名前のget/list。別名や別regionへretryしない                                                                  | effect-after-timeout、404 race、conflict exact/drift、controller restart                  |
+| `jobs.run` timeout後の二重Execution           | durable `run_intent`後にrunを一度だけ送信。timeout/response loss後は同じJobのExecution listだけをreconcileし、0件でも再送しない                                            | effect-after-timeout、lost response、0/1/2 executions、late visibility、restart           |
+| service identityをExecution attestationと誤認 | Google署名runtime identityにsingle active execution、challenge CAS、built-in execution名、controller live read-backを併用し、tokenがUID非結合である残余riskを維持          | sibling identity、forged/stale token、wrong execution、active複数、challenge replay       |
+| controller credentialの過剰権限               | ADR 0078でCloud Run/Firestore custom roleを分離し、exact runtime `actAs`、repo read、secret accessをresource別に付与。update/override/IAM/image write/quota mutationを拒否 | role permission、principal binding、resource/condition exact match、runtime role/key 0    |
+| GPU費用の連続消費                             | default count 0/budget 0、全resourceのfresh price snapshot、packetで承認した有限count/JPY reserve、environment active 1をFirestore transactionで直列化                     | missing/expired price、over-budget、concurrent admission、partial reservation、quota不足  |
+| orphan Job/Execution                          | provider task timeout 55分、retry 0、exact cancel/delete、absence read-back、recordを残すorphan reaper                                                                     | controller/Cron停止、cancel/delete response loss、provider outage、terminal-before-delete |
+| public outboundからのexfiltration             | Jobはlistener/inboundなし。application HTTPS origin/port、redirect、DNS/IPを固定し、controllerへdata/R2 capabilityを渡さない                                               | unexpected host/port/redirect/IP、controller payload schema、network fake                 |
+| network層egress制限不在                       | default outboundがdomain allowlistでないことを残余riskとし、Phase 14までsynthetic dataだけ、Phase 15でproduction可否を再判定                                               | unexpected outbound attempt、staging egress evidence、production ADR                      |
+| controller endpointへのDoS                    | public URLはapplication HMACでmutationを拒否し、bounded body/timeout/concurrencyを強制。platform-level private endpointではない残余riskをPhase 15で再評価                  | oversized/slow/unsigned request、instance scaling、GPU mutation 0、cost evidence          |
+| data location誤認                             | Job/controller/Artifact Registry/FirestoreをSingaporeへ固定し、R2からのtransferとprovider処理を別に扱う。実録音はprivacy acceptanceまで禁止                                | region drift、cross-environment、synthetic-only inspection、Phase 15 privacy review       |
+| raw provider dataの漏えい                     | Firestore内部だけにexact refを保持し、contractはopaque handleとbounded state/error、logはallowlist fieldだけ                                                               | oversized/raw body、resource URL/ID、HMAC header、error body、audit artifact redaction    |
+
+## Phase 13 selected Cloud Run one-shot threats（local runtime実装済み）
+
+[ADR 0077](./adr/0077-use-two-step-runtime-bootstrap-challenge.md)と
+[one-shot runtime設計](./cloud-run-one-shot-runtime.md)に従い、identityとapplication capabilityの間にdurable challengeを
+置いた。Phase 14 local preparationでD1 migration、CAS repository、disabled shadow route、共有HMAC contract、controller
+live attestation、bounded Orchestrator client、Google JWKS/RS256 verifierをlocal検証した。実Google token、controller service
+hosting、Firestore、remote D1、staging egressは未検証なので、local成功をproduction attestationと扱わない。
+
+| Threat                                    | Selected control                                                                                                        | Required evidence                                                                     |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| sibling Jobによるidentity再利用           | dedicated service account、single active、exact Job/Execution名、fixed manifest live read-back、ephemeral key challenge | wrong subject/audience、stale token、resource drift、active複数、forged signature     |
+| Google token claimの誤解                  | 数値`sub`/`azp`をverified emailと分離し、signature、issuer、audience、time、`sub == azp`、email verificationを確認      | email/sub差替え、wrong issuer/audience、stale/forged token、key rotation              |
+| bootstrap/claim response lossによる再発行 | request digestとchallenge/sessionをdurable保存し、exact retryだけ同じ値を導出。変更再利用はconflict                     | restart、response loss、changed signature/key/handle、expiry                          |
+| capability取得前のGPU/data side effect    | environment/identity/read-back/challenge署名/claim/ackを順に完了するまでdownload、CUDA、model loadを禁止                | rejected bootstrap、cancel at first heartbeat、GPU/source/model call 0                |
+| session replayとstale heartbeat           | token hash、expiry、monotonic sequence、terminal exact digest、persist-before-revoke                                    | wrong token、skipped/duplicate/conflicting sequence、terminal conflict、post-terminal |
+| URLからのcredential exfiltration          | purpose別exact host、HTTPS 443、redirect拒否、public DNS検証、IP pinning、Host/SNI保持                                  | wrong host/port/IP、redirect、DNS drift、source/result/orchestrator分離               |
+| partial artifactを完了扱い                | selected formatを逐次streamしmanifest-last。terminal counterはcleanup intentでありcompletion evidenceではない           | upload途中失敗、manifest失敗、terminal-before-cleanup、provider absence未確認         |
+| terminal後のorphan/課金継続               | terminal stateをdurable cleanup scheduleにし、exact replayでcontroller cancel/delete/absence read-backへ収束            | cleanup response loss、duplicate terminal、controller outage、hard timeout            |
+| log/outputからidentity・本文漏えい        | process markerとstable error codeだけ。token、challenge、signature、URL、key、resource ID、本文をfieldとして受けない    | stdout/stderr全分岐、HTTP error、native error、container check                        |
+| image/runtime supply-chain drift          | fixed base/model/dependency、runtime install/downloadなし、non-root/read-only、CycloneDX SBOM、Trivy fail-closed        | entrypoint/user/label inspect、network-none 8時間check、HIGH/CRITICAL scan            |
+| service identityをhost attestationと誤認  | Execution UID非結合を残余riskとして維持し、single-active/live read-backを補償controlとしてだけ扱う                      | Phase 15 privacy/identity再判定、production adoption ADR                              |
+
+Phase 14 local D1ではevent INSERT triggerがsequence advanceとterminal revokeを同一statementにし、terminalのsafe
+counter以外を保存しない。shadow namespaceはstaging、exact mode、service注入の三条件を要求する。remote migrationやmodeを
+先行適用しない。controller clientはlive read-back、bounded JSON、redirect拒否、timeout、response identityを強制し、
+cleanup response lossを再送しないが、identity/controller port未接続の状態ではshadow routeを404/503へfail closedする。
+JWKS fetchは固定origin、redirect拒否、5秒/64 KiB、Cache-Control上限、unknown-key cooldown、concurrent coalescingへ限定する。
+Firestore adapterはcreate reservation、request replay、execution CAS、cleanup時のactive slot解放をtransactionへ閉じ、SDKが
+callbackを再実行しても外部APIを呼ばない。persisted schema、authorization epoch、path/body handle、TTL、active singleton、
+count/JPY accountingがdriftした場合はfail closedにする。named database、TTL policy、IAM、service wiringはcloud reviewまで
+未作成であり、このlocal adapterだけをstaging durability evidenceとは扱わない。
+composition rootはFirestore、manifest、authorizationのenvironment/projectとimage/service-account ownershipを照合し、
+disabled budgetをADC/provider accessより前に適用する。ADC tokenはbounded visible ASCII、HMAC keyはcanonical base64urlの
+32〜64 byteかつrotation key非同一だけをmemoryへ取り込む。process境界はauthorization全欠落だけをdisabledへ写し、部分設定を
+拒否する。固定authority、bounded body/header/time/socket、allowlist JSON logを強制するが、Secret Manager bindingとservice
+deployment未実装のため、これも実IAMやcredential isolationのevidenceとは扱わない。
+controller imageはNode 24.18.0を実測したdistrolessのimmutable amd64 manifestへ固定し、production dependencyだけを
+non-root UID/GID 10001で実行する。metadata/base digest/entrypoint/secret-like environmentのinspect、network none、read-only、
+capability drop、`no-new-privileges`、bounded PID/memory/CPU/noexec tmpfsでのoffline invariant、CycloneDX SBOM、Trivy
+HIGH/CRITICAL fail-close scanをlocalで通した。bundleにはregular `.js`だけを許可し、shell、package manager、TypeScript、
+type package、source tree、declaration、source mapの不在とexact runtime dependencyの存在もcontainer内で確認する。ただし
+local image IDはrelease artifact digestではなく、registry provenance、
+signature、staging read-back、service runtime isolationのevidenceには使わない。
+controller Service planはpublic ingress/default URIとIAM invoker check無効を既存HMAC trade-offとして明示し、IAPなし、Binary
+Authorization default policy、dedicated identity、max instance 1、concurrency 8、request-based CPU、fixed-version secret、
+environment allowlistをexact normalized read-backへ固定する。zero-budget authorizationを初期値とし、unknown/duplicate environment、
+mutable/cross-project image、default identity、floating secret、traffic/scaling driftを拒否する。raw Cloud Run v2 adapterは未知field、
+未収束generation、非ready revision、breakglass、traffic/URI driftを拒否する。IAM、Secret Manager、Binary Authorizationのstrict local
+observation verifierはpublic/excess binding、非Singapore/disabled/floating secret、allowlist/specialized rule/dry-run/attestor driftを拒否する。
+必須観測を一つのlocal evidenceへ束ね、secondary secretの欠落・余剰とcross-project混在も拒否する。read-only clientは固定origin/path、
+GETと`getIamPolicy`だけのread-only POST、redirect拒否、bounded timeout/body、2回のstable snapshotを強制し、Secret Manager payload endpointや
+`setIamPolicy`を生成しない。IAM expectation自体もpermission集合とresource/project所属をcanonical値へ固定する。ただし実credential
+によるlive read-backは未実行のため、local成功を実service isolationやpublic DoS controlのevidenceにしない。
+
+Firestore named databaseはSingapore/Native/Standard、pessimistic concurrency、delete protection、Firestore-only data accessへ固定する。
+staging PITR無効/1時間retention、production PITR有効/7日retentionをenvironment policyとして分離し、request/executionの2 TTL fieldだけが
+offset 0で`ACTIVE`へ収束したことを要求する。別database/location、CMEK、Mongo/realtime access、TTL creating/repair、index overrideを拒否する。
+individual GETだけで想定外TTLを見逃さないよう、database-wide `ttlConfig:*` listを3件上限で取得し、期待2件以外、重複、paginationを
+fail closedにする。read-only clientのdouble snapshotはstrict raw responseを比較し、list順序だけを正規化して、継続変化するoutput-only
+`earliestVersionTime`だけを除外する。
+Service/security、IAM、Firestoreは同じdeployment expectationから導出した単一evidence verifierでも照合し、cross-project/database mixと未知sectionを
+拒否する。deployment-level clientは全endpointを一つのtoken/quota projectと同じ2 snapshotに束ね、個別観測間のcredential/time window差を
+残さない。実credential、database/TTL mutation、削除保護解除は未実行である。
+
 ## Paused ephemeral RunPod GPU Pod threats（未採用）
 
 [ADR 0066](./adr/0066-design-ephemeral-gpu-vm-execution.md)と

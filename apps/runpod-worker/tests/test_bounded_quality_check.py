@@ -22,6 +22,7 @@ from scribe_drop_worker.bounded_quality_check import (
     create_quality_options,
     evaluate_quality,
     main,
+    normalize_assigned_interval,
     normalize_segments,
     run_bounded_quality_check,
     run_full_file_reference,
@@ -43,6 +44,11 @@ if TYPE_CHECKING:
 BOUNDARY_INTERVAL: Final = SpeechInterval(
     start_sample=(BOUNDARY_SECONDS - 5) * 16_000,
     end_sample=(BOUNDARY_SECONDS + 5) * 16_000,
+)
+SPEECH_INTERVALS: Final = (
+    SpeechInterval(start_sample=10 * 16_000, end_sample=22 * 16_000),
+    BOUNDARY_INTERVAL,
+    SpeechInterval(start_sample=930 * 16_000, end_sample=942 * 16_000),
 )
 GLOBAL_TEXT: Final = "これは安全な合成文字列です境界の前後を正しく比較します"
 BOUNDARY_TEXT: Final = "境界の前後を正しく比較します"
@@ -194,7 +200,6 @@ def test_full_file_reference_uses_exact_options_and_validates_segments(tmp_path:
     "segments",
     [
         [NativeSegment(0, 20, 10, "invalid")],
-        [NativeSegment(0, 0, FIXTURE_DURATION_SECONDS + 1, "invalid")],
         [NativeSegment(1, 10, 11, "later"), NativeSegment(0, 1, 2, "earlier")],
     ],
 )
@@ -220,6 +225,30 @@ def test_full_file_reference_normalizes_invalid_native_segments(
     assert failure.value.code == "REFERENCE_FAILED"
 
 
+def test_full_file_reference_preserves_native_padding_past_media_duration(
+    tmp_path: Path,
+) -> None:
+    """The oracle matches the current full-file adapter's timestamp boundary."""
+    source = tmp_path / "speech-quality.wav"
+    source.write_bytes(b"synthetic")
+
+    class PaddedModel:
+        def transcribe(
+            self,
+            audio: object,
+            **options: object,
+        ) -> tuple[Iterable[object], object]:
+            del audio, options
+            return (
+                [NativeSegment(0, 955, FIXTURE_DURATION_SECONDS + 0.08, GLOBAL_TEXT)],
+                NativeInfo("ja", 0.9),
+            )
+
+    result = run_full_file_reference(PaddedModel(), source, FIXTURE_DURATION_SECONDS)
+
+    assert result.segments[0].end == pytest.approx(FIXTURE_DURATION_SECONDS + 0.08)
+
+
 def test_normalization_removes_spacing_case_and_punctuation_without_exposing_text() -> None:
     """Only letters, marks, and numbers participate in comparison."""
     segments = (
@@ -234,6 +263,28 @@ def test_normalization_removes_spacing_case_and_punctuation_without_exposing_tex
     assert normalize_segments(segments, interval=BOUNDARY_INTERVAL) == "abc12"
 
 
+def test_interval_normalization_assigns_a_long_segment_to_its_maximal_overlap() -> None:
+    """A VAD segment spanning silence cannot add end text to the boundary metric."""
+    spanning = (TranscriptSegment(id=0, start=900.0, end=940.0, text="end-only"),)
+
+    assert (
+        normalize_assigned_interval(
+            spanning,
+            speech_intervals=SPEECH_INTERVALS,
+            target_index=1,
+        )
+        == ""
+    )
+    assert (
+        normalize_assigned_interval(
+            spanning,
+            speech_intervals=SPEECH_INTERVALS,
+            target_index=2,
+        )
+        == "endonly"
+    )
+
+
 def test_character_error_rate_has_fixed_reference_denominator() -> None:
     """Insertions and deletions are measured against the oracle length."""
     assert character_error_rate("abcd", "abcd") == 0
@@ -245,11 +296,29 @@ def test_character_error_rate_has_fixed_reference_denominator() -> None:
 
 def test_quality_evaluation_accepts_equal_transcripts_and_returns_only_metrics() -> None:
     """Matching Japanese output passes the pre-registered global and boundary gates."""
-    metrics = evaluate_quality(_transcript(), _transcript(), BOUNDARY_INTERVAL)
+    metrics = evaluate_quality(_transcript(), _transcript(), SPEECH_INTERVALS)
     assert metrics.global_error_rate == 0
     assert metrics.boundary_error_rate == 0
     assert metrics.reference_characters == metrics.candidate_characters
     assert metrics.reference_segments == metrics.candidate_segments == EXPECTED_SEGMENT_COUNT
+
+
+def test_quality_evaluation_allows_reference_padding_but_rejects_candidate_overrun() -> None:
+    """Only the bounded candidate must keep every timestamp within media duration."""
+    padded_segment = TranscriptSegment(
+        id=2,
+        start=935,
+        end=FIXTURE_DURATION_SECONDS + 0.08,
+        text=GLOBAL_TEXT,
+    )
+    padded = replace(_transcript(), segments=(*_segments()[:2], padded_segment))
+
+    metrics = evaluate_quality(padded, _transcript(), SPEECH_INTERVALS)
+    assert metrics.global_error_rate == 0
+
+    with pytest.raises(BoundedQualityCheckError) as failure:
+        evaluate_quality(_transcript(), padded, SPEECH_INTERVALS)
+    assert failure.value.code == "QUALITY_REJECTED"
 
 
 @pytest.mark.parametrize(
@@ -274,7 +343,7 @@ def test_quality_evaluation_rejects_language_empty_drift_order_and_error(
 ) -> None:
     """Every pre-registered semantic and structural threshold fails closed."""
     with pytest.raises(BoundedQualityCheckError) as failure:
-        evaluate_quality(_transcript(), candidate, BOUNDARY_INTERVAL)
+        evaluate_quality(_transcript(), candidate, SPEECH_INTERVALS)
     assert failure.value.code == "QUALITY_REJECTED"
 
 
@@ -461,3 +530,19 @@ def test_main_emits_only_allowlisted_metrics_or_failure(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == f"{QUALITY_CHECK_FAILED}:QUALITY_REJECTED\n"
+
+    def reject_with_metrics() -> QualityMetrics:
+        raise BoundedQualityCheckError(QUALITY_REJECTED, metrics=metrics)
+
+    monkeypatch.setattr(
+        "scribe_drop_worker.bounded_quality_check.run_bounded_quality_check",
+        reject_with_metrics,
+    )
+    with pytest.raises(SystemExit):
+        main()
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith(
+        f"{QUALITY_CHECK_FAILED}:QUALITY_REJECTED global_error_ppm=10000"
+    )
+    assert GLOBAL_TEXT not in captured.err

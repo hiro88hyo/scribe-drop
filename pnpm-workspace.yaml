@@ -9,6 +9,7 @@ overrides:
 
 allowBuilds:
   esbuild: true
+  protobufjs: false
   workerd: true
 
 engineStrict: true
