@@ -152,18 +152,48 @@ IndexedDBは中断uploadを利用者に案内する最小metadataだけを保持
 - DLQ、replay、alert、手動回復は[operations.md](./operations.md)、secretとdeploy順序は
   [deployment.md](./deployment.md)を参照する。
 
-## Provider exit design（未採用）
+## Provider migration design（Cloud Run隔離probe成功、未採用）
 
-RunPod Serverlessが実Workerの事前attestationとauthoritativeなresource lifecycleを保証しない
-場合に備え、[ADR 0066](./adr/0066-design-ephemeral-gpu-vm-execution.md)と
-[一時GPU VM実行設計](./ephemeral-gpu-vm-design.md)をProposedとして保持する。これは現行data flowを
-変更しない。
+RunPod supportは、全compatible GPU、全available region、全fallbackにcapacityがない場合も、
+公開APIがGPU capacity待ちとその他の`IN_QUEUE`を区別しないことを確認した。この制約と実Workerの
+事前attestation、authoritativeなresource lifecycleを解決するため、
+[ADR 0066](./adr/0066-design-ephemeral-gpu-vm-execution.md)と
+[一時GPU Pod実行設計](./ephemeral-gpu-vm-design.md)でprovider-neutralなinvariantとRunPod Pods比較案を
+準備した。RunPod Pods文書は停止中の代替案であり、Phase 12以降のactive実装仕様ではない。
+RunPod Podsにはpublic IP、署名identity、create冪等性、hard lifetimeのmandatory gapが残るため、
+[ADR 0067](./adr/0067-evaluate-cloud-run-gpu-jobs.md)によりRunPod Pods評価を停止し、最初の隔離probeを
+Cloud Run GPU Jobへ変更した。現行data flow、staging、productionは変更しない。
 
-提案方式では、provider lifecycleを別execution aggregateに分離し、provider署名付きinstance
-identityとlive resource read-backに成功したVMだけへ短期R2 capabilityを発行する。terminal report、
-manifest、artifactに加え、exact VMの削除または不存在確認後にだけ`COMPLETED`へ遷移する。
-採用には別ADR、normative spec更新、forward-only migration、隔離probe、staging acceptance、
-利用者承認を必須とする。
+最初の[Cloud Run GPU隔離probe](./cloud-run-gpu-probe.md)は合成音声、無権限service account、L4 1台、
+task 1、retry 0、10分timeoutだけを使用し、GPU/CUDA/model compatibility、起動、終了、削除、課金停止を
+一度のexecutionで確認し、全probe resourceを削除した。R2 capability、録音、product controller、D1
+migrationを含めない。技術的Adopt candidateでも自動採用せず、
+provider lifecycleを別execution aggregateへ分離する設計、identity、data location、最大入力時間、
+staging promotionを別ADRで確定してからproduct実装へ進む。
+
+続く[8時間full-scan benchmark](./cloud-run-eight-hour-benchmark.md)では、L4、4 vCPU、16 GiBのexact 1
+executionが42秒でmemory limitにより終了した。したがって、Cloud Runの互換性成功をそのまま最大入力の
+実行可能性へ拡張しない。現行workerもsource全体を単一`transcribe`へ渡すため、provider移行前に
+bounded-memory分割を設計・検証するか、別ADRで最大入力時間を下げる。memory/CPUだけを増やしたcloud
+retryは新しいreview packetなしに行わない。
+
+[ADR 0069](./adr/0069-use-bounded-memory-transcription-windows.md)では、provider taskを分散せず、1 task内で
+single-pass FFmpeg decode、15分core、前後30秒context、1 model instanceを順次処理する方式をProposedと
+した。segmentはtimestamp ownershipでmergeしてbounded spoolへ書き、選択されたartifactを1形式ずつ生成・
+uploadしてmanifest v2を最後に書く。job optionsはattempt作成時のimmutable execution contractへ固定し、
+language、VAD、output formatをworkerが暗黙に上書きしない。詳細は
+[bounded-memory transcription design](./bounded-memory-transcription-design.md)を正とする。
+
+Phase 10Aではこのcoreを現行serviceへ接続しないisolated moduleとして実装した。8時間virtual PCMは32 windowを
+固定上限内で処理し、Python/TypeScriptのcontract v2は同一fixtureでoptions、capability、manifestを検証する。
+manifestはformat集合だけでなくjob、attempt、format拡張子までexact keyを照合する。build済みimageでは
+networkなしの`bounded_container_check`を追加する。Cloudで同じcoreを測る候補は
+[bounded Cloud Run 8-hour re-probe](./cloud-run-bounded-eight-hour-reprobe.md)に隔離し、現行RunPod経路、D1、R2、
+staging、productionは変更しない。
+
+Phase 10Bの結果と採用ADRがAcceptedになるまでproduct providerは選定しない。したがってcontroller、
+execution identity、network、hard lifetime、resource削除をRunPod PodsまたはCloud Run固有仕様として
+先行実装せず、Phase 12以降はselected-providerのplaceholderとして扱う。
 
 採用時のtarget releaseは`0.2.0`とし、現行RunPod修正の`0.1.1`へcode、migration、cloud
 resourceを混在させない。

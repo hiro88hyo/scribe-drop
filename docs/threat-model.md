@@ -182,25 +182,39 @@ artifact/finalize/notificationのend-to-end経路もPhase 5のstaging smokeで�
 - RunPod Workerに長期credentialを渡さず、runtime downloadやpackage installを許可しない。
 - 録音、本文、token、URL、raw exceptionをRunPod output、application log、CI artifactへ残さない。
 
-## Proposed ephemeral GPU VM threats（未採用）
+## Paused ephemeral RunPod GPU Pod threats（未採用）
 
 [ADR 0066](./adr/0066-design-ephemeral-gpu-vm-execution.md)と
-[一時GPU VM実行設計](./ephemeral-gpu-vm-design.md)を採用する場合、実装前に次を既存threat modelへ
-統合する。Proposedの間は現行runtimeのsecurity controlではない。
+[一時GPU Pod実行設計](./ephemeral-gpu-vm-design.md)を再評価する場合、実装前に次を既存threat modelへ
+統合する。RunPod PodsはADR 0067でactive probeを停止している。resource、credential、費用、cleanupは
+[provider decision packet](./ephemeral-gpu-vm-provider-decision.md)を正とする。Proposedかつprobe未承認の間は
+現行runtimeのsecurity controlではない。
 
-| Threat                               | Proposed control                                                                                                   | Required evidence                                                  |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------ |
-| 偽VMによるbootstrap                  | provider署名identity、single-use challenge、live resourceのaccount/zone/ID/image/GPU/network/creation time完全一致 | forged signature、別VM、別audience、stale evidence、resource drift |
-| identity evidenceのreplay            | 短命audience/nonce、public key binding、challengeのCAS消費、exact retryだけへ同一HPKE capsuleを再送                | 同一evidenceの別key/ID再送、response loss、並行bootstrap           |
-| controller credential侵害            | cloud内managed identity、固定policy-only API、任意spec拒否、rate/concurrency/budget上限、environment分離           | 任意image/GPU/network/metadata、cross-environment、上限超過        |
-| create timeout後の二重VM             | 決定的resource name、provider idempotency key、`CREATE_UNKNOWN`、read-back前の別create禁止                         | effect-after-timeout、duplicate Queue、別zoneへの誤fallback        |
-| orphan VMと継続課金                  | finally delete、Cron reaper、provider hard lifetime+auto-delete、max concurrency 1、resource/disk不存在read-back   | controller停止、delete response loss、hard lifetime、disk/IP残留   |
-| public networkまたは永続diskのdrift  | public IP/inboundなし、固定VPC、boot disk auto-delete、追加diskなしをbootstrap前read-back                          | public IPv4/IPv6、追加NIC/disk、wrong subnet/firewall              |
-| boot imageまたはruntime supply chain | immutable boot imageとOCI digest、model hash、SBOM、scan、runtime install/download禁止                             | image ID drift、driver/model hash不一致、offline boot              |
-| metadata serviceからの権限奪取       | VM identityはcloud resource権限なし、metadata adapter局所化、identity evidenceをlogしない                          | metadata token漏えい、cloud API create/delete/storage list拒否     |
-| terminal report後もVMが残る          | VM不存在とcapability失効を`COMPLETED`条件に追加し、delete受理やshutdownだけを成功扱いにしない                      | terminal-before-delete、delete timeout、provider read outage       |
-| provider capacity不足                | 8分prewarm、10分開始SLO、capability発行前停止、新attempt以外のretry禁止                                            | quota不足、capacity rejection、create pending、late boot           |
-| provider operator/host侵害           | short capability、one-shot VM、削除、no persistent data、provider比較                                              | 残余リスクとして明示し、署名identityをhost attestationと誤認しない |
+| Threat                                | Proposed control                                                                                                          | Required evidence                                                   |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| 偽Podによるbootstrap                  | provider署名identity、single-use challenge、live resourceのaccount/data center/ID/image/GPU/network/creation time完全一致 | forged signature、別Pod、別audience、stale evidence、resource drift |
+| identity evidenceのreplay             | 短命audience/nonce、public key binding、challengeのCAS消費、exact retryだけへ同一HPKE capsuleを再送                       | 同一evidenceの別key/ID再送、response loss、並行bootstrap            |
+| controller credential侵害             | 固定policy-only API、任意spec拒否、rate/concurrency/cost上限、environment分離、最小scopeまたは分離controller              | 任意image/GPU/network/metadata、cross-environment、上限超過         |
+| create timeout後の二重Pod             | provider idempotency保証、`CREATE_UNKNOWN`、account全体read-back前の別create禁止                                          | effect-after-timeout、duplicate Queue、別data centerへの誤fallback  |
+| orphan Podと継続課金                  | finally terminate、Cron reaper、provider hard lifetime、max concurrency 1、Pod/storage不存在read-back                     | controller停止、terminate response loss、hard lifetime、volume残留  |
+| public networkまたは永続storage drift | public IPなしまたは同等の全inbound拒否、empty ports、Network Volume/persistent volumeなしをbootstrap前read-back           | public port mapping、未知service、volume、global networking         |
+| container image/runtime supply chain  | immutable OCI digest、model hash、SBOM、scan、runtime install/download禁止                                                | image digest drift、driver/model hash不一致、offline起動            |
+| Pod内credentialからの権限奪取         | PodへRunPod API keyを渡さず、identity adapterを局所化し、identity evidenceをlogしない                                     | RunPod API操作、storage list、credential漏えい拒否                  |
+| terminal report後もPodが残る          | Pod/storage不存在とcapability失効を`COMPLETED`条件に追加し、terminate受理やprocess終了だけを成功扱いにしない              | terminal-before-terminate、response loss、provider read outage      |
+| provider capacity不足                 | 8分prewarm、10分開始SLO、capability発行前停止、新attempt以外のretry禁止                                                   | quota不足、capacity rejection、create pending、late boot            |
+| provider operator/host侵害            | short capability、one-shot Pod、terminate、no persistent data                                                             | 残余リスクとして明示し、署名identityをhost attestationと誤認しない  |
+
+## Proposed bounded transcription threats（provider未採用）
+
+[ADR 0069](./adr/0069-use-bounded-memory-transcription-windows.md)を採用する場合、providerに依存せず次を
+既存controlへ統合する。offline gateと採用ADRが完了するまでは現行runtimeのsecurity controlではない。
+
+| Threat                            | Proposed control                                                                                                       | Required evidence                                                   |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| 長時間mediaのmemory amplification | single-pass decode、15分core/30秒context、bounded buffer/spool/artifact、3 GiB scratch。OOM後のresource増量retryを禁止 | 8時間合成入力、chunk境界、overlap、volume full、memory/tmpfs metric |
+| job optionsとexecutionの不一致    | attempt immutable snapshot、contract/manifest v2、selected capability、exact format集合。version推測とfallbackを禁止   | ja/auto、VAD on/off、1～3形式、v1/v2混同、extra/missing artifact    |
+| manifest keyの別attempt差し替え   | manifest自身のjob/attempt/formatと各exact object keyを再照合し、credentialなしHTTPS capabilityだけを受理               | 別attempt ULID、format/key拡張子不一致、HTTP、credential、非443 URL |
+| spool/artifactのlocal path攻撃    | `/tmp`配下のtask固有directory、exclusive create、symlink拒否、regular file、mode 0600、hard byte limit、finally削除    | 既存file/symlink、corrupt row、short/partial failure、cleanup       |
 
 ## Test boundary
 

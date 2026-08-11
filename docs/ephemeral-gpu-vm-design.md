@@ -1,17 +1,25 @@
-# 一時GPU VM実行設計
+# 一時GPU Pod実行設計
 
 ## 1. Status and scope
 
-本書は[ADR 0066](./adr/0066-design-ephemeral-gpu-vm-execution.md)のProposed設計である。
-RunPod Serverlessの保証がScribeDropの要求に適合しない場合に備えたexit designであり、現行の
-`docs/spec.md`、`docs/additional-spec.md`、staging、productionを変更しない。
+本書は[ADR 0066](./adr/0066-design-ephemeral-gpu-vm-execution.md)のProposed設計を保存する、停止中の
+RunPod Pods比較案である。Phase 12以降のactive implementation sourceではない。
+RunPod Serverlessのcapacity保証と公開APIの待機理由分類がScribeDropの要求に適合しないことは
+[ADR 0065](./adr/0065-validate-runpod-serverless-gpu-pools.md)で確認済みであり、Phase 8の
+[provider decision packet](./ephemeral-gpu-vm-provider-decision.md)では当初RunPod Podsを第一候補とした。
+ただしpublic IP、create冪等性、署名付きinstance identity、provider側hard lifetimeのmandatory gapは
+未解決である。[ADR 0067](./adr/0067-evaluate-cloud-run-gpu-jobs.md)はRunPod Podsのactive probeを停止し、
+Cloud Run GPU Jobの隔離評価へ変更した。Cloud Runのproduct採用も未決定であり、active pathはADR 0067、
+[ADR 0068](./adr/0068-benchmark-cloud-run-eight-hour-input.md)、
+[ADR 0069](./adr/0069-use-bounded-memory-transcription-windows.md)を正とする。現行の`docs/spec.md`、
+`docs/additional-spec.md`、staging、productionを変更しない。
 
 採用する場合のtarget releaseは`0.2.0`とする。`0.1.1`は現行RunPod構成の修正だけを対象とし、
 本方式のcode、migration、cloud resource、credential、workflowを混在させない。root packageの
 versionは設計またはprobe時に変更せず、全product Phaseを`develop`へ統合した後に
 `release/0.2.0`で更新する。
 
-目的は、文字起こしattemptごとにGPU VMを最大1台だけ作成し、provider署名付きidentityと
+目的は、文字起こしattemptごとにGPU Podを最大1台だけ作成し、provider署名付きidentityと
 control-plane read-backを検証してから録音へアクセスさせ、処理後にresourceを確実に削除する
 実行方式を定義することである。
 
@@ -31,20 +39,20 @@ providerを変更しても次を緩めない。
 - 実Workerのidentity、image、GPU、network、lifecycleを検証するまでR2 capabilityを発行しない。
 - capabilityはexact object、exact method、短いexpiryに限定する。
 - claimまたはbootstrap前にmodel load、source download、ffprobe、GPU inferenceを開始しない。
-- model、CUDA、FFmpeg、Python依存、base image、boot imageをimmutableに固定する。
+- model、CUDA、FFmpeg、Python依存、base image、container imageをimmutableに固定する。
 - runtime package install、model download、任意URL、redirect、private/metadata destinationを拒否する。
 - manifestは最後に書き、terminal report、manifest、全artifact、current attemptを揃える。
 - Queue、create、bootstrap、heartbeat、complete、cancel、delete、Cronを冪等にする。
 - raw provider response、resource ID、identity evidence、token、URL、本文をlogへ残さない。
 - staging acceptanceなしにproduction providerを変更しない。
 
-VM方式では次を追加する。
+一時Pod方式では次を追加する。
 
 - public IPとinbound network ruleを持たない。
 - SSH key、password、対話login、serial consoleを通常運用で有効化しない。
-- boot disk以外の永続diskを付けず、boot diskもVM削除時に自動削除する。
-- VMのcloud identityへcompute create/delete権限やstorage列挙権限を与えない。
-- Orchestratorの正常完了は、exact VMの削除または不存在確認を必須とする。
+- Network Volumeとpersistent volumeを付けず、container diskはPod terminate時に削除する。
+- PodへRunPod API credentialやstorage列挙権限を与えない。
+- Orchestratorの正常完了は、exact Podとpersistent storageの削除または不存在確認を必須とする。
 - provider側のhard lifetimeを必須とし、application cleanup停止時も自動削除する。
 
 ## 3. Component boundary
@@ -53,9 +61,9 @@ VM方式では次を追加する。
 flowchart LR
   Q[Cloudflare Queue] --> O[Orchestrator]
   O --> D[(D1 execution aggregate)]
-  O --> C[GpuVmController]
-  C --> P[Provider Compute API]
-  P --> V[Ephemeral GPU VM]
+  O --> C[GpuExecutionController]
+  C --> P[RunPod Pods API]
+  P --> V[Ephemeral GPU Pod]
   V -->|signed instance identity| O
   O -->|short-lived exact capabilities| V
   V -->|GET source / PUT artifacts| R[(R2)]
@@ -73,34 +81,35 @@ flowchart LR
 - provider raw errorを`capacity_unavailable`、`request_rejected`、`outcome_unknown`、
   `identity_invalid`、`resource_drift`、`cleanup_unknown`へ分類する。
 
-### GpuVmController
+### GpuExecutionController
 
-- providerと同じcloud内の小さなcontrol-plane serviceとする。
-- managed identityで固定templateからcreate/get/deleteだけを行う。
-- callerがmachine type、image、startup script、service identity、metadata、network、disk、regionを
+- RunPod Pods APIを型付きHTTP client越しに呼ぶ小さなcontrol-plane境界とする。Orchestrator内adapterか
+  分離serviceかはcredential scopeの確認後にPhase 12で決める。
+- 固定policyからcreate/get/terminateだけを行い、RunPod credentialをPodへ渡さない。
+- callerがmachine type、image、command、environment、network、storage、data centerを
   指定できないようにする。requestは`policyId`とopaque execution handleだけを受け付ける。
 - timestamp、nonce、body digestを含む認証済みrequestを検証し、replayを拒否する。
 - application data、R2 capability、claim token、job ID、attempt IDを受け取らない。
 - provider operationとresourceをbounded schemaへ変換し、raw bodyを返さない。
-- create/delete request内でVM起動または削除完了を待たない。provider mutationのboundedな受理結果、
+- create/terminate request内でPod起動または削除完了を待たない。provider mutationのboundedな受理結果、
   operation reference、既知のexact resourceだけを返し、OrchestratorのQueue/Cron reconciliationが
   deadlineまでread-backする。Cloudflare request timeoutをprovisioning timeoutとして扱わない。
 
-Cloudflareへ広いcloud IAM private keyを保存しないことを優先する。controller認証用secretが必要な
-場合も、それは固定operationだけを要求できるcontrol capabilityとし、cloud IAM credentialでは
-ない。rotation、rate limit、environment分離、budget guardを必須とする。
+RunPod API credentialのscopeがaccount全体へ及ぶ場合は、Cloudflareへ直接置く前に分離controller、
+credential rotation、rate limit、environment分離、budget guardを脅威分析する。最小scopeをproviderが
+提供しない場合は、その残余riskを別ADRで承認するまでproduct採用しない。
 
-### Ephemeral GPU VM
+### Ephemeral GPU Pod
 
-- build時に検証済みWhisper containerとmodelを含むimmutable boot imageから作る。
+- build時に検証済みWhisper runtimeとmodelを含むimmutable container imageから作る。
 - startup dataには単独で権限を持たないopaque execution handleだけを含める。
-- metadata serviceからprovider署名付きidentity evidenceを取得し、outbound HTTPSで
+- RunPodが提供する場合はprovider署名付きidentity evidenceを取得し、outbound HTTPSで
   Orchestratorへbootstrapする。
 - 処理完了後にartifactとmanifestを残し、terminal reportを冪等送信する。
-- 自身へcompute delete権限を持たせない。削除は外部controllerとhard lifetimeが行う。
+- 自身へPod create/terminate権限を持たせない。削除は外部controllerとhard lifetimeが行う。
 
 現行Python Workerのmedia検証、transcription、artifact、manifest、cleanupをprovider-neutralな
-one-shot task runnerとして維持する。RunPod SDK handlerは既存adapterとして残し、VM entrypointは
+one-shot task runnerとして維持する。RunPod Serverless SDK handlerは既存adapterとして残し、Pod entrypointは
 instance identity、bootstrap、heartbeat、terminal reportだけを追加する。provider変更を理由に
 Whisper処理を再実装しない。
 
@@ -149,26 +158,25 @@ ExecutionRepository
 
 controllerは固定policyから次を解決する。
 
-- provider account/project/subscription
-- region/zone候補
+- RunPod accountとenvironment
+- data center候補
 - GPU SKUと個数
-- immutable boot image ID
-- service identity
-- VPC、subnet、firewall、NAT/egress proxy
-- public IPなし
-- boot disk auto-delete
-- hard maximum runtimeとtermination action `DELETE`
+- immutable container image digest
+- `cloudType: SECURE`
+- empty ports、global networking無効、SSH/Jupyter/proxy無効
+- Network Volumeとpersistent volumeなし
+- hard maximum runtimeとterminate action
 - environment、candidate、policyを表す非機密label
 
 任意field、自由入力metadata、startup script、container commandをrequestで上書きできないようにする。
 
 ### Bootstrap request
 
-VMは最初にopaque execution handle、random bootstrap request ID、一時HPKE public keyを
+Podは最初にopaque execution handle、random bootstrap request ID、一時HPKE public keyを
 Orchestratorのchallenge endpointへ送り、短命かつ未使用のnonceとidentity audienceを
 受け取る。audienceまたはnonceはexecution handle、request ID、public key digestに結び
 付ける。challenge responseはR2 capability、job ID、attempt IDを含まず、取得だけでは
-処理を開始できない。VMはprovider metadata serviceへそのaudienceまたはnonceを渡して
+処理を開始できない。PodはRunPodが提供する場合にidentity endpointへそのaudienceまたはnonceを渡して
 identity evidenceを取得し、次を送る。
 
 ```json
@@ -183,38 +191,37 @@ identity evidenceを取得し、次を送る。
 ```
 
 identity evidenceは最大size、encoding、algorithm、issuer、audience/nonce、`iat`、`exp`をstrictに
-検証する。VMが任意のnonceを自己申告するだけでは足りず、D1に保存した未使用challengeと一致し、
+検証する。Podが任意のnonceを自己申告するだけでは足りず、D1に保存した未使用challengeと一致し、
 一度だけ消費できることを必須とする。同じrequest ID、public key、evidence digestの再送だけは
 後述の同一暗号化responseへ収束させ、いずれかが異なる再利用は拒否する。providerが任意nonceまたは
 audienceを署名対象にできない場合は、signed evidenceの作成時刻、live resource creation time、
-未使用challenge、execution handleを併用し、replay耐性を隔離probeで実証できなければ候補から
-除外する。
+未使用challenge、execution handleを併用し、replay耐性を隔離probeで実証できなければ移行を
+Blockedのままとする。
 
 署名検証後にprovider APIからexact resourceを読み、次を照合する。
 
-- provider、account/project/subscription、region/zone
-- instance ID、決定的name、creation timestamp
+- provider、account、data center
+- Pod ID、machine ID、決定的name、creation timestamp
 - RUNNING state
-- immutable boot image IDとcandidate policy
-- GPU SKU、GPU count、machine type
-- expected service identity
-- public IPなし、expected VPC/subnet/firewall
-- boot disk auto-delete、追加diskなし
+- immutable container image digestとcandidate policy
+- GPU SKU、GPU count、machine
+- Secure Cloud、empty ports、global networking無効
+- Network Volumeとpersistent volumeなし
 - hard lifetime、termination action
 - environment、execution、policy label
 
-不一致時はbootstrapを拒否し、R2 capabilityを発行せず、exact VMをcleanup対象にする。
+不一致時はbootstrapを拒否し、R2 capabilityを発行せず、exact Podをcleanup対象にする。
 
 ### Granted session
 
 bootstrap成功後だけ、Orchestratorはcurrent attemptをCASでwinnerにし、現行claim responseと同じ
 job ID、attempt ID、schema version、exact R2 capability、heartbeat URL、短期session tokenを含む
-grantを作る。grantはVMの一時public keyへHPKE暗号化し、request IDとcontextに結び付ける。
+grantを作る。grantはPodの一時public keyへHPKE暗号化し、request IDとcontextに結び付ける。
 
 D1にsession token hashと短命の暗号化grant capsuleだけを保存する。raw tokenや署名付きURLを
 保存しない。response喪失時は、同じrequest ID、public key、evidence digestのみが同一capsuleを
-受け取れる。これによりchallengeの一回性を緩めず、VMまたはattemptを余分に作らない。
-VMは復号後にsession tokenでgrantをackし、capsuleはackまたはexpiryで削除する。HPKE suite、
+受け取れる。これによりchallengeの一回性を緩めず、Podまたはattemptを余分に作らない。
+Podは復号後にsession tokenでgrantをackし、capsuleはackまたはexpiryで削除する。HPKE suite、
 key validation、context binding、expiryはcontractに固定し、identity evidence、capsule、provider resource IDを
 application logへ渡さない。
 
@@ -249,7 +256,7 @@ cleanup status (orthogonal):
 - internal execution ULID、attempt ID、provider kind、environment
 - opaque execution handleのhash
 - idempotency keyまたはhash、決定的resource name
-- provider VM/disk resource ID、operation ID
+- provider Pod/storage resource ID、operation ID
 - fixed policy ID、candidate ID、expected image ID、expected GPU policy
 - execution status、cleanup status、version
 - create lease、provisioning deadline、bootstrap deadline、hard delete deadline
@@ -266,23 +273,23 @@ job削除時もresource不存在を確認するまで消さない。
 1. `provider_executions`とprovider-neutral foreign keyをexpand migrationで追加する。
 2. 現行RunPod adapterを同じportへ包み、stagingでdual-writeする。
 3. completion、cancel、delete、retentionをprovider-neutral readerへ切り替える。
-4. ephemeral VM adapterをstagingだけで有効化する。
+4. ephemeral Pod adapterをstagingだけで有効化する。
 5. production acceptance後にproviderをenvironment固定設定で切り替える。
 6. RunPod固有列とtableは少なくとも1 release保持し、後続のtable rebuild migrationで除去する。
 
-同じattemptをRunPodとVMへ同時投入しない。provider kindとpolicyはattempt作成時に固定し、retryは
+同じattemptをRunPod ServerlessとRunPod Podへ同時投入しない。provider kindとpolicyはattempt作成時に固定し、retryは
 新generation、新attempt、新executionを作る。
 
 ## 7. Completion and cleanup
 
-VM方式では次をすべて満たした場合だけ`COMPLETED`へCASする。
+一時Pod方式では次をすべて満たした場合だけ`COMPLETED`へCASする。
 
 1. current job、generation、attempt、provider executionが一致する。
 2. attested executionだけがwinnerである。
 3. allowlist済みterminal report `SUCCEEDED`をD1へ保存済みである。
 4. complete manifestと全artifactが存在し、identity、key、size、hashが一致する。
 5. heartbeat/session capabilityを失効済みである。
-6. exact VMとauto-delete diskが削除済み、またはproviderがexact resourceの不存在を返す。
+6. exact Podとpersistent storageが削除済み、またはproviderがexact resourceの不存在を返す。
 7. cleanup CASとnotification outbox作成が成功する。
 
 Worker自身のshutdown、providerのSTOPPED、controllerのdelete受理だけでは6を満たさない。
@@ -291,83 +298,88 @@ delete outcomeが不明ならjobを成功確定せず、Cronが同じresourceを
 
 ## 8. Failure recovery
 
-| Failure                           | Required behavior                                                               |
-| --------------------------------- | ------------------------------------------------------------------------------- |
-| create timeout                    | `CREATE_UNKNOWN`。同じname/keyをreadし、別VMを作らない                          |
-| explicit capacity rejection       | capabilityを発行せずattemptを安全にFAILED。自動で別providerへ送らない           |
-| RUNNING前に8分超過                | exact createをcancel/deleteし、10分開始SLO内でFAILEDへ収束                      |
-| bootstrapなし                     | capability未発行のままdelete。image/startup/identity failureを安全なcodeへ分類  |
-| identityまたはresource drift      | claim拒否、security alert、exact VM delete                                      |
-| bootstrap response loss           | exact requestに同一HPKE capsuleを再送し、別VM・別key・別attemptを作らない       |
-| heartbeat stale                   | capability失効、cancel要求、grace後にforce delete                               |
-| Spot/preemption                   | 初期はSpotを使わない。将来は新attemptとしてのみ再実行                           |
-| terminal report後のdelete timeout | manifestを保持し、`cleanup=UNKNOWN`でreconcile。COMPLETEDにしない               |
-| controller停止                    | provider hard lifetimeがdeleteし、復旧後に不存在をread-back                     |
-| user delete                       | jobを非表示化し、capability失効、exact VM delete、R2 cleanup、最後にD1親row削除 |
-| duplicate/out-of-order callback   | expected status、version、execution IDのCASで拒否                               |
+| Failure                           | Required behavior                                                                   |
+| --------------------------------- | ----------------------------------------------------------------------------------- |
+| create timeout                    | `CREATE_UNKNOWN`。同じexecutionをreadし、別Podを作らない                            |
+| explicit capacity rejection       | capabilityを発行せずattemptを安全にFAILED。自動で別providerへ送らない               |
+| RUNNING前に8分超過                | exact createをcancel/deleteし、10分開始SLO内でFAILEDへ収束                          |
+| bootstrapなし                     | capability未発行のままdelete。image/startup/identity failureを安全なcodeへ分類      |
+| identityまたはresource drift      | claim拒否、security alert、exact Pod terminate                                      |
+| bootstrap response loss           | exact requestに同一HPKE capsuleを再送し、別Pod・別key・別attemptを作らない          |
+| heartbeat stale                   | capability失効、cancel要求、grace後にforce delete                                   |
+| Spot/preemption                   | 初期はSpotを使わない。将来は新attemptとしてのみ再実行                               |
+| terminal report後のdelete timeout | manifestを保持し、`cleanup=UNKNOWN`でreconcile。COMPLETEDにしない                   |
+| controller停止                    | provider hard lifetimeがdeleteし、復旧後に不存在をread-back                         |
+| user delete                       | jobを非表示化し、capability失効、exact Pod terminate、R2 cleanup、最後にD1親row削除 |
+| duplicate/out-of-order callback   | expected status、version、execution IDのCASで拒否                                   |
 
 ## 9. Network and identity
 
-- VMにpublic IPv4/IPv6を付けず、inbound firewallを作らない。
-- outboundはNATまたはegress proxy経由とし、OrchestratorとR2のexact originだけを許可する。
+- 現行invariantではPodにpublic IPv4/IPv6を付けず、inboundを許可しない。RunPod Secure Cloudが
+  public IP必須であるため、無効化またはnetwork layerで同等以上の全inbound拒否を確認できるまでBlockedとする。
+- outboundはOrchestratorとR2のexact originだけを許可する。RunPodでprovider-native egress制限を
+  実現できない場合はegress proxyを含む代替controlを別ADRでreviewする。
 - DNS解決後IP、TLS、redirect、host、portをWorkerコードでも再検証する。
 - provider metadata endpointはidentity取得専用adapterからだけ利用する。取得したdocumentをlogへ
   出さず、bounded memoryで扱う。
-- GCPではexact audience付きGoogle署名JWT、AWSではIMDSv2とRSA-2048署名付きidentity document、
-  Azureではnonce付きattested metadataを候補とする。署名があってもlive resource read-backを
-  省略しない。
-- VM service identityはidentity evidence取得以外の権限を原則持たない。artifact registryからの
-  pullが必要なら、そのread権限だけを与えるが、初期probeではboot imageへruntimeを内包する方式を
-  優先する。
+- RunPod Podsで利用できるprovider署名付きidentityは公開仕様で確認できない。support回答で存在を
+  確認できた場合も、issuer、audience/nonce、Pod ID、machine ID、作成時刻を検証し、live resource
+  read-backを省略しない。存在しない場合は、代替controlを別ADRと脅威testでreviewするまで録音への
+  capabilityを発行しない。
+- PodへRunPod API credentialを渡さない。private registry pullはRunPod側の既存registry credentialを
+  使い、値をPod環境変数へ展開しない。runtimeとmodelはcontainer imageへ内包する。
 
 ## 10. Cost and availability guardrails
 
-- 全environment合計の初期max concurrent GPU VMは1とする。
-- create rateと日次上限をD1、controller、provider quotaの3層で制限する。
+- 全environment合計の初期max concurrent GPU Podは1とする。
+- create rateと日次上限をD1、controller、RunPod account read-backの3層で制限する。
 - hard runtimeは実8時間media benchmarkとcleanup余裕から決め、根拠なしに現行6時間を引き継がない。
-- VMは成功・失敗・cancel後に停止ではなくdeleteする。disk、static IP、snapshotを残さない。
-- provider budget alertは遅延する通知としてだけ使う。controllerはactive VMの最大残存時間と完了済み
+- Podは成功・失敗・cancel後にstopではなくterminateする。volume、Network Volumeを残さない。
+- provider spend limitはaccount全体の制御としてだけ使う。controllerはactive Podの最大残存時間と完了済み
   metered timeから保守的な予約費用を計算し、独立したhard ceiling超過時に新規createを拒否する。
-- 初期はOn-Demand/Standardを使う。Spot/preemptible、Flex-start、reservationは別ADRとfault testを
+- 初期はOn-Demandを使う。Spot/interruptible、Savings Planは別ADRとfault testを
   必須とする。
-- GPU名ではなく、VRAM、CUDA compatibility、real-time factor、boot time、単価、zone availabilityで
-  選ぶ。consumer GPUの5090/4090互換性を採用条件にしない。
+- GPU名ではなく、VRAM、CUDA compatibility、real-time factor、boot time、単価、data center availabilityで
+  選ぶ。consumer GPUの5090/4090だけを採用条件にしない。
 
 開始SLOは現行どおり、create受理からattested bootstrapまで10分未満とする。staging prewarmは
 8分で停止し、実jobを作成しない。処理SLOとhard runtimeは最大入力benchmark後に確定する。
 
 ## 11. Provider capability gate
 
-| Capability                                  | Mandatory | GCP Compute Engine | Amazon EC2                                    | Azure VM                          |
-| ------------------------------------------- | --------- | ------------------ | --------------------------------------------- | --------------------------------- |
-| idempotent create key                       | yes       | `requestId`        | ClientToken                                   | resource-name PUT; probe required |
-| exact resource read/delete                  | yes       | documented         | documented                                    | documented                        |
-| signed instance identity                    | yes       | audience付きJWT    | signed document                               | nonce付きattested document        |
-| immutable image exact read-back             | yes       | probe required     | probe required                                | probe required                    |
-| GPU SKU/count exact read-back               | yes       | probe required     | probe required                                | probe required                    |
-| no-public-IP outbound-only                  | yes       | probe required     | probe required                                | probe required                    |
-| per-VM short hard lifetime with auto-delete | yes       | documented         | external control required                     | external control/probe required   |
-| create/delete audit operation               | yes       | probe required     | probe required                                | probe required                    |
-| quota/capacity failure is explicit          | yes       | probe required     | probe required                                | probe required                    |
-| billing termination is observable           | yes       | probe required     | documented at lifecycle level; probe required | probe required                    |
+RunPod Podsは既存account、container image、GPU catalogを再利用でき、Podの作成・一覧・削除と
+秒単位課金が公式に提供されるため比較対象へ含める。一方、2026-08-10時点の公開仕様では次のgapが
+ある。
 
-GCPをfirst probe候補とする理由は、sensitive data送信前のVM identity verificationが公式に
-説明され、JWTがaudience、instance ID、project、zone、creation timestampを持つこと、GPU VMへ
-`maxRunDuration`とtermination action `DELETE`を設定できることである。Standard provisioningも
-best-effort capacityであるため、RunPodと同様のavailability問題がないとは仮定しない。
+- Secure Cloud Podは常にpublic IPを持つと明記され、現行のno-public-IP invariantを満たさない。
+- create requestのidempotency token、Pod内から検証できるprovider署名付きinstance identity、短い
+  hard lifetimeによる自動deleteは確認できない。
+- explicit terminateとmachine/GPU/Secure Cloud read-backは提供されるが、application cleanup停止時の
+  第3回収境界にはならない。
+
+ADR 0066策定時はRunPod PodsをPhase 8以降の第一候補とした。既存account、container、GPU catalogを
+再利用できる利点はあるが、mandatory gapを解消できず、ADR 0067によりこの評価経路は停止している。
+以下のcapability表とGate C以降は、RunPod Podsを将来再評価する場合の未解決条件としてだけ保持し、
+現行Phase 12以降の実装条件には使わない。
+
+| Capability                                   | Mandatory | RunPod Pods status                                     |
+| -------------------------------------------- | --------- | ------------------------------------------------------ |
+| idempotent create key                        | yes       | 公開仕様で未確認。support回答待ち                      |
+| exact resource read/delete                   | yes       | API提供あり。隔離probeで整合性を確認                   |
+| signed instance identity                     | yes       | 公開仕様で未確認。support回答待ち                      |
+| immutable image exact read-back              | yes       | digest create/read-backを隔離probeで確認               |
+| GPU SKU/count/Secure Cloud exact read-back   | yes       | API fieldあり。隔離probeで確認                         |
+| no-public-IP outbound-only                   | yes       | Secure Cloudはpublic IP必須。全inbound拒否保証を確認中 |
+| per-Pod short hard lifetime with auto-delete | yes       | 公開仕様で未確認。support回答待ち                      |
+| create/delete audit operation                | yes       | system logとAPI read-backを隔離probeで確認             |
+| capacity failure is explicit                 | yes       | Pod createのerror分類とresponse lossを隔離probeで確認  |
+| billing termination is observable            | yes       | 秒単位課金。terminate後のBilling停止を隔離probeで確認  |
 
 参照する一次資料:
 
-- [Google Cloud: GPU VMの作成](https://docs.cloud.google.com/compute/docs/gpus/create-vm-with-gpus)
-- [Google Cloud: VM identityの検証](https://docs.cloud.google.com/compute/docs/instances/verifying-instance-identity)
-- [Google Cloud: VM runtime上限と自動削除](https://docs.cloud.google.com/compute/docs/instances/limit-vm-runtime)
-- [Google Cloud: instances.insert](https://docs.cloud.google.com/compute/docs/reference/rest/v1/instances/insert)
-- [Google Cloud: provisioning model](https://docs.cloud.google.com/compute/docs/instances/provisioning-models)
-- [AWS: EC2 API idempotency](https://docs.aws.amazon.com/ec2/latest/devguide/ec2-api-idempotency.html)
-- [AWS: instance identity documentの検証](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/verify-iid.html)
-- [AWS: TerminateInstances](https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_TerminateInstances.html)
-- [Azure: attested instance metadata](https://learn.microsoft.com/en-us/azure/virtual-machines/instance-metadata-service#attested-data)
-- [Azure: VM delete API](https://learn.microsoft.com/en-us/rest/api/compute/virtual-machines/delete)
+- [RunPod: Pod作成API](https://docs.runpod.io/api-reference/pods/POST/pods)
+- [RunPod: Pod管理とterminate](https://docs.runpod.io/pods/manage-pods)
+- [RunPod: Pod料金](https://docs.runpod.io/pods/pricing)
 
 ## 12. Staged validation plan
 
@@ -376,15 +388,15 @@ best-effort capacityであるため、RunPodと同様のavailability問題がな
 - provider port、state machine、strict schemas、safe error codesをfakeで検証する。
 - duplicate create、timeout after effect、stale execution、concurrent cleanup、terminal conflictを注入する。
 - provider SDKやCLIをapplication runtimeからsubprocess実行しない。
-- probe前にprovider比較、data処理境界、全resource/IAM permission、credential配置、quota、region、
-  GPU SKU、hard lifetime、cleanup、最大費用を一つのreview packetへ固定する。
+- probe前にRunPod Podsのdata処理境界、全resource、credential配置、capacity、data center、GPU SKU、
+  hard lifetime、cleanup、最大費用を一つのreview packetへ固定する。
 
-### Gate B: CPU control-plane probe
+### Gate B: RunPod Pods control-plane probe
 
-- 利用者承認後に隔離project/accountで最小CPU VMを1台だけ作る。
-- idempotent create、identity evidence、no public IP、fixed image、hard auto-delete、explicit delete、
-  orphan reaper、課金停止を確認する。
-- recording、R2 capability、GPU、production credentialを使わない。
+- 利用者承認後に既存RunPod accountでSecure Cloud GPU Podを1台だけ作る。
+- idempotent create、identity evidence、inbound拒否、fixed image、hard auto-delete、explicit terminate、
+  orphan reaper、課金停止を確認する。未解決gapがあればcreate前に停止する。
+- recording、R2 capability、production/staging credentialを使わず、固定synthetic inputだけを使う。
 - probe harnessはproduct runtimeから隔離し、resource名、idempotency、cleanup対象を固定する。これは
   feasibility testであり、ADR Accepted前のapplication、D1 schema、staging変更を許可しない。
 
@@ -393,9 +405,12 @@ best-effort capacityであるため、RunPodと同様のavailability問題がな
 - 合成mediaだけを使い、1 GPU、max concurrency 1、短いhard lifetimeで実施する。
 - boot time、GPU/driver/model、offline container、real-time factor、最大VRAM、artifact、cleanup、
   provider operation logを測定する。
-- 失敗後はresource、disk、IP、snapshot、operation中resourceが0であることを独立確認する。
+- 失敗後はPod、persistent storage、公開port、operation中resourceが0であることを独立確認する。
 - 最大8時間入力を維持する場合は、release前に最大入力の処理時間、capability更新、hard lifetime、
   費用を実測する。実測しない場合は別ADRとspec変更でadmission上限を下げる。
+- Cloud Run L4 16 GiBの一括full-scanはmemory limitで失敗したため、provider変更だけで解決済みとしない。
+  次のprobe前に[ADR 0069](./adr/0069-use-bounded-memory-transcription-windows.md)のbounded-memory分割を
+  offlineで成立させ、同じ最大入力を固定memory ceilingで検証する。
 
 Gate C成功後にprovider選定ADRを作り、ADR 0066をAcceptedへ変更してからproduct migrationへ進む。
 
@@ -406,29 +421,31 @@ Gate C成功後にprovider選定ADRを作り、ADR 0066をAcceptedへ変更し�
 
 ### Gate E: formal staging acceptance
 
-- 正常M4A、破損M4A、失敗通知、cancel、timeout、worker crash、controller response loss、delete response
+- 正常M4A、破損M4A、失敗通知、cancel、timeout、worker crash、controller response loss、terminate response
   lossを検証する。
-- exact candidate、signed identity、manifest、全artifact、VM不存在、通知、fixture cleanupを一つの
+- exact candidate、signed identity、manifest、全artifact、Pod/storage不存在、通知、fixture cleanupを一つの
   短命acceptanceへ結び付ける。
 
 ### Gate F: production migration
 
 - staging acceptanceをproduction workflowが再検証する。
 - providerはenvironment固定設定で切り替え、UIやjob単位の自由選択を許さない。
-- RunPod adapterはrollback期間だけ保持し、自動fallbackには使用しない。
+- RunPod Serverless adapterはrollback期間だけ保持し、自動fallbackには使用しない。
 - production read-backと最初のsynthetic smoke成功後もmax concurrency 1を維持する。
-- rollbackは先に新規VM投入を停止し、active execution、VM、disk、operationが0になるまで新codeの
-  reaperを維持する。RunPodへ自動fallbackせず、新providerもRunPodも安全に使えない場合はjobを
+- rollbackは先に新規Pod投入を停止し、active execution、Pod、storage、operationが0になるまで新codeの
+  reaperを維持する。RunPod Serverlessへ自動fallbackせず、PodsもServerlessも安全に使えない場合はjobを
   `SUBMISSION_PENDING`に保つ。旧codeへのrollbackはprovider resource不存在確認後だけ許可する。
 
 ## 13. Open questions
 
-- RunPod supportは事前Worker検証、`workersMin`、inventory、healthへ何を保証するか。
-- GCP/AWS/Azureのどれが、対象accountとregionでGPU quotaを確保できるか。
-- 最大8時間mediaのboot込み処理時間、VRAM、費用上限はいくらか。
-- custom boot imageへNVIDIA driverとOCI imageを内包するか、managed registryからdigest pullするか。
-- Cloudflareからprovider controllerへ、長期cloud IAM keyなしでどの認証方式を採用するか。
+- RunPod Podsの候補GPUごとに、作成からterminate確認までの実課金はいくらか。
+- RunPod Podsのpublic IPを無効化できるか、または空portsで全inboundをnetwork layerから拒否できるか。
+- create冪等key、署名付きinstance identity、provider側hard lifetimeをRunPodが提供するか。
+- one-shot process終了後のrestartを無効化し、Pod状態と課金継続を一意に判定できるか。
+- bounded-memory分割後の最大8時間mediaのboot込み処理時間、peak memory、VRAM、費用上限はいくらか。
+- 既存worker image digestをPod APIで指定し、同一digestとしてread-backできるか。
+- CloudflareからRunPod Pod controllerへ、長期account-wide API keyの影響を最小化してどう認証するか。
 - egressをexact hostnameへ制限できるprovider-native構成とproxyの運用負荷はどれくらいか。
-- terminal report後のVM削除確認を含む利用者待ち時間が許容範囲か。
+- terminal report後のPod terminate確認を含む利用者待ち時間が許容範囲か。
 
 これらをprobe前に推測で確定しない。

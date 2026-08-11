@@ -31,11 +31,23 @@ Secure Cloud切替ではない。現行要件に特定certificationはないた�
 実Workerの`secureCloud=true` attestationを省略しない。
 
 2026-08-01のADR 0065 staging prewarmでは、表示上の在庫と3つの実Serverless GPU poolが
-存在してもWorkerが作成されなかった。RunPod supportの保証範囲を確認している間、同じworkflowを
-再実行しない。必要な保証が提供されない場合に備え、現行runtimeを変更しないProposedな
-[一時GPU VM実行設計](./ephemeral-gpu-vm-design.md)を[ADR 0066](./adr/0066-design-ephemeral-gpu-vm-execution.md)
+存在してもWorkerが作成されなかった。2026-08-06のbounded probeでも、`workersMin=1`または
+固定dummy requestの投入後10分以内にWorkerは作成されなかった。RunPod supportは2026-08-10までに、
+Schedulerが全compatible GPU、全available region、全fallbackを評価したがcapacityがなく、
+公開APIにはGPU capacity待ちとその他の`IN_QUEUE`を区別するstatusがないと確認した。
+inventoryとpool membershipを配置保証として同じworkflowを再実行しない。現行runtimeを変更しないProposedな
+[一時GPU Pod実行設計](./ephemeral-gpu-vm-design.md)を[ADR 0066](./adr/0066-design-ephemeral-gpu-vm-execution.md)
 で定義した。providerの採用、cloud resource作成、production変更はまだ承認していない。
-採用する場合は`0.2.0`として実装し、`0.1.1`は現行RunPod修正だけに限定する。
+採用する場合は`0.2.0`として実装する。[Phase 8 provider decision packet](./ephemeral-gpu-vm-provider-decision.md)
+では、`0.1.1`のstaging acceptanceとproduction promotionをBlockedのまま未releaseで閉じ、
+RunPod固有のfail-closed検証だけを別PRで`develop`へ戻す。現candidate artifactは再利用しない。
+RunPod Podsはpublic IP、create冪等性、署名付きidentity、provider側hard lifetimeのmandatory gapを
+解消できず、[ADR 0067](./adr/0067-evaluate-cloud-run-gpu-jobs.md)でactive probeを停止した。Cloud Run GPU
+Jobの隔離probeはL4で固定model推論まで成功したが、[ADR 0068](./adr/0068-benchmark-cloud-run-eight-hour-input.md)
+の8時間一括処理は16 GiBのmemory limitで失敗した。現在は
+[ADR 0069](./adr/0069-use-bounded-memory-transcription-windows.md)のbounded-memory offline検証が次の境界で
+あり、exact 1 re-probeとprovider採用ADRが完了するまでRunPod Pods、Cloud Runともproductへ採用せず、
+実録音を新providerへ送らない。
 
 ## Image supply chain
 

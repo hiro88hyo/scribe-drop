@@ -54,6 +54,7 @@ def test_ffprobe_uses_fixed_argument_array_and_validates_media(
 
     assert result.duration_seconds == EXPECTED_DURATION
     assert result.audio_codec == "mp3"
+    assert result.audio_stream_index == 0
     assert observed is not None
     assert observed[0] == "/usr/bin/ffprobe"
     assert observed[-1] == str(source)
@@ -94,6 +95,7 @@ def test_ffprobe_accepts_auxiliary_data_streams_without_codec_names(
     result = FfprobeMediaProbe().probe(source, max_duration_seconds=120)
 
     assert result.audio_codec == "aac"
+    assert result.audio_stream_index == 0
     assert result.duration_seconds == pytest.approx(18.1)
     assert result.format_name == "mov"
     assert result.stream_count == EXPECTED_PIXEL_STREAM_COUNT

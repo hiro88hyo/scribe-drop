@@ -493,6 +493,8 @@ for (const [description, value] of Object.entries({
   "reusable immutable image pull": 'docker pull "${REUSABLE_WORKER_IMAGE}"',
   "current-run Worker provenance": "create-runpod-worker-provenance.mjs",
   "current-run offline container check": "-m scribe_drop_worker.container_check",
+  "current-run maximum-duration bounded container check":
+    "-m scribe_drop_worker.bounded_container_check",
   "current-run Worker SBOM": "runpod-worker.spdx.json",
   "current-run Worker vulnerability scan": "runpod-worker-trivy.txt",
   "preflight before application assembly":
@@ -600,10 +602,53 @@ requireTextOrder(
 );
 requireTextOrder(
   publicationWorkflowContents,
+  "-m scribe_drop_worker.container_check",
+  "-m scribe_drop_worker.bounded_container_check",
+  "publish-runpod-worker.yml",
+  "normal image integrity check before maximum-duration bounded check",
+);
+requireTextCount(
+  publicationWorkflowContents,
+  "-m scribe_drop_worker.bounded_container_check",
+  1,
+  "publish-runpod-worker.yml",
+  "maximum-duration bounded container check",
+);
+requireTextOrder(
+  publicationWorkflowContents,
+  "-m scribe_drop_worker.bounded_container_check",
+  "Generate synthetic M4A acceptance fixture",
+  "publish-runpod-worker.yml",
+  "maximum-duration bounded check before candidate fixture generation",
+);
+requireTextOrder(
+  publicationWorkflowContents,
   "Scan image vulnerabilities",
   "create-runpod-worker-provenance.mjs",
   "publish-runpod-worker.yml",
   "current vulnerability scan before provenance and candidate creation",
+);
+
+requireTextCount(
+  ciWorkflowContents,
+  "-m scribe_drop_worker.bounded_container_check",
+  1,
+  "ci.yml",
+  "maximum-duration bounded container check",
+);
+requireTextOrder(
+  ciWorkflowContents,
+  "-m scribe_drop_worker.container_check",
+  "-m scribe_drop_worker.bounded_container_check",
+  "ci.yml",
+  "normal image integrity check before maximum-duration bounded check",
+);
+requireTextOrder(
+  ciWorkflowContents,
+  "-m scribe_drop_worker.bounded_container_check",
+  "Generate SPDX JSON SBOM",
+  "ci.yml",
+  "maximum-duration bounded check before supply-chain reports",
 );
 
 for (const [description, value] of Object.entries({

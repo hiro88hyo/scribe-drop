@@ -1,6 +1,6 @@
 # ADR 0065: 実Serverless GPU poolをmutation前に検証する
 
-- Status: Accepted（staging capacity移行済み、実acceptanceはGPU配置待ち）
+- Status: Accepted（Serverless capacity制約を確認、`0.1.1` staging acceptanceはBlocked）
 - Date: 2026-08-01
 - Supersedes: ADR 0064のGPU候補選定とOpenAPI単独preflight
 - Retains: ADR 0064の`Any Region`配置、ADR 0052の実Worker attestation
@@ -86,3 +86,31 @@ read-only検証で`workersMin=0`、`workersMax=1`、active Worker 0、provider j
 `EU-RO-1`で5090 Medium、4090 Highを返した。表示上の在庫とServerless実配置が一致しないため、
 同じworkflowを再実行して成功扱いにしない。実Worker配置の証拠またはprovider側の説明を得るまで
 staging acceptanceとproduction promotionをBlockedとする。
+
+## Provider confirmation
+
+2026-08-06に、release workflowと分離した非機密probeを既存staging endpointへ実施した。最初の
+probeは`workersMin=1`を公開endpoint APIで10分間exact read-backしたが、jobなしでactive Workerは
+作成されず、healthの全worker counterも0だった。次に同じworker設定で固定dummy requestを1件だけ
+投入した。requestは10分間`IN_QUEUE`、`jobs.inProgress=0`のままで、active Worker、worker参照、
+execution timeは一度も現れず、healthのidle、ready、running、initializing、throttled、unhealthyも
+すべて0だった。別時間帯の再現でも同じ結果となった。各probeはrequestをcancelし、
+`workersMin=0`、queue 0、active Worker 0をexact read-backして終了した。実録音、R2 capability、
+artifact、notificationは作成していない。provider resource IDとrequest IDは追跡文書へ保存しない。
+
+同時刻のConsoleはendpointを`Initializing`と表示し、primary GPU supplyがLowである旨を表示したが、
+公開APIには対応するinitializing Workerが存在しなかった。RunPod supportは2026-08-10までの回答で
+次を確認した。
+
+- Schedulerは設定済みの全compatible GPU typeを、利用可能な全regionに対して評価した。
+- 設定済みfallback GPU typeとregionもcapacity checkへ含まれていた。
+- primary GPUだけでなく、設定したどの候補にもrequest時点のcapacityがなかった。
+- 公開APIはGPU capacity待ちとその他の`IN_QUEUE`を区別する別statusを提供しない。
+- Workerは作成されず、対象requestへの課金は発生しなかった。
+
+したがってglobal inventory、data center inventory、Serverless pool membership、endpoint exact
+read-backは、実requestを処理できるcapacityの予約または保証ではない。さらにcapacity不足を
+machine-readableに分類できないため、同じendpointを無条件に再試行する運用は開始SLOを保証せず、
+provider障害との切り分けもできない。inventory回復時の限定probeは診断には使えるが、production
+availabilityの根拠にはしない。`0.1.1`をこの状態でproductionへ昇格せず、
+[ADR 0066](./0066-design-ephemeral-gpu-vm-execution.md)のPhase 8 provider比較へ進む。

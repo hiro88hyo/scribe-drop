@@ -347,6 +347,17 @@ jobs:
             scribe-drop-runpod-worker:publish \
             -m scribe_drop_worker.container_check
 
+      - name: Verify maximum-duration bounded core offline
+        run: |
+          docker run \
+            --rm \
+            --network none \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --entrypoint python \
+            scribe-drop-runpod-worker:publish \
+            -m scribe_drop_worker.bounded_container_check
+
       - name: Generate synthetic M4A acceptance fixture
         run: |
           mkdir -p candidate-fixtures

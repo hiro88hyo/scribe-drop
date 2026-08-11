@@ -232,6 +232,12 @@ timeoutでは「10分ちょうどでprovider queueから消える」と扱わな
   `job.submission_cancel_deferred`を記録し、FAILEDを戻さず次回Cronで再試行する。
 - `job.submission_start_slo_exceeded`はGPU供給またはendpoint構成のrelease blockerである。
   claim tokenを15分より延長したり、workflowを自動retryしたりして回避しない。
+- RunPod supportは2026-08-10までに、Schedulerが全compatible GPU、全available region、全fallbackを
+  評価してcapacityがない場合も、公開APIはGPU capacity待ちとその他の`IN_QUEUE`を区別しないと
+  確認した。`IN_QUEUE`、active Worker 0、全worker counter 0は「配置処理なし」を証明せず、
+  capacity不足をmachine-readableにも確定できない。Consoleのsupply警告を自動判定へ使わず、
+  10分開始SLOでfail closedする。Worker未作成時はWorker logが存在しないため、support調査には
+  D1に保持するexact provider job IDとUTC windowを使い、IDをapplication logやtracked文書へ複製しない。
 - 同eventはproductionでも利用者影響として扱う。RunPod `/health`の`inQueue`または
   `throttled`増加と、`ready=0`かつ`running=0`を照合する。endpointのGPU候補とtemplateを
   公式APIでread-backし、固定planと不一致なら新規submissionを増やさない。
