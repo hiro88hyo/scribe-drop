@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import importlib
 from dataclasses import dataclass, replace
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Final
 
 import pytest
 
+import scribe_drop_worker.bounded_quality_check as quality_check_module
 from scribe_drop_worker.bounded_quality_check import (
     QUALITY_CHECK_FAILED,
     QUALITY_CHECK_OK,
@@ -125,6 +128,44 @@ def test_quality_options_match_the_pre_registered_native_case() -> None:
     assert options.language == "auto"
     assert options.vad is True
     assert options.output_formats == ("json",)
+
+
+def test_native_quality_model_uses_production_gpu_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The native gate cannot silently fall back to CPU inference."""
+    calls: list[tuple[str, dict[str, object]]] = []
+    expected_model = ReferenceModel()
+
+    def constructor(model_path: str, **options: object) -> ReferenceModel:
+        calls.append((model_path, options))
+        return expected_model
+
+    monkeypatch.setattr(quality_check_module, "verify_model_bundle", lambda _path: None)
+    monkeypatch.setattr(
+        importlib,
+        "import_module",
+        lambda name: (
+            SimpleNamespace(WhisperModel=constructor) if name == "faster_whisper" else None
+        ),
+    )
+
+    model = quality_check_module._create_gpu_model(  # noqa: SLF001 - default factory contract.
+        DEFAULT_MODEL_PATH
+    )
+
+    assert model is expected_model
+    assert calls == [
+        (
+            DEFAULT_MODEL_PATH,
+            {
+                "device": "cuda",
+                "compute_type": "float16",
+                "local_files_only": True,
+                "num_workers": 1,
+            },
+        )
+    ]
 
 
 def test_full_file_reference_uses_exact_options_and_validates_segments(tmp_path: Path) -> None:
@@ -289,7 +330,7 @@ def test_quality_runner_uses_one_model_two_paths_and_removes_all_files(tmp_path:
     )
 
     assert metrics.global_error_rate == 0
-    assert calls == ["fixture", "model", "reference", "candidate"]
+    assert calls == ["model", "fixture", "reference", "candidate"]
     assert tuple(tmp_path.iterdir()) == ()
 
 

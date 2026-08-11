@@ -121,7 +121,8 @@ CandidateRunner = Callable[
 MediaProbe = Callable[[Path, float], MediaInfo]
 
 
-def _create_cpu_model(model_path: str) -> QualityWhisperModelPort:
+def _create_gpu_model(model_path: str) -> QualityWhisperModelPort:
+    """Load the fixed model with the production CUDA/float16 settings."""
     path = Path(model_path)
     try:
         verify_model_bundle(path)
@@ -129,8 +130,8 @@ def _create_cpu_model(model_path: str) -> QualityWhisperModelPort:
         constructor = cast("Callable[..., QualityWhisperModelPort]", module.WhisperModel)
         return constructor(
             model_path,
-            device="cpu",
-            compute_type="int8",
+            device="cuda",
+            compute_type="float16",
             local_files_only=True,
             num_workers=1,
         )
@@ -163,7 +164,7 @@ def _default_candidate_runner(
 class QualityCheckPorts:
     """Replaceable boundaries for deterministic unit tests and one local native run."""
 
-    model_factory: ModelFactory = _create_cpu_model
+    model_factory: ModelFactory = _create_gpu_model
     fixture_factory: FixtureFactory = generate_speech_quality_fixture
     reference_runner: ReferenceRunner = _default_reference_runner
     candidate_runner: CandidateRunner = _default_candidate_runner
@@ -307,8 +308,9 @@ def run_bounded_quality_check(
 
 
 def _execute_quality_check(ports: QualityCheckPorts, task_directory: Path) -> QualityMetrics:
-    fixture, media = _create_fixture_and_media(ports, task_directory)
+    # Fail before fixture synthesis when CUDA or the fixed model is unavailable.
     model = _load_quality_model(ports)
+    fixture, media = _create_fixture_and_media(ports, task_directory)
     reference = _run_reference(ports, model, fixture, media.duration_seconds)
     candidate = _run_candidate(ports, model, fixture, media, task_directory)
     return evaluate_quality(reference, candidate, fixture.boundary_interval)

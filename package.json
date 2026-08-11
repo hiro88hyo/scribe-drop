@@ -56,7 +56,7 @@
     "container:build:quality:runpod": "docker buildx build --load --tag scribe-drop-runpod-worker-quality:local --build-arg WORKER_IMAGE=scribe-drop-runpod-worker:local --file apps/runpod-worker/quality.Dockerfile .",
     "container:check:runpod": "docker run --rm --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m --entrypoint python scribe-drop-runpod-worker:local -m scribe_drop_worker.container_check",
     "container:check:bounded:runpod": "docker run --rm --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m --entrypoint python scribe-drop-runpod-worker:local -m scribe_drop_worker.bounded_container_check",
-    "container:check:quality:runpod": "docker run --rm --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=128m scribe-drop-runpod-worker-quality:local",
+    "container:check:quality:runpod": "docker run --rm --gpus device=0 --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=128m scribe-drop-runpod-worker-quality:local",
     "container:scan:runpod": "./.tools/bin/trivy image --cache-dir .tools/trivy-cache --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed=false --exit-code 1 --format table --table-mode detailed --quiet --skip-version-check --timeout 15m scribe-drop-runpod-worker:local",
     "container:scan:quality:runpod": "./.tools/bin/trivy image --cache-dir .tools/trivy-cache --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed=false --exit-code 1 --format table --table-mode detailed --quiet --skip-version-check --timeout 15m scribe-drop-runpod-worker-quality:local",
     "d1:migrate:local": "wrangler d1 migrations apply SCRIBE_DROP_DB --local --config apps/orchestrator/wrangler.toml",

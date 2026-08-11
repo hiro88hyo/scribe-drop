@@ -13,7 +13,9 @@
 auto detectionは証明していない。
 
 このPhaseでは現行RunPod、Cloud Run resource、R2、D1、staging、productionを変更しない。local native比較は
-固定modelを含むbuild済みworker imageから派生した短命quality imageで行い、networkを無効にする。
+固定modelを含むbuild済みworker imageから派生した短命quality imageで行い、networkを無効にする。native比較は
+本番workerと同じ`device=cuda`、`compute_type=float16`を固定し、GPU 0だけをcontainerへ公開する。CUDAを
+利用できない場合はfixture生成前に失敗させ、CPU fallbackは許可しない。
 
 ## 2. Fixture provenance and privacy
 
