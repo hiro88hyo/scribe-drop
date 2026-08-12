@@ -1362,6 +1362,9 @@ local preparation（2026-08-11〜12）:
   Artifact Registry両repositoryが空、project Occurrence 0をread-backした。GitHub Environment jobのdefault subjectが
   branch contextではなくenvironment contextになるため、WIF planをimmutable repository prefixのexact staging subject、
   数値ID、repository/owner名、environment、release ref、event、workflowの同時照合へ修正した。
+- 修正後runはOIDCとkeyless gcloud preflightに成功したが、auth actionの一時credentialをPrettierが対象にしてimage build前に
+  停止した。local application/secret/dependency gateをcloud authより前へ移し、OIDCはimage build直前に維持する。一時
+  `gha-creds-*.json`をGit/Docker build contextから除外し、static workflow verifierで順序と除外を固定した。
 - forward-only `0011_cloud_run_runtime_protocol.sql`でbootstrap、challenge/session、allowlist terminal eventを
   provider executionへ外部キーで固定した。challenge消費、sequence、terminal revokeはD1 CAS/triggerへ収束する。
 - D1 production repositoryはactive attempt、provider kind/policy、contract v2、source key/ETag/size、result prefixを

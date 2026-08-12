@@ -18,6 +18,8 @@ const cloudRunPublicationWorkflowPath = path.join(
   workflowsDirectory,
   "publish-cloud-run-candidate.yml",
 );
+const dockerIgnorePath = path.join(repositoryRoot, ".dockerignore");
+const gitIgnorePath = path.join(repositoryRoot, ".gitignore");
 const cloudflareReadbackScriptPath = path.join(
   repositoryRoot,
   "scripts",
@@ -228,6 +230,8 @@ const publicationWorkflowContents = readFileSync(publicationWorkflowPath, "utf8"
 const stagingWorkflowContents = readFileSync(stagingWorkflowPath, "utf8");
 const productionWorkflowContents = readFileSync(productionWorkflowPath, "utf8");
 const cloudRunPublicationWorkflowContents = readFileSync(cloudRunPublicationWorkflowPath, "utf8");
+const dockerIgnoreContents = readFileSync(dockerIgnorePath, "utf8");
+const gitIgnoreContents = readFileSync(gitIgnorePath, "utf8");
 const cloudflareReadbackScriptContents = readFileSync(cloudflareReadbackScriptPath, "utf8");
 const stagingE2eContents = readFileSync(stagingE2ePath, "utf8");
 const stagingFailureE2eContents = readFileSync(stagingFailureE2ePath, "utf8");
@@ -458,11 +462,11 @@ for (const [description, forbidden] of Object.entries({
 for (const [earlier, later, description] of [
   [
     "Require one versioned release commit",
-    "Authenticate publisher",
-    "release identity before cloud auth",
+    "Run complete application",
+    "release identity before repository gates",
   ],
-  ["Authenticate publisher", "Run complete application", "keyless auth before costly gates"],
-  ["Run complete application", "Build and inspect", "repository gates before image builds"],
+  ["Run complete application", "Authenticate publisher", "repository gates before cloud auth"],
+  ["Authenticate publisher", "Build and inspect", "keyless auth before image builds"],
   ["Build and inspect", "Push each image", "image gates before publication"],
   [
     "Push each image",
@@ -480,6 +484,19 @@ for (const [earlier, later, description] of [
     description,
   );
 }
+
+requireText(
+  gitIgnoreContents,
+  "gha-creds-*.json",
+  ".gitignore",
+  "GitHub auth credential exclusion",
+);
+requireText(
+  dockerIgnoreContents,
+  "**/gha-creds-*.json",
+  ".dockerignore",
+  "GitHub auth credential build-context exclusion",
+);
 
 if (image.uvImage.version !== versions.uv) {
   failures.push(

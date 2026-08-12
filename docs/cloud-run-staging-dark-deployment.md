@@ -196,7 +196,10 @@ OIDC、full gate、SBOM/scan、各image 1 push、registry digest、KMS署名、0
 初回workflowは旧branch-context subjectをpublisher OIDC preflightで拒否し、後続stepを実行しなかった。GitHub OIDC
 customization APIのimmutable subject prefix、staging Environmentの`release/*`単一branch policyをread-backし、subjectを
 exact `environment:staging` contextへ修正した。失敗後も両repositoryは空、project Occurrenceは0であり、candidate image、
-attestation、Cloud Run Service/Jobはまだ存在しない。
+attestation、Cloud Run Service/Jobはまだ存在しない。修正後runではOIDCとkeyless gcloud preflightが成功したが、auth actionの
+一時`gha-creds-*.json`をroot Prettierが走査してapplication gateで停止し、image buildへ到達しなかった。application/secret/
+dependency gateをcloud authより前、OIDC preflightをimage build直前へ固定し、一時credentialをGitとDocker build contextから
+明示除外する。再実行前も両repositoryが空であることをread-backする。
 
 controller authorityは[ADR 0078](./adr/0078-split-controller-iam-by-resource-boundary.md)に従うpure IAM planで分割する。Cloud Run Jobs roleは
 実clientが呼ぶ8 permissionだけ、Firestore roleはtransactionとentity CRUDの5 permissionだけとし、database条件、runtime
