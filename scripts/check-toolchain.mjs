@@ -55,7 +55,10 @@ function expectVersionPrefix(label, actualOutput, expected) {
   console.log(`${label}: ${actual}`);
 }
 
-expectVersion("Volta", execute("volta", ["--version"]), toolVersions.volta);
+const voltaExecutable = process.env.VOLTA_HOME
+  ? path.join(process.env.VOLTA_HOME, "bin", process.platform === "win32" ? "volta.exe" : "volta")
+  : "volta";
+expectVersion("Volta", execute(voltaExecutable, ["--version"]), toolVersions.volta);
 expectVersion("Node.js", process.versions.node, packageJson.volta.node);
 expectVersion("pnpm", execute("pnpm", ["--version"]), packageJson.volta.pnpm);
 expectVersion("uv", execute("uv", ["--version"]), toolVersions.uv);
@@ -84,6 +87,16 @@ expectVersion(
   "runpodctl",
   execute(runpodctlExecutable, ["version"]),
   toolVersions.runpodctl.version,
+);
+
+const trivyExecutable =
+  process.platform === "win32"
+    ? path.join(repositoryRoot, ".tools", "bin", "trivy.exe")
+    : path.join(repositoryRoot, ".tools", "bin", "trivy");
+expectVersion(
+  "Trivy",
+  execute(trivyExecutable, ["--version"]),
+  toolVersions.runpodWorkerImage.trivy.version,
 );
 
 if (process.env.VOLTA_FEATURE_PNPM !== "1") {

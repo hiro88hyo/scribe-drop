@@ -16,6 +16,13 @@ const OWNER_HASH = "0123456789abcdef0123456789abcdef";
 const SOURCE_KEY = `incoming/${OWNER_HASH}/${RETAINED_JOB_ID}/nonce/source.mp3`;
 const RESULT_PREFIX = `results/${OWNER_HASH}/${RETAINED_JOB_ID}/${RETAINED_ATTEMPT_ID}/`;
 const EXPIRED_SOURCE_KEY = `incoming/${OWNER_HASH}/${EXPIRED_AUDIT_JOB_ID}/nonce/source.mp3`;
+const EXECUTION_OPTIONS = JSON.stringify({
+  contractVersion: 1,
+  language: "auto",
+  model: "large-v3-turbo",
+  outputFormats: ["markdown", "json", "srt"],
+  vad: true,
+});
 
 beforeAll(async () => {
   await applyD1Migrations(env.SCRIBE_DROP_DB, env.TEST_MIGRATIONS);
@@ -102,12 +109,19 @@ async function seedRetentionCandidates(): Promise<void> {
         status,
         result_prefix,
         completed_at,
+        provider_kind,
+        provider_policy,
+        execution_contract_version,
+        execution_options_json,
         created_at,
         updated_at
-      ) VALUES (?1, ?2, 1, 'COMPLETED', ?3, ?4, ?4, ?4)
+      ) VALUES (
+        ?1, ?2, 1, 'COMPLETED', ?3, ?4, 'runpod_serverless',
+        'runpod_serverless_v1', 1, ?5, ?4, ?4
+      )
     `,
   )
-    .bind(RETAINED_ATTEMPT_ID, RETAINED_JOB_ID, RESULT_PREFIX, oneHundredDaysAgo)
+    .bind(RETAINED_ATTEMPT_ID, RETAINED_JOB_ID, RESULT_PREFIX, oneHundredDaysAgo, EXECUTION_OPTIONS)
     .run();
   await env.SCRIBE_DROP_DB.batch([
     env.SCRIBE_DROP_DB.prepare("UPDATE jobs SET active_attempt_id = ?2 WHERE id = ?1").bind(
@@ -246,5 +260,39 @@ describe("configured retention", () => {
     await expect(
       env.SCRIBE_DROP_DB.prepare("SELECT id FROM jobs WHERE id = ?1").bind(RETAINED_JOB_ID).first(),
     ).resolves.not.toBeNull();
+  });
+
+  it("leaves source and results untouched when the provider aggregate drifts", async () => {
+    await seedRetentionCandidates();
+    await env.SCRIBE_DROP_DB.prepare(
+      "UPDATE provider_executions SET status = 'RUNNING' WHERE attempt_id = ?1",
+    )
+      .bind(RETAINED_ATTEMPT_ID)
+      .run();
+
+    await expect(
+      processRetention(
+        {
+          AUDIT_RETENTION_DAYS: "180",
+          MULTIPART_RETENTION_HOURS: "24",
+          RECORDINGS: env.RECORDINGS,
+          RESULT_RETENTION_DAYS: "90",
+          SCRIBE_DROP_DB: env.SCRIBE_DROP_DB,
+          SOURCE_RETENTION_DAYS: "7",
+        },
+        logger(),
+        {
+          createEventId: () => EVENT_ID,
+          now: () => NOW,
+        },
+      ),
+    ).resolves.toEqual({
+      auditScheduledCount: 1,
+      resultDeletedCount: 0,
+      retryCount: 0,
+      sourceDeletedCount: 1,
+    });
+    await expect(env.RECORDINGS.head(SOURCE_KEY)).resolves.not.toBeNull();
+    await expect(env.RECORDINGS.head(`${RESULT_PREFIX}partial.json`)).resolves.not.toBeNull();
   });
 });

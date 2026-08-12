@@ -208,6 +208,7 @@ class FakeMediaProbe:
         assert max_duration_seconds == MAX_TEST_DURATION_SECONDS
         self.operations.append("probe")
         return MediaInfo(
+            audio_stream_index=0,
             duration_seconds=60.0,
             stream_count=1,
             format_name="mp3",

@@ -21,6 +21,7 @@ import {
   setRunpodEndpointDataCenters,
   setRunpodEndpointGpuTypes,
   setRunpodEndpointWorkersMax,
+  verifyRunpodServerlessGpuPools,
   verifyRunpodServerlessGpuTypes,
 } from "./runpod-template-api.mjs";
 
@@ -129,6 +130,10 @@ try {
     environment,
   );
   await verifyRunpodServerlessGpuTypes({ gpuTypeIds: plan.endpoint.gpuTypeIds });
+  await verifyRunpodServerlessGpuPools({
+    apiKey: process.env["RUNPOD_API_KEY"],
+    gpuTypeIds: plan.endpoint.gpuTypeIds,
+  });
   if (preflightOnly) {
     const preflightInput = {
       endpointId,

@@ -14,6 +14,33 @@ const notificationErrorCodeSchema = z.enum(NOTIFICATION_ERROR_CODES);
 const updatedIdRowsSchema = z.array(z.object({ id: ulidSchema }).strict()).max(1);
 const terminalStatusSchema = z.enum(["COMPLETED", "FAILED"]);
 
+const JOB_PROVIDER_COMPATIBILITY_PREDICATE = `
+  (
+    jobs.active_attempt_id IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM job_attempts AS attempts
+      LEFT JOIN provider_executions AS executions ON executions.attempt_id = attempts.id
+      WHERE attempts.id = jobs.active_attempt_id
+        AND (
+          (
+            attempts.provider_kind IS NULL
+            AND executions.id IS NULL
+          )
+          OR (
+            executions.id = attempts.id
+            AND executions.provider_kind = attempts.provider_kind
+            AND executions.provider_policy = attempts.provider_policy
+            AND executions.status = 'TERMINAL'
+            AND executions.create_outcome IS attempts.submission_outcome
+            AND executions.provider_handle IS attempts.winning_runpod_job_id
+            AND executions.terminal_status IS attempts.runpod_terminal_status
+          )
+        )
+    )
+  )
+`;
+
 const ENQUEUE_NEXT_TERMINAL_NOTIFICATION_SQL = `
   INSERT INTO notification_outbox (
     id,
@@ -44,6 +71,7 @@ const ENQUEUE_NEXT_TERMINAL_NOTIFICATION_SQL = `
       (jobs.status = 'COMPLETED' AND jobs.completed_at IS NOT NULL)
       OR (jobs.status = 'FAILED' AND jobs.failed_at IS NOT NULL)
     )
+    AND ${JOB_PROVIDER_COMPATIBILITY_PREDICATE}
     AND NOT EXISTS (
       SELECT 1
       FROM notification_outbox AS existing
@@ -87,6 +115,7 @@ const CLAIM_NOTIFICATION_SQL = `
       AND outbox.job_version = jobs.version
       AND jobs.notified_at IS NULL
       AND jobs.deleted_at IS NULL
+      AND ${JOB_PROVIDER_COMPATIBILITY_PREDICATE}
     ORDER BY COALESCE(outbox.next_attempt_at, outbox.created_at), outbox.id
     LIMIT 1
   )

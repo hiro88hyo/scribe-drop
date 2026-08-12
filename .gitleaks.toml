@@ -12,3 +12,11 @@ condition = "AND"
 regexTarget = "line"
 regexes = ['''^\s*"registryAuthId": "[A-Za-z0-9_-]{3,128}",?\s*$''']
 paths = ['''^\.runpod/deploy/(?:staging|production)-plan\.json$''']
+
+[[allowlists]]
+description = "Locally installed Google Cloud SDK and its ignored credential store"
+paths = ['''^\.tools/(?:google-cloud-sdk|gcloud-config)/''']
+
+[[allowlists]]
+description = "Downloaded Trivy vulnerability database cache"
+paths = ['''^\.tools/trivy-cache/''']

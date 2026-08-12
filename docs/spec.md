@@ -455,6 +455,11 @@ CREATE TABLE job_attempts (
     winning_runpod_job_id TEXT,
     result_prefix TEXT NOT NULL,
 
+    provider_kind TEXT,
+    provider_policy TEXT,
+    execution_contract_version INTEGER,
+    execution_options_json TEXT,
+
     submission_started_at TEXT,
     submission_outcome TEXT,
     submission_finished_at TEXT,
@@ -488,7 +493,47 @@ forward-only table rebuildによってsentinelをNULLへ変換し、未使用の
 `webhook_token_hash`を除去する。claim tokenはRunPod投入直前、heartbeat tokenは
 winner claim成功時に初めて発行する。
 
-### 7.3 runpod_submissions
+Phase 11では[ADR 0074](./adr/0074-expand-provider-execution-compatibility-without-mixing-contracts.md)に
+従い、上記4つのexecution binding列をforward-only migrationで追加する。旧codeとのexpand互換期間は
+4列すべてNULLのlegacy rowを許すが、新codeはattempt insert時に4列すべてを固定し、以後の変更をtriggerで
+拒否する。現行RunPod attemptはcontract v1を明示し、bounded contract v2を同じattemptへ推測適用しない。
+
+### 7.3 provider_executions
+
+provider lifecycleとcleanupの互換aggregate。Phase 11ではRunPod adapterだけが使用し、provider resourceや
+environment switchは追加しない。
+
+```sql
+CREATE TABLE provider_executions (
+    id TEXT PRIMARY KEY,
+    attempt_id TEXT NOT NULL UNIQUE,
+    provider_kind TEXT NOT NULL,
+    provider_policy TEXT NOT NULL,
+    status TEXT NOT NULL,
+    create_outcome TEXT,
+    provider_handle TEXT,
+    terminal_status TEXT,
+    cleanup_status TEXT NOT NULL DEFAULT 'NOT_REQUESTED',
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+
+    FOREIGN KEY(attempt_id) REFERENCES job_attempts(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_provider_executions_status_updated
+ON provider_executions(status, updated_at, id);
+
+CREATE UNIQUE INDEX idx_provider_executions_handle
+ON provider_executions(provider_kind, provider_handle)
+WHERE provider_handle IS NOT NULL;
+```
+
+`provider_handle`はopaque値として扱い、利用者response、log、tracked evidenceへ出さない。RunPod移行期間は
+旧attempt列をsourceとしてaggregateへdual-writeし、submission、claim、completion、cancel、retention、delete、
+notificationは両者の完全一致を必要とする。cleanup transitionは`version`付きCASで直列化する。
+
+### 7.4 runpod_submissions
 
 RunPod `/run`の重複呼出しを観測するためのテーブル。
 
@@ -520,7 +565,7 @@ status_poll
 forward-only migrationで除去する。上記は移行後の論理schemaであり、適用済みmigration
 を書き換えない。
 
-### 7.4 job_events
+### 7.5 job_events
 
 監査・デバッグ用の追記専用テーブル。
 
@@ -543,7 +588,7 @@ ON job_events(job_id, created_at);
 
 音声本文、文字起こし本文、短期認証情報、署名付きURL、token原文は保存しない。
 
-### 7.5 notification_outbox
+### 7.6 notification_outbox
 
 ```sql
 CREATE TABLE notification_outbox (

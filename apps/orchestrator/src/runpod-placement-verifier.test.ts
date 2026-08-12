@@ -38,8 +38,8 @@ function options(fetchImplementation: typeof fetch): RunpodPlacementVerifierOpti
   return {
     allowedGpuTypeIds: [
       "NVIDIA GeForce RTX 5090",
-      "NVIDIA RTX PRO 4500 Blackwell",
       "NVIDIA GeForce RTX 4090",
+      "NVIDIA RTX PRO 6000 Blackwell Server Edition",
     ],
     apiKey: API_KEY,
     endpointId: ENDPOINT_ID,

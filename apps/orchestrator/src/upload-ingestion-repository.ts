@@ -1,10 +1,12 @@
 import {
   MAX_FILE_SIZE_BYTES,
+  jobOptionsSchema,
   jobStatusSchema,
   publicErrorCodeSchema,
   ulidSchema,
   utcDateTimeSchema,
   type JobStatus,
+  type JobOptions,
   type PublicErrorCode,
 } from "@scribe-drop/contracts";
 import { z } from "zod";
@@ -17,6 +19,7 @@ const FIND_SOURCE_JOB_SQL = `
     jobs.expected_size_bytes,
     jobs.actual_size_bytes,
     jobs.source_etag,
+    jobs.options_json,
     jobs.status,
     jobs.version,
     jobs.active_attempt_id,
@@ -37,6 +40,10 @@ const INSERT_ATTEMPT_SQL = `
     generation,
     status,
     result_prefix,
+    provider_kind,
+    provider_policy,
+    execution_contract_version,
+    execution_options_json,
     created_at,
     updated_at
   )
@@ -46,6 +53,10 @@ const INSERT_ATTEMPT_SQL = `
     1,
     'SUBMISSION_PENDING',
     ?3,
+    'runpod_serverless',
+    'runpod_serverless_v1',
+    1,
+    ?10,
     ?4,
     ?4
   FROM jobs
@@ -263,6 +274,14 @@ const sourceJobRowSchema = z
     expected_size_bytes: z.number().int().positive().max(MAX_FILE_SIZE_BYTES),
     generation_one_attempt_id: ulidSchema.nullable(),
     id: ulidSchema,
+    options_json: z.string().transform((value, context) => {
+      try {
+        return jobOptionsSchema.parse(JSON.parse(value));
+      } catch {
+        context.addIssue({ code: "custom", message: "Invalid persisted job options" });
+        return z.NEVER;
+      }
+    }),
     source_bucket: z.string().min(3).max(63),
     source_etag: z.string().min(1).max(512).nullable(),
     source_key: z.string().min(1).max(1024).startsWith("incoming/"),
@@ -291,6 +310,7 @@ export interface SourceJob {
   readonly expectedSizeBytes: number;
   readonly generationOneAttemptId: string | null;
   readonly id: string;
+  readonly options: JobOptions;
   readonly sourceBucket: string;
   readonly sourceEtag: string | null;
   readonly sourceKey: string;
@@ -334,6 +354,7 @@ function mapSourceJob(row: z.infer<typeof sourceJobRowSchema>): SourceJob {
     expectedSizeBytes: row.expected_size_bytes,
     generationOneAttemptId: row.generation_one_attempt_id,
     id: row.id,
+    options: row.options_json,
     sourceBucket: row.source_bucket,
     sourceEtag: row.source_etag,
     sourceKey: row.source_key,
@@ -379,6 +400,10 @@ export function createD1UploadIngestionRepository(database: D1Database): UploadI
       const attemptId = input.job.generationOneAttemptId ?? ulidSchema.parse(input.attemptId);
       const eventId = ulidSchema.parse(input.eventId);
       const ownerHash = ownerHashSchema.parse(input.ownerHash);
+      const executionOptionsJson = JSON.stringify({
+        contractVersion: 1,
+        ...input.job.options,
+      });
       const resultPrefix = `results/${ownerHash}/${input.job.id}/${attemptId}/`;
       const statements: D1PreparedStatement[] = [];
       if (input.job.generationOneAttemptId === null) {
@@ -395,6 +420,7 @@ export function createD1UploadIngestionRepository(database: D1Database): UploadI
               input.job.sourceKey,
               sizeBytes,
               sourceEtag,
+              executionOptionsJson,
             ),
         );
       }

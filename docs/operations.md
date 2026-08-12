@@ -232,6 +232,12 @@ timeoutでは「10分ちょうどでprovider queueから消える」と扱わな
   `job.submission_cancel_deferred`を記録し、FAILEDを戻さず次回Cronで再試行する。
 - `job.submission_start_slo_exceeded`はGPU供給またはendpoint構成のrelease blockerである。
   claim tokenを15分より延長したり、workflowを自動retryしたりして回避しない。
+- RunPod supportは2026-08-10までに、Schedulerが全compatible GPU、全available region、全fallbackを
+  評価してcapacityがない場合も、公開APIはGPU capacity待ちとその他の`IN_QUEUE`を区別しないと
+  確認した。`IN_QUEUE`、active Worker 0、全worker counter 0は「配置処理なし」を証明せず、
+  capacity不足をmachine-readableにも確定できない。Consoleのsupply警告を自動判定へ使わず、
+  10分開始SLOでfail closedする。Worker未作成時はWorker logが存在しないため、support調査には
+  D1に保持するexact provider job IDとUTC windowを使い、IDをapplication logやtracked文書へ複製しない。
 - 同eventはproductionでも利用者影響として扱う。RunPod `/health`の`inQueue`または
   `throttled`増加と、`ready=0`かつ`running=0`を照合する。endpointのGPU候補とtemplateを
   公式APIでread-backし、固定planと不一致なら新規submissionを増やさない。
@@ -241,13 +247,14 @@ timeoutでは「10分ちょうどでprovider queueから消える」と扱わな
   Pod IDをlogへ追加して調査しない。RunPod planとCloudflare bindingのread-backを先に確認する。
 - inventory preflightは固定GPU候補がすべてSecure Cloudで提供され、2候補以上が
   availableであることを確認する。stock tierは運用シグナルでありreleaseの合否には使わない。
-  live OpenAPIのendpoint create/update enumにも全候補が存在しなければならない。条件を
+  live OpenAPIのendpoint create/update enumと認証済みGraphQLの`serverlessGpuPools`にも
+  全候補が存在し、各候補が相異なるpoolへ一意に対応しなければならない。条件を
   満たさない場合はworkflowを開始せず、同じjobやworkflowを繰り返して供給待ちを隠さない。
 - inventoryのavailableは実割り当てを保証しない。staging acceptanceは
   [ADR 0051](./adr/0051-prewarm-staging-before-job-creation.md)に従い、job作成前に
   candidate Workerを最大8分prewarmする。ready evidenceを得られなければjobを作らず、
   `workersMin=0`のexact read-backまで確認する。cleanup失敗は課金継続のalert対象とする。
-- [ADR 0064](./adr/0064-expand-runpod-placement-capacity.md)に従い、追跡対象planは
+- [ADR 0065](./adr/0065-validate-runpod-serverless-gpu-pools.md)に従い、追跡対象planは
   `Any Region`とCompliance `Any`を使用する。Compliance filterはSecure Cloud切替ではないため、
   実Workerの`secureCloud=true` attestationを必ず維持する。追跡対象plan
   とpromotionはRESTのGPU情報とConsole-equivalent GraphQLのdata center/compliance情報を
@@ -296,6 +303,25 @@ timeoutでは「10分ちょうどでprovider queueから消える」と扱わな
 - retentionはterminal jobだけを対象に、source、attempt result、監査情報を7日、90日、
   180日の独立したcutoffで回収する。値はenvironment変数で変更できるが、
   `source <= result <= audit`を崩さない。監査期限はuser deletionと同じ物理削除へ渡す。
+- Phase 11 migration後は、RunPod旧列と`provider_executions`のprovider kind/policy、状態、create outcome、
+  opaque handle、terminal observationが一致しないattemptへsubmission、status/cancel、R2 cleanup、notificationを
+  実行しない。どちらかを手動SQLで合わせたり、aggregateだけを削除してlegacy扱いへ戻したりしない。まずread-onlyで
+  attempt ID、両status、両outcome、handleの一致有無だけを確認し、値そのものをincident logへ残さない。repairが必要なら
+  dry-run、CAS、監査eventを持つ専用commandを別変更で実装する。
+- cleanupの`PENDING`、`IN_PROGRESS`、`SUCCEEDED`、`FAILED`はexecution statusと別の状態機械である。stale versionや
+  concurrent claimがfalseを返すのは正常な競合であり、手動でversionを増減しない。`FAILED`からの再要求だけを許可する。
+- Phase 13のCloud Run one-shotはlocal implementationだけであり、運用対象resourceは存在しない。local evidenceは
+  `pnpm container:check:cloud-run`、`container:sbom:cloud-run`、`container:scan:cloud-run`で再生成する。SBOMを
+  repositoryへ追加せず、local imageをregistryへpushしない。terminal reportはcleanup pendingであり、provider
+  Execution/Job不存在とartifact/finalizeを確認するまで手動で`COMPLETED`へ変更しない。
+- Phase 14 local preparationで`0011` migrationとshadow namespaceを追加したが、remote D1へ未適用で運用対象ではない。
+  `CLOUD_RUN_RUNTIME_MODE`をWrangler、dashboard、secretへ手動設定しない。local D1 eventのsequenceやrevokeを直接更新せず、
+  repository経由のexact replayだけを使う。実staging運用は[dark deployment](./cloud-run-staging-dark-deployment.md)の残gateを
+  同一candidateで満たしてから別途開始する。
+- Phase 14 staging release foundationのArtifact Registry、WIF、service account、KMS key、Artifact Analysis Note、Binary
+  Authorization attestor/policyは作成済みである。KMS active key versionの保持費を監視し、candidate監査とproduction昇格が
+  終わる前に削除しない。publisher/signerへuser-managed keyを作らず、candidate workflow外からimage pushまたはOccurrenceを
+  発行しない。candidate image/Occurrence、Cloud Run Service/Job、Firestore、Secret Managerはまだ未作成である。
 - terminal statusをD1で観測していないjobは、manifestが存在しても`COMPLETED`にしない。
 - 手動修復が必要でもjob/attempt/outboxを直接SQLで更新しない。同じrepositoryとserviceを
   使う専用repair commandを先に実装し、dry-run、CAS、監査eventを必須とする。

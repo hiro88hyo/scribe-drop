@@ -26,6 +26,7 @@ function fakeRepository(
   overrides: Partial<DeletionRepository> = {},
 ): DeletionRepository {
   return {
+    assertProviderCompatibility: () => Promise.resolve(),
     deferDeletion: () => Promise.resolve(true),
     deleteJobRecord: () => Promise.resolve("deleted"),
     findDeletionCandidates: () => Promise.resolve([deletionCandidate]),
@@ -173,6 +174,36 @@ describe("pending user deletion sweep", () => {
       nextAttemptAt: "2026-07-26T04:01:00.000Z",
       timestamp: NOW.toISOString(),
     });
+  });
+
+  it("does not contact RunPod when provider execution state drifted", async () => {
+    const cancel = vi.fn<RunpodControlClient["cancel"]>();
+    const recordDeletionRetry = vi.fn<DeletionRepository["recordDeletionRetry"]>(() =>
+      Promise.resolve(true),
+    );
+
+    await expect(
+      processPendingDeletions(environment(memoryBucket([]).bucket), logger([]), {
+        createRepository: () =>
+          fakeRepository(candidate(), {
+            assertProviderCompatibility: () =>
+              Promise.reject(new Error("provider execution drift")),
+            recordDeletionRetry,
+          }),
+        createRunpodClient: () => runpodClient(cancel),
+        now: () => NOW,
+        random: () => 0.5,
+      }),
+    ).resolves.toEqual({
+      completedCount: 0,
+      deferredCount: 0,
+      retryCount: 1,
+    });
+
+    expect(cancel).not.toHaveBeenCalled();
+    expect(recordDeletionRetry).toHaveBeenCalledWith(
+      expect.objectContaining({ errorCode: "RUNPOD_CANCEL_FAILED", jobId: JOB_ID }),
+    );
   });
 
   it("cancels known RunPod work before deleting an already-expired job record", async () => {

@@ -30,7 +30,7 @@ const retentionDefaults = {
   sourceRetentionDays: 7,
 };
 const runpodGpuIdsPlaceholder =
-  "NVIDIA GeForce RTX 5090,NVIDIA RTX PRO 4500 Blackwell,NVIDIA GeForce RTX 4090";
+  "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090,NVIDIA RTX PRO 6000 Blackwell Server Edition";
 const runpodWorkerImagePlaceholder =
   "ghcr.io/example/scribe-drop-runpod-worker@sha256:" + "0".repeat(64);
 

@@ -170,6 +170,73 @@ export function verifyRunpodServerlessGpuTypes(input, dependencies = {}) {
   );
 }
 
+function validateServerlessGpuPoolMappings(value, gpuTypeIds) {
+  if (!Array.isArray(value?.errors ?? []) || (value.errors ?? []).length !== 0) {
+    throw new Error("RunPod Serverless GPU pool response is missing or invalid");
+  }
+  const pools = value?.data?.serverlessGpuPools;
+  if (!Array.isArray(pools) || pools.length === 0) {
+    throw new Error("RunPod Serverless GPU pool response is missing or invalid");
+  }
+  const validatedPools = pools.map((untrustedPool) => {
+    if (
+      typeof untrustedPool !== "object" ||
+      untrustedPool === null ||
+      Array.isArray(untrustedPool) ||
+      typeof untrustedPool.id !== "string" ||
+      !/^[A-Z0-9_]{2,64}$/u.test(untrustedPool.id) ||
+      !Array.isArray(untrustedPool.gpuTypeIds) ||
+      untrustedPool.gpuTypeIds.length === 0 ||
+      untrustedPool.gpuTypeIds.some(
+        (gpuTypeId) => typeof gpuTypeId !== "string" || !gpuTypeIdPattern.test(gpuTypeId),
+      ) ||
+      new Set(untrustedPool.gpuTypeIds).size !== untrustedPool.gpuTypeIds.length
+    ) {
+      throw new Error("RunPod Serverless GPU pool response is missing or invalid");
+    }
+    return { gpuTypeIds: untrustedPool.gpuTypeIds, id: untrustedPool.id };
+  });
+  if (new Set(validatedPools.map((pool) => pool.id)).size !== validatedPools.length) {
+    throw new Error("RunPod Serverless GPU pool response is missing or invalid");
+  }
+  const resolvedPoolIds = gpuTypeIds.map((gpuTypeId) => {
+    const matches = validatedPools.filter((pool) => pool.gpuTypeIds.includes(gpuTypeId));
+    if (matches.length !== 1) {
+      throw new Error("RunPod fixed GPU policy does not uniquely map to Serverless GPU pools");
+    }
+    return matches[0].id;
+  });
+  if (new Set(resolvedPoolIds).size !== gpuTypeIds.length) {
+    throw new Error("RunPod fixed GPU policy contains duplicate Serverless GPU pools");
+  }
+  return { configuredCount: gpuTypeIds.length, poolCount: resolvedPoolIds.length };
+}
+
+export function verifyRunpodServerlessGpuPools(input, dependencies = {}) {
+  const gpuTypeIds = validateEndpointGpuTypes(input.gpuTypeIds);
+  return readRunpodJson(
+    {
+      apiKey: input.apiKey,
+      body: {
+        query: `query ScribeDropServerlessGpuPools {
+  serverlessGpuPools {
+    id
+    gpuTypeIds
+  }
+}`,
+      },
+      command: "Serverless GPU pool policy",
+      method: "POST",
+      origin: runpodGraphqlApiOrigin,
+      pathname: "/graphql",
+      validate(value) {
+        return validateServerlessGpuPoolMappings(value, gpuTypeIds);
+      },
+    },
+    dependencies,
+  );
+}
+
 export function listRunpodTemplates(input, dependencies = {}) {
   return readRunpodJson(
     {

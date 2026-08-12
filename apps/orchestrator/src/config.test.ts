@@ -1,11 +1,32 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  parseCloudRunRuntimeShadowConfig,
   parseRetentionConfig,
   parseRunpodConfig,
   type RetentionConfigEnvironment,
   type RunpodConfigEnvironment,
 } from "./config.js";
+
+describe("Cloud Run runtime shadow configuration", () => {
+  it("accepts only the exact staging synthetic mode", () => {
+    expect(
+      parseCloudRunRuntimeShadowConfig({
+        APP_ENV: "staging",
+        CLOUD_RUN_RUNTIME_MODE: "synthetic-shadow",
+      }),
+    ).toEqual({ appEnvironment: "staging", mode: "synthetic-shadow" });
+  });
+
+  it.each([
+    { APP_ENV: "local" },
+    { APP_ENV: "staging" },
+    { APP_ENV: "production", CLOUD_RUN_RUNTIME_MODE: "synthetic-shadow" },
+    { APP_ENV: "staging", CLOUD_RUN_RUNTIME_MODE: "enabled" },
+  ])("fails closed for an unavailable shadow route: %o", (environment) => {
+    expect(parseCloudRunRuntimeShadowConfig(environment)).toBeUndefined();
+  });
+});
 
 const WORKER_IMAGE = "ghcr.io/example/scribe-drop-runpod-worker@sha256:" + "a".repeat(64);
 
@@ -53,7 +74,7 @@ function runpodEnvironment(
     R2_BUCKET_NAME: "recording-transcriber-staging",
     R2_SECRET_ACCESS_KEY: "0000000000000000",
     RUNPOD_ALLOWED_GPU_IDS:
-      "NVIDIA GeForce RTX 5090,NVIDIA RTX PRO 4500 Blackwell,NVIDIA GeForce RTX 4090",
+      "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090,NVIDIA RTX PRO 6000 Blackwell Server Edition",
     RUNPOD_API_KEY: "runpod-api-key-placeholder",
     RUNPOD_ENDPOINT_ID: "endpoint-placeholder",
     RUNPOD_INTERNAL_BASE_URL: "https://orchestrator-staging.example.invalid",
@@ -67,8 +88,8 @@ describe("RunPod placement policy configuration", () => {
     expect(parseRunpodConfig(runpodEnvironment())).toMatchObject({
       runpodAllowedGpuTypeIds: [
         "NVIDIA GeForce RTX 5090",
-        "NVIDIA RTX PRO 4500 Blackwell",
         "NVIDIA GeForce RTX 4090",
+        "NVIDIA RTX PRO 6000 Blackwell Server Edition",
       ],
       runpodWorkerImage: WORKER_IMAGE,
     });

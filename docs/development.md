@@ -12,6 +12,7 @@
 | Wrangler  |     4.114.0 | root devDependency                   |
 | Gitleaks  |      8.30.1 | `tools/versions.json` と公式 SHA-256 |
 | runpodctl |       2.7.2 | `tools/versions.json` と公式 SHA-256 |
+| Trivy     |      0.72.0 | `tools/versions.json` と公式 SHA-256 |
 
 バージョン更新は専用 PR で行い、lockfile、CI、コンテナ、本文書を同時に更新する。
 
@@ -43,6 +44,7 @@ pnpm install --frozen-lockfile
 uv sync --project apps/runpod-worker --frozen
 pnpm run gitleaks:install
 pnpm run runpodctl:install
+pnpm run trivy:install
 ```
 
 最後に全ツールを検証する。
@@ -83,6 +85,10 @@ Gitleaks は `.tools/bin/gitleaks` に導入される。commit 済みの Git 履
 exact pathとfield行のAND条件で除外する。plan全体は除外せず、credentialやtokenが
 混入した場合は引き続き失敗させる。
 
+`.tools/trivy-cache/`は公式Trivy vulnerability databaseのローカルcacheであり、公開CVEの
+再現例をsecretとして誤検出するためworktree scanから除外する。このdirectoryはGit無視対象で、
+履歴scanは追跡された全ファイルへ引き続き適用する。
+
 ```bash
 pnpm run secrets:check
 ```
@@ -112,11 +118,66 @@ pnpm check
 
 個別に調査するときは `pnpm format:check`、`pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build` を使う。Python コマンドは root script が `uv run --directory apps/runpod-worker ...` に統一して実行する。
 
+Phase 12のCloud Run controllerはlocal fakeだけで次のfocused gateを実行できる。Google credential、cloud
+resource、GPU、product Worker imageを使わず、default synthetic authorizationはcount/budget/rateすべて0である。
+
+```bash
+pnpm --filter @scribe-drop/gpu-controller run typecheck
+pnpm exec vitest run apps/gpu-controller/src
+pnpm --filter @scribe-drop/gpu-controller run build
+```
+
+Phase 13のone-shot imageは、更新済みworker imageから固定entrypointを作り、cloudへ接続せず検査する。SBOMは
+`/tmp`の追跡外artifactでありcommitしない。
+
+```bash
+pnpm container:build:runpod
+pnpm container:build:cloud-run
+pnpm container:check:cloud-run
+pnpm container:sbom:cloud-run
+pnpm container:scan:cloud-run
+```
+
+`container:check:cloud-run`はnetwork none、read-only、non-root、GPU count mockで起動し、8時間virtual bounded core、
+selected artifact、manifest-last、cleanupを検証する。実Cloud Run executionやnative CUDA quality gateの代替ではない。
+
+Phase 14 local preparationのD1 CASとdisabled shadow routeはcloudへ接続せず次で検証する。
+
+```bash
+pnpm --filter @scribe-drop/orchestrator test:workers
+pnpm exec vitest run apps/orchestrator/src/cloud-run-runtime-service.test.ts \
+  apps/orchestrator/src/cloud-run-runtime-http.test.ts \
+  apps/orchestrator/src/cloud-run-runtime-shadow.test.ts \
+  apps/orchestrator/src/cloud-run-runtime-capabilities.test.ts
+pnpm d1:verify
+```
+
+`CLOUD_RUN_RUNTIME_MODE`はlocal/staging/productionのWrangler設定へ追加しない。modeだけをshellやdashboardで設定しても
+default Workerにはruntime serviceが注入されず503となる。実service接続とremote D1適用はPhase 14 cloud review後だけ行う。
+
 既知の依存脆弱性は network を使う別ゲートで検査する。
 
 ```bash
 pnpm run security:audit
 ```
+
+RunPod worker imageを変更した場合は、checksum固定TrivyでCIと同じOS/libraryの
+High/Critical gateをローカルでも実行する。unfixed findingも失敗対象とする。
+
+```bash
+pnpm run container:build:runpod
+pnpm run container:check:runpod
+pnpm run container:check:bounded:runpod
+pnpm run container:scan:runpod
+```
+
+`container:check:bounded:runpod`はGPUやnetworkを使わず、production定数の8時間virtual float32 streamを
+32 windowへ逐次処理し、bounded spool、3形式artifact、manifest-last、task directory削除をbuild済みimage内で
+確認する。Cloud Run executionの代替ではなく、Phase 10Bを開始する前のlocal image gateである。
+
+Trivyはimage rootfsを一時展開する。通常の一時領域がimage sizeより小さいLinux hostでは、
+十分な揮発領域があることを確認したうえで`TMPDIR=/dev/shm`をその実行だけに指定できる。
+容量不足によるscan中断を成功扱いにしない。
 
 CI の job、Action 固定方針、branch protection は [continuous-integration.md](./continuous-integration.md) を参照する。
 staging resourceの構築順序、CLI認証、environment分離、rollback方針は [deployment.md](./deployment.md) を参照する。

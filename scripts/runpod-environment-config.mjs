@@ -17,8 +17,8 @@ const maxSourceBytes = 2 * 1024 * 1024 * 1024;
 const minimumAvailableGpuFallbacks = 2;
 const fixedGpuTypeIds = [
   "NVIDIA GeForce RTX 5090",
-  "NVIDIA RTX PRO 4500 Blackwell",
   "NVIDIA GeForce RTX 4090",
+  "NVIDIA RTX PRO 6000 Blackwell Server Edition",
 ];
 // An empty list is the explicit plan representation for RunPod's "Any Region"
 // placement. It is not missing configuration: GraphQL read-back normalizes a

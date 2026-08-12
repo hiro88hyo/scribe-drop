@@ -1,0 +1,212 @@
+name: Publish Cloud Run release candidate
+
+on:
+  workflow_dispatch:
+
+run-name: Publish Cloud Run release candidate from ${{ github.ref_name }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloud-run-release-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CLOUD_RUN_REGION: asia-southeast1
+  GOOGLE_CLOUD_PROJECT: scribe-drop
+  VOLTA_FEATURE_PNPM: "1"
+  WORKLOAD_IDENTITY_PROVIDER: projects/601035271372/locations/global/workloadIdentityPools/scribe-drop-release/providers/github-actions
+
+jobs:
+  publish:
+    name: Build, publish, and attest Cloud Run candidate
+    environment: staging
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out exact release commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up Volta
+        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
+        with:
+          volta-version: 2.0.2
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: 0.11.32
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: apps/runpod-worker/uv.lock
+
+      - name: Require one versioned release commit
+        run: |
+          case "${GITHUB_REF}" in
+            refs/heads/release/*)
+              release_version="${GITHUB_REF#refs/heads/release/}"
+              package_version="$(node -p "require('./package.json').version")"
+              if [ "${release_version}" != "${package_version}" ]; then
+                echo "Release branch and package version must match" >&2
+                exit 1
+              fi
+              ;;
+            *)
+              echo "Cloud Run candidates require release/<version>" >&2
+              exit 1
+              ;;
+          esac
+          if [ "$(git rev-parse HEAD)" != "${GITHUB_SHA}" ]; then
+            echo "Checked-out commit does not match the workflow identity" >&2
+            exit 1
+          fi
+
+      - name: Install locked dependencies and security tools
+        run: |
+          pnpm install --frozen-lockfile
+          uv sync --project apps/runpod-worker --frozen
+          pnpm run gitleaks:install
+          pnpm run trivy:install
+
+      - name: Authenticate publisher through fixed GitHub OIDC
+        id: publisher-preflight
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: sd-candidate-publisher@scribe-drop.iam.gserviceaccount.com
+          project_id: scribe-drop
+          token_format: access_token
+          access_token_lifetime: 900s
+
+      - name: Set up pinned Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          version: 579.0.0
+          project_id: scribe-drop
+
+      - name: Verify keyless publisher identity before costly work
+        run: |
+          test "$(gcloud version | sed -n 's/^Google Cloud SDK //p')" = "579.0.0"
+          gcloud auth print-access-token >/dev/null
+
+      - name: Run complete application and dependency gates
+        run: |
+          pnpm check
+          pnpm run secrets:check
+          pnpm run security:audit
+
+      - name: Build and inspect exact controller and worker images
+        run: |
+          pnpm run container:build:gpu-controller
+          pnpm run container:check:gpu-controller
+          pnpm run container:sbom:gpu-controller
+          pnpm run container:scan:gpu-controller
+          pnpm run container:build:runpod
+          pnpm run container:build:cloud-run
+          pnpm run container:check:cloud-run
+          pnpm run container:sbom:cloud-run
+          pnpm run container:scan:cloud-run
+
+      - name: Refresh publisher credential
+        id: publisher
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: sd-candidate-publisher@scribe-drop.iam.gserviceaccount.com
+          project_id: scribe-drop
+          token_format: access_token
+          access_token_lifetime: 900s
+
+      - name: Push each image once and resolve immutable registry digests
+        env:
+          ARTIFACT_REGISTRY_ACCESS_TOKEN: ${{ steps.publisher.outputs.access_token }}
+        run: |
+          printf '%s' "${ARTIFACT_REGISTRY_ACCESS_TOKEN}" | \
+            docker login -u oauth2accesstoken --password-stdin \
+              "${CLOUD_RUN_REGION}-docker.pkg.dev"
+          candidate_tag="candidate-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          controller_tag="${CLOUD_RUN_REGION}-docker.pkg.dev/${GOOGLE_CLOUD_PROJECT}/controller/runtime:${candidate_tag}"
+          worker_tag="${CLOUD_RUN_REGION}-docker.pkg.dev/${GOOGLE_CLOUD_PROJECT}/worker/runtime:${candidate_tag}"
+          docker image tag scribe-drop-gpu-controller:local "${controller_tag}"
+          docker image tag scribe-drop-cloud-run-worker:local "${worker_tag}"
+          docker push "${controller_tag}"
+          docker push "${worker_tag}"
+          docker buildx imagetools inspect "${controller_tag}" \
+            --format '{{json .Manifest}}' >"${RUNNER_TEMP}/controller-manifest.json"
+          docker buildx imagetools inspect "${worker_tag}" \
+            --format '{{json .Manifest}}' >"${RUNNER_TEMP}/worker-manifest.json"
+          controller_digest="$(node -e '
+            const fs = require("node:fs");
+            const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+            if (!/^sha256:[a-f0-9]{64}$/.test(manifest.digest)) process.exit(1);
+            process.stdout.write(manifest.digest);
+          ' "${RUNNER_TEMP}/controller-manifest.json")"
+          worker_digest="$(node -e '
+            const fs = require("node:fs");
+            const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+            if (!/^sha256:[a-f0-9]{64}$/.test(manifest.digest)) process.exit(1);
+            process.stdout.write(manifest.digest);
+          ' "${RUNNER_TEMP}/worker-manifest.json")"
+          controller_image="${controller_tag%:*}@${controller_digest}"
+          worker_image="${worker_tag%:*}@${worker_digest}"
+          pnpm run cloud-run:candidate:evidence create \
+            "${RUNNER_TEMP}/cloud-run-candidate.json" \
+            "${controller_image}" \
+            "${worker_image}" \
+            "${GITHUB_SHA}" \
+            "${GITHUB_RUN_ID}" \
+            "${GITHUB_RUN_ATTEMPT}"
+          pnpm run cloud-run:candidate:evidence verify \
+            "${RUNNER_TEMP}/cloud-run-candidate.json"
+
+      - name: Authenticate isolated release signer
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: sd-release-signer@scribe-drop.iam.gserviceaccount.com
+          project_id: scribe-drop
+          token_format: access_token
+          access_token_lifetime: 900s
+
+      - name: KMS-sign and create one attestation per digest
+        run: |
+          controller_image="$(node -e '
+            const fs = require("node:fs");
+            const evidence = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+            process.stdout.write(evidence.controllerImage);
+          ' "${RUNNER_TEMP}/cloud-run-candidate.json")"
+          worker_image="$(node -e '
+            const fs = require("node:fs");
+            const evidence = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+            process.stdout.write(evidence.workerImage);
+          ' "${RUNNER_TEMP}/cloud-run-candidate.json")"
+          for image in "${controller_image}" "${worker_image}"; do
+            gcloud beta container binauthz attestations sign-and-create \
+              --project=scribe-drop \
+              --artifact-url="${image}" \
+              --note=scribe-drop-release-candidate \
+              --note-project=scribe-drop \
+              --keyversion-project=scribe-drop \
+              --keyversion-location=asia-southeast1 \
+              --keyversion-keyring=scribe-drop-release \
+              --keyversion-key=candidate-attestor \
+              --keyversion=1 \
+              --quiet
+          done
+
+      - name: Upload metadata-only candidate evidence and SBOMs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scribe-drop-cloud-run-candidate-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/cloud-run-candidate.json
+            /tmp/scribe-drop-gpu-controller.cdx.json
+            /tmp/scribe-drop-cloud-run-worker.cdx.json
+          if-no-files-found: error
+          retention-days: 7

@@ -1,6 +1,6 @@
 # ADR 0064: RunPodの配置範囲とGPU fallbackを広げる
 
-- Status: Accepted（remote migrationは未実施）
+- Status: Superseded by ADR 0065（staging migration失敗後に旧capacityへrollback済み）
 - Date: 2026-07-31
 - Supersedes: ADR 0054の固定2 data centerという恒久配置方針
 - Refines: ADR 0053、ADR 0056、ADR 0057
@@ -77,3 +77,9 @@ RTX PRO 6000は96 GiB、stock Mediumであり、3枠の可用性と文字起こ�
   変わる場合は再評価が必要である。
 - 追跡対象planと既存remote endpointはmigration完了まで意図的にdriftする。通常releaseを
   起動せず、staging-firstのcapacity移行とread-backを独立して完了させる必要がある。
+
+2026-08-01のstaging migrationでは、`Any Region`更新後の3 GPU REST更新がexact read-backへ
+収束せず、旧2 GPU・2 data center、worker上限1へ自動rollbackした。公式GraphQLの
+`serverlessGpuPools`を追加確認した結果、RTX PRO 4500はglobal inventoryとREST OpenAPI enumには
+存在するが、実Serverless poolには存在しなかった。GPU選定とpreflight境界はADR 0065で
+置き換える。

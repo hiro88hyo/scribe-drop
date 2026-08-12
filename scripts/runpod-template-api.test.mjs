@@ -13,6 +13,7 @@ import {
   setRunpodEndpointWorkersMax,
   setRunpodEndpointWorkersMin,
   verifyRunpodReleaseReadiness,
+  verifyRunpodServerlessGpuPools,
   verifyRunpodServerlessGpuTypes,
 } from "./runpod-template-api.mjs";
 
@@ -42,11 +43,15 @@ function serverlessOpenApi(gpuTypeIds) {
   };
 }
 
+function serverlessGpuPools(pools, errors = []) {
+  return { data: { serverlessGpuPools: pools }, errors };
+}
+
 test("verifies fixed GPU fallbacks against both public Serverless OpenAPI inputs", async () => {
   const gpuTypeIds = [
     "NVIDIA GeForce RTX 5090",
-    "NVIDIA RTX PRO 4500 Blackwell",
     "NVIDIA GeForce RTX 4090",
+    "NVIDIA RTX PRO 6000 Blackwell Server Edition",
   ];
   const signal = {};
   let observed;
@@ -81,6 +86,101 @@ test("rejects an inventory GPU that either Serverless OpenAPI input does not sup
         {
           async fetchImplementation() {
             return jsonResponse(openApi);
+          },
+          async sleep() {},
+        },
+      ),
+      /failed after bounded retries/u,
+    );
+  }
+});
+
+test("verifies every fixed GPU maps to a distinct authenticated Serverless pool", async () => {
+  const gpuTypeIds = [
+    "NVIDIA GeForce RTX 5090",
+    "NVIDIA GeForce RTX 4090",
+    "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+  ];
+  const signal = {};
+  let observed;
+  const result = await verifyRunpodServerlessGpuPools(
+    { apiKey, gpuTypeIds },
+    {
+      createTimeoutSignal(milliseconds) {
+        assert.equal(milliseconds, 15_000);
+        return signal;
+      },
+      async fetchImplementation(url, init) {
+        observed = { body: JSON.parse(init.body), init, url };
+        return jsonResponse(
+          serverlessGpuPools([
+            { gpuTypeIds: [gpuTypeIds[1]], id: "ADA_24" },
+            { gpuTypeIds: [gpuTypeIds[0]], id: "ADA_32_PRO" },
+            { gpuTypeIds: [gpuTypeIds[2]], id: "BLACKWELL_96" },
+          ]),
+        );
+      },
+    },
+  );
+  assert.deepEqual(result, { configuredCount: 3, poolCount: 3 });
+  assert.equal(observed.url.href, "https://api.runpod.io/graphql");
+  assert.deepEqual(observed.init.headers, {
+    Authorization: `Bearer ${apiKey}`,
+    "Content-Type": "application/json",
+  });
+  assert.equal(observed.init.method, "POST");
+  assert.match(observed.body.query, /serverlessGpuPools/u);
+  assert.equal(observed.init.redirect, "error");
+  assert.equal(observed.init.signal, signal);
+});
+
+test("rejects GPUs missing from Serverless pools and duplicate pool mappings", async () => {
+  const cases = [
+    {
+      gpuTypeIds: ["NVIDIA RTX PRO 4500 Blackwell"],
+      pools: [{ gpuTypeIds: ["NVIDIA GeForce RTX 5090"], id: "ADA_32_PRO" }],
+    },
+    {
+      gpuTypeIds: ["NVIDIA GeForce RTX 5090", "NVIDIA RTX PRO 4500 Blackwell"],
+      pools: [
+        {
+          gpuTypeIds: ["NVIDIA GeForce RTX 5090", "NVIDIA RTX PRO 4500 Blackwell"],
+          id: "ADA_32_PRO",
+        },
+      ],
+    },
+  ];
+  for (const testCase of cases) {
+    await assert.rejects(
+      verifyRunpodServerlessGpuPools(
+        { apiKey, gpuTypeIds: testCase.gpuTypeIds },
+        {
+          async fetchImplementation() {
+            return jsonResponse(serverlessGpuPools(testCase.pools));
+          },
+          async sleep() {},
+        },
+      ),
+      /failed after bounded retries/u,
+    );
+  }
+});
+
+test("rejects malformed or errored Serverless GPU pool responses", async () => {
+  for (const response of [
+    serverlessGpuPools([], [{ message: "provider error" }]),
+    serverlessGpuPools([{ gpuTypeIds: [], id: "ADA_24" }]),
+    serverlessGpuPools([
+      { gpuTypeIds: ["NVIDIA GeForce RTX 4090"], id: "ADA_24" },
+      { gpuTypeIds: ["NVIDIA GeForce RTX 5090"], id: "ADA_24" },
+    ]),
+  ]) {
+    await assert.rejects(
+      verifyRunpodServerlessGpuPools(
+        { apiKey, gpuTypeIds: ["NVIDIA GeForce RTX 4090"] },
+        {
+          async fetchImplementation() {
+            return jsonResponse(response);
           },
           async sleep() {},
         },
@@ -285,8 +385,8 @@ test("combines REST GPU capacity with exact GraphQL placement", async () => {
           return jsonResponse({
             gpuTypeIds: [
               "NVIDIA GeForce RTX 5090",
-              "NVIDIA RTX PRO 4500 Blackwell",
               "NVIDIA GeForce RTX 4090",
+              "NVIDIA RTX PRO 6000 Blackwell Server Edition",
             ],
             id: endpointId,
           });
@@ -310,8 +410,8 @@ test("combines REST GPU capacity with exact GraphQL placement", async () => {
     dataCenterIds: ["EUR-IS-1", "EU-RO-1"],
     gpuTypeIds: [
       "NVIDIA GeForce RTX 5090",
-      "NVIDIA RTX PRO 4500 Blackwell",
       "NVIDIA GeForce RTX 4090",
+      "NVIDIA RTX PRO 6000 Blackwell Server Edition",
     ],
     id: endpointId,
   });
@@ -824,8 +924,8 @@ test("sets ordered GPU fallbacks without sending a data-center field", async () 
   const endpointId = "endpoint_test";
   const gpuTypeIds = [
     "NVIDIA GeForce RTX 5090",
-    "NVIDIA RTX PRO 4500 Blackwell",
     "NVIDIA GeForce RTX 4090",
+    "NVIDIA RTX PRO 6000 Blackwell Server Edition",
   ];
   let bodyCancelled = false;
   await setRunpodEndpointGpuTypes(

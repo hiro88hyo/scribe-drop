@@ -14,9 +14,9 @@ max workerは1へ復元した。実ID、image参照、originは追跡対象へ�
 上記のRTX 4090単一構成は過去checkpointである。release acceptanceで同GPUの供給待ちが
 再現し、productionでも同じ単一構成だったため、現在のrelease policyは
 [ADR 0053](./adr/0053-use-mixed-availability-gpus-with-runtime-attestation.md)に従い、
-`NVIDIA GeForce RTX 5090`、`NVIDIA RTX PRO 4500 Blackwell`、
-`NVIDIA GeForce RTX 4090`の優先順位付きGPU候補へ更新した。
-両GPU種別はCommunity Cloudにも提供されるため、個々の実Workerが
+`NVIDIA GeForce RTX 5090`、`NVIDIA GeForce RTX 4090`、
+`NVIDIA RTX PRO 6000 Blackwell Server Edition`の優先順位付きGPU候補へ更新した。
+全GPU種別はCommunity Cloudにも提供されるため、個々の実Workerが
 `secureCloud=true`であることをclaim前に検証する。stagingの実GPU E2Eとexact endpoint
 read-backを通すまではproduction-readyとしない。
 
@@ -29,6 +29,25 @@ GitHub staging Environmentが同期するまではproduction promotion evidence�
 Consoleの`Security & compliance`はdata centerのcertification filterであり、
 Secure Cloud切替ではない。現行要件に特定certificationはないため`Any`を維持し、
 実Workerの`secureCloud=true` attestationを省略しない。
+
+2026-08-01のADR 0065 staging prewarmでは、表示上の在庫と3つの実Serverless GPU poolが
+存在してもWorkerが作成されなかった。2026-08-06のbounded probeでも、`workersMin=1`または
+固定dummy requestの投入後10分以内にWorkerは作成されなかった。RunPod supportは2026-08-10までに、
+Schedulerが全compatible GPU、全available region、全fallbackを評価したがcapacityがなく、
+公開APIにはGPU capacity待ちとその他の`IN_QUEUE`を区別するstatusがないと確認した。
+inventoryとpool membershipを配置保証として同じworkflowを再実行しない。現行runtimeを変更しないProposedな
+[一時GPU Pod実行設計](./ephemeral-gpu-vm-design.md)を[ADR 0066](./adr/0066-design-ephemeral-gpu-vm-execution.md)
+で定義した。providerの採用、cloud resource作成、production変更はまだ承認していない。
+採用する場合は`0.2.0`として実装する。[Phase 8 provider decision packet](./ephemeral-gpu-vm-provider-decision.md)
+では、`0.1.1`のstaging acceptanceとproduction promotionをBlockedのまま未releaseで閉じ、
+RunPod固有のfail-closed検証だけを別PRで`develop`へ戻す。現candidate artifactは再利用しない。
+RunPod Podsはpublic IP、create冪等性、署名付きidentity、provider側hard lifetimeのmandatory gapを
+解消できず、[ADR 0067](./adr/0067-evaluate-cloud-run-gpu-jobs.md)でactive probeを停止した。Cloud Run GPU
+Jobの隔離probeはL4で固定model推論まで成功したが、[ADR 0068](./adr/0068-benchmark-cloud-run-eight-hour-input.md)
+の8時間一括処理は16 GiBのmemory limitで失敗した。現在は
+[ADR 0069](./adr/0069-use-bounded-memory-transcription-windows.md)のbounded-memory offline検証が次の境界で
+あり、exact 1 re-probeとprovider採用ADRが完了するまでRunPod Pods、Cloud Runともproductへ採用せず、
+実録音を新providerへ送らない。
 
 ## Image supply chain
 
@@ -100,10 +119,11 @@ stagingとproductionは別endpoint、別template、別credentialを使用する�
 - active workers 0
 - max workers 1
 - GPU 1
-- 優先順位付きGPU候補は`NVIDIA GeForce RTX 5090`、`NVIDIA RTX PRO 4500 Blackwell`、
-  `NVIDIA GeForce RTX 4090`の順で固定する
+- 優先順位付きGPU候補は`NVIDIA GeForce RTX 5090`、`NVIDIA GeForce RTX 4090`、
+  `NVIDIA RTX PRO 6000 Blackwell Server Edition`の順で固定する
 - 全候補がinventoryでSecure Cloud提供され、2候補以上がavailable。Community Cloudでの
   提供とstock tierはrelease invariantにしない
+- 全候補が認証済みGraphQLの`serverlessGpuPools`へ一意に存在し、候補間でpool IDが重複しない
 - 各claimで実Workerの`secureCloud=true`をR2 capability発行前に検証する
 - data centerは`Any Region`とし、GraphQLの`locations: null`または空文字を明示的な
   空配列へ正規化してexact read-backする。field欠落は一致とみなさない
@@ -169,7 +189,9 @@ rollbackを維持する。retry logへAPI応答と実IDを出さない。
 candidate workflowではRESTのtemplate listとendpoint getを高コスト処理前に並列実行し、
 その前に固定`runpodctl`のGPU inventoryでADR 0053のSecure Cloud提供属性を検証する。
 candidate publicationは瞬間的な在庫を合否にせず、staging/production promotionでは
-全候補のSecure Cloud提供と2候補以上のavailableを必須とする。staging promotionでは
+全候補のSecure Cloud提供と2候補以上のavailableを必須とする。OpenAPI enumに加え、
+[ADR 0065](./adr/0065-validate-runpod-serverless-gpu-pools.md)の認証済み
+`serverlessGpuPools`で全候補の一意かつ相異なるpool対応を確認する。staging promotionでは
 candidate固有planを再検証する。
 最初のremote mutationより前に`runpod:preflight:<environment>`を実行し、認証、templateの
 一意性、endpoint invariant、workerがidleであることをread-onlyで検証する。
