@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-- Status: release foundation read-back passed; candidate not published
+- Status: release/0.2.0 version pinned; candidate not published
 - Date: 2026-08-12
 - Product routing: RunPod Serverless
 - Cloud/CI mutation: staging release supply chain only; production untouched
@@ -265,7 +265,7 @@ Cloud Run Job、R2 signed request、課金停止のevidenceではない。
 
 release candidateのPhase境界に従うbranch/commitを作り、次を順番に完了する。
 
-- Phase 8〜13の`develop`統合、`release/0.2.0`作成、version固定、一度だけのcandidate build
+- version-pinned `release/0.2.0` commitの全gateと、一度だけのcandidate build
 - candidate workflowによるcontroller/worker image publishとattestation発行、digest/Occurrenceのauthoritative read-back
 - dedicated named Firestore database/TTL policy、controllerへのadapter injection/service hosting、Cloud Run v2/IAM/Secret Managerの
   authoritative read-back、HMAC secret rotation

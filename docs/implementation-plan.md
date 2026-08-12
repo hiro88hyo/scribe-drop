@@ -1340,7 +1340,7 @@ pnpm check
   Orchestrator HMAC client、Firestore control-store adapterはPhase 14 local preparationで追加したが、default service
   wiringには接続していない。
 
-### Phase 14: staging dark deployment（release foundation構築済み、candidate未発行）
+### Phase 14: staging dark deployment（release/0.2.0準備中、candidate未発行）
 
 実装:
 
@@ -1355,6 +1355,9 @@ pnpm check
 
 local preparation（2026-08-11〜12）:
 
+- PR #19をstrict required checks成功、未解決conversation 0、approval 0のsolo-maintainer policyでmerge commitにより
+  `develop`へ統合し、`release/0.2.0`を作成した。root package、Python worker、uv lockのversionを`0.2.0`へ同期した。
+  candidate workflowはこのversion commitの全gateが成功するまで実行しない。
 - forward-only `0011_cloud_run_runtime_protocol.sql`でbootstrap、challenge/session、allowlist terminal eventを
   provider executionへ外部キーで固定した。challenge消費、sequence、terminal revokeはD1 CAS/triggerへ収束する。
 - D1 production repositoryはactive attempt、provider kind/policy、contract v2、source key/ETag/size、result prefixを
