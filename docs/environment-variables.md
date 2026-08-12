@@ -36,6 +36,12 @@ R2 CORSは`pnpm cloudflare:config:staging:r2-cors`、R2 lifecycleは
 - `SCRIBE_DROP_STAGING_WEB_ORIGIN`: Accessで保護するstaging Webの単一exact HTTPS origin
 - `SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN`:
   RunPodからclaim/heartbeatを受けるOrchestratorの単一exact HTTPS origin
+- `SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_ORIGIN`:
+  Phase 14の`synthetic-shadow`時だけ必須となるstaging GPU controller専用Cloud Run `run.app` exact HTTPS origin
+- `SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_MODE`:
+  通常は`disabled`、Phase 14の有限synthetic gateだけ`synthetic-shadow`
+- `SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT`:
+  `synthetic-shadow`時だけ必須となる`gpu-runtime@scribe-drop.iam.gserviceaccount.com`の固定staging runtime identity
 - `SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`:
   `https://<team>.cloudflareaccess.com`のexact origin
 - `SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`:
@@ -157,24 +163,30 @@ production project以外を対象にできない。PagesとOrchestratorの両方
 
 localでは`apps/orchestrator/.dev.vars.example`を`apps/orchestrator/.dev.vars`へコピーする。
 
-| Variable                    | Secret | Purpose                           |
-| --------------------------- | :----: | --------------------------------- |
-| `APP_ENV`                   |   no   | 実行環境                          |
-| `WEB_BASE_URL`              |   no   | Access保護済みジョブ詳細URLのbase |
-| `RUNPOD_INTERNAL_BASE_URL`  |   no   | claim、heartbeat内部APIの固定base |
-| `RUNPOD_WORKER_IMAGE`       |   no   | claim前に照合するimmutable image  |
-| `RUNPOD_ALLOWED_GPU_IDS`    |   no   | claim前に照合するGPU候補          |
-| `RUNPOD_ENDPOINT_ID`        |  yes   | 環境別RunPod Serverless endpoint  |
-| `RUNPOD_API_KEY`            |  yes   | RunPod API認証                    |
-| `CLOUDFLARE_ACCOUNT_ID`     |   no   | R2 S3 endpointのaccount           |
-| `R2_BUCKET_NAME`            |   no   | eventとR2 bindingの環境別bucket名 |
-| `R2_ACCESS_KEY_ID`          |  yes   | presigned URL発行専用key          |
-| `R2_SECRET_ACCESS_KEY`      |  yes   | presigned URL発行専用secret       |
-| `DISCORD_WEBHOOK_URL`       |  yes   | 完了通知先                        |
-| `MULTIPART_RETENTION_HOURS` |   no   | 未完了multipart保持時間、初期値24 |
-| `SOURCE_RETENTION_DAYS`     |   no   | 元録音保持日数、初期値7           |
-| `RESULT_RETENTION_DAYS`     |   no   | 結果保持日数、初期値90            |
-| `AUDIT_RETENTION_DAYS`      |   no   | 監査情報保持日数、初期値180       |
+| Variable                              | Secret | Purpose                                       |
+| ------------------------------------- | :----: | --------------------------------------------- |
+| `APP_ENV`                             |   no   | 実行環境                                      |
+| `WEB_BASE_URL`                        |   no   | Access保護済みジョブ詳細URLのbase             |
+| `RUNPOD_INTERNAL_BASE_URL`            |   no   | claim、heartbeat内部APIの固定base             |
+| `RUNPOD_WORKER_IMAGE`                 |   no   | claim前に照合するimmutable image              |
+| `RUNPOD_ALLOWED_GPU_IDS`              |   no   | claim前に照合するGPU候補                      |
+| `RUNPOD_ENDPOINT_ID`                  |  yes   | 環境別RunPod Serverless endpoint              |
+| `RUNPOD_API_KEY`                      |  yes   | RunPod API認証                                |
+| `CLOUDFLARE_ACCOUNT_ID`               |   no   | R2 S3 endpointのaccount                       |
+| `R2_BUCKET_NAME`                      |   no   | eventとR2 bindingの環境別bucket名             |
+| `R2_ACCESS_KEY_ID`                    |  yes   | presigned URL発行専用key                      |
+| `R2_SECRET_ACCESS_KEY`                |  yes   | presigned URL発行専用secret                   |
+| `DISCORD_WEBHOOK_URL`                 |  yes   | 完了通知先                                    |
+| `MULTIPART_RETENTION_HOURS`           |   no   | 未完了multipart保持時間、初期値24             |
+| `SOURCE_RETENTION_DAYS`               |   no   | 元録音保持日数、初期値7                       |
+| `RESULT_RETENTION_DAYS`               |   no   | 結果保持日数、初期値90                        |
+| `AUDIT_RETENTION_DAYS`                |   no   | 監査情報保持日数、初期値180                   |
+| `CLOUD_RUN_CONTROLLER_HMAC_PRIMARY`   |  yes   | Phase 14 controller request HMAC              |
+| `CLOUD_RUN_CONTROLLER_ORIGIN`         |   no   | staging controllerのexact root origin         |
+| `CLOUD_RUN_ORCHESTRATOR_ORIGIN`       |   no   | OIDC audience用staging Orchestrator origin    |
+| `CLOUD_RUN_RUNTIME_DERIVATION_SECRET` |  yes   | runtime session secret導出用HMAC              |
+| `CLOUD_RUN_RUNTIME_MODE`              |   no   | `disabled`またはstaging限定`synthetic-shadow` |
+| `CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT`   |   no   | staging runtime専用service account            |
 
 Phase 3のQueue consumerは`APP_ENV`、`CLOUDFLARE_ACCOUNT_ID`、
 `R2_BUCKET_NAME`を起動境界で検証し、raw eventのaccount/bucketと一致しないmessageを
@@ -198,6 +210,18 @@ manifestとRunPod planから追跡外Wrangler設定へ生成し、deploy後のbi
 productionでは`DISCORD_WEBHOOK_URL`を含む必須5件を
 `pnpm cloudflare:secrets:verify:production:orchestrator`で名前だけ検証する。CLIのJSON
 応答にvalue fieldが含まれる場合はfail closedとし、値をlogへ出さない。
+
+Phase 14のCloud Run runtimeはstaging限定である。追跡対象設定では
+`CLOUD_RUN_RUNTIME_MODE=disabled`とし、production設定には6件のCloud Run runtime bindingを
+追加しない。staging gateではcontroller origin、Orchestrator origin、固定runtime identity、
+`synthetic-shadow`を追跡外設定へ生成し、既存5件に加えて次の相異なるcanonical base64url
+secretをencrypted secretとして登録する。
+
+- `CLOUD_RUN_CONTROLLER_HMAC_PRIMARY`
+- `CLOUD_RUN_RUNTIME_DERIVATION_SECRET`
+
+両secretは32〜64 byte、paddingなしとし、値をread-back、log、deployment記録へ出さない。
+modeまたは必須設定が欠ける場合はruntime serviceを生成せず、shadow routeを404/503へ閉じる。
 
 Phase 5では`WEB_BASE_URL`をuserinfo、query、fragmentのない単一originに限定する。
 stagingとproductionはHTTPSを必須とし、stagingでは`SCRIBE_DROP_STAGING_WEB_ORIGIN`から

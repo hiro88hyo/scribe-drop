@@ -133,6 +133,88 @@ const cloudRunRuntimeShadowConfigSchema = z
   })
   .strict();
 
+function isExactHttpsRoot(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "https:" &&
+      url.username === "" &&
+      url.password === "" &&
+      url.port === "" &&
+      (url.pathname === "" || url.pathname === "/") &&
+      url.search === "" &&
+      url.hash === ""
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function decodeCloudRunRuntimeSecret(value: string): Uint8Array | undefined {
+  if (!/^[A-Za-z0-9_-]+$/u.test(value) || value.length % 4 === 1) return undefined;
+  try {
+    const decoded = Uint8Array.from(
+      atob(
+        value
+          .replaceAll("-", "+")
+          .replaceAll("_", "/")
+          .padEnd(Math.ceil(value.length / 4) * 4, "="),
+      ),
+      (character) => character.charCodeAt(0),
+    );
+    const canonical = btoa(String.fromCharCode(...decoded))
+      .replaceAll("+", "-")
+      .replaceAll("/", "_")
+      .replace(/=+$/u, "");
+    return canonical === value && decoded.byteLength >= 32 && decoded.byteLength <= 64
+      ? decoded
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const cloudRunSecretSchema = z
+  .string()
+  .min(43)
+  .max(86)
+  .refine((value) => decodeCloudRunRuntimeSecret(value) !== undefined);
+
+const cloudRunRuntimeServiceConfigSchema = z
+  .object({
+    appEnvironment: z.literal("staging"),
+    cloudflareAccountId: z.string().regex(/^[a-f0-9]{32}$/u),
+    controllerHmacPrimary: cloudRunSecretSchema,
+    controllerOrigin: z
+      .string()
+      .refine(isExactHttpsRoot)
+      .refine((value) => {
+        const hostname = new URL(value).hostname;
+        return /^scribe-drop-staging-gpu-controller-[0-9]+\.asia-southeast1\.run\.app$/u.test(
+          hostname,
+        );
+      })
+      .transform((value) => new URL(value).toString()),
+    mode: z.literal("synthetic-shadow"),
+    orchestratorOrigin: z
+      .string()
+      .refine(isExactHttpsRoot)
+      .transform((value) => new URL(value).toString()),
+    r2AccessKeyId: z.string().min(1).max(256),
+    r2BucketName: z.string().min(3).max(63),
+    r2SecretAccessKey: z.string().min(1).max(256),
+    runtimeDerivationSecret: cloudRunSecretSchema,
+    runtimeServiceAccount: z
+      .string()
+      .regex(/^gpu-runtime@scribe-drop\.iam\.gserviceaccount\.com$/u),
+  })
+  .strict()
+  .refine(
+    ({ controllerHmacPrimary, runtimeDerivationSecret }) =>
+      controllerHmacPrimary !== runtimeDerivationSecret,
+    { message: "Cloud Run controller and runtime derivation secrets must be distinct" },
+  );
+
 function isAllowedWebBaseUrl(value: string, environment: DeploymentEnvironment): boolean {
   if (environment !== "local") {
     return isAllowedInternalBaseUrl(value);
@@ -188,6 +270,18 @@ export interface CloudRunRuntimeShadowConfigEnvironment {
   readonly CLOUD_RUN_RUNTIME_MODE?: string;
 }
 
+export interface CloudRunRuntimeServiceConfigEnvironment extends CloudRunRuntimeShadowConfigEnvironment {
+  readonly CLOUDFLARE_ACCOUNT_ID: string;
+  readonly CLOUD_RUN_CONTROLLER_HMAC_PRIMARY?: string;
+  readonly CLOUD_RUN_CONTROLLER_ORIGIN?: string;
+  readonly CLOUD_RUN_ORCHESTRATOR_ORIGIN?: string;
+  readonly CLOUD_RUN_RUNTIME_DERIVATION_SECRET?: string;
+  readonly CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT?: string;
+  readonly R2_ACCESS_KEY_ID: string;
+  readonly R2_BUCKET_NAME: string;
+  readonly R2_SECRET_ACCESS_KEY: string;
+}
+
 export interface OrchestratorConfig {
   readonly appEnvironment: DeploymentEnvironment;
   readonly cloudflareAccountId: string;
@@ -219,6 +313,20 @@ export interface RetentionConfig {
 export interface CloudRunRuntimeShadowConfig {
   readonly appEnvironment: "staging";
   readonly mode: "synthetic-shadow";
+}
+
+export interface CloudRunRuntimeServiceConfig {
+  readonly appEnvironment: "staging";
+  readonly cloudflareAccountId: string;
+  readonly controllerHmacPrimary: string;
+  readonly controllerOrigin: string;
+  readonly mode: "synthetic-shadow";
+  readonly orchestratorOrigin: string;
+  readonly r2AccessKeyId: string;
+  readonly r2BucketName: string;
+  readonly r2SecretAccessKey: string;
+  readonly runtimeDerivationSecret: string;
+  readonly runtimeServiceAccount: string;
 }
 
 export function parseOrchestratorConfig(
@@ -281,6 +389,25 @@ export function parseCloudRunRuntimeShadowConfig(
   const result = cloudRunRuntimeShadowConfigSchema.safeParse({
     appEnvironment: environment.APP_ENV,
     mode: environment.CLOUD_RUN_RUNTIME_MODE,
+  });
+  return result.success ? result.data : undefined;
+}
+
+export function parseCloudRunRuntimeServiceConfig(
+  environment: CloudRunRuntimeServiceConfigEnvironment,
+): CloudRunRuntimeServiceConfig | undefined {
+  const result = cloudRunRuntimeServiceConfigSchema.safeParse({
+    appEnvironment: environment.APP_ENV,
+    cloudflareAccountId: environment.CLOUDFLARE_ACCOUNT_ID,
+    controllerHmacPrimary: environment.CLOUD_RUN_CONTROLLER_HMAC_PRIMARY,
+    controllerOrigin: environment.CLOUD_RUN_CONTROLLER_ORIGIN,
+    mode: environment.CLOUD_RUN_RUNTIME_MODE,
+    orchestratorOrigin: environment.CLOUD_RUN_ORCHESTRATOR_ORIGIN,
+    r2AccessKeyId: environment.R2_ACCESS_KEY_ID,
+    r2BucketName: environment.R2_BUCKET_NAME,
+    r2SecretAccessKey: environment.R2_SECRET_ACCESS_KEY,
+    runtimeDerivationSecret: environment.CLOUD_RUN_RUNTIME_DERIVATION_SECRET,
+    runtimeServiceAccount: environment.CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT,
   });
   return result.success ? result.data : undefined;
 }

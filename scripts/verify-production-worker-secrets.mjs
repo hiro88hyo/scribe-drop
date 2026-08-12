@@ -32,7 +32,7 @@ try {
   if (result.error !== undefined || result.status !== 0) {
     throw new Error("Wrangler could not list encrypted production Worker secret names");
   }
-  const verification = verifyRequiredOrchestratorSecrets(result.stdout);
+  const verification = verifyRequiredOrchestratorSecrets(result.stdout, "production");
   console.log(
     `Verified required encrypted production Worker secrets: ${verification.requiredCount}`,
   );

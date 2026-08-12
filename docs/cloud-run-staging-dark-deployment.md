@@ -9,7 +9,8 @@
 
 Phase 14の実staging gateに先立ち、Orchestratorのdurable runtime protocolとshadow namespaceをlocalで固定した。
 2026-08-12にstaging release supply chainだけを構築し、source-controlled candidate workflowを追加した。
-`CLOUD_RUN_RUNTIME_MODE`はWrangler設定へ追加せず、default Worker wiringへruntime serviceを注入していない。
+`CLOUD_RUN_RUNTIME_MODE`のsource defaultはstagingでも`disabled`、productionではbinding自体なしとする。Phase 14の実行直前だけ
+ignored staging configへ`synthetic-shadow`をrenderし、reviewed production portsがすべて構成できた場合だけruntime serviceを注入する。
 
 ## Local persistence boundary
 
@@ -44,8 +45,11 @@ Orchestrator clientはHTTPS origin、最大60秒の署名lifetime、256 bit以�
 16 KiBのJSON response上限、request/handle identity一致を強制する。cleanupはlive attestationで得たcontroller versionを
 条件にexact 1回だけ送る。timeoutまたはresponse loss後は結果不明として閉じ、自動再送しない。
 
-default Orchestrator runtime service wiringとproduct routeには接続していない。staging controller Serviceにはdisabled authorizationと
-固定environment/secretを注入したが、OrchestratorからのrequestとGPU executionは0のままである。
+staging限定composition rootはD1 store、Google OIDC verifier、controller attestation/cleanup、R2 capability、HMAC/Ed25519を
+一つのserviceへ結ぶ。mode、2つの相異なるcanonical secret、exact controller/orchestrator origin、runtime identity、R2/account/bucketの
+いずれかが欠ければserviceを生成せず、shadow routeは404または503へ閉じる。production configにはCloud Run runtime bindingを追加しない。
+staging controller Serviceにはdisabled authorizationと固定environment/secretを注入済みで、remote Workerを切り替えるまでは
+OrchestratorからのrequestとGPU executionは0のままである。
 
 ## Local Firestore controller store
 
@@ -263,7 +267,7 @@ Google OAuth JWKSだけを固定HTTPS URLから取得し、redirect、5秒超過
 tokenは8 KiB以下のRS256 JWTに限定し、Google署名、exact audience、`https://accounts.google.com` issuer、issue/expiry、
 1時間上限、`sub == azp`、`email_verified == true`、service-account emailを検証する。Googleの`sub`/`azp`はservice accountの
 数値IDでありemailではないため、runtime serviceは数値subjectとverified emailを別fieldで受け、dedicated runtime accountの
-一致にはemailを使う。このadapterもdefault runtime serviceへ未注入である。
+一致にはemailを使う。このadapterはstaging限定composition rootへ接続し、remote Workerのmodeが`disabled`の間は生成されない。
 
 ## Local evidence
 
@@ -317,12 +321,11 @@ Cloud Run Job、R2 signed request、課金停止のevidenceではない。
 
 release candidateのPhase境界に従うbranch/commitを作り、次を順番に完了する。
 
-- version-pinned `release/0.2.0` commitの全gateと、一度だけのcandidate build
-- candidate workflowによるcontroller/worker image publishとattestation発行、digest/Occurrenceのauthoritative read-back
-- dedicated named Firestore database/TTL policy、controllerへのadapter injection/service hosting、Cloud Run v2/IAM/Secret Managerの
-  authoritative read-back、HMAC secret rotation
-- local Google identity token/JWKS verifierとcontroller attestation/cleanup clientの実service接続
-- staging D1 migration、shadow mode/service injection、synthetic execution最大1件
+- staging限定composition rootを含むversion-pinned `release/0.2.0` commitの全gateと最終candidate再build
+- 最終candidateのcontroller/worker attestation各1件、Binary Authorization `VERIFIED`、Service digest差し替え
+- staging D1 migration、相異なるruntime/controller HMAC secret、shadow mode/service injectionのstrict read-back
+- finite controller authorizationとD1/R2 synthetic fixtureを同じexecution handleへ固定したsynthetic execution最大1件
 - timeout/response loss/hard lifetime/reaper、artifact/manifest、resource/storage不存在、課金終了の期限付きevidence
 
-実staging gateを開始するまで`CLOUD_RUN_RUNTIME_MODE`をsource configuration、dashboard、secretへ設定しない。
+GPU execution直前までsource defaultとdeployed staging bindingを`disabled`へ保ち、strict preflight後だけ
+`synthetic-shadow`へ切り替える。productionへmode、secret、routeを設定しない。

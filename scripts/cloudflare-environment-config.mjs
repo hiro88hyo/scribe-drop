@@ -16,6 +16,12 @@ const stagingD1DatabaseIdPlaceholder = "00000000-0000-0000-0000-000000000101";
 const stagingOrchestratorHostnamePlaceholder = "replace-with-staging-orchestrator.example.invalid";
 const stagingOrchestratorOriginPlaceholder =
   "https://replace-with-staging-orchestrator.example.invalid";
+const stagingCloudRunControllerOriginPlaceholder =
+  "https://replace-with-staging-gpu-controller.example.invalid";
+const stagingCloudRunOrchestratorOriginPlaceholder =
+  "https://replace-with-staging-cloud-run-orchestrator.example.invalid";
+const stagingCloudRunRuntimeServiceAccountPlaceholder =
+  "replace-with-staging-runtime@replace-with-project.iam.gserviceaccount.com";
 const webOriginPlaceholder = "https://replace-with-staging-web.example.invalid";
 const productionD1DatabaseIdPlaceholder = "00000000-0000-0000-0000-000000000201";
 const productionOrchestratorHostnamePlaceholder =
@@ -78,6 +84,33 @@ function requireExactHttpsOrigin(value, name) {
   }
 
   return value;
+}
+
+function validatedStagingCloudRunConfiguration(identifiers, orchestratorOrigin) {
+  const mode = identifiers.cloudRunRuntimeMode ?? "disabled";
+  if (mode !== "disabled" && mode !== "synthetic-shadow") {
+    throw new Error("SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_MODE is invalid");
+  }
+  if (mode === "disabled") {
+    return { mode };
+  }
+  const controllerOrigin = requireExactHttpsOrigin(
+    identifiers.cloudRunControllerOrigin,
+    "SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_ORIGIN",
+  );
+  if (
+    !/^scribe-drop-staging-gpu-controller-[0-9]+\.asia-southeast1\.run\.app$/u.test(
+      new URL(controllerOrigin).hostname,
+    )
+  ) {
+    throw new Error("SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_ORIGIN is invalid");
+  }
+  const runtimeServiceAccount = requireIdentifier(
+    identifiers.cloudRunRuntimeServiceAccount,
+    /^gpu-runtime@scribe-drop\.iam\.gserviceaccount\.com$/u,
+    "SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT",
+  );
+  return { controllerOrigin, mode, orchestratorOrigin, runtimeServiceAccount };
 }
 
 function rejectEnvironmentMarker(value, marker, name) {
@@ -196,6 +229,7 @@ export function renderOrchestratorStagingConfig(template, identifiers) {
     "SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN",
   );
   const orchestratorHostname = new URL(orchestratorOrigin).hostname;
+  const cloudRun = validatedStagingCloudRunConfiguration(identifiers, orchestratorOrigin);
   const webOrigin = requireExactHttpsOrigin(
     identifiers.webOrigin,
     "SCRIBE_DROP_STAGING_WEB_ORIGIN",
@@ -236,6 +270,36 @@ export function renderOrchestratorStagingConfig(template, identifiers) {
     `RUNPOD_INTERNAL_BASE_URL = "${orchestratorOrigin}"`,
     "orchestrator staging internal origin",
   );
+  const cloudRunBindings = [
+    [
+      `CLOUD_RUN_CONTROLLER_ORIGIN = "${stagingCloudRunControllerOriginPlaceholder}"`,
+      `CLOUD_RUN_CONTROLLER_ORIGIN = "${cloudRun.controllerOrigin}"`,
+      "orchestrator staging Cloud Run controller origin",
+    ],
+    [
+      `CLOUD_RUN_ORCHESTRATOR_ORIGIN = "${stagingCloudRunOrchestratorOriginPlaceholder}"`,
+      `CLOUD_RUN_ORCHESTRATOR_ORIGIN = "${cloudRun.orchestratorOrigin}"`,
+      "orchestrator staging Cloud Run orchestrator origin",
+    ],
+    [
+      'CLOUD_RUN_RUNTIME_MODE = "disabled"',
+      `CLOUD_RUN_RUNTIME_MODE = "${cloudRun.mode}"`,
+      "orchestrator staging Cloud Run runtime mode",
+    ],
+    [
+      `CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT = "${stagingCloudRunRuntimeServiceAccountPlaceholder}"`,
+      `CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT = "${cloudRun.runtimeServiceAccount}"`,
+      "orchestrator staging Cloud Run runtime service account",
+    ],
+  ];
+  for (const [source, activeValue, label] of cloudRunBindings) {
+    stagingConfig = replaceOnce(
+      stagingConfig,
+      `${source}\n`,
+      cloudRun.mode === "disabled" ? "" : `${activeValue}\n`,
+      label,
+    );
+  }
   stagingConfig = replaceOnce(
     stagingConfig,
     `RUNPOD_ALLOWED_GPU_IDS = "${runpodGpuIdsPlaceholder}"`,

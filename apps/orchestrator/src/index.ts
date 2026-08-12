@@ -1,7 +1,8 @@
+import { handleCloudRunRuntimeShadowRequest } from "./cloud-run-runtime-shadow.js";
 import {
-  handleCloudRunRuntimeShadowRequest,
-  type CloudRunRuntimeShadowEnvironment,
-} from "./cloud-run-runtime-shadow.js";
+  createCloudRunRuntimeService,
+  type CloudRunRuntimeCompositionEnvironment,
+} from "./cloud-run-runtime-composition.js";
 import { handleUploadQueueBatch, type UploadQueueEnvironment } from "./upload-queue-consumer.js";
 import { handleRunpodHttpRequest, type RunpodHttpEnvironment } from "./runpod-http-handler.js";
 import { reconcileJobs, type ReconciliationEnvironment } from "./reconciliation-service.js";
@@ -11,7 +12,11 @@ export const ORCHESTRATOR_APPLICATION_ID = "scribe-drop-orchestrator";
 
 export default {
   async fetch(request, environment): Promise<Response> {
-    const shadowResponse = await handleCloudRunRuntimeShadowRequest(request, environment);
+    const shadowResponse = await handleCloudRunRuntimeShadowRequest(
+      request,
+      environment,
+      createCloudRunRuntimeService(environment),
+    );
     if (shadowResponse !== undefined) return shadowResponse;
     return handleRunpodHttpRequest(request, environment);
   },
@@ -38,5 +43,5 @@ export default {
   UploadQueueEnvironment &
     RunpodHttpEnvironment &
     ReconciliationEnvironment &
-    CloudRunRuntimeShadowEnvironment
+    CloudRunRuntimeCompositionEnvironment
 >;

@@ -1481,6 +1481,11 @@ local preparation（2026-08-11〜12）:
   Cloudflare routingは変更していない。既存imageは後続source変更を含まないため、最終acceptanceには新candidateが必要である。
 - 最終candidateのbuild/publish/attestationとService digest差し替え、staging D1 shadow wiring、exact 1 GPU execution、timeout/reaper/
   artifact/cleanup evidenceが残るため、Phase 14の完了条件は未達である。
+- 既存署名済みimageによるnon-GPU preflight後、Cloud Run runtimeのproduction portがdefault Workerへ意図的に未注入だったblockerを
+  解消するstaging限定composition rootを追加した。exact `synthetic-shadow`、相異なるcanonical controller/runtime secret、fixed
+  controller/orchestrator origin、dedicated runtime identity、D1/R2/account設定がすべて揃う場合だけD1 store、Google OIDC、controller
+  attestation/cleanup、R2 capability、HMAC/Ed25519を結線する。欠落、padding、同一secret、production、origin/identity driftでは
+  service生成前にfail closedとし、Workers integrationを50件へ増やした。source defaultはstaging `disabled`、production bindingなしである。
 
 完了条件:
 

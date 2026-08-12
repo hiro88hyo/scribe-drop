@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  decodeCloudRunRuntimeSecret,
   parseCloudRunRuntimeShadowConfig,
+  parseCloudRunRuntimeServiceConfig,
   parseRetentionConfig,
   parseRunpodConfig,
   type RetentionConfigEnvironment,
   type RunpodConfigEnvironment,
 } from "./config.js";
+
+const CLOUD_RUN_CONTROLLER_SECRET = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
+const CLOUD_RUN_DERIVATION_SECRET = "CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg";
 
 describe("Cloud Run runtime shadow configuration", () => {
   it("accepts only the exact staging synthetic mode", () => {
@@ -25,6 +30,47 @@ describe("Cloud Run runtime shadow configuration", () => {
     { APP_ENV: "staging", CLOUD_RUN_RUNTIME_MODE: "enabled" },
   ])("fails closed for an unavailable shadow route: %o", (environment) => {
     expect(parseCloudRunRuntimeShadowConfig(environment)).toBeUndefined();
+  });
+});
+
+describe("Cloud Run runtime service configuration", () => {
+  const valid = {
+    APP_ENV: "staging",
+    CLOUDFLARE_ACCOUNT_ID: "a".repeat(32),
+    CLOUD_RUN_CONTROLLER_HMAC_PRIMARY: CLOUD_RUN_CONTROLLER_SECRET,
+    CLOUD_RUN_CONTROLLER_ORIGIN:
+      "https://scribe-drop-staging-gpu-controller-123456789012.asia-southeast1.run.app",
+    CLOUD_RUN_ORCHESTRATOR_ORIGIN: "https://orchestrator-staging.example.invalid",
+    CLOUD_RUN_RUNTIME_DERIVATION_SECRET: CLOUD_RUN_DERIVATION_SECRET,
+    CLOUD_RUN_RUNTIME_MODE: "synthetic-shadow",
+    CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT: "gpu-runtime@scribe-drop.iam.gserviceaccount.com",
+    R2_ACCESS_KEY_ID: "r2-access-key-placeholder",
+    R2_BUCKET_NAME: "recording-transcriber-staging",
+    R2_SECRET_ACCESS_KEY: "0000000000000000",
+  };
+
+  it("normalizes exact roots and accepts canonical 256-bit secrets", () => {
+    expect(parseCloudRunRuntimeServiceConfig(valid)).toMatchObject({
+      appEnvironment: "staging",
+      controllerOrigin:
+        "https://scribe-drop-staging-gpu-controller-123456789012.asia-southeast1.run.app/",
+      mode: "synthetic-shadow",
+      orchestratorOrigin: "https://orchestrator-staging.example.invalid/",
+    });
+    expect(decodeCloudRunRuntimeSecret(CLOUD_RUN_CONTROLLER_SECRET)?.byteLength).toBe(32);
+  });
+
+  it.each([
+    { APP_ENV: "production" },
+    { CLOUD_RUN_RUNTIME_MODE: "disabled" },
+    { CLOUD_RUN_CONTROLLER_HMAC_PRIMARY: `${CLOUD_RUN_CONTROLLER_SECRET}=` },
+    { CLOUD_RUN_RUNTIME_DERIVATION_SECRET: CLOUD_RUN_CONTROLLER_SECRET },
+    { CLOUD_RUN_RUNTIME_DERIVATION_SECRET: "short" },
+    { CLOUD_RUN_CONTROLLER_ORIGIN: "https://example.invalid" },
+    { CLOUD_RUN_ORCHESTRATOR_ORIGIN: "https://orchestrator-staging.example.invalid/path" },
+    { CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT: "default@scribe-drop.iam.gserviceaccount.com" },
+  ])("fails closed before service composition for config drift: %o", (override) => {
+    expect(parseCloudRunRuntimeServiceConfig({ ...valid, ...override })).toBeUndefined();
   });
 });
 

@@ -2,6 +2,7 @@ import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { createCloudRunRuntimeService } from "../src/cloud-run-runtime-composition.js";
 import { D1CloudRunRuntimeStore } from "../src/cloud-run-runtime-d1-store.js";
 import type {
   RuntimeAttemptContext,
@@ -24,6 +25,8 @@ const OPTIONS = {
   outputFormats: ["markdown", "json", "srt"] as const,
   vad: true,
 };
+const CLOUD_RUN_CONTROLLER_SECRET = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
+const CLOUD_RUN_DERIVATION_SECRET = "CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg";
 
 beforeAll(async () => {
   await applyD1Migrations(env.SCRIBE_DROP_DB, env.TEST_MIGRATIONS);
@@ -75,6 +78,34 @@ beforeEach(async () => {
   await env.SCRIBE_DROP_DB.prepare("UPDATE jobs SET active_attempt_id = ?2 WHERE id = ?1")
     .bind(JOB_ID, ATTEMPT_ID)
     .run();
+});
+
+describe("Cloud Run runtime composition", () => {
+  const configuration = {
+    APP_ENV: "staging",
+    CLOUD_RUN_CONTROLLER_HMAC_PRIMARY: CLOUD_RUN_CONTROLLER_SECRET,
+    CLOUD_RUN_CONTROLLER_ORIGIN:
+      "https://scribe-drop-staging-gpu-controller-123456789012.asia-southeast1.run.app",
+    CLOUD_RUN_ORCHESTRATOR_ORIGIN: "https://orchestrator-staging.example.invalid",
+    CLOUD_RUN_RUNTIME_DERIVATION_SECRET: CLOUD_RUN_DERIVATION_SECRET,
+    CLOUD_RUN_RUNTIME_MODE: "synthetic-shadow",
+    CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT: "gpu-runtime@scribe-drop.iam.gserviceaccount.com",
+    R2_SECRET_ACCESS_KEY: "0000000000000000",
+  };
+
+  it("injects all reviewed production ports only for the complete staging boundary", () => {
+    expect(createCloudRunRuntimeService({ ...env, ...configuration })).toBeDefined();
+    expect(
+      createCloudRunRuntimeService({
+        ...env,
+        ...configuration,
+        CLOUD_RUN_RUNTIME_DERIVATION_SECRET: `${CLOUD_RUN_DERIVATION_SECRET}=`,
+      }),
+    ).toBeUndefined();
+    expect(
+      createCloudRunRuntimeService({ ...env, ...configuration, APP_ENV: "production" }),
+    ).toBeUndefined();
+  });
 });
 
 function store(): D1CloudRunRuntimeStore {

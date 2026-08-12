@@ -16,6 +16,10 @@ const identifiers = {
   accessAudience: "staging-access-audience",
   accessTeamDomain: "https://scribe-drop-staging.cloudflareaccess.com",
   accountId: "a".repeat(32),
+  cloudRunControllerOrigin:
+    "https://scribe-drop-staging-gpu-controller-123456789012.asia-southeast1.run.app",
+  cloudRunRuntimeMode: "synthetic-shadow",
+  cloudRunRuntimeServiceAccount: "gpu-runtime@scribe-drop.iam.gserviceaccount.com",
   d1DatabaseId: "12345678-1234-4abc-8def-1234567890ab",
   orchestratorOrigin: "https://orchestrator-staging.example.invalid",
   pagesAccessAudience: "staging-pages-access-audience",
@@ -52,6 +56,10 @@ routes = [
 [env.staging.vars]
 AUDIT_RETENTION_DAYS = "180"
 CLOUDFLARE_ACCOUNT_ID = "${"0".repeat(32)}"
+CLOUD_RUN_CONTROLLER_ORIGIN = "https://replace-with-staging-gpu-controller.example.invalid"
+CLOUD_RUN_ORCHESTRATOR_ORIGIN = "https://replace-with-staging-cloud-run-orchestrator.example.invalid"
+CLOUD_RUN_RUNTIME_MODE = "disabled"
+CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT = "replace-with-staging-runtime@replace-with-project.iam.gserviceaccount.com"
 MULTIPART_RETENTION_HOURS = "24"
 RESULT_RETENTION_DAYS = "90"
 RUNPOD_ALLOWED_GPU_IDS = "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090,NVIDIA RTX PRO 6000 Blackwell Server Edition"
@@ -81,10 +89,31 @@ database_id = "00000000-0000-0000-0000-000000000101"
   );
   assert.match(
     rendered,
+    /CLOUD_RUN_CONTROLLER_ORIGIN = "https:\/\/scribe-drop-staging-gpu-controller-123456789012\.asia-southeast1\.run\.app"/u,
+  );
+  assert.match(
+    rendered,
+    /CLOUD_RUN_ORCHESTRATOR_ORIGIN = "https:\/\/orchestrator-staging\.example\.invalid"/u,
+  );
+  assert.match(rendered, /CLOUD_RUN_RUNTIME_MODE = "synthetic-shadow"/u);
+  assert.match(
+    rendered,
+    /CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT = "gpu-runtime@scribe-drop\.iam\.gserviceaccount\.com"/u,
+  );
+  assert.match(
+    rendered,
     /RUNPOD_ALLOWED_GPU_IDS = "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090,NVIDIA RTX PRO 6000 Blackwell Server Edition"/u,
   );
   assert.match(rendered, new RegExp(`RUNPOD_WORKER_IMAGE = "${identifiers.runpodWorkerImage}"`));
   assert.match(rendered, /WEB_BASE_URL = "https:\/\/scribe-drop-staging\.example\.invalid"/u);
+
+  const disabled = renderOrchestratorStagingConfig(template, {
+    ...identifiers,
+    cloudRunControllerOrigin: undefined,
+    cloudRunRuntimeMode: undefined,
+    cloudRunRuntimeServiceAccount: undefined,
+  });
+  assert.doesNotMatch(disabled, /CLOUD_RUN_/u);
 });
 
 test("renders the web staging identifiers and ignored-config build path", () => {

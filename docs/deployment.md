@@ -234,6 +234,9 @@ Phase 7のmigration、retention、PWA rolloutは
 - `SCRIBE_DROP_STAGING_D1_DATABASE_ID`
 - `SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN`
 - `SCRIBE_DROP_STAGING_WEB_ORIGIN`
+- `SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_ORIGIN`（`synthetic-shadow`時だけ必須）
+- `SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_MODE`（省略時`disabled`）
+- `SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT`（`synthetic-shadow`時だけ必須）
 - `MULTIPART_RETENTION_HOURS`（省略時24）
 - `SOURCE_RETENTION_DAYS`（省略時7）
 - `RESULT_RETENTION_DAYS`（省略時90）
@@ -540,6 +543,19 @@ RunPodから到達するOrchestratorは専用Custom Domainを使う。追跡外s
 `RUNPOD_INTERNAL_BASE_URL`を同時生成する。対話loginを要求するAccess policyは付けず、
 未知path、query付きrequest、POST以外、JSON以外、4 KiB超過、schema不一致を拒否する。
 実origin、claim/heartbeat token、署名URLをdeployment記録やCLI出力へ残さない。
+
+Phase 14のCloud Run runtimeはstaging shadow namespaceに限定する。D1 migration
+`0010_provider_execution_compatibility.sql`と`0011_cloud_run_runtime_protocol.sql`を先に適用し、
+`CLOUD_RUN_CONTROLLER_HMAC_PRIMARY`と`CLOUD_RUN_RUNTIME_DERIVATION_SECRET`を相異なる
+32〜64 byteのcanonical base64url encrypted secretとして登録する。追跡外設定は
+controllerのexact `run.app` origin、上記Custom Domainと同じOrchestrator origin、固定runtime
+service accountを同時に生成する。まず`CLOUD_RUN_RUNTIME_MODE=disabled`でdeploy/read-backし、
+controller authorization、D1/R2 fixture、課金上限、cleanup期限をstrict preflightした後だけ
+`synthetic-shadow`へ切り替える。production設定にはこれらのbindingとrouteを追加しない。
+
+rollbackはmodeを`disabled`へ戻してshadow endpointを閉じ、実行中Executionのcleanupとcontroller
+authorizationの無効化を確認してから直前のWorker deploymentへ戻す。forward-only migrationは
+旧applicationと互換のため削除しない。
 
 Phase 5の追跡外Orchestrator設定では、同じ生成処理が
 `SCRIBE_DROP_STAGING_WEB_ORIGIN`から`WEB_BASE_URL`も設定する。D1 migration
