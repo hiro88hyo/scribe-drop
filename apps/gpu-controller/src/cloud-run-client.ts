@@ -14,8 +14,17 @@ import type {
 const MAX_PROVIDER_RESPONSE_BYTES = 65_536;
 const PROVIDER_TIMEOUT_MS = 10_000;
 
+const binaryAuthorizationSchema = z
+  .object({
+    breakglassJustification: z.literal("").optional(),
+    policy: z.never().optional(),
+    useDefault: z.literal(true),
+  })
+  .strict();
+
 export const cloudRunJobManifestSchema = z
   .object({
+    binaryAuthorization: binaryAuthorizationSchema,
     labels: z.record(z.string(), z.string()),
     template: z
       .object({
@@ -152,6 +161,7 @@ const jobSchema = z
       })
       .loose()
       .optional(),
+    binaryAuthorization: binaryAuthorizationSchema,
     labels: z.record(z.string(), z.string()),
     template: cloudRunJobManifestSchema.shape.template,
   })
@@ -261,7 +271,11 @@ export class CloudRunJobsClient implements CloudRunAdminPort {
         ready:
           parsed.data.reconciling !== true &&
           parsed.data.terminalCondition?.state === "CONDITION_SUCCEEDED",
-        manifest: { labels: parsed.data.labels, template: parsed.data.template },
+        manifest: {
+          binaryAuthorization: { useDefault: true },
+          labels: parsed.data.labels,
+          template: parsed.data.template,
+        },
       },
     };
   }

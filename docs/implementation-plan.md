@@ -1332,7 +1332,8 @@ pnpm check
   service identityの残余riskを固定した。詳細とlocal image evidenceは
   [Cloud Run one-shot runtime](./cloud-run-one-shot-runtime.md)を正とする。
 - fixed manifestとcontroller read-back schemaは`cloud_run_jobs_l4_v1`のtask 1、retry 0、L4 1、resource、command、
-  non-secret runtime environmentを完全比較する。permission set、region、GPU、CPU、memory、timeout、volume、service
+  non-secret runtime environment、Binary Authorization default policyを完全比較し、欠落、無効化、policy override、
+  breakglassを拒否する。permission set、region、GPU、CPU、memory、timeout、volume、service
   accountにPhase 12からの拡張はない。
 - Firestore resourceとservice wiring、実Google identity接続、service hosting、IAM、cloud resource、CI、product routingは
   Phase 14の実staging gateまで未実装である。D1 runtime adapter、disabled shadow namespace、controller live attestation、
@@ -1408,6 +1409,9 @@ local preparation（2026-08-11）:
   Google API originとresource pathだけへGETし、redirect、非JSON、256 KiB超過、10秒timeoutを拒否するread-only clientもlocal実装した。
   Secret Managerは`:access`を呼ばずmetadataだけを取得し、全resourceを2回readして途中変更を拒否する。実credentialでの呼び出し、
   authoritative evidence取得、resource作成、deployは行わない。
+- ephemeral GPU JobにもBinary Authorization default policyを固定し、create bodyとlive read-backの両方で欠落、無効化、
+  policy override、breakglassを拒否する。project default policy/attestorのauthoritative read-backとworker image attestation
+  発行は未実装であり、cloud/CI変更前のstaging blockerとして残る。
 - [ADR 0078](./adr/0078-split-controller-iam-by-resource-boundary.md)に従いcontroller IAM pure planを追加した。Cloud Run Jobs custom roleは
   実clientが使うJob create/get/delete/run、Execution list/cancel/delete、Operation getだけ、Firestore custom roleはtransactionと
   entity get/create/update/deleteだけへ固定する。project binding、database完全一致condition、runtime account上の

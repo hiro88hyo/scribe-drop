@@ -86,6 +86,59 @@ describe("Cloud Run Jobs REST adapter", () => {
     expect(await client.getJob("sd-stg-job")).toEqual({ outcome: "unavailable" });
   });
 
+  it("rejects a Job whose Binary Authorization protection is missing or weakened", async () => {
+    const validResponse = {
+      ...MANIFEST,
+      name: JOB.ref,
+      uid: JOB.uid,
+      etag: JOB.etag,
+      reconciling: false,
+      terminalCondition: { state: "CONDITION_SUCCEEDED" },
+    };
+    const missing = {
+      name: JOB.ref,
+      uid: JOB.uid,
+      etag: JOB.etag,
+      reconciling: false,
+      terminalCondition: { state: "CONDITION_SUCCEEDED" },
+      labels: MANIFEST.labels,
+      template: MANIFEST.template,
+    };
+    const responses = [
+      validResponse,
+      {
+        ...validResponse,
+        binaryAuthorization: { useDefault: true, breakglassJustification: "" },
+      },
+      missing,
+      { ...validResponse, binaryAuthorization: { useDefault: false } },
+      { ...validResponse, binaryAuthorization: { policy: "projects/p/policy" } },
+      {
+        ...validResponse,
+        binaryAuthorization: {
+          useDefault: true,
+          breakglassJustification: "unreviewed bypass",
+        },
+      },
+    ];
+    const client = new CloudRunJobsClient(
+      { projectId: "scribe-phase12", region: "asia-southeast1" },
+      { getAccessToken: () => Promise.resolve("token") },
+      () => {
+        const response = responses.shift();
+        if (response === undefined) throw new Error("unexpected request");
+        return Promise.resolve(Response.json(response));
+      },
+    );
+
+    expect(await client.getJob("sd-stg-job")).toEqual({ outcome: "found", job: JOB });
+    expect(await client.getJob("sd-stg-job")).toEqual({ outcome: "found", job: JOB });
+    expect(await client.getJob("sd-stg-job")).toEqual({ outcome: "unavailable" });
+    expect(await client.getJob("sd-stg-job")).toEqual({ outcome: "unavailable" });
+    expect(await client.getJob("sd-stg-job")).toEqual({ outcome: "unavailable" });
+    expect(await client.getJob("sd-stg-job")).toEqual({ outcome: "unavailable" });
+  });
+
   it("reads an exact scoped asynchronous operation without exposing its raw body", async () => {
     const reference = "projects/scribe-phase12/locations/asia-southeast1/operations/operation-1";
     const client = new CloudRunJobsClient(

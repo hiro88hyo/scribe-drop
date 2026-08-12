@@ -45,6 +45,7 @@ GPU runtime
 | task             | task 1、parallelism 1、retry 0、timeout 3,300秒                               |
 | scratch          | `/tmp`だけ、3 GiB size-limited in-memory volume                               |
 | image            | release candidateのimmutable Artifact Registry digest                         |
+| supply chain     | Binary Authorization default policy、policy override/breakglass禁止           |
 | command          | fixed one-shot runtime entrypoint、override禁止                               |
 | runtime identity | environment専用user-managed service account、project role 0、key 0            |
 | network          | listenerなし、inboundなし、default outbound、application HTTPS allowlist      |
@@ -158,7 +159,8 @@ expiry後もrecordが存在し得ることをreplay判断と運用文書へ反�
 2. fixed policyだけからCloud Run v2 Job bodyを生成する。
 3. caller指定`jobId`でcreateし、Operationをbounded schemaへ変換する。
 4. timeoutまたはresponse parse failureは`unknown_outcome`として同じJob IDをget/listする。
-5. 既存JobがあればUID、etag、manifestを完全照合する。不一致はresource driftとして実行せずcleanupする。
+5. 既存JobがあればUID、etag、Binary Authorization default policyを含むmanifestを完全照合する。default policyの
+   欠落、無効化、policy override、breakglassを含む不一致はresource driftとして実行せずcleanupする。
 6. 404確認後にcreateを再試行する場合も同じJob IDだけを使う。別名、別region、別GPUへfallbackしない。
 7. Operation完了とmanifest一致後にprovider refをFirestoreへ保存する。
 
@@ -187,6 +189,7 @@ controllerはExecutionから次をbounded schemaへ写す。
 - reconciling、terminal condition、running/succeeded/failed/cancelled/retried count
 - task count、parallelism、retry、timeout
 - immutable image digest、command、environment allowlist、runtime service account
+- Binary Authorization default policy、policy override/breakglass不在
 - L4 count、CPU、memory、scratch、volume/networkのfixed policy一致
 
 runtimeはGPU/model初期化前にCloud Run組み込みJob/Execution/task変数をstrict検証し、opaque handle、bootstrap request ID、
@@ -298,6 +301,9 @@ allowlist reasonからsafe error kindへ変換する。
   IAM/Secret Manager/Binary Authorizationのstrict observation verifier、必須read-backを束ねるatomic evidence verifierもlocal実装した。
   固定Google API endpointへのGETと`getIamPolicy`だけのread-only POST、bounded、double-snapshot clientもlocal実装した。実credentialとauthoritative live
   observationへは未接続である。
+- GPU Job manifestにもBinary Authorization default policyを固定し、Cloud Run v2 Job read-backで欠落、無効化、
+  policy override、breakglassを拒否する。project default policyとexact attestorのauthoritative read-back、worker imageへの
+  attestation発行は実staging gateに残す。
 - 別review packetと明示承認後だけ、environment分離した最小staging resourceへ接続する。
 - exact synthetic execution countと費用を事前固定し、cleanup/parityをread-backする。
 
@@ -320,6 +326,7 @@ allowlist reasonからsafe error kindへ変換する。
 - [Cloud Run IAM permissions](https://docs.cloud.google.com/run/docs/reference/iam/permissions)
 - [Cloud Run locations](https://cloud.google.com/run/docs/locations)
 - [Cloud Run authentication overview](https://docs.cloud.google.com/run/docs/authenticating/overview)
+- [Enable Binary Authorization for Cloud Run](https://docs.cloud.google.com/binary-authorization/docs/run/enabling-binauthz-cloud-run)
 - [Firestore transactions](https://docs.cloud.google.com/firestore/native/docs/manage-data/transactions)
 - [Firestore locations](https://docs.cloud.google.com/firestore/docs/locations)
 - [Firestore TTL](https://docs.cloud.google.com/firestore/native/docs/ttl)

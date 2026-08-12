@@ -39,7 +39,9 @@ RunPod Pods比較案はpublic IP、create idempotency、provider署名instance i
   [Cloud Run provider control-plane設計](../cloud-run-provider-control-plane.md)とする。
 - provider policyを`cloud_run_jobs_l4_v1`に固定する。regionは`asia-southeast1`、L4 1台、4 vCPU、
   16 GiB、task 1、parallelism 1、retry 0、task timeout 55分、no zonal redundancy、`/tmp` 3 GiB
-  size-limited in-memory volume、immutable image digest、固定commandとする。caller overrideは一切受けない。
+  size-limited in-memory volume、immutable image digest、固定command、Binary Authorization default policyとする。
+  policy指定やbreakglassを許さず、Job read-backでdefault policyの欠落または無効化を検出した場合は実行しない。
+  caller overrideは一切受けない。
 - provider control planeは同じregionの専用Cloud Run Serviceとして分離する。Cloudflare Orchestratorは
   Google Cloud credentialを保持せず、environment別256 bit以上のcontroller HMAC secretでrequest method、path、
   timestamp、request ID、canonical body digestを認証する。controllerはsecret key ID、signature、時刻、request digestを
@@ -111,6 +113,7 @@ RunPod Pods比較案はpublic IP、create idempotency、provider署名instance i
 | durable guard      | provider resource list中心       | regional Firestore transactionでreplay/concurrency/budgetを固定        |
 | data location      | data center未固定                | compute/control stateをSingaporeへ固定、実録音はPhase 15まで禁止       |
 | network            | Secure Cloud、public network gap | no inbound Job、default outbound + application allowlistの残余リスク   |
+| supply chain       | digest照合とlocal scan           | immutable digest + Job単位のBinary Authorization default policy        |
 | cost               | deploy時Console単価              | default 0円、packetごとのfresh全resource見積、有限count/JPY reserve    |
 | cleanup            | Pod/storage terminate            | exact Execution cancel/delete、Job delete、absence read-back           |
 
@@ -139,6 +142,7 @@ RunPod Pods比較案はpublic IP、create idempotency、provider署名instance i
 - [Cloud Run locations](https://cloud.google.com/run/docs/locations)
 - [Cloud Run IAM roles](https://docs.cloud.google.com/run/docs/reference/iam/roles)
 - [Cloud Run authentication overview](https://docs.cloud.google.com/run/docs/authenticating/overview)
+- [Enable Binary Authorization for Cloud Run](https://docs.cloud.google.com/binary-authorization/docs/run/enabling-binauthz-cloud-run)
 - [Firestore transactions](https://docs.cloud.google.com/firestore/native/docs/manage-data/transactions)
 - [Firestore locations](https://docs.cloud.google.com/firestore/docs/locations)
 - [ADR 0071](./0071-separate-provider-selection-from-production-adoption.md)

@@ -198,7 +198,8 @@ Serverlessのままである。
 
 Phase 12の`apps/gpu-controller`はCloudflare Orchestratorから独立したcontrol-plane境界である。外部requestは
 environment別HMACとstrict schemaを通り、opaque handle以外のapplication dataやresource specを受けない。
-controllerはfixed L4 policyだけからJobを構築し、Cloud Run Admin APIとdurable control storeをport化する。
+controllerはBinary Authorization default policyを含むfixed L4 policyだけからJobを構築し、Cloud Run Admin APIとdurable
+control storeをport化する。Job read-backでdefault policyの欠落、無効化、policy override、breakglassを拒否する。
 createはdeterministic Job ID、runはdurable intent後exact 1 send、cancel/deleteはexact refとread-backで収束する。
 このPhaseのstoreはrestartを再現するin-memory fakeであり、Firestore adapter、service hosting、IAM、secret、
 staging接続はPhase 14まで導入しない。

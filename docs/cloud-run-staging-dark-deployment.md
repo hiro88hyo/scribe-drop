@@ -150,7 +150,7 @@ Terraform apply、`gcloud run deploy`を行わない。
 | scaling/concurrency | service/revision min 0、max 1、instance concurrency 8                                |
 | request/traffic     | 60秒timeout、latest revision 100%、session affinityなし                              |
 | ingress/auth        | public ingress、default URI有効、IAM invoker check無効、IAPなし、application HMAC    |
-| supply chain        | Binary Authorization default policy必須                                              |
+| supply chain        | controller Serviceと各GPU JobにBinary Authorization default policy必須               |
 | storage/network     | volumeなし、VPC accessなし                                                           |
 | secret/config       | HMACはenvironment別distinct secretの数値version、その他はexact environment allowlist |
 | authorization       | 初期値は明示的なexecution 0、request 0、budget 0                                     |
@@ -160,7 +160,7 @@ containerは既に`0.0.0.0`のCloud Run注入`PORT`でlistenする。planは8080
 service/secret名にはstagingまたはproductionのdelimiter付きmarkerを要求し、controller/worker imageとcontroller/runtime identityは
 同じprojectへ限定する。
 
-normalized read-back verifierはimage、identity、secret version、ingress、Binary Authorization、scaling、traffic、resource、
+normalized read-back verifierはcontroller Serviceのimage、identity、secret version、ingress、Binary Authorization、scaling、traffic、resource、
 environmentの完全一致だけを受ける。Cloud Run v2 raw adapterはstrict response schema、generation収束、ready revision、latest 100%
 traffic、root HTTPS `run.app` URIを検証してnormalized shapeへ変換する。project由来のoutput-only `threatDetectionEnabled`はevidenceへ
 分離し、desired-state driftには使わない。IAM policyはpublic/excess bindingなし、Secret ManagerはSingapore user-managed replica、数値
@@ -171,6 +171,8 @@ evidenceへ束ね、secondary observationの欠落・余剰を拒否する。rea
 secret/version metadata/IAM、Binary Authorization policyの固定endpointだけをGETし、redirect、非JSON、256 KiB超過、10秒timeoutを拒否する。
 同じaccess tokenとquota projectで全endpointを2回readし、canonical response差分があれば観測を破棄する。`:access`によるsecret payload取得、
 retry、mutationは行わない。cloud review後に実credentialで各authoritative observationを取得してこの検証へ渡す。
+各ephemeral GPU Jobもcreate bodyとlive read-backの両方でBinary Authorization default policyを必須とし、欠落、無効化、
+policy override、breakglassは実行前のresource driftとして拒否する。
 
 controller authorityは[ADR 0078](./adr/0078-split-controller-iam-by-resource-boundary.md)に従うpure IAM planで分割する。Cloud Run Jobs roleは
 実clientが呼ぶ8 permissionだけ、Firestore roleはtransactionとentity CRUDの5 permissionだけとし、database条件、runtime
@@ -237,7 +239,8 @@ Cloud Run Job、R2 signed request、課金停止のevidenceではない。
 
 - Phase 8〜13の`develop`統合、`release/0.2.0`作成、version固定、一度だけのcandidate build
 - dedicated named Firestore database/TTL policy、controllerへのadapter injection/service hosting、controller image publish、
-  signature/provenance、Cloud Run v2/IAM/Secret Manager/Binary Authorization read-only clientの実credential実行とauthoritative evidence、
+  controller/worker imageのsignature/provenanceとattestation発行、Cloud Run v2/IAM/Secret Manager/Binary Authorization
+  read-only clientの実credential実行とauthoritative evidence、
   HMAC secret rotation
 - local Google identity token/JWKS verifierとcontroller attestation/cleanup clientの実service接続
 - staging D1 migration、shadow mode/service injection、synthetic execution最大1件

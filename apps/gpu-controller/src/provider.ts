@@ -39,6 +39,9 @@ export const fixedPolicyConfigurationSchema = z
 export type FixedPolicyConfiguration = z.infer<typeof fixedPolicyConfigurationSchema>;
 
 export interface CloudRunJobManifest {
+  readonly binaryAuthorization: {
+    readonly useDefault: true;
+  };
   readonly labels: Readonly<Record<string, string>>;
   readonly template: {
     readonly taskCount: 1;
@@ -97,6 +100,7 @@ export function createFixedJobManifest(
 ): CloudRunJobManifest {
   const parsed = fixedPolicyConfigurationSchema.parse(configuration);
   return {
+    binaryAuthorization: { useDefault: true },
     labels: {
       "scribe-drop-environment": parsed.environment,
       "scribe-drop-policy": "cloud-run-jobs-l4-v1",
