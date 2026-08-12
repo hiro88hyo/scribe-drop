@@ -203,7 +203,10 @@ dependency gateをcloud authより前、OIDC preflightをimage build直前へ固
 Dockerfileの`CMD []`はDocker engineによりlive `docker inspect`で`Config.Cmd: null`またはfield省略となるため、no-command
 の2 serializationだけを許可し、unexpected commandを拒否する回帰テストを追加した。push/signingには到達しておらず、
 controller build/check/SBOM/Trivy、RunPod worker build、Cloud Run worker build/check/SBOM/Trivyの同一9 commandはlocalで成功した。
-再実行前も両repositoryとOccurrenceが空であることをread-backする。
+次のrunは同じgateと両imageの1回push、registry digest解決、isolated signer OIDCまで成功した。pinned gcloudに`beta`
+componentがなく、attestation commandが非対話promptの前に停止したため、両repositoryに各1 image、Occurrence 0をread-backした。
+公式setup-gcloudの`install_components: beta`をversion 579と同時に固定し、static verifierで必須化する。失敗candidate imageは
+成功candidateのread-back後にexact tag/digestで削除し、成功artifactを保持する。
 
 controller authorityは[ADR 0078](./adr/0078-split-controller-iam-by-resource-boundary.md)に従うpure IAM planで分割する。Cloud Run Jobs roleは
 実clientが呼ぶ8 permissionだけ、Firestore roleはtransactionとentity CRUDの5 permissionだけとし、database条件、runtime

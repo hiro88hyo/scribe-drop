@@ -1369,6 +1369,9 @@ local preparation（2026-08-11〜12）:
   Dockerfileの`CMD []`がengine差で返す`Config.Cmd: null`またはfield省略をno-commandとして固定し、unexpected commandを
   拒否する回帰テストを追加した。candidate workflowと同じcontroller/workerのbuild、check、SBOM、HIGH/CRITICAL scanは
   localで全て成功した。image push、Occurrence、Cloud Run mutationには到達していない。
+- 修正後runは全gate、両imageの1回push、digest解決、isolated signer OIDCまで成功した。pinned gcloudに`beta` componentがなく
+  attestation commandのcomponent promptで停止した。両repository各1 image、Occurrence 0をread-backし、部分署名がないことを
+  確認した。setup-gcloudでversion 579と`beta`を同時に固定し、失敗candidate imageは成功candidate検証後にexact cleanupする。
 - forward-only `0011_cloud_run_runtime_protocol.sql`でbootstrap、challenge/session、allowlist terminal eventを
   provider executionへ外部キーで固定した。challenge消費、sequence、terminal revokeはD1 CAS/triggerへ収束する。
 - D1 production repositoryはactive attempt、provider kind/policy、contract v2、source key/ETag/size、result prefixを

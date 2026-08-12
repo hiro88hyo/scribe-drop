@@ -363,6 +363,8 @@ for (const [description, expected] of Object.entries({
   "exact commit equality": 'if [ "$(git rev-parse HEAD)" != "${GITHUB_SHA}" ]; then',
   "frozen pnpm install": "pnpm install --frozen-lockfile",
   "frozen Python install": "uv sync --project apps/runpod-worker --frozen",
+  "pinned gcloud version": "version: 579.0.0",
+  "pinned gcloud beta component": "install_components: beta",
   "full repository gate": "pnpm check",
   "Git history and worktree secret gate": "pnpm run secrets:check",
   "locked dependency audit": "pnpm run security:audit",

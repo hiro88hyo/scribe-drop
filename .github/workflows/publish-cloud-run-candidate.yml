@@ -93,6 +93,7 @@ jobs:
       - name: Set up pinned Google Cloud CLI
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
         with:
+          install_components: beta
           version: 579.0.0
           project_id: scribe-drop
 
