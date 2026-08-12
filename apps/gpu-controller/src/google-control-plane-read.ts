@@ -13,6 +13,37 @@ const projectIdSchema = z.string().regex(/^[a-z][a-z0-9-]{4,28}$/u);
 const getIamPolicyBodySchema = z
   .object({ options: z.object({ requestedPolicyVersion: z.literal(3) }).strict() })
   .strict();
+const payloadBase64Schema = z
+  .string()
+  .min(4)
+  .max(32_768)
+  .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u);
+const signatureBase64Schema = z
+  .string()
+  .min(4)
+  .max(16_384)
+  .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u);
+export const binaryAuthorizationAttestationSchema = z
+  .object({
+    jwts: z.never().optional(),
+    serializedPayload: payloadBase64Schema,
+    signatures: z.tuple([
+      z
+        .object({
+          publicKeyId: z.string().min(1).max(1024),
+          signature: signatureBase64Schema,
+        })
+        .strict(),
+    ]),
+  })
+  .strict();
+export const validateAttestationOccurrenceBodySchema = z
+  .object({
+    attestation: binaryAuthorizationAttestationSchema,
+    occurrenceNote: z.string().min(1).max(1024),
+    occurrenceResourceUri: z.string().min(1).max(2048),
+  })
+  .strict();
 const allowedOrigins = new Set([
   "https://artifactregistry.googleapis.com",
   "https://binaryauthorization.googleapis.com",
@@ -31,6 +62,12 @@ export type GoogleControlPlaneReadRequest<Key extends string> =
       readonly body?: { readonly options: { readonly requestedPolicyVersion: 3 } };
       readonly key: Key;
       readonly method: "POST_GET_IAM_POLICY";
+      readonly url: string;
+    }
+  | {
+      readonly body: z.input<typeof validateAttestationOccurrenceBodySchema>;
+      readonly key: Key;
+      readonly method: "POST_VALIDATE_ATTESTATION";
       readonly url: string;
     };
 
@@ -124,14 +161,22 @@ export class BoundedGoogleControlPlaneReadClient {
       parsedUrl.username !== "" ||
       parsedUrl.password !== "" ||
       parsedUrl.hash !== "" ||
-      (request.method === "POST_GET_IAM_POLICY" && !parsedUrl.pathname.endsWith(":getIamPolicy"))
+      (request.method === "POST_GET_IAM_POLICY" && !parsedUrl.pathname.endsWith(":getIamPolicy")) ||
+      (request.method === "POST_VALIDATE_ATTESTATION" &&
+        (parsedUrl.origin !== "https://binaryauthorization.googleapis.com" ||
+          !parsedUrl.pathname.endsWith(":validateAttestationOccurrence")))
     ) {
       throw new Error("control-plane read-back endpoint is not allowed");
     }
-    const body =
-      request.method === "POST_GET_IAM_POLICY" && request.body !== undefined
-        ? getIamPolicyBodySchema.parse(request.body)
-        : undefined;
+    const body = (() => {
+      if (request.method === "POST_GET_IAM_POLICY") {
+        return request.body === undefined ? undefined : getIamPolicyBodySchema.parse(request.body);
+      }
+      if (request.method === "POST_VALIDATE_ATTESTATION") {
+        return validateAttestationOccurrenceBodySchema.parse(request.body);
+      }
+      return undefined;
+    })();
     const abort = new AbortController();
     const timeout = setTimeout(() => {
       abort.abort();

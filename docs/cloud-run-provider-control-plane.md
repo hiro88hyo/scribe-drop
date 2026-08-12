@@ -307,7 +307,9 @@ allowlist reasonからsafe error kindへ変換する。
 - [ADR 0080](./adr/0080-use-kms-backed-binary-authorization-attestations.md)のproject-singleton attestor、global Artifact
   Analysis Note、Singapore KMS signing version、publisher/signer分離、controller/worker両digestをpure deployment planへ固定した。
   attestor/Note/KMS public keyとCRC32C、version 1だけのactive set、resource IAMをstrict read-backし、固定Google API endpointの
-  double snapshotへ接続する。実credential、WIF/service-account key不在、candidate attestation/validationは未接続である。
+  double snapshotへ接続する。両candidate digestはgcloud 579の整形済みpayload、exact KMS key ID、各1件のOccurrenceを要求し、
+  Binary Authorization validationの`VERIFIED`とvalidation前後の不変性もlocal検証する。実credential、WIF/service-account key不在、
+  Occurrence発行は未接続である。
 - 別review packetと明示承認後だけ、environment分離した最小staging resourceへ接続する。
 - exact synthetic execution countと費用を事前固定し、cleanup/parityをread-backする。
 

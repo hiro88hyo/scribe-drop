@@ -233,13 +233,14 @@ CPU/memory/concurrency/scaling/timeout、traffic 100%、public HMAC ingress、Bi
 environment allowlistを表現し、normalized read-backの完全一致だけを受ける。Cloud Run v2 raw responseをstrict parseして収束・ready・
 traffic・URIを検証するadapterと、IAM、Singapore Secret Manager fixed version、Binary Authorization default policyのstrict local
 observation verifierも追加し、必須observationを同一project/environmentのatomic local evidenceへ束ねる。read-only clientは固定Google
-API origin/pathへのGETと`getIamPolicy`だけのread-only POST、redirect拒否、10秒/256 KiB上限、同一access token、`x-goog-user-project`、2回のstable snapshotへ閉じ、Secret
+API origin/pathへのGET、`getIamPolicy`、署名を変更しないBinary Authorization validation POSTだけへ閉じ、redirect拒否、10秒/256 KiB上限、同一access token、`x-goog-user-project`、2回のstable snapshotへ閉じ、Secret
 Manager payload accessを行わない。実credentialによるlive read-backとresource mutationは未接続である。詳細は
 [staging dark deployment](./cloud-run-staging-dark-deployment.md)を正とする。
 
 release supply chainはADR 0080のproject-singleton Binary Authorization attestor、global Artifact Analysis Note、Singapore
 Cloud KMS ECDSA P-256 signing versionへ固定する。publisherとsignerを分離したpure plan、attestor/Note/KMS public key/CRC32C/
-resource IAMのstrict double-snapshot read-backはlocal実装済みで、WIF、candidate attestation、cloud resourceは未接続である。
+resource IAMのstrict double-snapshot read-backをlocal実装した。両candidate digestはgcloud 579のcanonical payload、exact KMS key ID、
+各1件のOccurrence、Binary Authorization `VERIFIED`を照合し、validation前後の置換を拒否する。WIF、Occurrence発行、cloud resourceは未接続である。
 
 controller IAMは[ADR 0078](./adr/0078-split-controller-iam-by-resource-boundary.md)に従い、Cloud Run JobsとFirestoreのcustom roleを分離する。
 Cloud Run roleから未使用のJob listとExecution getを除き、Firestore roleはtransactionと固定document CRUDだけにする。project policyの

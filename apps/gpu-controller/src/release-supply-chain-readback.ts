@@ -64,7 +64,7 @@ export const artifactAnalysisAttestorNoteReadbackSchema = z
       .strict(),
     createTime: timestampSchema,
     expirationTime: z.never().optional(),
-    kind: z.literal("ATTESTATION_AUTHORITY"),
+    kind: z.literal("ATTESTATION"),
     longDescription: z.string().max(4096),
     name: resourceNameSchema,
     relatedNoteNames: z.array(resourceNameSchema).max(1).optional(),

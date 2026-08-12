@@ -109,7 +109,7 @@ function fixture(): {
       note: {
         ...plan.artifactAnalysisNote,
         createTime: "2026-08-12T00:00:00Z",
-        kind: "ATTESTATION_AUTHORITY",
+        kind: "ATTESTATION",
         relatedNoteNames: [],
         relatedUrl: [],
         updateTime: "2026-08-12T00:00:01Z",

@@ -1,4 +1,6 @@
 export * from "./authentication.js";
+export * from "./candidate-attestation-readback.js";
+export * from "./candidate-attestation-readback-client.js";
 export * from "./cloud-run-client.js";
 export * from "./contracts.js";
 export * from "./control-store.js";

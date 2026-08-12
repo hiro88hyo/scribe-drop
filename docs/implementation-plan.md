@@ -1417,8 +1417,9 @@ local preparation（2026-08-11〜12）:
   権限分離、controller/worker両digestのattestation、月額約US$0.06のkey保持費を固定した。project numberとdeployment
   configから必要API、Note、attestor、policy、Singapore KMS key/version、publisher/signer、repository/IAMを一意に導出する
   pure planを追加した。strict read-backはattestor/Note/KMS version/public key/CRC32Cとresource IAMを照合し、固定endpointだけを
-  同じtoken/quota projectで2回取得する。candidate attestation/validation、service-account key/WIF read-back、candidate workflow、
-  API/WIF/cloud resourceは未実装であり、別の明示承認まで変更しない。
+  同じtoken/quota projectで2回取得する。両candidate digestのOccurrenceはgcloud 579のcanonical payload、exact KMS key ID、
+  `ATTESTATION` kind、各1件へ固定し、Binary Authorization validationの`VERIFIED`とvalidation前後の置換拒否をlocal実装した。
+  service-account key/WIF read-back、Occurrence発行、candidate workflow、API/WIF/cloud resourceは未実装であり、別の明示承認まで変更しない。
 - [ADR 0078](./adr/0078-split-controller-iam-by-resource-boundary.md)に従いcontroller IAM pure planを追加した。Cloud Run Jobs custom roleは
   実clientが使うJob create/get/delete/run、Execution list/cancel/delete、Operation getだけ、Firestore custom roleはtransactionと
   entity get/create/update/deleteだけへ固定する。project binding、database完全一致condition、runtime account上の

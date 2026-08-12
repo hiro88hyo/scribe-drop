@@ -26,8 +26,8 @@ attestorで検証する。
 - projectごとにattestorを一つだけ作り、resource IDを`scribe-drop-release-candidate`へ固定する。project default policyは
   このattestorだけを`REQUIRE_ATTESTATION`かつ`ENFORCED_BLOCK_AND_AUDIT_LOG`で要求する。allowlist、specialized rule、
   dry-run、breakglass、resource固有policyを許可しない。
-- attestorは同じprojectのglobal Artifact Analysis Note `scribe-drop-release-candidate`だけを参照する。Noteは
-  `ATTESTATION_AUTHORITY`だけを表し、application data、利用者ID、録音、文字起こし、credentialを含めない。
+- attestorは同じprojectのglobal Artifact Analysis Note `scribe-drop-release-candidate`だけを参照する。NoteはRESTの
+  `ATTESTATION` kindだけを表し、application data、利用者ID、録音、文字起こし、credentialを含めない。
 - Artifact Analysis Note/Occurrenceのglobal保存をBinary Authorization metadataに限る例外として受け入れる。
   controller、GPU Job、Artifact Registry、Firestore、Secret Manager、KMS keyは引き続き`asia-southeast1`へ固定する。
   実録音のdata-location判断にはこの例外を流用しない。
