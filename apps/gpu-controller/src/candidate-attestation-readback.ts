@@ -97,7 +97,7 @@ function verifyOccurrence(
   image: string,
   observed: CandidateAttestationOccurrence,
 ): CandidateAttestationOccurrence {
-  const publicKey = expected.attestor.userOwnedDrydockNote.publicKeys[0];
+  const publicKey = expected.attestor.userOwnedGrafeasNote.publicKeys[0];
   const signature = observed.attestation.signatures[0];
   const expectedPayload = Buffer.from(createCandidateAttestationPayload(image), "utf8").toString(
     "base64",

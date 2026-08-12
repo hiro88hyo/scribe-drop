@@ -52,6 +52,7 @@
     "cloudflare:pages:upload-permission:verify:staging": "node scripts/verify-staging-pages-upload-permission.mjs",
     "cloudflare:worker-route:verify:production": "node scripts/verify-cloudflare-worker-route-permission.mjs production",
     "cloudflare:worker-route:verify:staging": "node scripts/verify-cloudflare-worker-route-permission.mjs staging",
+    "cloud-run:candidate:evidence": "node scripts/cloud-run-candidate-evidence.mjs",
     "container:build:runpod": "docker buildx build --load --tag scribe-drop-runpod-worker:local --file apps/runpod-worker/Dockerfile .",
     "container:build:quality:runpod": "docker buildx build --load --tag scribe-drop-runpod-worker-quality:local --build-arg WORKER_IMAGE=scribe-drop-runpod-worker:local --file apps/runpod-worker/quality.Dockerfile .",
     "container:build:cloud-run": "docker buildx build --load --tag scribe-drop-cloud-run-worker:local --build-arg WORKER_IMAGE=scribe-drop-runpod-worker:local --file apps/runpod-worker/cloud-run.Dockerfile .",

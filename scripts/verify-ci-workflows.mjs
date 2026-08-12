@@ -14,6 +14,10 @@ const ciWorkflowPath = path.join(workflowsDirectory, "ci.yml");
 const publicationWorkflowPath = path.join(workflowsDirectory, "publish-runpod-worker.yml");
 const stagingWorkflowPath = path.join(workflowsDirectory, "deploy-staging-candidate.yml");
 const productionWorkflowPath = path.join(workflowsDirectory, "deploy-production-candidate.yml");
+const cloudRunPublicationWorkflowPath = path.join(
+  workflowsDirectory,
+  "publish-cloud-run-candidate.yml",
+);
 const cloudflareReadbackScriptPath = path.join(
   repositoryRoot,
   "scripts",
@@ -223,6 +227,7 @@ const ciWorkflowContents = readFileSync(ciWorkflowPath, "utf8");
 const publicationWorkflowContents = readFileSync(publicationWorkflowPath, "utf8");
 const stagingWorkflowContents = readFileSync(stagingWorkflowPath, "utf8");
 const productionWorkflowContents = readFileSync(productionWorkflowPath, "utf8");
+const cloudRunPublicationWorkflowContents = readFileSync(cloudRunPublicationWorkflowPath, "utf8");
 const cloudflareReadbackScriptContents = readFileSync(cloudflareReadbackScriptPath, "utf8");
 const stagingE2eContents = readFileSync(stagingE2ePath, "utf8");
 const stagingFailureE2eContents = readFileSync(stagingFailureE2ePath, "utf8");
@@ -262,6 +267,11 @@ const publicationPreflightJob = workflowJob(
   publicationWorkflowContents,
   "preflight",
   "publish-runpod-worker.yml",
+);
+const cloudRunPublicationJob = workflowJob(
+  cloudRunPublicationWorkflowContents,
+  "publish",
+  "publish-cloud-run-candidate.yml",
 );
 const stagingPreflightJob = workflowJob(
   stagingWorkflowContents,
@@ -330,6 +340,145 @@ for (const [filename, contents] of [
   ["deploy-production-candidate.yml", productionWorkflowContents],
 ]) {
   requireText(contents, 'WRANGLER_WRITE_LOGS: "0"', filename, "disabled Wrangler local debug logs");
+}
+
+for (const [description, expected] of Object.entries({
+  "manual candidate trigger": "workflow_dispatch:",
+  "Cloud Run candidate workflow name": "name: Publish Cloud Run release candidate",
+  "non-cancelling candidate concurrency": "cancel-in-progress: false",
+  "fixed Singapore region": "CLOUD_RUN_REGION: asia-southeast1",
+  "fixed Google Cloud project": "GOOGLE_CLOUD_PROJECT: scribe-drop",
+  "fixed workload identity provider":
+    "WORKLOAD_IDENTITY_PROVIDER: projects/601035271372/locations/global/workloadIdentityPools/scribe-drop-release/providers/github-actions",
+  "staging GitHub Environment": "environment: staging",
+  "OIDC token permission": "id-token: write",
+  "read-only source permission": "contents: read",
+  "bounded candidate timeout": "timeout-minutes: 90",
+  "release branch restriction": "refs/heads/release/*)",
+  "release version equality": 'if [ "${release_version}" != "${package_version}" ]; then',
+  "exact commit equality": 'if [ "$(git rev-parse HEAD)" != "${GITHUB_SHA}" ]; then',
+  "frozen pnpm install": "pnpm install --frozen-lockfile",
+  "frozen Python install": "uv sync --project apps/runpod-worker --frozen",
+  "full repository gate": "pnpm check",
+  "Git history and worktree secret gate": "pnpm run secrets:check",
+  "locked dependency audit": "pnpm run security:audit",
+  "controller image build": "pnpm run container:build:gpu-controller",
+  "controller image check": "pnpm run container:check:gpu-controller",
+  "controller SBOM": "pnpm run container:sbom:gpu-controller",
+  "controller vulnerability gate": "pnpm run container:scan:gpu-controller",
+  "base worker image build": "pnpm run container:build:runpod",
+  "Cloud Run worker image build": "pnpm run container:build:cloud-run",
+  "Cloud Run worker image check": "pnpm run container:check:cloud-run",
+  "Cloud Run worker SBOM": "pnpm run container:sbom:cloud-run",
+  "Cloud Run worker vulnerability gate": "pnpm run container:scan:cloud-run",
+  "password-stdin registry login": "--password-stdin",
+  "run-scoped immutable tag":
+    'candidate_tag="candidate-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"',
+  "controller repository":
+    "${CLOUD_RUN_REGION}-docker.pkg.dev/${GOOGLE_CLOUD_PROJECT}/controller/runtime:",
+  "worker repository": "${CLOUD_RUN_REGION}-docker.pkg.dev/${GOOGLE_CLOUD_PROJECT}/worker/runtime:",
+  "registry manifest read-back": "docker buildx imagetools inspect",
+  "registry digest validation": "^sha256:[a-f0-9]{64}$",
+  "candidate evidence creation": "cloud-run:candidate:evidence create",
+  "candidate evidence verification": "cloud-run:candidate:evidence verify",
+  "fixed attestation Note": "--note=scribe-drop-release-candidate",
+  "fixed attestation Note project": "--note-project=scribe-drop",
+  "fixed KMS location": "--keyversion-location=asia-southeast1",
+  "fixed KMS keyring": "--keyversion-keyring=scribe-drop-release",
+  "fixed KMS key": "--keyversion-key=candidate-attestor",
+  "fixed KMS version": "--keyversion=1",
+  "metadata-only evidence upload": "${{ runner.temp }}/cloud-run-candidate.json",
+  "short-lived evidence retention": "retention-days: 7",
+})) {
+  requireText(
+    cloudRunPublicationWorkflowContents,
+    expected,
+    "publish-cloud-run-candidate.yml",
+    description,
+  );
+}
+
+requireTextCount(
+  cloudRunPublicationJob,
+  "uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093",
+  3,
+  "publish-cloud-run-candidate.yml publish job",
+  "pinned google-github-actions/auth v3.0.0",
+);
+requireTextCount(
+  cloudRunPublicationJob,
+  "service_account: sd-candidate-publisher@scribe-drop.iam.gserviceaccount.com",
+  2,
+  "publish-cloud-run-candidate.yml publish job",
+  "isolated candidate publisher identity",
+);
+requireTextCount(
+  cloudRunPublicationJob,
+  "service_account: sd-release-signer@scribe-drop.iam.gserviceaccount.com",
+  1,
+  "publish-cloud-run-candidate.yml publish job",
+  "isolated candidate signer identity",
+);
+requireTextCount(
+  cloudRunPublicationJob,
+  "token_format: access_token",
+  3,
+  "publish-cloud-run-candidate.yml publish job",
+  "short-lived access tokens",
+);
+requireTextCount(
+  cloudRunPublicationJob,
+  "docker push",
+  2,
+  "publish-cloud-run-candidate.yml publish job",
+  "one push per candidate image",
+);
+requireTextCount(
+  cloudRunPublicationJob,
+  '--artifact-url="${image}"',
+  1,
+  "publish-cloud-run-candidate.yml publish job",
+  "two-digest attestation loop",
+);
+for (const [description, forbidden] of Object.entries({
+  "production Environment": "environment: production",
+  "floating image tag": ":latest",
+  "service-account JSON key": "credentials_json:",
+  "unscoped Workload Identity audience": "audience:",
+  "attestation verifier escalation": "--validate",
+  "Cloud Run deployment during publication": "gcloud run ",
+})) {
+  forbidText(
+    cloudRunPublicationJob,
+    forbidden,
+    "publish-cloud-run-candidate.yml publish job",
+    description,
+  );
+}
+for (const [earlier, later, description] of [
+  [
+    "Require one versioned release commit",
+    "Authenticate publisher",
+    "release identity before cloud auth",
+  ],
+  ["Authenticate publisher", "Run complete application", "keyless auth before costly gates"],
+  ["Run complete application", "Build and inspect", "repository gates before image builds"],
+  ["Build and inspect", "Push each image", "image gates before publication"],
+  [
+    "Push each image",
+    "Authenticate isolated release signer",
+    "digest resolution before signer auth",
+  ],
+  ["Authenticate isolated release signer", "KMS-sign", "isolated signer before attestations"],
+  ["KMS-sign", "Upload metadata-only", "attestations before evidence publication"],
+]) {
+  requireTextOrder(
+    cloudRunPublicationJob,
+    earlier,
+    later,
+    "publish-cloud-run-candidate.yml publish job",
+    description,
+  );
 }
 
 if (image.uvImage.version !== versions.uv) {

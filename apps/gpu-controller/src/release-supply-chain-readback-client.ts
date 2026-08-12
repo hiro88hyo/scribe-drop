@@ -51,9 +51,10 @@ export function createReleaseSupplyChainReadbackRequests(
     },
     { key: "note", method: "GET", url: noteUrl },
     {
+      body: { options: { requestedPolicyVersion: 3 } },
       key: "noteIamPolicy",
-      method: "GET",
-      url: `${noteUrl}:getIamPolicy?options.requestedPolicyVersion=3`,
+      method: "POST_GET_IAM_POLICY",
+      url: `${noteUrl}:getIamPolicy`,
     },
     { key: "cryptoKey", method: "GET", url: cryptoKeyUrl },
     {

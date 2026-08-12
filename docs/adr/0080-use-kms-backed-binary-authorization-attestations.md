@@ -5,6 +5,7 @@
 - Target release: `0.2.0`
 - Relates to: ADR 0023、ADR 0071、ADR 0076、ADR 0078
 - Does not authorize: API有効化、cloud resource/IAM作成、CI変更、image publish、staging/production deploy
+- Implementation authorization: 2026-08-12にstaging release supply chainとcandidate CIだけを別途承認、productionは対象外
 
 ## Context
 

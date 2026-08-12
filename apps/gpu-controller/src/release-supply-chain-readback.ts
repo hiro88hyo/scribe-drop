@@ -37,7 +37,7 @@ export const binaryAuthorizationAttestorReadbackSchema = z
     etag: z.string().min(1).max(1024),
     name: resourceNameSchema,
     updateTime: timestampSchema,
-    userOwnedDrydockNote: z
+    userOwnedGrafeasNote: z
       .object({
         delegationServiceAccountEmail: z.email(),
         noteReference: resourceNameSchema,
@@ -103,7 +103,7 @@ export const kmsCryptoKeyReadbackSchema = z
     createTime: timestampSchema,
     cryptoKeyBackend: z.never().optional(),
     destroyScheduledDuration: z.literal("2592000s"),
-    importOnly: z.literal(false),
+    importOnly: z.literal(false).optional(),
     labels: z.object({ "scribe-drop-component": z.literal("release-supply-chain") }).strict(),
     name: resourceNameSchema,
     nextRotationTime: z.never().optional(),
@@ -206,14 +206,14 @@ export function verifyReleaseSupplyChainReadback(
 ): ReleaseSupplyChainReadbackEvidence {
   const expected = releaseSupplyChainDeploymentPlanSchema.parse(expectation);
   const observed = releaseSupplyChainRawReadbackSchema.parse(rawReadback);
-  const publicKey = observed.attestor.userOwnedDrydockNote.publicKeys[0];
-  const expectedPublicKey = expected.attestor.userOwnedDrydockNote.publicKeys[0];
+  const publicKey = observed.attestor.userOwnedGrafeasNote.publicKeys[0];
+  const expectedPublicKey = expected.attestor.userOwnedGrafeasNote.publicKeys[0];
   if (
     observed.attestor.name !== expected.attestor.name ||
     observed.attestor.description !== expected.attestor.description ||
-    observed.attestor.userOwnedDrydockNote.noteReference !==
-      expected.attestor.userOwnedDrydockNote.noteReference ||
-    observed.attestor.userOwnedDrydockNote.delegationServiceAccountEmail !==
+    observed.attestor.userOwnedGrafeasNote.noteReference !==
+      expected.attestor.userOwnedGrafeasNote.noteReference ||
+    observed.attestor.userOwnedGrafeasNote.delegationServiceAccountEmail !==
       expected.identities.binaryAuthorizationServiceAgent ||
     publicKey.id !== expectedPublicKey.id
   ) {

@@ -318,6 +318,10 @@ timeoutでは「10分ちょうどでprovider queueから消える」と扱わな
   `CLOUD_RUN_RUNTIME_MODE`をWrangler、dashboard、secretへ手動設定しない。local D1 eventのsequenceやrevokeを直接更新せず、
   repository経由のexact replayだけを使う。実staging運用は[dark deployment](./cloud-run-staging-dark-deployment.md)の残gateを
   同一candidateで満たしてから別途開始する。
+- Phase 14 staging release foundationのArtifact Registry、WIF、service account、KMS key、Artifact Analysis Note、Binary
+  Authorization attestor/policyは作成済みである。KMS active key versionの保持費を監視し、candidate監査とproduction昇格が
+  終わる前に削除しない。publisher/signerへuser-managed keyを作らず、candidate workflow外からimage pushまたはOccurrenceを
+  発行しない。candidate image/Occurrence、Cloud Run Service/Job、Firestore、Secret Managerはまだ未作成である。
 - terminal statusをD1で観測していないjobは、manifestが存在しても`COMPLETED`にしない。
 - 手動修復が必要でもjob/attempt/outboxを直接SQLで更新しない。同じrepositoryとserviceを
   使う専用repair commandを先に実装し、dry-run、CAS、監査eventを必須とする。

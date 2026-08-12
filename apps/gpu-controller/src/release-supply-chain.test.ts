@@ -46,7 +46,7 @@ describe("release candidate supply-chain deployment policy", () => {
     expect(plan.attestor.name).toBe(
       "projects/scribe-phase14/attestors/scribe-drop-release-candidate",
     );
-    expect(plan.attestor.userOwnedDrydockNote).toEqual({
+    expect(plan.attestor.userOwnedGrafeasNote).toEqual({
       noteReference: "projects/scribe-phase14/notes/scribe-drop-release-candidate",
       publicKeys: [
         {

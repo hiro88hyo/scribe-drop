@@ -28,12 +28,18 @@ function plan(): ReturnType<typeof createReleaseSupplyChainDeploymentPlan> {
 }
 
 describe("release supply-chain read-back request plan", () => {
-  it("uses only fixed resource GETs and one project getIamPolicy request", () => {
+  it("uses only fixed resource reads and two typed getIamPolicy requests", () => {
     const requests = createReleaseSupplyChainReadbackRequests(plan());
 
     expect(requests).toHaveLength(11);
     expect(new Set(requests.map(({ key }) => key)).size).toBe(requests.length);
     expect(requests.filter(({ method }) => method === "POST_GET_IAM_POLICY")).toEqual([
+      {
+        body: { options: { requestedPolicyVersion: 3 } },
+        key: "noteIamPolicy",
+        method: "POST_GET_IAM_POLICY",
+        url: "https://containeranalysis.googleapis.com/v1/projects/scribe-phase14/notes/scribe-drop-release-candidate:getIamPolicy",
+      },
       {
         body: { options: { requestedPolicyVersion: 3 } },
         key: "projectIamPolicy",

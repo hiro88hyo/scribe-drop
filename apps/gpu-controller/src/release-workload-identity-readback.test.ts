@@ -86,8 +86,13 @@ function rawReadback(expected: ReturnType<typeof plan>): ReleaseWorkloadIdentity
 describe("release workload identity read-back", () => {
   it("accepts one active GitHub provider, exact impersonation, and zero user-managed keys", () => {
     const expected = plan();
+    const raw = rawReadback(expected);
+    delete raw.pool.disabled;
+    delete raw.provider.disabled;
+    delete raw.serviceAccounts[0].account.disabled;
+    delete raw.serviceAccounts[1].account.disabled;
 
-    expect(verifyReleaseWorkloadIdentityReadback(expected, rawReadback(expected))).toEqual({
+    expect(verifyReleaseWorkloadIdentityReadback(expected, raw)).toEqual({
       poolState: "ACTIVE",
       providerState: "ACTIVE",
       serviceAccounts: [
@@ -114,6 +119,12 @@ describe("release workload identity read-back", () => {
     expect(() => verifyReleaseWorkloadIdentityReadback(expected, broadProvider)).toThrow(
       "release workload identity provider read-back drifted",
     );
+
+    const disabled = structuredClone(rawReadback(expected)) as unknown as {
+      provider: { disabled: boolean };
+    };
+    disabled.provider.disabled = true;
+    expect(() => verifyReleaseWorkloadIdentityReadback(expected, disabled)).toThrow();
 
     const customAudience = structuredClone(rawReadback(expected)) as unknown as {
       provider: { oidc: { allowedAudiences: string[] } };

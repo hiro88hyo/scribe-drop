@@ -15,7 +15,7 @@ const resourceNameSchema = z.string().min(1).max(1024);
 export const releaseWorkloadIdentityPoolReadbackSchema = z
   .object({
     description: z.string().max(256),
-    disabled: z.literal(false),
+    disabled: z.literal(false).optional(),
     displayName: z.string().max(32),
     expireTime: z.never().optional(),
     inlineCertificateIssuanceConfig: z.never().optional(),
@@ -37,7 +37,7 @@ export const releaseWorkloadIdentityProviderReadbackSchema = z
       })
       .strict(),
     description: z.string().max(256),
-    disabled: z.literal(false),
+    disabled: z.literal(false).optional(),
     displayName: z.string().max(32),
     expireTime: z.never().optional(),
     name: resourceNameSchema,
@@ -55,7 +55,7 @@ export const releaseWorkloadIdentityProviderReadbackSchema = z
 export const releaseServiceAccountReadbackSchema = z
   .object({
     description: z.string().max(256),
-    disabled: z.literal(false),
+    disabled: z.literal(false).optional(),
     displayName: z.string().max(100),
     email: z.email(),
     etag: z.string().min(1).max(1024).optional(),

@@ -2,14 +2,14 @@
 
 ## Status and scope
 
-- Status: Phase 14 local preparation in progress
-- Date: 2026-08-11
+- Status: release foundation read-back passed; candidate not published
+- Date: 2026-08-12
 - Product routing: RunPod Serverless
-- Cloud/CI mutation: none
+- Cloud/CI mutation: staging release supply chain only; production untouched
 
 Phase 14の実staging gateに先立ち、Orchestratorのdurable runtime protocolとshadow namespaceをlocalで固定した。
-この文書はdeploy手順またはcloud resource作成承認ではない。`CLOUD_RUN_RUNTIME_MODE`はWrangler設定へ追加せず、
-default Worker wiringへruntime serviceを注入していない。
+2026-08-12にstaging release supply chainだけを構築し、source-controlled candidate workflowを追加した。
+`CLOUD_RUN_RUNTIME_MODE`はWrangler設定へ追加せず、default Worker wiringへruntime serviceを注入していない。
 
 ## Local persistence boundary
 
@@ -186,7 +186,13 @@ release用WIFのpure planはglobal pool/provider、Google canonical audience、i
 `workflow_dispatch`、固定candidate workflowを同時に要求する。publisher/signerの各service accountにはrepository IDの単一
 principalだけを`roles/iam.workloadIdentityUser`で許可する。strict read-backはpool/providerのactive状態、exact attribute
 mapping/condition、相異なるservice-account ID、exact IAM、user-managed key 0を固定IAM endpointのdouble snapshotで照合する。
-実credential実行、WIF/service account作成、IAM変更、Occurrence発行は未実装である。
+
+2026-08-12に必要API、Singaporeのimmutable `controller`/`worker` repository、WIF pool/provider、publisher/signer、KMS key
+version 1、Note、attestor、project default policyと限定IAMを作成した。実credentialのstrict double snapshotはexact planとの
+一致と途中変更なしを確認した。live APIはNote IAMの`POST :getIamPolicy`、`userOwnedGrafeasNote`、false値を省略する
+`importOnly`/`disabled`へ合わせ、trueや未知fieldは引き続き拒否する。candidate workflowはrelease branchとcommit/version一致、
+OIDC、full gate、SBOM/scan、各image 1 push、registry digest、KMS署名、0600のmetadata-only evidenceへ固定した。
+workflowは未実行であり、candidate image、Occurrence、Cloud Run Service/Jobはまだ存在しない。
 
 controller authorityは[ADR 0078](./adr/0078-split-controller-iam-by-resource-boundary.md)に従うpure IAM planで分割する。Cloud Run Jobs roleは
 実clientが呼ぶ8 permissionだけ、Firestore roleはtransactionとentity CRUDの5 permissionだけとし、database条件、runtime
@@ -257,13 +263,12 @@ Cloud Run Job、R2 signed request、課金停止のevidenceではない。
 
 ## Remaining real staging gate
 
-次の作業にはCI/cloud resource変更の明示承認と、release candidateのPhase境界に従うbranch/commitが必要である。
+release candidateのPhase境界に従うbranch/commitを作り、次を順番に完了する。
 
 - Phase 8〜13の`develop`統合、`release/0.2.0`作成、version固定、一度だけのcandidate build
-- dedicated named Firestore database/TTL policy、controllerへのadapter injection/service hosting、controller image publish、
-  controller/worker imageのsignature/provenanceとattestation発行、Cloud Run v2/IAM/Secret Manager/Binary Authorization
-  read-only clientとWIF/IAM read-only clientの実credential実行とauthoritative evidence、
-  HMAC secret rotation
+- candidate workflowによるcontroller/worker image publishとattestation発行、digest/Occurrenceのauthoritative read-back
+- dedicated named Firestore database/TTL policy、controllerへのadapter injection/service hosting、Cloud Run v2/IAM/Secret Managerの
+  authoritative read-back、HMAC secret rotation
 - local Google identity token/JWKS verifierとcontroller attestation/cleanup clientの実service接続
 - staging D1 migration、shadow mode/service injection、synthetic execution最大1件
 - timeout/response loss/hard lifetime/reaper、artifact/manifest、resource/storage不存在、課金終了の期限付きevidence

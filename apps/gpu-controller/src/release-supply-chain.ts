@@ -64,7 +64,7 @@ export const releaseSupplyChainDeploymentPlanSchema = z
       .object({
         description: z.literal("ScribeDrop staging-verified release candidate."),
         name: resourceNameSchema,
-        userOwnedDrydockNote: z
+        userOwnedGrafeasNote: z
           .object({
             noteReference: resourceNameSchema,
             publicKeys: z.tuple([
@@ -164,8 +164,8 @@ export const releaseSupplyChainDeploymentPlanSchema = z
     const resourcesMatch =
       plan.artifactAnalysisNote.name === expectedNote &&
       plan.attestor.name === expectedAttestor &&
-      plan.attestor.userOwnedDrydockNote.noteReference === expectedNote &&
-      plan.attestor.userOwnedDrydockNote.publicKeys[0].id === expectedKeyId &&
+      plan.attestor.userOwnedGrafeasNote.noteReference === expectedNote &&
+      plan.attestor.userOwnedGrafeasNote.publicKeys[0].id === expectedKeyId &&
       plan.binaryAuthorizationPolicy.name === `${project}/policy` &&
       plan.binaryAuthorizationPolicy.defaultAdmissionRule.requireAttestationsBy[0] ===
         expectedAttestor &&
@@ -244,7 +244,7 @@ export function createReleaseSupplyChainDeploymentPlan(
     attestor: {
       description: "ScribeDrop staging-verified release candidate.",
       name: attestor,
-      userOwnedDrydockNote: {
+      userOwnedGrafeasNote: {
         noteReference: note,
         publicKeys: [
           {

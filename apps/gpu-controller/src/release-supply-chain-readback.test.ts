@@ -49,7 +49,7 @@ function fixture(): {
     deployment: deployment(),
     projectNumber: "123456789012",
   });
-  const publicKey = plan.attestor.userOwnedDrydockNote.publicKeys[0];
+  const publicKey = plan.attestor.userOwnedGrafeasNote.publicKeys[0];
   const version = plan.kms.signingVersion;
   return {
     plan,
@@ -59,9 +59,9 @@ function fixture(): {
         etag: "attestor-etag",
         name: plan.attestor.name,
         updateTime: "2026-08-12T00:00:00Z",
-        userOwnedDrydockNote: {
+        userOwnedGrafeasNote: {
           delegationServiceAccountEmail: plan.identities.binaryAuthorizationServiceAgent,
-          noteReference: plan.attestor.userOwnedDrydockNote.noteReference,
+          noteReference: plan.attestor.userOwnedGrafeasNote.noteReference,
           publicKeys: [
             {
               id: publicKey.id,
@@ -148,6 +148,7 @@ function fixture(): {
 describe("release candidate supply-chain read-back", () => {
   it("accepts one exact attestor, Note, KMS key version, public key, and least IAM", () => {
     const { plan, raw } = fixture();
+    delete raw.cryptoKey.importOnly;
 
     expect(verifyReleaseSupplyChainReadback(plan, raw)).toMatchObject({
       attestorEtag: "attestor-etag",
@@ -158,9 +159,19 @@ describe("release candidate supply-chain read-back", () => {
     });
   });
 
+  it("rejects a KMS key restricted to imported versions", () => {
+    const { plan, raw } = fixture();
+    const imported = structuredClone(raw) as unknown as {
+      cryptoKey: { importOnly: boolean };
+    };
+    imported.cryptoKey.importOnly = true;
+
+    expect(() => verifyReleaseSupplyChainReadback(plan, imported)).toThrow();
+  });
+
   it("rejects an attestor public key that differs from the KMS response", () => {
     const { plan, raw } = fixture();
-    raw.attestor.userOwnedDrydockNote.publicKeys[0].pkixPublicKey.publicKeyPem =
+    raw.attestor.userOwnedGrafeasNote.publicKeys[0].pkixPublicKey.publicKeyPem =
       PUBLIC_KEY_PEM.replace("AAAA", "BBBB");
 
     expect(() => verifyReleaseSupplyChainReadback(plan, raw)).toThrow(

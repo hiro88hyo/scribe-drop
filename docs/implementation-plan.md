@@ -1340,7 +1340,7 @@ pnpm check
   Orchestrator HMAC client、Firestore control-store adapterはPhase 14 local preparationで追加したが、default service
   wiringには接続していない。
 
-### Phase 14: staging dark deployment（local preparation中）
+### Phase 14: staging dark deployment（release foundation構築済み、candidate未発行）
 
 実装:
 
@@ -1410,8 +1410,8 @@ local preparation（2026-08-11〜12）:
   Secret Managerは`:access`を呼ばずmetadataだけを取得し、全resourceを2回readして途中変更を拒否する。実credentialでの呼び出し、
   authoritative evidence取得、resource作成、deployは行わない。
 - ephemeral GPU JobにもBinary Authorization default policyを固定し、create bodyとlive read-backの両方で欠落、無効化、
-  policy override、breakglassを拒否する。project default policy/attestorのauthoritative read-backとworker image attestation
-  発行は未実装であり、cloud/CI変更前のstaging blockerとして残る。
+  policy override、breakglassを拒否する。project default policy/attestorのauthoritative read-backは2026-08-12に成功した。
+  worker image attestationはcandidate workflow未実行のためまだ存在しない。
 - [ADR 0080](./adr/0080-use-kms-backed-binary-authorization-attestations.md)でproject-singleton release attestor、global
   Artifact Analysis Noteのmetadata例外、Singapore software KMS ECDSA P-256 key、keyless GitHub OIDC signer、publisherとの
   権限分離、controller/worker両digestのattestation、月額約US$0.06のkey保持費を固定した。project numberとdeployment
@@ -1422,8 +1422,18 @@ local preparation（2026-08-11〜12）:
   release用WIFはglobal pool/provider、canonical audience、公開されたimmutable repository/owner ID、`release/*`、
   `workflow_dispatch`、固定candidate workflowへ閉じるpure planを追加した。publisher/signer service accountのimpersonationは
   repository IDの単一principalだけを許可し、pool/provider active、exact mapping/condition/IAM、相異なるidentity、
-  user-managed key 0を固定IAM endpointのdouble snapshotで検証する。Occurrence発行、candidate workflow、実credential、
-  API/WIF/service account/IAM/cloud resourceは未実装であり、別の明示承認まで変更しない。
+  user-managed key 0を固定IAM endpointのdouble snapshotで検証する。
+- 2026-08-12のstaging release-foundation作業で、必要API、Singaporeのimmutable `controller`/`worker` repository、
+  global WIF pool/provider、publisher/signer service account、Singapore software KMS key version 1、global Artifact Analysis Note、
+  Binary Authorization attestor/default policyを作成した。publisherは各repository writerだけ、signerはKMS signer、Note attacher、
+  Occurrence editorだけに分離し、両identityのuser-managed key 0とBinary Authorization service agentの限定権限を確認した。
+  strict supply-chain/WIF read-only clientを実credentialで2 snapshot実行し、途中変更なしでexact planとの一致を確認した。
+  live API契約に合わせ、Note IAM readは`POST :getIamPolicy`、attestor/Occurrence fieldは`userOwnedGrafeasNote`、falseの
+  `importOnly`/`disabled`はresponse省略を許す一方trueを拒否するよう修正した。
+- `.github/workflows/publish-cloud-run-candidate.yml`を追加し、`release/<version>`のmanual dispatch、GitHub OIDC、分離identity、
+  full local gate、SBOM、HIGH/CRITICAL scan、各image 1 push、registry digest read-back、KMS attestation、metadata-only evidenceを
+  固定した。workflowとOccurrenceはまだ実行しておらず、Artifact Registryのcandidate imageも0件である。production resource、
+  Cloud Run Service/Job、Firestore、Secret Manager、remote D1、product routingは変更していない。
 - [ADR 0078](./adr/0078-split-controller-iam-by-resource-boundary.md)に従いcontroller IAM pure planを追加した。Cloud Run Jobs custom roleは
   実clientが使うJob create/get/delete/run、Execution list/cancel/delete、Operation getだけ、Firestore custom roleはtransactionと
   entity get/create/update/deleteだけへ固定する。project binding、database完全一致condition、runtime account上の

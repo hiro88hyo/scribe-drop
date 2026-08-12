@@ -50,7 +50,7 @@ function occurrenceList(
           ),
           signatures: [
             {
-              publicKeyId: expected.attestor.userOwnedDrydockNote.publicKeys[0].id,
+              publicKeyId: expected.attestor.userOwnedGrafeasNote.publicKeys[0].id,
               signature,
             },
           ],
