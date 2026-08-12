@@ -199,7 +199,11 @@ exact `environment:staging` contextへ修正した。失敗後も両repository�
 attestation、Cloud Run Service/Jobはまだ存在しない。修正後runではOIDCとkeyless gcloud preflightが成功したが、auth actionの
 一時`gha-creds-*.json`をroot Prettierが走査してapplication gateで停止し、image buildへ到達しなかった。application/secret/
 dependency gateをcloud authより前、OIDC preflightをimage build直前へ固定し、一時credentialをGitとDocker build contextから
-明示除外する。再実行前も両repositoryが空であることをread-backする。
+明示除外した。次のrunはfull gate、OIDC、keyless gcloud preflightを通過し、controller image build後のinspectionで停止した。
+Dockerfileの`CMD []`はDocker engineによりlive `docker inspect`で`Config.Cmd: null`またはfield省略となるため、no-command
+の2 serializationだけを許可し、unexpected commandを拒否する回帰テストを追加した。push/signingには到達しておらず、
+controller build/check/SBOM/Trivy、RunPod worker build、Cloud Run worker build/check/SBOM/Trivyの同一9 commandはlocalで成功した。
+再実行前も両repositoryとOccurrenceが空であることをread-backする。
 
 controller authorityは[ADR 0078](./adr/0078-split-controller-iam-by-resource-boundary.md)に従うpure IAM planで分割する。Cloud Run Jobs roleは
 実clientが呼ぶ8 permissionだけ、Firestore roleはtransactionとentity CRUDの5 permissionだけとし、database条件、runtime

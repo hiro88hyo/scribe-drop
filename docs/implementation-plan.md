@@ -1365,6 +1365,10 @@ local preparation（2026-08-11〜12）:
 - 修正後runはOIDCとkeyless gcloud preflightに成功したが、auth actionの一時credentialをPrettierが対象にしてimage build前に
   停止した。local application/secret/dependency gateをcloud authより前へ移し、OIDCはimage build直前に維持する。一時
   `gha-creds-*.json`をGit/Docker build contextから除外し、static workflow verifierで順序と除外を固定した。
+- 次のrunはfull gate、OIDC、keyless gcloud preflightを通過し、controller image build後のinspectionで停止した。
+  Dockerfileの`CMD []`がengine差で返す`Config.Cmd: null`またはfield省略をno-commandとして固定し、unexpected commandを
+  拒否する回帰テストを追加した。candidate workflowと同じcontroller/workerのbuild、check、SBOM、HIGH/CRITICAL scanは
+  localで全て成功した。image push、Occurrence、Cloud Run mutationには到達していない。
 - forward-only `0011_cloud_run_runtime_protocol.sql`でbootstrap、challenge/session、allowlist terminal eventを
   provider executionへ外部キーで固定した。challenge消費、sequence、terminal revokeはD1 CAS/triggerへ収束する。
 - D1 production repositoryはactive attempt、provider kind/policy、contract v2、source key/ETag/size、result prefixを
