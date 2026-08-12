@@ -237,6 +237,10 @@ API origin/pathへのGETと`getIamPolicy`だけのread-only POST、redirect拒�
 Manager payload accessを行わない。実credentialによるlive read-backとresource mutationは未接続である。詳細は
 [staging dark deployment](./cloud-run-staging-dark-deployment.md)を正とする。
 
+release supply chainはADR 0080のproject-singleton Binary Authorization attestor、global Artifact Analysis Note、Singapore
+Cloud KMS ECDSA P-256 signing versionへ固定する。publisherとsignerを分離したpure plan、attestor/Note/KMS public key/CRC32C/
+resource IAMのstrict double-snapshot read-backはlocal実装済みで、WIF、candidate attestation、cloud resourceは未接続である。
+
 controller IAMは[ADR 0078](./adr/0078-split-controller-iam-by-resource-boundary.md)に従い、Cloud Run JobsとFirestoreのcustom roleを分離する。
 Cloud Run roleから未使用のJob listとExecution getを除き、Firestore roleはtransactionと固定document CRUDだけにする。project policyの
 controller principal binding、database condition、runtime service account `actAs`、Artifact Registry repository readerをresource identityと

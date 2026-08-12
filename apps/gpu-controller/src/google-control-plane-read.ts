@@ -16,7 +16,9 @@ const getIamPolicyBodySchema = z
 const allowedOrigins = new Set([
   "https://artifactregistry.googleapis.com",
   "https://binaryauthorization.googleapis.com",
+  "https://cloudkms.googleapis.com",
   "https://cloudresourcemanager.googleapis.com",
+  "https://containeranalysis.googleapis.com",
   "https://firestore.googleapis.com",
   "https://iam.googleapis.com",
   "https://run.googleapis.com",

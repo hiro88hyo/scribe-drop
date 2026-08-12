@@ -174,6 +174,14 @@ retry、mutationは行わない。cloud review後に実credentialで各authorita
 各ephemeral GPU Jobもcreate bodyとlive read-backの両方でBinary Authorization default policyを必須とし、欠落、無効化、
 policy override、breakglassは実行前のresource driftとして拒否する。
 
+release attestorの供給網は
+[ADR 0080](./adr/0080-use-kms-backed-binary-authorization-attestations.md)に従う。project singleton attestorとglobal Artifact
+Analysis Noteはrelease candidate専用とし、private keyをexportせずSingapore software KMS ECDSA P-256 keyでcontroller/worker
+両digestを署名する。global Noteはdigest/signature metadataだけの明示例外であり、application dataを保存しない。attestor、Note、
+KMS public key/signing version、publisher/signer/repository IAMのpure planとstrict read-back verifierを追加した。read-only clientは
+Binary Authorization、global Artifact Analysis、Singapore KMS、Artifact Registry、Resource Managerの固定resourceだけを同じtoken/
+quota projectで2回取得する。実credential実行、service-account key/WIF read-back、両candidate attestationとvalidationは未実装である。
+
 controller authorityは[ADR 0078](./adr/0078-split-controller-iam-by-resource-boundary.md)に従うpure IAM planで分割する。Cloud Run Jobs roleは
 実clientが呼ぶ8 permissionだけ、Firestore roleはtransactionとentity CRUDの5 permissionだけとし、database条件、runtime
 `roles/iam.serviceAccountUser`、repository `roles/artifactregistry.reader`をcontroller principalの単独bindingとして固定する。raw custom
@@ -209,6 +217,9 @@ pnpm exec vitest run apps/orchestrator/src/cloud-run-runtime-service.test.ts \
   apps/gpu-controller/src/firestore-control-store.test.ts \
   apps/gpu-controller/src/firestore-deployment.test.ts \
   apps/gpu-controller/src/firestore-readback-client.test.ts \
+  apps/gpu-controller/src/release-supply-chain.test.ts \
+  apps/gpu-controller/src/release-supply-chain-readback.test.ts \
+  apps/gpu-controller/src/release-supply-chain-readback-client.test.ts \
   apps/gpu-controller/src/control-plane-evidence.test.ts \
   apps/gpu-controller/src/deployment-readback-client.test.ts \
   apps/gpu-controller/src/google-runtime-auth.test.ts \

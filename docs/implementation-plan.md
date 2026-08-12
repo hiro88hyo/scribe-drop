@@ -1353,7 +1353,7 @@ pnpm check
 - 現行RunPod Serverlessとselected providerへ同じattemptを二重投入せず、全resource削除後にenvironmentを
   disabledへ戻す。
 
-local preparation（2026-08-11）:
+local preparation（2026-08-11〜12）:
 
 - forward-only `0011_cloud_run_runtime_protocol.sql`でbootstrap、challenge/session、allowlist terminal eventを
   provider executionへ外部キーで固定した。challenge消費、sequence、terminal revokeはD1 CAS/triggerへ収束する。
@@ -1412,6 +1412,13 @@ local preparation（2026-08-11）:
 - ephemeral GPU JobにもBinary Authorization default policyを固定し、create bodyとlive read-backの両方で欠落、無効化、
   policy override、breakglassを拒否する。project default policy/attestorのauthoritative read-backとworker image attestation
   発行は未実装であり、cloud/CI変更前のstaging blockerとして残る。
+- [ADR 0080](./adr/0080-use-kms-backed-binary-authorization-attestations.md)でproject-singleton release attestor、global
+  Artifact Analysis Noteのmetadata例外、Singapore software KMS ECDSA P-256 key、keyless GitHub OIDC signer、publisherとの
+  権限分離、controller/worker両digestのattestation、月額約US$0.06のkey保持費を固定した。project numberとdeployment
+  configから必要API、Note、attestor、policy、Singapore KMS key/version、publisher/signer、repository/IAMを一意に導出する
+  pure planを追加した。strict read-backはattestor/Note/KMS version/public key/CRC32Cとresource IAMを照合し、固定endpointだけを
+  同じtoken/quota projectで2回取得する。candidate attestation/validation、service-account key/WIF read-back、candidate workflow、
+  API/WIF/cloud resourceは未実装であり、別の明示承認まで変更しない。
 - [ADR 0078](./adr/0078-split-controller-iam-by-resource-boundary.md)に従いcontroller IAM pure planを追加した。Cloud Run Jobs custom roleは
   実clientが使うJob create/get/delete/run、Execution list/cancel/delete、Operation getだけ、Firestore custom roleはtransactionと
   entity get/create/update/deleteだけへ固定する。project binding、database完全一致condition、runtime account上の
