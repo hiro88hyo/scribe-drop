@@ -1358,6 +1358,10 @@ local preparation（2026-08-11〜12）:
 - PR #19をstrict required checks成功、未解決conversation 0、approval 0のsolo-maintainer policyでmerge commitにより
   `develop`へ統合し、`release/0.2.0`を作成した。root package、Python worker、uv lockのversionを`0.2.0`へ同期した。
   candidate workflowはこのversion commitの全gateが成功するまで実行しない。
+- 初回candidate runはpublisher OIDC preflightで停止し、image build/push、Occurrence、Cloud Run mutationへ到達しなかった。
+  Artifact Registry両repositoryが空、project Occurrence 0をread-backした。GitHub Environment jobのdefault subjectが
+  branch contextではなくenvironment contextになるため、WIF planをimmutable repository prefixのexact staging subject、
+  数値ID、repository/owner名、environment、release ref、event、workflowの同時照合へ修正した。
 - forward-only `0011_cloud_run_runtime_protocol.sql`でbootstrap、challenge/session、allowlist terminal eventを
   provider executionへ外部キーで固定した。challenge消費、sequence、terminal revokeはD1 CAS/triggerへ収束する。
 - D1 production repositoryはactive attempt、provider kind/policy、contract v2、source key/ETag/size、result prefixを

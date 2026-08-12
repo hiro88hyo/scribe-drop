@@ -182,17 +182,21 @@ KMS public key/signing version、publisher/signer/repository IAMのpure planとs
 Binary Authorization、global Artifact Analysis、Singapore KMS、Artifact Registry、Resource Managerの固定resourceだけを同じtoken/
 quota projectで2回取得する。両digestのOccurrenceは`ATTESTATION` kind、exact Note/image/KMS key ID、gcloud 579のcanonical
 payload、各1件へ固定し、Binary Authorization validationが両方`VERIFIED`であることとvalidation前後の不変性をlocal検証する。
-release用WIFのpure planはglobal pool/provider、Google canonical audience、immutable repository/owner ID、release branch、
-`workflow_dispatch`、固定candidate workflowを同時に要求する。publisher/signerの各service accountにはrepository IDの単一
-principalだけを`roles/iam.workloadIdentityUser`で許可する。strict read-backはpool/providerのactive状態、exact attribute
-mapping/condition、相異なるservice-account ID、exact IAM、user-managed key 0を固定IAM endpointのdouble snapshotで照合する。
+release用WIFのpure planはglobal pool/provider、Google canonical audience、immutable repository/owner ID、exact staging
+Environment subject、release branch、`workflow_dispatch`、固定candidate workflowを同時に要求する。publisher/signerの各service
+accountにはrepository IDの単一principalだけを`roles/iam.workloadIdentityUser`で許可する。strict read-backはpool/providerの
+active状態、exact attribute mapping/condition、相異なるservice-account ID、exact IAM、user-managed key 0を固定IAM endpointの
+double snapshotで照合する。
 
 2026-08-12に必要API、Singaporeのimmutable `controller`/`worker` repository、WIF pool/provider、publisher/signer、KMS key
 version 1、Note、attestor、project default policyと限定IAMを作成した。実credentialのstrict double snapshotはexact planとの
 一致と途中変更なしを確認した。live APIはNote IAMの`POST :getIamPolicy`、`userOwnedGrafeasNote`、false値を省略する
 `importOnly`/`disabled`へ合わせ、trueや未知fieldは引き続き拒否する。candidate workflowはrelease branchとcommit/version一致、
 OIDC、full gate、SBOM/scan、各image 1 push、registry digest、KMS署名、0600のmetadata-only evidenceへ固定した。
-workflowは未実行であり、candidate image、Occurrence、Cloud Run Service/Jobはまだ存在しない。
+初回workflowは旧branch-context subjectをpublisher OIDC preflightで拒否し、後続stepを実行しなかった。GitHub OIDC
+customization APIのimmutable subject prefix、staging Environmentの`release/*`単一branch policyをread-backし、subjectを
+exact `environment:staging` contextへ修正した。失敗後も両repositoryは空、project Occurrenceは0であり、candidate image、
+attestation、Cloud Run Service/Jobはまだ存在しない。
 
 controller authorityは[ADR 0078](./adr/0078-split-controller-iam-by-resource-boundary.md)に従うpure IAM planで分割する。Cloud Run Jobs roleは
 実clientが呼ぶ8 permissionだけ、Firestore roleはtransactionとentity CRUDの5 permissionだけとし、database条件、runtime

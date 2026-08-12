@@ -48,10 +48,15 @@ attestorで検証する。
 - GitHub Actionsはglobal pool `scribe-drop-release`のOIDC provider `github-actions`から鍵なしで上記2 service accountを
   impersonateする。provider audienceはGoogleのcanonical provider audienceだけを使い、local JWKSを持たない。mappingは
   `google.subject`、repository ID、owner IDだけとし、公開済みの数値repository ID `1312444559`とowner ID `1670222`、
-  immutable repository subject、`release/*` branch、`workflow_dispatch`、固定workflow
+  immutable repository prefixと`environment:staging`を結ぶexact subject、exact repository/owner名、staging environment、
+  `release/*` branch、`workflow_dispatch`、固定workflow
   `.github/workflows/publish-cloud-run-candidate.yml`をCEL conditionで同時に要求する。各service accountの
   `roles/iam.workloadIdentityUser`はrepository IDの単一`principalSet`だけをmemberとし、condition、追加member、
   user-managed keyを許可しない。
+- GitHub Environmentをjobへ指定するとdefault OIDC subjectのcontextは`ref`ではなく`environment`になる。2026-08-12の
+  初回preflightで旧branch-context subjectがattribute conditionに拒否されたため、GitHub OIDC customization APIが返す
+  immutable `sub_claim_prefix`と`environment:staging`のexact subjectへ修正した。branchは独立した`ref`/`ref_type` claimと
+  staging Environmentの単一`release/*` deployment branch policyで引き続き固定する。
 - candidate workflowはcontroller imageとCloud Run worker imageをrelease commitから一度だけbuildし、SBOM、
   HIGH/CRITICAL fail-close scan、offline/non-root gate、candidate manifest検証後に両方のdigestへattestationを一度だけ
   発行する。production向けにimageまたはattestationを再buildしない。

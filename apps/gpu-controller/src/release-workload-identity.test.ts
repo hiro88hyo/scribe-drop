@@ -46,11 +46,17 @@ describe("release workload identity policy", () => {
       "assertion.repository_owner_id == '1670222'",
     );
     expect(plan.provider.attributeCondition).toContain(
+      "assertion.sub == 'repo:hiro88hyo@1670222/scribe-drop@1312444559:environment:staging'",
+    );
+    expect(plan.provider.attributeCondition).toContain("assertion.environment == 'staging'");
+    expect(plan.provider.attributeCondition).not.toContain("assertion.sub.startsWith");
+    expect(plan.provider.attributeCondition).toContain(
       "assertion.event_name == 'workflow_dispatch'",
     );
     expect(plan.provider.attributeCondition).toContain(
       "publish-cloud-run-candidate.yml@refs/heads/release/",
     );
+    expect(plan.github.environment).toBe("staging");
     expect(plan.serviceAccounts.map(({ email }) => email)).toEqual([
       "sd-candidate-publisher@scribe-phase14.iam.gserviceaccount.com",
       "sd-release-signer@scribe-phase14.iam.gserviceaccount.com",
