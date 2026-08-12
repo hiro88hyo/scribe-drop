@@ -9,7 +9,7 @@ const MANIFEST = createFixedJobManifest(
     projectId: "scribe-phase12",
     imageDigest: `asia-southeast1-docker.pkg.dev/scribe-phase12/worker/runtime@sha256:${"a".repeat(64)}`,
     runtimeServiceAccount: "runtime@scribe-phase12.iam.gserviceaccount.com",
-    orchestratorOrigin: "https://orchestrator.example.test/",
+    orchestratorOrigin: "https://orchestrator.example.test",
     resultHost: "storage.example.test",
     sourceHost: "storage.example.test",
   },
@@ -58,6 +58,12 @@ describe("Cloud Run Jobs REST adapter", () => {
       "https://run.googleapis.com/v2/projects/scribe-phase12/locations/asia-southeast1/jobs?jobId=sd-stg-job",
     );
     expect(JSON.parse(requestBody(calls[0]?.init.body))).toEqual(MANIFEST);
+    expect(MANIFEST.template.template.containers[0].env[4].value).toBe(
+      "https://orchestrator.example.test/",
+    );
+    expect(MANIFEST.template.template.containers[0].env[5].value).toBe(
+      "https://orchestrator.example.test/internal/cloud-run/bootstrap",
+    );
     expect(calls[1]?.url).toBe(
       "https://run.googleapis.com/v2/projects/scribe-phase12/locations/asia-southeast1/jobs/sd-stg-job:run",
     );

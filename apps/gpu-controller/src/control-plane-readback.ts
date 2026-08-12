@@ -3,6 +3,7 @@ import { z } from "zod";
 const timestampSchema = z.iso.datetime({ offset: true });
 const etagSchema = z.string().min(1).max(1024);
 const projectIdSchema = z.string().regex(/^[a-z][a-z0-9-]{4,28}$/u);
+const projectNumberSchema = z.string().regex(/^[1-9][0-9]{5,19}$/u);
 const serviceAccountSchema = z
   .string()
   .regex(/^[a-z][a-z0-9-]{4,28}@[a-z][a-z0-9-]{4,28}\.iam\.gserviceaccount\.com$/u);
@@ -60,7 +61,6 @@ export const iamPolicyReadbackSchema = z
 export type IamBindingReadback = z.infer<typeof iamBindingReadbackSchema>;
 
 const iamCustomRoleFields = {
-  deleted: z.literal(false),
   description: z.string().min(1).max(4096),
   includedPermissions: z.array(z.string().regex(/^[a-z][a-zA-Z0-9.]+$/u)).min(1),
   name: z.string().regex(/^projects\/[a-z][a-z0-9-]{4,28}\/roles\/[A-Za-z0-9_.]{3,64}$/u),
@@ -69,7 +69,7 @@ const iamCustomRoleFields = {
 } as const;
 
 export const iamCustomRoleExpectationSchema = z
-  .object(iamCustomRoleFields)
+  .object({ ...iamCustomRoleFields, deleted: z.literal(false) })
   .strict()
   .superRefine((role, context) => {
     if (new Set(role.includedPermissions).size !== role.includedPermissions.length) {
@@ -78,7 +78,7 @@ export const iamCustomRoleExpectationSchema = z
   });
 
 export const iamCustomRoleReadbackSchema = z
-  .object({ ...iamCustomRoleFields, etag: etagSchema })
+  .object({ ...iamCustomRoleFields, deleted: z.literal(false).optional(), etag: etagSchema })
   .strict()
   .superRefine((role, context) => {
     if (new Set(role.includedPermissions).size !== role.includedPermissions.length) {
@@ -198,7 +198,7 @@ export function verifyIamCustomRoleReadback(
     includedPermissions: [...expected.includedPermissions].sort(),
   };
   const normalizedObserved = {
-    deleted: observed.deleted,
+    deleted: observed.deleted ?? false,
     description: observed.description,
     includedPermissions: [...observed.includedPermissions].sort(),
     name: observed.name,
@@ -269,6 +269,7 @@ export const controllerSecretReadbackExpectationSchema = z
     environment: z.enum(["staging", "production"]),
     name: secretNameSchema,
     projectId: projectIdSchema,
+    projectNumber: projectNumberSchema,
     version: secretVersionSchema,
   })
   .strict()
@@ -309,7 +310,7 @@ export function verifyControllerSecretReadback(
   const expected = controllerSecretReadbackExpectationSchema.parse(expectation);
   const secret = secretManagerSecretReadbackSchema.parse(rawSecret);
   const version = secretManagerVersionReadbackSchema.parse(rawVersion);
-  const secretResourceName = `projects/${expected.projectId}/secrets/${expected.name}`;
+  const secretResourceName = `projects/${expected.projectNumber}/secrets/${expected.name}`;
   if (secret.name !== secretResourceName) {
     throw new Error("Secret Manager secret resource name does not match");
   }

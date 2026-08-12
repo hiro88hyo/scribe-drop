@@ -21,6 +21,7 @@ const expectation: ControllerControlPlaneReadbackExpectation = {
     attestors: ["projects/scribe-phase14/attestors/release-candidate"],
     projectId: "scribe-phase14",
   },
+  projectNumber: "123456789012",
   deployment: {
     authorization: defaultSyntheticAuthorizations().staging,
     controllerImageDigest: `asia-southeast1-docker.pkg.dev/scribe-phase14/controller/runtime@sha256:${"b".repeat(64)}`,
@@ -42,7 +43,7 @@ const expectation: ControllerControlPlaneReadbackExpectation = {
 };
 
 function secretObservation(name: string, version: string): Record<string, unknown> {
-  const resource = `projects/scribe-phase14/secrets/${name}`;
+  const resource = `projects/${expectation.projectNumber}/secrets/${name}`;
   return {
     iamPolicy: {
       bindings: [

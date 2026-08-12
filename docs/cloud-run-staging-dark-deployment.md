@@ -2,10 +2,10 @@
 
 ## Status and scope
 
-- Status: release/0.2.0 version pinned; candidate not published
+- Status: staging non-GPU preflight complete; final release/0.2.0 candidate pending
 - Date: 2026-08-12
 - Product routing: RunPod Serverless
-- Cloud/CI mutation: staging release supply chain only; production untouched
+- Cloud/CI mutation: staging release supply chain and disabled controller control plane; production untouched
 
 Phase 14の実staging gateに先立ち、Orchestratorのdurable runtime protocolとshadow namespaceをlocalで固定した。
 2026-08-12にstaging release supply chainだけを構築し、source-controlled candidate workflowを追加した。
@@ -44,8 +44,8 @@ Orchestrator clientはHTTPS origin、最大60秒の署名lifetime、256 bit以�
 16 KiBのJSON response上限、request/handle identity一致を強制する。cleanupはlive attestationで得たcontroller versionを
 条件にexact 1回だけ送る。timeoutまたはresponse loss後は結果不明として閉じ、自動再送しない。
 
-これらはlocal port実装であり、environment variable、secret、default runtime service wiring、controller Serviceには
-接続していない。
+default Orchestrator runtime service wiringとproduct routeには接続していない。staging controller Serviceにはdisabled authorizationと
+固定environment/secretを注入したが、OrchestratorからのrequestとGPU executionは0のままである。
 
 ## Local Firestore controller store
 
@@ -65,19 +65,23 @@ create admissionでは全3 documentを一つのtransactionで読み、execution/
   cleanup commitだけがexecution更新とactive slot解放を同じtransactionで行う。
 - read時にもstrict schema、path/body handle、bootstrap request、TTL、active singleton、reservation accountingを検証する。
   drift、missing singleton、transaction failureではprovider mutationへ進まない。
-- request/execution documentは31日expiryに対応する`ttlExpiresAt`を持つ。実databaseのTTL policyはまだ作成しておらず、
+- request/execution documentは31日expiryに対応する`ttlExpiresAt`を持つ。staging databaseの両TTL policyは`ACTIVE`へ収束したが、
   即時削除をreplay/cleanupの前提にしない。
 
 adapter restart、Firestore transaction callback retry、並行create/CAS、exact replay、stale version、rate/budget、cleanup release、
 authorization/path/TTL/singleton driftをlocal serialized fakeで検証した。named Firestore database、TTL policy、IAM、ADCを持つ
-controller Serviceへの注入は未実施である。
+controller Serviceへの注入とstrict read-backは完了した。disabled authorizationのためdocument mutationはまだ発生させていない。
 
 [ADR 0079](./adr/0079-fix-controller-firestore-database-and-ttl-policy.md)のpure resource planはstaging databaseをSingapore、Native/
-Standard、pessimistic transaction、delete protection有効、App Engine/MongoDB/Realtime無効、Firestore API有効、PITR無効へ固定する。
+Standard、pessimistic transaction、delete protection有効、App Engine/MongoDB無効、Firestore API/Realtime有効、PITR無効へ固定する。
+Standard/Native databaseが省略するFirestore/MongoDB access-mode fieldは固定defaultとしてのみ正規化し、明示された矛盾値を拒否する。
 request/execution collection groupの`ttlExpiresAt`だけをoffset 0で設定し、raw field read-backが`ACTIVE`かつancestor index継承の場合だけ
 受ける。Firestore Admin APIのdatabase/field exact GETとdatabase-wide `ttlConfig:*` list clientは同じtoken/quota projectで2回readし、
-期待2件以外、重複、paginationを拒否する。list順序だけを正規化し、継続変化するoutput-only `earliestVersionTime`だけを安定性比較から
-除外する。database/TTL作成、delete protection変更、実credential read-backは行っていない。
+list methodが0以外の`pageSize`を拒否するlive contractに従ってpage sizeを送らず、response schema側で最大3件へ閉じる。
+TTL fieldのinherited indexで既定`apiScope: ANY_API`が省略された場合だけ正規化し、別scopeとindex overrideを拒否する。
+databaseのsliding `earliestVersionTime`と連動してetagもmutationなしに変化するため、double-snapshotの安定性比較から両方だけを除外し、
+2回目のetagはevidenceとして保持する。期待2件以外、重複、paginationを拒否する。staging database作成、delete protection有効化、
+両TTLの`ACTIVE`収束後に実credentialのstrict double-snapshotを通過した。
 Service/security、IAM、Firestoreのraw observationは同じdeployment configから各planを導出するatomic verifierでも束ね、別project/databaseの
 観測や未知sectionを混在させたevidenceを拒否する。deployment-level read-only clientは個別clientと固定endpoint builderを共有し、全endpointを
 一つのaccess token/quota projectで並列取得する2 snapshotへまとめる。個別resource間でtokenや観測窓が分かれた結果をatomic evidenceとして
@@ -87,13 +91,17 @@ Service/security、IAM、Firestoreのraw observationは同じdeployment config�
 
 strict composition rootはmanifest、synthetic authorization、Firestoreを一度に検証し、environmentとprojectを一致させる。
 immutable imageは同projectのSingapore Artifact Registry digest、runtime identityは同projectのuser-managed service account
-だけを許可する。構成が成立した後にFirestore store、Cloud Run Admin client、controller service、HMAC HTTP handlerを結ぶ。
+だけを許可する。orchestrator originはschema境界でroot末尾`/`付きへ正規化し、Jobのidentity audienceをそのorigin直下の
+`internal/cloud-run/bootstrap`へ完全一致させる。構成が成立した後にFirestore store、Cloud Run Admin client、controller service、
+HMAC HTTP handlerを結ぶ。
 default disabled authorizationをseedしたlocal testでは、正しい署名のcreateも`BUDGET_EXHAUSTED`となり、Google ADC token取得と
 provider HTTPは0回である。
 
 Google Admin API token adapterはofficial Google Auth LibraryのADC/cloud-platform scopeを使い、null、control/whitespace、
 8 KiB超過tokenを拒否する。HMAC key adapterはSecret Managerから将来注入する値をcanonical base64urlとしてdecodeし、32〜64
 byte、primary/secondary非同一、defensive copyを強制する。token、secret、signatureはlog recordへ入れない。
+live stagingでは`basenc --base64url`が付けたpaddingをstartup parserがfail closedで拒否した。payloadをread-backせず、paddingを
+除く生成pipelineでversion 2を作成し、未使用version 1を復元可能なdisabledへ移した。Serviceは数値version 2だけを参照する。
 
 Node process entrypointは次の値だけを参照する。platformが追加する他のenvironment variableはauthorizationやpolicyへ混ぜない。
 
@@ -114,8 +122,8 @@ Node process entrypointは次の値だけを参照する。platformが追加す�
 HTTP transportはclientのHostをresource scopeに使わず固定internal authorityでFetch handlerへ渡す。absolute/authority-form targetを
 invalid routeへ置換し、bodyは4,097 byteだけ保持、headerは8 KiB/32件、receive timeoutは15秒、socketあたりrequestは100件に制限する。
 process logは固定controller recordとready/failure markerだけで、起動例外を文字列化しない。SIGINT/SIGTERMでは新規受付を閉じる。
-実testではsocketをlistenせずpure transport/configを検証する。Secret Manager version binding、Cloud Run Service、registry
-publish、実credentialによるdeployed service read-backは未実施である。
+pure transport/config testに加え、stagingではSecret Managerの固定versionをCloud Run Serviceへbindingし、ready状態と
+実credentialによるdeployed service double-snapshotを確認した。authorizationはexecution/request/budgetすべて0である。
 
 ## Local controller image boundary
 
@@ -135,7 +143,8 @@ source mapの不在を検証する。
 
 local imageはCycloneDX SBOMを`/tmp/scribe-drop-gpu-controller.cdx.json`だけへ生成し、Trivyのunfixedを含む
 HIGH/CRITICAL fail-close scanを通過した。local image IDとSBOMはrelease artifactでもstaging evidenceでもなく、commitしない。
-image publish、signature/provenance、registry read-back、Cloud Run Serviceへのdigest bindingは実staging gateに残す。
+先行candidateでpublish済みの署名付きimageは非GPU preflightだけに利用した。このread-back修正を含む最終candidateのpublish、
+署名/provenance検証、Serviceへのdigest差し替えは実staging gateに残す。
 
 ## Local controller Service deployment plan
 
@@ -158,19 +167,26 @@ Terraform apply、`gcloud run deploy`を行わない。
 containerは既に`0.0.0.0`のCloud Run注入`PORT`でlistenする。planは8080/http1を固定し、`PORT`自体をuser environmentへ
 重複設定しない。environment read-backは順序だけを正規化し、名前の重複、不足、未知値、secret/value表現の変更を拒否する。
 service/secret名にはstagingまたはproductionのdelimiter付きmarkerを要求し、controller/worker imageとcontroller/runtime identityは
-同じprojectへ限定する。
+同じprojectへ限定する。gcloudがservice labelsをrevision templateへも伝播するため、component/environment/policyの3固定labelを
+ServiceとRevisionの両方で完全一致させ、欠落と追加を拒否する。
 
 normalized read-back verifierはcontroller Serviceのimage、identity、secret version、ingress、Binary Authorization、scaling、traffic、resource、
 environmentの完全一致だけを受ける。Cloud Run v2 raw adapterはstrict response schema、generation収束、ready revision、latest 100%
 traffic、root HTTPS `run.app` URIを検証してnormalized shapeへ変換する。project由来のoutput-only `threatDetectionEnabled`はevidenceへ
-分離し、desired-state driftには使わない。IAM policyはpublic/excess bindingなし、Secret ManagerはSingapore user-managed replica、数値
-fixed versionの`ENABLED`、exact secret-level accessor、Binary Authorizationはglobal policy有効、allowlist/specialized ruleなし、exact
-attestorによるblock-and-auditをlocal raw schemaで照合する。controller custom roleとruntime `actAs`を含むlive API read-backは未接続であり、
+分離し、desired-state driftには使わない。Cloud Run v2が省略する`reconciling: false`と追加した`sshEnabled: false`だけを安全な
+defaultとして許可し、trueを拒否する。自動注入されるstartup TCP probeはport 8080、timeout/period 240秒、failure threshold 1だけを
+許可し、変更を拒否する。IAM policyはpublic/excess bindingなし、Secret ManagerはSingapore user-managed replica、数値fixed versionの
+`ENABLED`、exact secret-level accessorへ固定する。Secret Managerのlive metadataがcanonical resource名にproject numberを
+返すため、read-back expectationにauthoritative project numberを含め、requestのproject IDとresponseのproject numberを別々に完全照合する。
+LATEST/100%の`trafficStatuses`でrevisionが省略された場合はlatest ready/created一致とdesired LATEST/100%で補い、明示されたrevisionは
+latest readyとの完全一致だけを許可する。
+Binary Authorizationはglobal policy有効、allowlist/specialized ruleなし、exact
+attestorによるblock-and-auditをlocal raw schemaで照合する。controller custom roleとruntime `actAs`を含むlive API read-backも実施し、
 Cloud Run Service、空のService resource IAM、primary/secondary secret、Binary Authorizationは同一project/environmentのatomic local
 evidenceへ束ね、secondary observationの欠落・余剰を拒否する。read-only clientはCloud Run v2 Service/IAM、Secret Manager
 secret/version metadata/IAM、Binary Authorization policyの固定endpointだけをGETし、redirect、非JSON、256 KiB超過、10秒timeoutを拒否する。
 同じaccess tokenとquota projectで全endpointを2回readし、canonical response差分があれば観測を破棄する。`:access`によるsecret payload取得、
-retry、mutationは行わない。cloud review後に実credentialで各authoritative observationを取得してこの検証へ渡す。
+retryは行わない。staging resource作成後、実credentialのauthoritative observationをこの検証へ渡して完全一致を確認した。
 各ephemeral GPU Jobもcreate bodyとlive read-backの両方でBinary Authorization default policyを必須とし、欠落、無効化、
 policy override、breakglassは実行前のresource driftとして拒否する。
 
@@ -196,7 +212,7 @@ OIDC、full gate、SBOM/scan、各image 1 push、registry digest、KMS署名、0
 初回workflowは旧branch-context subjectをpublisher OIDC preflightで拒否し、後続stepを実行しなかった。GitHub OIDC
 customization APIのimmutable subject prefix、staging Environmentの`release/*`単一branch policyをread-backし、subjectを
 exact `environment:staging` contextへ修正した。失敗後も両repositoryは空、project Occurrenceは0であり、candidate image、
-attestation、Cloud Run Service/Jobはまだ存在しない。修正後runではOIDCとkeyless gcloud preflightが成功したが、auth actionの
+attestation、Cloud Run Service/Jobはその時点ではまだ存在しなかった。修正後runではOIDCとkeyless gcloud preflightが成功したが、auth actionの
 一時`gha-creds-*.json`をroot Prettierが走査してapplication gateで停止し、image buildへ到達しなかった。application/secret/
 dependency gateをcloud authより前、OIDC preflightをimage build直前へ固定し、一時credentialをGitとDocker build contextから
 明示除外した。次のrunはfull gate、OIDC、keyless gcloud preflightを通過し、controller image build後のinspectionで停止した。
@@ -207,6 +223,12 @@ controller build/check/SBOM/Trivy、RunPod worker build、Cloud Run worker build
 componentがなく、attestation commandが非対話promptの前に停止したため、両repositoryに各1 image、Occurrence 0をread-backした。
 公式setup-gcloudの`install_components: beta`をversion 579と同時に固定し、static verifierで必須化する。失敗candidate imageは
 成功candidateのread-back後にexact tag/digestで削除し、成功artifactを保持する。
+component修正後runは全stepに成功し、candidate evidenceのcommit/run/attempt/digestも一致した。Artifact Analysisには両
+Occurrenceが存在したが、strict clientのproject-scoped、schemeなしfilterが空を返した。GoogleのBinary Authorization手順と
+同じNote-scoped endpointへ修正する。live gcloud 579のOccurrenceはschemeなし`resourceUri`を保存し、Note-scoped比較では
+schemeなしfilterだけが各1件、`https://` filterは0件だったため、単一`resourceUrl="<digest image>"` filterへ固定する。
+responseでkind、Note、resource URI、payload、keyを完全照合し、Binary Authorization `VERIFIED`、validation前後不変を
+再検証する。このverifier変更を含む新candidateを作るまで既存成功runをstaging evidenceに採用しない。
 
 controller authorityは[ADR 0078](./adr/0078-split-controller-iam-by-resource-boundary.md)に従うpure IAM planで分割する。Cloud Run Jobs roleは
 実clientが呼ぶ8 permissionだけ、Firestore roleはtransactionとentity CRUDの5 permissionだけとし、database条件、runtime
@@ -214,7 +236,23 @@ controller authorityは[ADR 0078](./adr/0078-split-controller-iam-by-resource-bo
 roleとIAM policy verifierは他principalのproject bindingを無視する一方、controllerの追加role、他principalとの混在、条件/resource driftを
 拒否する。IAM read-only clientはcustom role GETとproject/repository/runtime service accountの`getIamPolicy`だけを固定endpointへ送り、
 同じtoken/quota projectの2回のresponseが一致した場合だけ検証へ渡す。HTTP POSTは`:getIamPolicy`に限定し、`setIamPolicy`と不正bodyを
-request送信前に拒否する。live IAM APIは未実行である。
+request送信前に拒否する。live custom role responseで削除されていないroleの`deleted: false`が省略された場合だけfalseへ
+正規化し、`deleted: true`、permission、stage、title、description、binding/conditionの差分は引き続き拒否する。
+
+## Staging non-GPU preflight
+
+2026-08-12に、既存の署名検証済みcandidate imageを使って最終image buildを待たずに次を先行検証した。既存imageは後続の
+source変更を含まないため、最終acceptance evidenceやproduction昇格artifactには使用しない。
+
+- Firestore named databaseをSingapore/Native/Standard、delete protection有効、PITR無効で作成し、request/executionのTTL 2件を
+  `ACTIVE`へ収束させた。database/TTLのstrict double-snapshotは完全一致した。
+- controller/runtime service account、Jobs/Firestore custom role、database/repository/runtime/secretの限定bindingを作成し、IAMの
+  strict double-snapshotを通過した。
+- canonical base64url HMAC secretの固定versionと、execution/request/budgetをすべて0にしたcontroller Serviceをdeployした。
+  Service、IAM、Secret metadata、Binary Authorization、Firestoreを一つの観測窓で2回読み、readyかつ完全一致を確認した。
+- 固定L4 manifestのephemeral Jobを1件だけcreate/read-backし、Binary Authorization、runtime identity、worker digest、task/retry/
+  timeoutを照合した。`jobs.run`は呼ばず、Execution 0を再確認してJobをexact deleteし、不存在までread-backした。
+- production resource、CI、remote D1、Cloudflare routingは変更していない。Cloud Run GPU executionも0である。
 
 ## Local Google identity boundary
 

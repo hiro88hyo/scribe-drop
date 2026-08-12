@@ -13,6 +13,7 @@ const expectation: ControllerControlPlaneReadbackExpectation = {
     attestors: ["projects/scribe-phase14/attestors/release-candidate"],
     projectId: "scribe-phase14",
   },
+  projectNumber: "123456789012",
   deployment: {
     authorization: defaultSyntheticAuthorizations().staging,
     controllerImageDigest: `asia-southeast1-docker.pkg.dev/scribe-phase14/controller/runtime@sha256:${"b".repeat(64)}`,
@@ -44,7 +45,8 @@ function fixtures(): Map<string, unknown> {
   const firestorePlan = createControllerFirestoreDeploymentPlan(deployment);
   const revision = "scribe-drop-staging-gpu-controller-00001-abc";
   const uri = "https://scribe-drop-staging-gpu-controller-abcdef-as.a.run.app/";
-  const secretResource = `projects/scribe-phase14/secrets/${deployment.primaryHmacSecret.name}`;
+  const secretRequestResource = `projects/scribe-phase14/secrets/${deployment.primaryHmacSecret.name}`;
+  const secretResource = `projects/${expectation.projectNumber}/secrets/${deployment.primaryHmacSecret.name}`;
   const defaultField = `${firestorePlan.database.name}/collectionGroups/__default__/fields/*`;
   const ttlFields = firestorePlan.ttlFields.map((field) => ({
     indexConfig: { ancestorField: defaultField, usesAncestorConfig: true },
@@ -103,7 +105,7 @@ function fixtures(): Map<string, unknown> {
       { bindings: [], etag: "service-iam-etag", version: 1 },
     ],
     [
-      `https://secretmanager.googleapis.com/v1/${secretResource}`,
+      `https://secretmanager.googleapis.com/v1/${secretRequestResource}`,
       {
         createTime: "2026-08-11T00:00:00Z",
         etag: "secret-etag",
@@ -117,7 +119,7 @@ function fixtures(): Map<string, unknown> {
       },
     ],
     [
-      `https://secretmanager.googleapis.com/v1/${secretResource}/versions/7`,
+      `https://secretmanager.googleapis.com/v1/${secretRequestResource}/versions/7`,
       {
         clientSpecifiedPayloadChecksum: true,
         createTime: "2026-08-11T00:01:00Z",
@@ -130,7 +132,7 @@ function fixtures(): Map<string, unknown> {
       },
     ],
     [
-      `https://secretmanager.googleapis.com/v1/${secretResource}:getIamPolicy?options.requestedPolicyVersion=3`,
+      `https://secretmanager.googleapis.com/v1/${secretRequestResource}:getIamPolicy?options.requestedPolicyVersion=3`,
       {
         bindings: [
           {
@@ -199,7 +201,7 @@ function fixtures(): Map<string, unknown> {
       },
     ],
     [
-      `https://firestore.googleapis.com/v1/${firestorePlan.database.name}/collectionGroups/-/fields?filter=ttlConfig%3A*&pageSize=3`,
+      `https://firestore.googleapis.com/v1/${firestorePlan.database.name}/collectionGroups/-/fields?filter=ttlConfig%3A*`,
       { fields: [...ttlFields].reverse() },
     ],
     ...firestorePlan.ttlFields.map(

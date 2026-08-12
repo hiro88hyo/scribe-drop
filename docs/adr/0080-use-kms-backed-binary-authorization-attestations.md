@@ -60,6 +60,9 @@ attestorで検証する。
 - candidate workflowはcontroller imageとCloud Run worker imageをrelease commitから一度だけbuildし、SBOM、
   HIGH/CRITICAL fail-close scan、offline/non-root gate、candidate manifest検証後に両方のdigestへattestationを一度だけ
   発行する。production向けにimageまたはattestationを再buildしない。
+- pinned gcloud 579が作るOccurrenceはdigest imageをschemeなし`resourceUri`で保存する。read-backはArtifact Analysisの
+  Note-scoped endpointを使い、schemeなしexact digestの単一`resourceUrl` filterで各1件に限定する。kind、Note、resource URI、
+  payload、KMS public key IDはresponse schemaで完全照合し、Binary Authorization validation前後のstable snapshotを要求する。
 - attestation preflightは両digestについてexact Note、resource URI、KMS public key ID、signature、serialized payloadを
   read-backし、Binary Authorization validation APIでも検証する。一方だけのattestation、tag、別registry/repository、別key
   version、余剰candidate imageを拒否する。

@@ -48,6 +48,15 @@ const environmentVariableSchema = z.union([
     .strict(),
 ]);
 
+const defaultStartupProbeSchema = z
+  .object({
+    failureThreshold: z.literal(1),
+    periodSeconds: z.literal(240),
+    tcpSocket: z.object({ port: z.literal(8080) }).strict(),
+    timeoutSeconds: z.literal(240),
+  })
+  .strict();
+
 const containerSchema = z
   .object({
     args: z.array(z.string()).optional(),
@@ -79,7 +88,7 @@ const containerSchema = z
       .strict()
       .optional(),
     sourceCode: z.never().optional(),
-    startupProbe: z.never().optional(),
+    startupProbe: defaultStartupProbeSchema.optional(),
     volumeMounts: z.array(z.never()).optional(),
     workingDir: z.never().optional(),
   })
@@ -213,7 +222,7 @@ export const cloudRunV2ControllerServiceReadbackSchema = z
     multiRegionSettings: z.never().optional(),
     name: z.string().min(1),
     observedGeneration: int64Schema,
-    reconciling: z.boolean(),
+    reconciling: z.literal(false).optional(),
     satisfiesPzs: z.boolean().optional(),
     scaling: z
       .object({
@@ -224,6 +233,7 @@ export const cloudRunV2ControllerServiceReadbackSchema = z
       })
       .strict()
       .optional(),
+    sshEnabled: z.literal(false).optional(),
     template: revisionTemplateSchema,
     terminalCondition: conditionSchema,
     threatDetectionEnabled: z.boolean().optional(),
@@ -238,9 +248,6 @@ export const cloudRunV2ControllerServiceReadbackSchema = z
   .superRefine((service, context) => {
     if (service.generation !== service.observedGeneration) {
       context.addIssue({ code: "custom", message: "Cloud Run observed generation is stale" });
-    }
-    if (service.reconciling) {
-      context.addIssue({ code: "custom", message: "Cloud Run Service is still reconciling" });
     }
     if (service.terminalCondition.state !== "CONDITION_SUCCEEDED") {
       context.addIssue({
@@ -282,7 +289,8 @@ export const cloudRunV2ControllerServiceReadbackSchema = z
       service.trafficStatuses.length !== 1 ||
       service.trafficStatuses[0]?.type !== "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST" ||
       service.trafficStatuses[0].percent !== 100 ||
-      service.trafficStatuses[0].revision !== service.latestReadyRevision ||
+      (service.trafficStatuses[0].revision !== undefined &&
+        service.trafficStatuses[0].revision !== service.latestReadyRevision) ||
       service.trafficStatuses[0].tag !== undefined
     ) {
       context.addIssue({ code: "custom", message: "Cloud Run traffic status is not latest-only" });

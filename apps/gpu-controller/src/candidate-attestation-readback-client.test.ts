@@ -85,9 +85,11 @@ describe("release candidate attestation read-back client", () => {
     ]) {
       const url = new URL(request.url);
       expect(url.origin).toBe("https://containeranalysis.googleapis.com");
-      expect(url.pathname).toBe("/v1/projects/scribe-phase14/occurrences");
+      expect(url.pathname).toBe(
+        "/v1/projects/scribe-phase14/notes/scribe-drop-release-candidate/occurrences",
+      );
       expect(url.searchParams.get("pageSize")).toBe("2");
-      expect(url.searchParams.get("filter")).toContain(`resourceUrl="${image}"`);
+      expect(url.searchParams.get("filter")).toBe(`resourceUrl="${image}"`);
     }
     const occurrences = verifyCandidateAttestationOccurrenceLists(expected, [
       occurrenceList(expected, 0),

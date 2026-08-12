@@ -1340,7 +1340,7 @@ pnpm check
   Orchestrator HMAC client、Firestore control-store adapterはPhase 14 local preparationで追加したが、default service
   wiringには接続していない。
 
-### Phase 14: staging dark deployment（release/0.2.0準備中、candidate未発行）
+### Phase 14: staging dark deployment（non-GPU preflight完了、最終candidate未発行）
 
 実装:
 
@@ -1372,6 +1372,10 @@ local preparation（2026-08-11〜12）:
 - 修正後runは全gate、両imageの1回push、digest解決、isolated signer OIDCまで成功した。pinned gcloudに`beta` componentがなく
   attestation commandのcomponent promptで停止した。両repository各1 image、Occurrence 0をread-backし、部分署名がないことを
   確認した。setup-gcloudでversion 579と`beta`を同時に固定し、失敗candidate imageは成功candidate検証後にexact cleanupする。
+- component修正後runは全stepに成功し、candidate evidence identity/digestも一致した。両Occurrenceは作成済みだが、strict
+  read-backのproject-scoped、schemeなしfilterが空を返した。公式手順と同じNote-scoped endpointと
+  単一resource filterへ修正する。live gcloud 579のschemeなし`resourceUri`に対しschemeなしfilterだけが各1件、`https://`
+  filterが0件であることをread-backした。このverifierを含む新candidateまで既存runをacceptance evidenceにしない。
 - forward-only `0011_cloud_run_runtime_protocol.sql`でbootstrap、challenge/session、allowlist terminal eventを
   provider executionへ外部キーで固定した。challenge消費、sequence、terminal revokeはD1 CAS/triggerへ収束する。
 - D1 production repositoryはactive attempt、provider kind/policy、contract v2、source key/ETag/size、result prefixを
@@ -1395,8 +1399,8 @@ local preparation（2026-08-11〜12）:
 - `@google-cloud/firestore`のnamed-database adapterを追加した。environment singleton、request replay、execution recordを
   一つのtransactionへ閉じ、active 1、finite count/JPY reservation、rate window、version CAS、cleanup時だけのactive slot
   releaseを永続化する。SDK transaction callbackの再実行、並行admission/CAS、adapter restart、authorization/path/TTL/
-  singleton driftをlocal fakeで検証し、strict persisted schema違反はfail closedにする。TTL fieldは保存するがTTL policyは
-  cloud側へ未設定である。
+  singleton driftをlocal fakeで検証し、strict persisted schema違反はfail closedにする。このlocal実装時点ではTTL fieldだけを保存し、
+  後続のnon-GPU preflightでcloud TTL policyを`ACTIVE`へ収束させた。
 - strict composition rootでmanifest、authorization、Firestoreのenvironment/project、image repository、runtime service
   accountを完全照合し、Firestore store、Cloud Run client、HMAC HTTP handlerをlocal結線した。default disabled
   authorizationでは署名済みcreateもADC token取得/Cloud Run call前に停止する。Google ADC access tokenはvisible ASCIIかつ
@@ -1411,7 +1415,7 @@ local preparation（2026-08-11〜12）:
   `no-new-privileges`、PID/memory/CPU上限、noexec tmpfsでcontainer invariantを実行する。CycloneDX SBOMは`/tmp`だけへ
   生成し、TrivyのHIGH/CRITICAL fail-close scanを通過した。bundleはregular `.js`だけを選び、shell、BusyBox、npm/pnpm、
   TypeScript、`@types/node`、source tree、declaration、source mapの不在とproduction runtime dependencyの存在をcontainer内で
-  検証する。image publish、registry、CI、service deploymentは変更していない。
+  検証する。このlocal image gate時点ではimage publish、registry、CI、service deploymentを変更していなかった。
 - controller Cloud Run Serviceのpure deployment planとnormalized read-back verifierを追加した。Singapore、Gen2、immutable
   controller image、専用service account、1 vCPU/512 MiB、request-based CPU、service/revision max instance 1、min 0、concurrency
   8、60秒timeout、latest revision 100%、volume/VPCなし、default URI有効、IAP無効、public ingressとapplication HMAC、Binary
@@ -1428,7 +1432,7 @@ local preparation（2026-08-11〜12）:
   authoritative evidence取得、resource作成、deployは行わない。
 - ephemeral GPU JobにもBinary Authorization default policyを固定し、create bodyとlive read-backの両方で欠落、無効化、
   policy override、breakglassを拒否する。project default policy/attestorのauthoritative read-backは2026-08-12に成功した。
-  worker image attestationはcandidate workflow未実行のためまだ存在しない。
+  このplan追加時点ではworker image attestationは存在せず、後続candidateでcontroller/worker各1件を作成・検証した。
 - [ADR 0080](./adr/0080-use-kms-backed-binary-authorization-attestations.md)でproject-singleton release attestor、global
   Artifact Analysis Noteのmetadata例外、Singapore software KMS ECDSA P-256 key、keyless GitHub OIDC signer、publisherとの
   権限分離、controller/worker両digestのattestation、月額約US$0.06のkey保持費を固定した。project numberとdeployment
@@ -1449,8 +1453,8 @@ local preparation（2026-08-11〜12）:
   `importOnly`/`disabled`はresponse省略を許す一方trueを拒否するよう修正した。
 - `.github/workflows/publish-cloud-run-candidate.yml`を追加し、`release/<version>`のmanual dispatch、GitHub OIDC、分離identity、
   full local gate、SBOM、HIGH/CRITICAL scan、各image 1 push、registry digest read-back、KMS attestation、metadata-only evidenceを
-  固定した。workflowとOccurrenceはまだ実行しておらず、Artifact Registryのcandidate imageも0件である。production resource、
-  Cloud Run Service/Job、Firestore、Secret Manager、remote D1、product routingは変更していない。
+  固定した。workflow追加時点ではOccurrenceとArtifact Registry candidate imageは0件で、production resource、Cloud Run
+  Service/Job、Firestore、Secret Manager、remote D1、product routingを変更していなかった。
 - [ADR 0078](./adr/0078-split-controller-iam-by-resource-boundary.md)に従いcontroller IAM pure planを追加した。Cloud Run Jobs custom roleは
   実clientが使うJob create/get/delete/run、Execution list/cancel/delete、Operation getだけ、Firestore custom roleはtransactionと
   entity get/create/update/deleteだけへ固定する。project binding、database完全一致condition、runtime account上の
@@ -1463,14 +1467,20 @@ local preparation（2026-08-11〜12）:
   environment専用named databaseをSingapore/Native/Standard、pessimistic transaction、delete protection、Firestore-only accessへ固定する。
   staging PITR無効/1時間retention、production PITR有効/7日retentionを分離し、request/execution collection groupの`ttlExpiresAt`だけを
   offset 0かつ`ACTIVE`で受ける。fixed database/field GETとdatabase-wide `ttlConfig:*` listを同じtoken/quota projectで2回実行し、
-  期待2件以外、重複、paginationを拒否する。list順序だけを正規化し、継続変化するoutput-only `earliestVersionTime`だけを安定性比較から
-  除外するlocal clientも追加した。Service/security、IAM、Firestoreを同じdeployment expectationから
+  期待2件以外、重複、paginationを拒否する。list順序だけを正規化し、継続変化するoutput-only `earliestVersionTime`と連動する
+  `etag`だけを安定性比較から除外するlocal clientも追加した。Service/security、IAM、Firestoreを同じdeployment expectationから
   導出するatomic evidence verifierでcross-project/database mixと未知sectionを拒否する。deployment-level read-only clientは個別clientと
-  pure endpoint builderを共有し、全resourceを一つのtoken/quota projectと同じdouble-snapshot windowで取得する。実credential、database/TTL
-  作成、mutationは行わない。
-- release branch/version、candidate workflow、CI、Firestore database/TTL policy、identity/controller deployment wiring、service
-  hosting、IAM、secret resource、cloud resource、deploy、product routingは変更していない。このためPhase 14の完了条件は
-  未達である。
+  pure endpoint builderを共有し、全resourceを一つのtoken/quota projectと同じdouble-snapshot windowで取得する。
+- 最終candidate buildを待たず、既存の署名検証済みimageでstaging non-GPU preflightを行った。Firestore named databaseとTTL 2件、
+  controller/runtime identity、Jobs/Firestore custom roleと限定IAM、固定versionのHMAC secret、disabled controller Serviceを作成した。
+  Standard/NativeのRealtime enabled、access-mode省略、TTL listの`pageSize`制約、inherited index scope省略、sliding
+  `earliestVersionTime`/`etag`、Secret Managerのproject number resource名、IAM `deleted: false`省略、Cloud Run v2のsafe default省略と
+  startup probe/label伝播をlive contractとして回帰testへ固定した。全resourceのstrict double-snapshotは完全一致した。
+- 既存worker digestで固定manifestのephemeral Jobをcreate/read-backし、Binary Authorization、runtime identity、task/retry/timeoutを
+  照合した。`jobs.run`は呼ばずExecution 0のままJobをexact deleteし、不存在まで確認した。production resource、CI、remote D1、
+  Cloudflare routingは変更していない。既存imageは後続source変更を含まないため、最終acceptanceには新candidateが必要である。
+- 最終candidateのbuild/publish/attestationとService digest差し替え、staging D1 shadow wiring、exact 1 GPU execution、timeout/reaper/
+  artifact/cleanup evidenceが残るため、Phase 14の完了条件は未達である。
 
 完了条件:
 

@@ -116,6 +116,15 @@ describe("controller IAM deployment policy", () => {
     });
   });
 
+  it("accepts live custom role output that omits deleted false", () => {
+    const plan = createControllerIamDeploymentPlan(configuration);
+    const observed = rawIamReadback();
+    delete observed.cloudRunRole.deleted;
+    delete observed.firestoreRole.deleted;
+
+    expect(() => verifyControllerIamReadback(plan, observed)).not.toThrow();
+  });
+
   it("rejects excess roles, shared bindings, role drift, and database-condition drift", () => {
     const plan = createControllerIamDeploymentPlan(configuration);
     const excess = rawIamReadback();
