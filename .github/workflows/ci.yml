@@ -52,6 +52,7 @@ jobs:
         run: |
           pnpm run gitleaks:install
           pnpm run runpodctl:install
+          pnpm run trivy:install
 
       - name: Verify toolchain
         run: pnpm run toolchain:check

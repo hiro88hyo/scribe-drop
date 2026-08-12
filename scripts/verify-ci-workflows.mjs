@@ -785,6 +785,20 @@ requireTextCount(
   "ci.yml",
   "maximum-duration bounded container check",
 );
+requireTextCount(
+  ciWorkflowContents,
+  "pnpm run trivy:install",
+  1,
+  "ci.yml",
+  "checksummed Trivy installation",
+);
+requireTextOrder(
+  ciWorkflowContents,
+  "pnpm run trivy:install",
+  "pnpm run toolchain:check",
+  "ci.yml",
+  "Trivy installation before toolchain verification",
+);
 requireTextOrder(
   ciWorkflowContents,
   "-m scribe_drop_worker.container_check",
