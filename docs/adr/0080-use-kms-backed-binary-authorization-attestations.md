@@ -44,6 +44,13 @@ attestorで検証する。
 - image publisherとrelease signerを別service accountにする。publisherはcandidate repositoryへのuploadだけ、signerは
   scanとcandidate manifest検証が成功した同じworkflow runのimmutable digestだけを署名する。local user credential、
   service-account key、未固定tagからattestationを作成しない。
+- GitHub Actionsはglobal pool `scribe-drop-release`のOIDC provider `github-actions`から鍵なしで上記2 service accountを
+  impersonateする。provider audienceはGoogleのcanonical provider audienceだけを使い、local JWKSを持たない。mappingは
+  `google.subject`、repository ID、owner IDだけとし、公開済みの数値repository ID `1312444559`とowner ID `1670222`、
+  immutable repository subject、`release/*` branch、`workflow_dispatch`、固定workflow
+  `.github/workflows/publish-cloud-run-candidate.yml`をCEL conditionで同時に要求する。各service accountの
+  `roles/iam.workloadIdentityUser`はrepository IDの単一`principalSet`だけをmemberとし、condition、追加member、
+  user-managed keyを許可しない。
 - candidate workflowはcontroller imageとCloud Run worker imageをrelease commitから一度だけbuildし、SBOM、
   HIGH/CRITICAL fail-close scan、offline/non-root gate、candidate manifest検証後に両方のdigestへattestationを一度だけ
   発行する。production向けにimageまたはattestationを再buildしない。
@@ -55,8 +62,8 @@ attestorで検証する。
   `roles/containeranalysis.notes.occurrences.viewer`を許可する。controller/runtime identityへKMS、Note、Occurrence、
   attestor、policy権限を与えない。
 - cloud mutation前のread-back対象へpolicy、attestor、attestor IAM、Note、Note IAM、KMS CryptoKey/signing version/public
-  key、signer/publisher identityとIAM、candidateの2 attestationを追加する。途中変更、未知key、余剰binding、pagination、
-  API disabledをfail closedにする。
+  key、WIF pool/provider、signer/publisher identity/IAM/user-managed key、candidateの2 attestationを追加する。途中変更、
+  未知key、余剰binding、pagination、API disabledをfail closedにする。
 - Phase 14で必要な追加APIは`binaryauthorization.googleapis.com`、`containeranalysis.googleapis.com`、
   `cloudkms.googleapis.com`とし、project IAM read-backに`cloudresourcemanager.googleapis.com`も要求する。CIのWorkload Identity Federationを接続する時点で
   `sts.googleapis.com`と`iamcredentials.googleapis.com`もread-backする。Artifact Analysisのautomatic vulnerability

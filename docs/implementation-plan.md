@@ -1419,7 +1419,11 @@ local preparation（2026-08-11〜12）:
   pure planを追加した。strict read-backはattestor/Note/KMS version/public key/CRC32Cとresource IAMを照合し、固定endpointだけを
   同じtoken/quota projectで2回取得する。両candidate digestのOccurrenceはgcloud 579のcanonical payload、exact KMS key ID、
   `ATTESTATION` kind、各1件へ固定し、Binary Authorization validationの`VERIFIED`とvalidation前後の置換拒否をlocal実装した。
-  service-account key/WIF read-back、Occurrence発行、candidate workflow、API/WIF/cloud resourceは未実装であり、別の明示承認まで変更しない。
+  release用WIFはglobal pool/provider、canonical audience、公開されたimmutable repository/owner ID、`release/*`、
+  `workflow_dispatch`、固定candidate workflowへ閉じるpure planを追加した。publisher/signer service accountのimpersonationは
+  repository IDの単一principalだけを許可し、pool/provider active、exact mapping/condition/IAM、相異なるidentity、
+  user-managed key 0を固定IAM endpointのdouble snapshotで検証する。Occurrence発行、candidate workflow、実credential、
+  API/WIF/service account/IAM/cloud resourceは未実装であり、別の明示承認まで変更しない。
 - [ADR 0078](./adr/0078-split-controller-iam-by-resource-boundary.md)に従いcontroller IAM pure planを追加した。Cloud Run Jobs custom roleは
   実clientが使うJob create/get/delete/run、Execution list/cancel/delete、Operation getだけ、Firestore custom roleはtransactionと
   entity get/create/update/deleteだけへ固定する。project binding、database完全一致condition、runtime account上の

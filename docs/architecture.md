@@ -240,7 +240,11 @@ Manager payload accessを行わない。実credentialによるlive read-backとr
 release supply chainはADR 0080のproject-singleton Binary Authorization attestor、global Artifact Analysis Note、Singapore
 Cloud KMS ECDSA P-256 signing versionへ固定する。publisherとsignerを分離したpure plan、attestor/Note/KMS public key/CRC32C/
 resource IAMのstrict double-snapshot read-backをlocal実装した。両candidate digestはgcloud 579のcanonical payload、exact KMS key ID、
-各1件のOccurrence、Binary Authorization `VERIFIED`を照合し、validation前後の置換を拒否する。WIF、Occurrence発行、cloud resourceは未接続である。
+各1件のOccurrence、Binary Authorization `VERIFIED`を照合し、validation前後の置換を拒否する。release用WIFはglobal poolと
+GitHub provider、canonical audience、immutable repository/owner ID、release branch、workflow dispatch、固定workflowをpure planへ
+固定する。publisher/signer service accountにはrepository IDの単一principalだけをimpersonation memberとして許可し、active resource、
+exact IAM、相異なるservice-account ID、user-managed key 0をdouble-snapshotで検証する。Occurrence発行、実credential実行、
+cloud/CI resourceは未接続である。
 
 controller IAMは[ADR 0078](./adr/0078-split-controller-iam-by-resource-boundary.md)に従い、Cloud Run JobsとFirestoreのcustom roleを分離する。
 Cloud Run roleから未使用のJob listとExecution getを除き、Firestore roleはtransactionと固定document CRUDだけにする。project policyの

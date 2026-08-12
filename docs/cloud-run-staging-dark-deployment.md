@@ -182,7 +182,11 @@ KMS public key/signing version、publisher/signer/repository IAMのpure planとs
 Binary Authorization、global Artifact Analysis、Singapore KMS、Artifact Registry、Resource Managerの固定resourceだけを同じtoken/
 quota projectで2回取得する。両digestのOccurrenceは`ATTESTATION` kind、exact Note/image/KMS key ID、gcloud 579のcanonical
 payload、各1件へ固定し、Binary Authorization validationが両方`VERIFIED`であることとvalidation前後の不変性をlocal検証する。
-実credential実行、service-account key/WIF read-back、Occurrence発行は未実装である。
+release用WIFのpure planはglobal pool/provider、Google canonical audience、immutable repository/owner ID、release branch、
+`workflow_dispatch`、固定candidate workflowを同時に要求する。publisher/signerの各service accountにはrepository IDの単一
+principalだけを`roles/iam.workloadIdentityUser`で許可する。strict read-backはpool/providerのactive状態、exact attribute
+mapping/condition、相異なるservice-account ID、exact IAM、user-managed key 0を固定IAM endpointのdouble snapshotで照合する。
+実credential実行、WIF/service account作成、IAM変更、Occurrence発行は未実装である。
 
 controller authorityは[ADR 0078](./adr/0078-split-controller-iam-by-resource-boundary.md)に従うpure IAM planで分割する。Cloud Run Jobs roleは
 実clientが呼ぶ8 permissionだけ、Firestore roleはtransactionとentity CRUDの5 permissionだけとし、database条件、runtime
@@ -224,6 +228,9 @@ pnpm exec vitest run apps/orchestrator/src/cloud-run-runtime-service.test.ts \
   apps/gpu-controller/src/release-supply-chain-readback-client.test.ts \
   apps/gpu-controller/src/candidate-attestation-readback.test.ts \
   apps/gpu-controller/src/candidate-attestation-readback-client.test.ts \
+  apps/gpu-controller/src/release-workload-identity.test.ts \
+  apps/gpu-controller/src/release-workload-identity-readback.test.ts \
+  apps/gpu-controller/src/release-workload-identity-readback-client.test.ts \
   apps/gpu-controller/src/control-plane-evidence.test.ts \
   apps/gpu-controller/src/deployment-readback-client.test.ts \
   apps/gpu-controller/src/google-runtime-auth.test.ts \
@@ -255,7 +262,7 @@ Cloud Run Job、R2 signed request、課金停止のevidenceではない。
 - Phase 8〜13の`develop`統合、`release/0.2.0`作成、version固定、一度だけのcandidate build
 - dedicated named Firestore database/TTL policy、controllerへのadapter injection/service hosting、controller image publish、
   controller/worker imageのsignature/provenanceとattestation発行、Cloud Run v2/IAM/Secret Manager/Binary Authorization
-  read-only clientの実credential実行とauthoritative evidence、
+  read-only clientとWIF/IAM read-only clientの実credential実行とauthoritative evidence、
   HMAC secret rotation
 - local Google identity token/JWKS verifierとcontroller attestation/cleanup clientの実service接続
 - staging D1 migration、shadow mode/service injection、synthetic execution最大1件
