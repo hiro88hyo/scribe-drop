@@ -2,13 +2,15 @@
 
 ## 1. Status and scope
 
-- Status: `Implementation selected`、Phase 12/13 local implementation完了、cloud未接続
-- Date: 2026-08-11
-- Decision: [ADR 0076](./adr/0076-select-cloud-run-jobs-for-synthetic-provider-implementation.md)
+- Status: `Formal staging routing implemented locally`、新candidate/remote適用前
+- Date: 2026-08-13
+- Decision: [ADR 0076](./adr/0076-select-cloud-run-jobs-for-synthetic-provider-implementation.md)、
+  [ADR 0083](./adr/0083-connect-cloud-run-to-formal-staging-routing.md)
 - Product routing: 現行RunPod Serverlessのまま
 
-この文書はPhase 12からPhase 14のsynthetic-only実装境界を固定する。cloud resource、credential、CI、
-staging、productionを変更する実行手順ではない。実録音、R2 capability、利用者metadataをcontrollerへ渡さない。
+この文書はPhase 12からPhase 15のprovider境界を固定する。Phase 15接続実装はlocalにあり、既存Phase 14
+candidate evidenceは失効している。新candidate、remote D1、provider switch、CI、productionはまだ変更していない。
+実録音、R2 capability、利用者metadataをcontrollerへ渡さない。
 
 ## 2. Components and trust boundaries
 
@@ -230,6 +232,10 @@ capabilityだけでこのprotocolを実装し、Phase 15 acceptanceが残余リ�
 - delete outcome不明、provider read outage、unexpected second Executionではbudget reservationとrecordを残し、
   orphan reaperが同じresourceだけを回収する。
 - Job delete受理、container exit、terminal reportのいずれか一つだけでcleanup completeにしない。
+- `GPU_EXECUTION_POLICY`は新規generation-one attemptだけへsnapshotする。switchをRunPodへ戻しても保存済みCloud Run
+  attemptはCronでobserve/cancel/cleanupし続け、`cleanup_status=SUCCEEDED`まで利用者deleteとretentionの物理削除を止める。
+- runtime terminal成功はmanifest v2、requested format、exact result prefix、全artifact sizeをR2で確認してからproduct
+  jobとnotification outboxを確定する。controllerだけがterminalになりruntime terminalを欠く場合はjobを安全な失敗へ収束させる。
 
 ## 11. Error mapping
 

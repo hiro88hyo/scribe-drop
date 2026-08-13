@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   decodeCloudRunRuntimeSecret,
+  parseGpuExecutionSelection,
   parseCloudRunRuntimeShadowConfig,
   parseCloudRunRuntimeServiceConfig,
   parseRetentionConfig,
@@ -12,6 +13,31 @@ import {
 
 const CLOUD_RUN_CONTROLLER_SECRET = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
 const CLOUD_RUN_DERIVATION_SECRET = "CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg";
+
+describe("GPU execution selection", () => {
+  it("selects RunPod in every environment and Cloud Run only in staging", () => {
+    expect(
+      parseGpuExecutionSelection({
+        APP_ENV: "production",
+        GPU_EXECUTION_POLICY: "runpod_serverless_v1",
+      }),
+    ).toEqual({ contractVersion: 1, kind: "runpod_serverless", policy: "runpod_serverless_v1" });
+    expect(
+      parseGpuExecutionSelection({
+        APP_ENV: "staging",
+        GPU_EXECUTION_POLICY: "cloud_run_jobs_l4_v1",
+      }),
+    ).toEqual({ contractVersion: 2, kind: "cloud_run_jobs", policy: "cloud_run_jobs_l4_v1" });
+  });
+
+  it.each([
+    { APP_ENV: "staging", GPU_EXECUTION_POLICY: "" },
+    { APP_ENV: "production", GPU_EXECUTION_POLICY: "cloud_run_jobs_l4_v1" },
+    { APP_ENV: "local", GPU_EXECUTION_POLICY: "cloud_run_jobs_l4_v1" },
+  ])("fails closed for an unavailable selection: %o", (environment) => {
+    expect(parseGpuExecutionSelection(environment)).toBeUndefined();
+  });
+});
 
 describe("Cloud Run runtime shadow configuration", () => {
   it("accepts only the exact staging synthetic mode", () => {

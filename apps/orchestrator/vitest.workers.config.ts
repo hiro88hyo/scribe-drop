@@ -15,6 +15,7 @@ export default defineConfig({
           APP_ENV: "local",
           AUDIT_RETENTION_DAYS: "180",
           CLOUDFLARE_ACCOUNT_ID: "0123456789abcdef0123456789abcdef",
+          GPU_EXECUTION_POLICY: "runpod_serverless_v1",
           MULTIPART_RETENTION_HOURS: "24",
           R2_ACCESS_KEY_ID: "r2-access-key-placeholder",
           R2_BUCKET_NAME: "recording-transcriber-test",

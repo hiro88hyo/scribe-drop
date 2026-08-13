@@ -21,6 +21,7 @@ const identifiers = {
   cloudRunRuntimeMode: "synthetic-shadow",
   cloudRunRuntimeServiceAccount: "gpu-runtime@scribe-drop.iam.gserviceaccount.com",
   d1DatabaseId: "12345678-1234-4abc-8def-1234567890ab",
+  gpuExecutionPolicy: "cloud_run_jobs_l4_v1",
   orchestratorOrigin: "https://orchestrator-staging.example.invalid",
   pagesAccessAudience: "staging-pages-access-audience",
   runpodAllowedGpuTypeIds:
@@ -60,6 +61,7 @@ CLOUD_RUN_CONTROLLER_ORIGIN = "https://replace-with-staging-gpu-controller.examp
 CLOUD_RUN_ORCHESTRATOR_ORIGIN = "https://replace-with-staging-cloud-run-orchestrator.example.invalid"
 CLOUD_RUN_RUNTIME_MODE = "disabled"
 CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT = "replace-with-staging-runtime@replace-with-project.iam.gserviceaccount.com"
+GPU_EXECUTION_POLICY = "runpod_serverless_v1"
 MULTIPART_RETENTION_HOURS = "24"
 RESULT_RETENTION_DAYS = "90"
 RUNPOD_ALLOWED_GPU_IDS = "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090,NVIDIA RTX PRO 6000 Blackwell Server Edition"
@@ -96,6 +98,7 @@ database_id = "00000000-0000-0000-0000-000000000101"
     /CLOUD_RUN_ORCHESTRATOR_ORIGIN = "https:\/\/orchestrator-staging\.example\.invalid"/u,
   );
   assert.match(rendered, /CLOUD_RUN_RUNTIME_MODE = "synthetic-shadow"/u);
+  assert.match(rendered, /GPU_EXECUTION_POLICY = "cloud_run_jobs_l4_v1"/u);
   assert.match(
     rendered,
     /CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT = "gpu-runtime@scribe-drop\.iam\.gserviceaccount\.com"/u,
@@ -112,8 +115,17 @@ database_id = "00000000-0000-0000-0000-000000000101"
     cloudRunControllerOrigin: undefined,
     cloudRunRuntimeMode: undefined,
     cloudRunRuntimeServiceAccount: undefined,
+    gpuExecutionPolicy: "runpod_serverless_v1",
   });
   assert.doesNotMatch(disabled, /CLOUD_RUN_/u);
+  assert.throws(
+    () =>
+      renderOrchestratorStagingConfig(template, {
+        ...identifiers,
+        cloudRunRuntimeMode: "disabled",
+      }),
+    /requires the staging runtime service/u,
+  );
 });
 
 test("renders the web staging identifiers and ignored-config build path", () => {
@@ -290,6 +302,7 @@ routes = [
 [env.production.vars]
 AUDIT_RETENTION_DAYS = "180"
 CLOUDFLARE_ACCOUNT_ID = "${"0".repeat(32)}"
+GPU_EXECUTION_POLICY = "runpod_serverless_v1"
 MULTIPART_RETENTION_HOURS = "24"
 RESULT_RETENTION_DAYS = "90"
 RUNPOD_ALLOWED_GPU_IDS = "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090,NVIDIA RTX PRO 6000 Blackwell Server Edition"
@@ -309,6 +322,7 @@ database_id = "00000000-0000-0000-0000-000000000201"
     new RegExp(`\\[env\\.production\\.vars\\][\\s\\S]*CLOUDFLARE_ACCOUNT_ID = "${"b".repeat(32)}"`),
   );
   assert.match(rendered, /database_id = "abcdef12-1234-4abc-8def-1234567890ab"/u);
+  assert.match(rendered, /GPU_EXECUTION_POLICY = "runpod_serverless_v1"/u);
   assert.match(
     rendered,
     /pattern = "orchestrator-production\.example\.invalid", custom_domain = true/u,
@@ -326,6 +340,14 @@ database_id = "00000000-0000-0000-0000-000000000201"
     new RegExp(`RUNPOD_WORKER_IMAGE = "${productionIdentifiers.runpodWorkerImage}"`),
   );
   assert.match(rendered, /WEB_BASE_URL = "https:\/\/scribe-drop-production\.example\.invalid"/u);
+  assert.throws(
+    () =>
+      renderOrchestratorProductionConfig(template, {
+        ...productionIdentifiers,
+        gpuExecutionPolicy: "cloud_run_jobs_l4_v1",
+      }),
+    /Production GPU execution policy is not adopted/u,
+  );
 });
 
 test("renders production Web, CORS, and lifecycle without staging values", () => {

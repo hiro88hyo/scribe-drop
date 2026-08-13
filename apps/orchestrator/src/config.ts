@@ -38,6 +38,8 @@ const retentionIntegerSchema = z
   .transform(Number)
   .pipe(z.number().int().positive().max(3_650));
 
+const gpuExecutionPolicySchema = z.enum(["runpod_serverless_v1", "cloud_run_jobs_l4_v1"]);
+
 function isAllowedInternalBaseUrl(value: string): boolean {
   let url: URL;
   try {
@@ -242,6 +244,11 @@ export interface OrchestratorConfigEnvironment {
   readonly R2_BUCKET_NAME: string;
 }
 
+export interface GpuExecutionSelectionEnvironment {
+  readonly APP_ENV: string;
+  readonly GPU_EXECUTION_POLICY: string;
+}
+
 export interface RunpodConfigEnvironment extends OrchestratorConfigEnvironment {
   readonly R2_ACCESS_KEY_ID: string;
   readonly R2_SECRET_ACCESS_KEY: string;
@@ -287,6 +294,18 @@ export interface OrchestratorConfig {
   readonly cloudflareAccountId: string;
   readonly r2BucketName: string;
 }
+
+export type GpuExecutionSelection =
+  | {
+      readonly contractVersion: 1;
+      readonly kind: "runpod_serverless";
+      readonly policy: "runpod_serverless_v1";
+    }
+  | {
+      readonly contractVersion: 2;
+      readonly kind: "cloud_run_jobs";
+      readonly policy: "cloud_run_jobs_l4_v1";
+    };
 
 export interface RunpodConfig extends OrchestratorConfig {
   readonly r2AccessKeyId: string;
@@ -338,6 +357,21 @@ export function parseOrchestratorConfig(
     r2BucketName: environment.R2_BUCKET_NAME,
   });
   return result.success ? result.data : undefined;
+}
+
+/** Cloud Run is a staging-only admission choice until the production adoption ADR is accepted. */
+export function parseGpuExecutionSelection(
+  environment: GpuExecutionSelectionEnvironment,
+): GpuExecutionSelection | undefined {
+  const appEnvironment = z.enum(DEPLOYMENT_ENVIRONMENTS).safeParse(environment.APP_ENV);
+  const policy = gpuExecutionPolicySchema.safeParse(environment.GPU_EXECUTION_POLICY);
+  if (!appEnvironment.success || !policy.success) return undefined;
+  if (policy.data === "cloud_run_jobs_l4_v1") {
+    return appEnvironment.data === "staging"
+      ? { contractVersion: 2, kind: "cloud_run_jobs", policy: policy.data }
+      : undefined;
+  }
+  return { contractVersion: 1, kind: "runpod_serverless", policy: policy.data };
 }
 
 export function parseRunpodConfig(environment: RunpodConfigEnvironment): RunpodConfig | undefined {

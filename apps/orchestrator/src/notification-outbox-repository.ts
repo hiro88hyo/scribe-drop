@@ -28,13 +28,22 @@ const JOB_PROVIDER_COMPATIBILITY_PREDICATE = `
             AND executions.id IS NULL
           )
           OR (
-            executions.id = attempts.id
+            attempts.provider_kind = 'runpod_serverless'
+            AND executions.id = attempts.id
             AND executions.provider_kind = attempts.provider_kind
             AND executions.provider_policy = attempts.provider_policy
             AND executions.status = 'TERMINAL'
             AND executions.create_outcome IS attempts.submission_outcome
             AND executions.provider_handle IS attempts.winning_runpod_job_id
             AND executions.terminal_status IS attempts.runpod_terminal_status
+          )
+          OR (
+            attempts.provider_kind = 'cloud_run_jobs'
+            AND executions.id = attempts.id
+            AND executions.provider_kind = attempts.provider_kind
+            AND executions.provider_policy = attempts.provider_policy
+            AND executions.status = 'TERMINAL'
+            AND executions.create_outcome IS attempts.submission_outcome
           )
         )
     )

@@ -106,23 +106,43 @@ const FIND_PROVIDER_EXECUTION_DRIFT_SQL = `
     AND (
       (attempts.provider_kind IS NULL AND executions.id IS NOT NULL)
       OR (
-        attempts.provider_kind IS NOT NULL
+        attempts.provider_kind = 'runpod_serverless'
         AND (
           executions.id IS NULL
-          OR executions.id <> attempts.id
-          OR executions.provider_kind <> attempts.provider_kind
-          OR executions.provider_policy <> attempts.provider_policy
-          OR executions.status <> CASE attempts.status
-            WHEN 'SUBMISSION_PENDING' THEN 'PENDING'
-            WHEN 'SUBMITTING' THEN 'CREATING'
-            WHEN 'RUNNING' THEN 'RUNNING'
-            WHEN 'CANCEL_REQUESTED' THEN 'CANCEL_REQUESTED'
-            ELSE 'TERMINAL'
-          END
-          OR executions.create_outcome IS NOT attempts.submission_outcome
-          OR executions.provider_handle IS NOT attempts.winning_runpod_job_id
-          OR executions.terminal_status IS NOT attempts.runpod_terminal_status
+          OR NOT (
+            executions.id = attempts.id
+            AND executions.provider_kind = attempts.provider_kind
+            AND executions.provider_policy = attempts.provider_policy
+            AND executions.status = CASE attempts.status
+              WHEN 'SUBMISSION_PENDING' THEN 'PENDING'
+              WHEN 'SUBMITTING' THEN 'CREATING'
+              WHEN 'RUNNING' THEN 'RUNNING'
+              WHEN 'CANCEL_REQUESTED' THEN 'CANCEL_REQUESTED'
+              ELSE 'TERMINAL'
+            END
+            AND executions.create_outcome IS attempts.submission_outcome
+            AND executions.provider_handle IS attempts.winning_runpod_job_id
+            AND executions.terminal_status IS attempts.runpod_terminal_status
+          )
         )
+      )
+      OR (
+        attempts.provider_kind = 'cloud_run_jobs'
+        AND (
+          executions.id IS NULL
+          OR NOT (
+            executions.id = attempts.id
+            AND executions.provider_kind = attempts.provider_kind
+            AND executions.provider_policy = attempts.provider_policy
+            AND executions.status = 'TERMINAL'
+            AND executions.create_outcome IS attempts.submission_outcome
+            AND executions.cleanup_status = 'SUCCEEDED'
+          )
+        )
+      )
+      OR (
+        attempts.provider_kind IS NOT NULL
+        AND attempts.provider_kind NOT IN ('runpod_serverless', 'cloud_run_jobs')
       )
     )
   LIMIT 1

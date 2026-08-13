@@ -35,6 +35,7 @@ const JOB = {
   actualSizeBytes: null,
   expectedSizeBytes: 1024,
   generationOneAttemptId: null,
+  generationOneSelection: null,
   id: JOB_ID,
   options: {
     language: "auto",
@@ -73,6 +74,7 @@ function environment(): UploadQueueEnvironment {
   return {
     APP_ENV: "local",
     CLOUDFLARE_ACCOUNT_ID: EVENT.account,
+    GPU_EXECUTION_POLICY: "runpod_serverless_v1",
     R2_ACCESS_KEY_ID: "r2-access-key-placeholder",
     // These bindings are never invoked because every unit test injects its ports.
     RECORDINGS: {} as R2Bucket,
@@ -169,8 +171,54 @@ describe("R2 upload Queue consumer", () => {
       JOB_ID,
       environment().SCRIBE_DROP_DB,
       expect.objectContaining({
-        runpodEndpointId: "endpoint-placeholder",
+        contractVersion: 1,
+        kind: "runpod_serverless",
+        policy: "runpod_serverless_v1",
       }),
+      expect.any(Object),
+    );
+  });
+
+  it("uses the immutable attempt selection when the staging switch changes", async () => {
+    const message = new FakeMessage(EVENT);
+    const submitPendingJob = vi.fn().mockResolvedValue("accepted");
+    const selected = {
+      ...JOB,
+      activeAttemptId: ATTEMPT_ID,
+      actualSizeBytes: EVENT.object.size,
+      generationOneAttemptId: ATTEMPT_ID,
+      generationOneSelection: {
+        contractVersion: 1,
+        kind: "runpod_serverless",
+        policy: "runpod_serverless_v1",
+      },
+      sourceEtag: EVENT.object.eTag,
+      status: "SUBMISSION_PENDING",
+    } satisfies SourceJob;
+    await handleUploadQueueBatch(
+      { messages: [message] },
+      {
+        ...environment(),
+        APP_ENV: "staging",
+        GPU_EXECUTION_POLICY: "cloud_run_jobs_l4_v1",
+      },
+      {
+        createRepository: () =>
+          fakeRepository({
+            findSourceJob: () => Promise.resolve(selected),
+            ingestSource: () => Promise.resolve("duplicate"),
+          }),
+        headSourceObject: () =>
+          Promise.resolve({ etag: EVENT.object.eTag, size: EVENT.object.size }),
+        logger: logger([]),
+        now: () => NOW,
+        submitPendingJob,
+      },
+    );
+    expect(submitPendingJob).toHaveBeenCalledWith(
+      JOB_ID,
+      environment().SCRIBE_DROP_DB,
+      selected.generationOneSelection,
       expect.any(Object),
     );
   });
@@ -323,6 +371,11 @@ describe("R2 upload Queue consumer", () => {
       activeAttemptId: ATTEMPT_ID,
       actualSizeBytes: EVENT.object.size,
       generationOneAttemptId: ATTEMPT_ID,
+      generationOneSelection: {
+        contractVersion: 1,
+        kind: "runpod_serverless",
+        policy: "runpod_serverless_v1",
+      },
       sourceEtag: EVENT.object.eTag,
       status: "SUBMISSION_PENDING",
     } satisfies SourceJob;

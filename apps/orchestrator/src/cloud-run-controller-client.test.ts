@@ -106,6 +106,7 @@ describe("Cloud Run controller Orchestrator client", () => {
 
     await expect(client(providerFetch).read(HANDLE)).resolves.toEqual({
       activeExecutionCount: 1,
+      controllerVersion: 7,
       environment: "staging",
       executionHandle: HANDLE,
       executionName: "execution-1",

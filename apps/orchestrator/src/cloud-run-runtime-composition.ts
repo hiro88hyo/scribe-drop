@@ -4,6 +4,7 @@ import { createStructuredLogger } from "@scribe-drop/observability";
 import { CloudRunControllerClient } from "./cloud-run-controller-client.js";
 import { R2RuntimeCapabilityIssuer } from "./cloud-run-runtime-capabilities.js";
 import { D1CloudRunRuntimeStore } from "./cloud-run-runtime-d1-store.js";
+import { CloudRunTerminalFinalizer } from "./cloud-run-terminal-finalizer.js";
 import {
   CloudRunRuntimeService,
   HmacRuntimeSecretDeriver,
@@ -26,6 +27,7 @@ const GOOGLE_JWKS_TIMEOUT_MS = 5_000;
 const SESSION_LIFETIME_MS = 55 * 60 * 1_000;
 
 export interface CloudRunRuntimeCompositionEnvironment extends CloudRunRuntimeServiceConfigEnvironment {
+  readonly RECORDINGS: R2Bucket;
   readonly SCRIBE_DROP_DB: D1Database;
 }
 
@@ -110,6 +112,11 @@ export function createCloudRunRuntimeService(
           },
         },
       ),
+      finalizer: new CloudRunTerminalFinalizer(environment.SCRIBE_DROP_DB, environment.RECORDINGS, {
+        createEventId: () => ids.next(),
+        createNotificationId: () => ids.next(),
+        now: () => clock.now(),
+      }),
       secrets: new HmacRuntimeSecretDeriver(requireSecret(config.runtimeDerivationSecret)),
       signatures: new WebCryptoEd25519Verifier(),
       store: new D1CloudRunRuntimeStore(environment.SCRIBE_DROP_DB, config.appEnvironment),

@@ -113,6 +113,17 @@ function validatedStagingCloudRunConfiguration(identifiers, orchestratorOrigin) 
   return { controllerOrigin, mode, orchestratorOrigin, runtimeServiceAccount };
 }
 
+function validatedStagingGpuExecutionPolicy(identifiers, cloudRun) {
+  const policy = identifiers.gpuExecutionPolicy ?? "runpod_serverless_v1";
+  if (!new Set(["runpod_serverless_v1", "cloud_run_jobs_l4_v1"]).has(policy)) {
+    throw new Error("SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY is invalid");
+  }
+  if (policy === "cloud_run_jobs_l4_v1" && cloudRun.mode !== "synthetic-shadow") {
+    throw new Error("Cloud Run execution requires the staging runtime service");
+  }
+  return policy;
+}
+
 function rejectEnvironmentMarker(value, marker, name) {
   if (value.toLowerCase().includes(marker)) {
     throw new Error(`${name} must not contain a ${marker} environment marker`);
@@ -230,6 +241,7 @@ export function renderOrchestratorStagingConfig(template, identifiers) {
   );
   const orchestratorHostname = new URL(orchestratorOrigin).hostname;
   const cloudRun = validatedStagingCloudRunConfiguration(identifiers, orchestratorOrigin);
+  const gpuExecutionPolicy = validatedStagingGpuExecutionPolicy(identifiers, cloudRun);
   const webOrigin = requireExactHttpsOrigin(
     identifiers.webOrigin,
     "SCRIBE_DROP_STAGING_WEB_ORIGIN",
@@ -269,6 +281,12 @@ export function renderOrchestratorStagingConfig(template, identifiers) {
     `RUNPOD_INTERNAL_BASE_URL = "${stagingOrchestratorOriginPlaceholder}"`,
     `RUNPOD_INTERNAL_BASE_URL = "${orchestratorOrigin}"`,
     "orchestrator staging internal origin",
+  );
+  stagingConfig = replaceOnce(
+    stagingConfig,
+    'GPU_EXECUTION_POLICY = "runpod_serverless_v1"',
+    `GPU_EXECUTION_POLICY = "${gpuExecutionPolicy}"`,
+    "orchestrator staging GPU execution policy",
   );
   const cloudRunBindings = [
     [
@@ -488,6 +506,12 @@ export function renderOrchestratorProductionConfig(template, identifiers) {
   const { accountId, d1DatabaseId } = validatedProductionResourceIdentifiers(identifiers);
   const retention = validatedRetentionIdentifiers(identifiers);
   const runpodPlacement = validatedRunpodPlacementPolicy(identifiers, "production");
+  if (
+    identifiers.gpuExecutionPolicy !== undefined &&
+    identifiers.gpuExecutionPolicy !== "runpod_serverless_v1"
+  ) {
+    throw new Error("Production GPU execution policy is not adopted");
+  }
   const orchestratorOrigin = requireExactHttpsOrigin(
     identifiers.orchestratorOrigin,
     "SCRIBE_DROP_PRODUCTION_ORCHESTRATOR_ORIGIN",

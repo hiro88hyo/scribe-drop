@@ -672,6 +672,8 @@ const FIND_DISPATCHABLE_PENDING_JOB_SQL = `
     AND jobs.deleted_at IS NULL
     AND job_attempts.job_id = jobs.id
     AND job_attempts.status = 'SUBMISSION_PENDING'
+    AND job_attempts.provider_kind = 'runpod_serverless'
+    AND job_attempts.provider_policy = 'runpod_serverless_v1'
     AND NOT EXISTS (
       SELECT 1
       FROM job_attempts AS active_attempt

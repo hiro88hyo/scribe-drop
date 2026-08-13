@@ -52,6 +52,7 @@ const identifiers = {
   auditRetentionDays: process.env.AUDIT_RETENTION_DAYS,
   candidateMigrationsDirectory: process.env.SCRIBE_DROP_CANDIDATE_MIGRATIONS_DIR,
   d1DatabaseId: process.env.SCRIBE_DROP_PRODUCTION_D1_DATABASE_ID,
+  gpuExecutionPolicy: process.env.SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_POLICY,
   multipartRetentionHours: process.env.MULTIPART_RETENTION_HOURS,
   orchestratorOrigin: process.env.SCRIBE_DROP_PRODUCTION_ORCHESTRATOR_ORIGIN,
   resultRetentionDays: process.env.RESULT_RETENTION_DAYS,

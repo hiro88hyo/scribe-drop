@@ -28,6 +28,7 @@ const requiredSchemaObjects = [
   "idx_jobs_status_updated",
   "idx_notification_outbox_pending",
   "idx_provider_executions_handle",
+  "idx_provider_executions_provider_version",
   "idx_provider_executions_status_updated",
   "idx_runpod_submissions_attempt",
   "job_attempts",
@@ -40,6 +41,7 @@ const requiredSchemaObjects = [
   "trg_jobs_active_attempt_insert",
   "trg_jobs_active_attempt_update",
   "trg_attempt_execution_identity_immutable",
+  "trg_attempt_cloud_run_cancellation_update",
   "trg_attempt_provider_execution_insert",
   "trg_attempt_provider_execution_update",
 ];
@@ -90,6 +92,7 @@ const requiredProviderExecutionColumns = [
   "provider_handle",
   "provider_kind",
   "provider_policy",
+  "provider_version",
   "status",
   "terminal_status",
   "version",

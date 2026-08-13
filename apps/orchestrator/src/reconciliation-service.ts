@@ -29,12 +29,18 @@ import {
   submitPendingRunpodJob,
   type SubmissionDispatchResult,
 } from "./runpod-submission-service.js";
+import { reconcileCloudRunJobs } from "./cloud-run-reconciliation-service.js";
+import type { CloudRunRuntimeServiceConfigEnvironment } from "./config.js";
 
 const RECONCILIATION_BATCH_SIZE = 25;
 export const ACCEPTED_SUBMISSION_START_SLO_MS = 10 * 60 * 1_000;
 
 export interface ReconciliationEnvironment
-  extends RunpodConfigEnvironment, NotificationConfigEnvironment, RetentionConfigEnvironment {
+  extends
+    RunpodConfigEnvironment,
+    NotificationConfigEnvironment,
+    RetentionConfigEnvironment,
+    CloudRunRuntimeServiceConfigEnvironment {
   readonly RECORDINGS: R2Bucket;
   readonly SCRIBE_DROP_DB: D1Database;
 }
@@ -119,6 +125,7 @@ export async function reconcileJobs(
   }
 
   try {
+    await reconcileCloudRunJobs(environment, logger, { now });
     const repositoryFactory = dependencies.createRepository ?? createD1RunpodControlRepository;
     const repository = repositoryFactory(environment.SCRIBE_DROP_DB);
     const cancelStaleSubmission =

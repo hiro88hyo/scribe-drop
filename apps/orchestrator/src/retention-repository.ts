@@ -51,7 +51,8 @@ const JOB_PROVIDER_COMPATIBILITY_PREDICATE = `
             AND compatibility_executions.id IS NULL
           )
           OR (
-            compatibility_executions.id = compatibility_attempts.id
+            compatibility_attempts.provider_kind = 'runpod_serverless'
+            AND compatibility_executions.id = compatibility_attempts.id
             AND compatibility_executions.provider_kind = compatibility_attempts.provider_kind
             AND compatibility_executions.provider_policy = compatibility_attempts.provider_policy
             AND compatibility_executions.status = CASE compatibility_attempts.status
@@ -65,6 +66,15 @@ const JOB_PROVIDER_COMPATIBILITY_PREDICATE = `
             AND compatibility_executions.provider_handle IS compatibility_attempts.winning_runpod_job_id
             AND compatibility_executions.terminal_status IS compatibility_attempts.runpod_terminal_status
           )
+          OR (
+            compatibility_attempts.provider_kind = 'cloud_run_jobs'
+            AND compatibility_executions.id = compatibility_attempts.id
+            AND compatibility_executions.provider_kind = compatibility_attempts.provider_kind
+            AND compatibility_executions.provider_policy = compatibility_attempts.provider_policy
+            AND compatibility_executions.status = 'TERMINAL'
+            AND compatibility_executions.create_outcome IS compatibility_attempts.submission_outcome
+            AND compatibility_executions.cleanup_status = 'SUCCEEDED'
+          )
         )
     )
   )
@@ -77,13 +87,23 @@ const ATTEMPT_PROVIDER_COMPATIBILITY_PREDICATE = `
       AND executions.id IS NULL
     )
     OR (
-      executions.id = attempts.id
+      attempts.provider_kind = 'runpod_serverless'
+      AND executions.id = attempts.id
       AND executions.provider_kind = attempts.provider_kind
       AND executions.provider_policy = attempts.provider_policy
       AND executions.status = 'TERMINAL'
       AND executions.create_outcome IS attempts.submission_outcome
       AND executions.provider_handle IS attempts.winning_runpod_job_id
       AND executions.terminal_status IS attempts.runpod_terminal_status
+    )
+    OR (
+      attempts.provider_kind = 'cloud_run_jobs'
+      AND executions.id = attempts.id
+      AND executions.provider_kind = attempts.provider_kind
+      AND executions.provider_policy = attempts.provider_policy
+      AND executions.status = 'TERMINAL'
+      AND executions.create_outcome IS attempts.submission_outcome
+      AND executions.cleanup_status = 'SUCCEEDED'
     )
   )
 `;
@@ -100,6 +120,7 @@ const UPDATE_ATTEMPT_PROVIDER_COMPATIBILITY_PREDICATE = `
       SELECT 1
       FROM provider_executions AS executions
       WHERE executions.attempt_id = job_attempts.id
+        AND job_attempts.provider_kind = 'runpod_serverless'
         AND executions.id = job_attempts.id
         AND executions.provider_kind = job_attempts.provider_kind
         AND executions.provider_policy = job_attempts.provider_policy
@@ -107,6 +128,18 @@ const UPDATE_ATTEMPT_PROVIDER_COMPATIBILITY_PREDICATE = `
         AND executions.create_outcome IS job_attempts.submission_outcome
         AND executions.provider_handle IS job_attempts.winning_runpod_job_id
         AND executions.terminal_status IS job_attempts.runpod_terminal_status
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM provider_executions AS executions
+      WHERE executions.attempt_id = job_attempts.id
+        AND job_attempts.provider_kind = 'cloud_run_jobs'
+        AND executions.id = job_attempts.id
+        AND executions.provider_kind = job_attempts.provider_kind
+        AND executions.provider_policy = job_attempts.provider_policy
+        AND executions.status = 'TERMINAL'
+        AND executions.create_outcome IS job_attempts.submission_outcome
+        AND executions.cleanup_status = 'SUCCEEDED'
     )
   )
 `;

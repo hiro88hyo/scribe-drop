@@ -314,14 +314,18 @@ timeoutでは「10分ちょうどでprovider queueから消える」と扱わな
   `pnpm container:check:cloud-run`、`container:sbom:cloud-run`、`container:scan:cloud-run`で再生成する。SBOMを
   repositoryへ追加せず、local imageをregistryへpushしない。terminal reportはcleanup pendingであり、provider
   Execution/Job不存在とartifact/finalizeを確認するまで手動で`COMPLETED`へ変更しない。
-- Phase 14 local preparationで`0011` migrationとshadow namespaceを追加したが、remote D1へ未適用で運用対象ではない。
-  `CLOUD_RUN_RUNTIME_MODE`をWrangler、dashboard、secretへ手動設定しない。local D1 eventのsequenceやrevokeを直接更新せず、
-  repository経由のexact replayだけを使う。実staging運用は[dark deployment](./cloud-run-staging-dark-deployment.md)の残gateを
-  同一candidateで満たしてから別途開始する。
+- Phase 14で`0011` migrationとshadow namespaceをstagingへ適用し、candidate `cdfc394`のexact one L4 gateと全cleanupを
+  完了した。ただしPhase 15接続のsource変更によりpromotion evidenceは失効している。新candidateでPhase 14をやり直すまで
+  `0012`をremote D1へ適用せず、provider switchも変更しない。D1 eventのsequenceやrevokeを直接更新せず、repository経由の
+  exact replayだけを使う。
 - Phase 14 staging release foundationのArtifact Registry、WIF、service account、KMS key、Artifact Analysis Note、Binary
   Authorization attestor/policyは作成済みである。KMS active key versionの保持費を監視し、candidate監査とproduction昇格が
   終わる前に削除しない。publisher/signerへuser-managed keyを作らず、candidate workflow外からimage pushまたはOccurrenceを
-  発行しない。candidate image/Occurrence、Cloud Run Service/Job、Firestore、Secret Managerはまだ未作成である。
+  発行しない。Phase 14 candidate image/Occurrence、controller Service、Firestore、Secret Managerは作成済みで、synthetic
+  authorizationはdisabled、Cloud Run Job/Executionとfixtureは0へcleanup済みである。
+- Phase 15の`GPU_EXECUTION_POLICY`は新規generation-one attemptだけを選択する。rollbackでは最初に
+  `runpod_serverless_v1`へ戻し、保存済み`cloud_run_jobs_l4_v1` attemptのobserve/cancel/cleanupを止めない。
+  `provider_executions.cleanup_status=SUCCEEDED`になる前に利用者deleteやretentionのD1/R2物理削除を手動で進めない。
 - Phase 14のCloud Run runtimeをstagingで有効化する前に、[ADR 0082](./adr/0082-skip-browser-integrity-check-for-cloud-run-runtime.md)の
   BIC exceptionをstrict read-backする。`CLOUDFLARE_WAF_API_TOKEN`はexact staging zoneの
   `Zone WAF Edit`/`Zone Read`だけを持つ一時tokenとし、local credential storeから注入して次を実行する。

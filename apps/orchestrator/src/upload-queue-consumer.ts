@@ -8,9 +8,10 @@ import { z } from "zod";
 
 import {
   parseOrchestratorConfig,
-  parseRunpodConfig,
+  parseGpuExecutionSelection,
+  type GpuExecutionSelection,
+  type GpuExecutionSelectionEnvironment,
   type OrchestratorConfigEnvironment,
-  type RunpodConfig,
   type RunpodConfigEnvironment,
 } from "./config.js";
 import { parseSourceObjectKey } from "./source-object-key.js";
@@ -41,7 +42,7 @@ const r2HeadResultSchema = z.object({
 });
 
 export interface UploadQueueEnvironment
-  extends OrchestratorConfigEnvironment, RunpodConfigEnvironment {
+  extends OrchestratorConfigEnvironment, GpuExecutionSelectionEnvironment, RunpodConfigEnvironment {
   readonly RECORDINGS: R2Bucket;
   readonly SCRIBE_DROP_DB: D1Database;
 }
@@ -69,7 +70,7 @@ export interface UploadQueueDependencies {
   readonly submitPendingJob?: (
     jobId: string,
     database: D1Database,
-    config: RunpodConfig,
+    selection: GpuExecutionSelection,
     logger: StructuredLogger,
   ) => Promise<unknown>;
 }
@@ -96,7 +97,8 @@ async function processMessage(
   logger: StructuredLogger,
 ): Promise<"ack" | "retry"> {
   const config = parseOrchestratorConfig(environment);
-  if (config === undefined) {
+  const configuredSelection = parseGpuExecutionSelection(environment);
+  if (config === undefined || configuredSelection === undefined) {
     logger.error("upload_event_configuration_invalid", {
       errorCode: "INTERNAL_ERROR",
     });
@@ -152,6 +154,7 @@ async function processMessage(
     });
     return "ack";
   }
+  const selection = job.generationOneSelection ?? configuredSelection;
   const headSourceObject =
     dependencies.headSourceObject ?? ((bucket: R2Bucket, key: string) => bucket.head(key));
   const untrustedHead = await headSourceObject(environment.RECORDINGS, job.sourceKey);
@@ -277,6 +280,7 @@ async function processMessage(
     eventId: createEventId(now.getTime()),
     job,
     ownerHash: parsedKey.ownerHash,
+    selection,
     sizeBytes: headResult.data.size,
     sourceEtag: headResult.data.etag,
     timestamp: now.toISOString(),
@@ -300,16 +304,11 @@ async function processMessage(
     sizeBytes: headResult.data.size,
     status: "SUBMISSION_PENDING",
   });
-  if (dependencies.submitPendingJob !== undefined) {
-    const runpodConfig = parseRunpodConfig(environment);
-    if (runpodConfig === undefined) {
-      logger.error("upload_event_configuration_invalid", {
-        errorCode: "INTERNAL_ERROR",
-        jobId: job.id,
-      });
-      return "retry";
-    }
-    await dependencies.submitPendingJob(job.id, environment.SCRIBE_DROP_DB, runpodConfig, logger);
+  if (
+    dependencies.submitPendingJob !== undefined &&
+    (result === "ingested" || result === "duplicate")
+  ) {
+    await dependencies.submitPendingJob(job.id, environment.SCRIBE_DROP_DB, selection, logger);
   }
   return "ack";
 }

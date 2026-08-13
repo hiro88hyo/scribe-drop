@@ -54,6 +54,7 @@ const identifiers = {
   cloudRunControllerOrigin: process.env.SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_ORIGIN,
   cloudRunRuntimeMode: process.env.SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_MODE,
   cloudRunRuntimeServiceAccount: process.env.SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT,
+  gpuExecutionPolicy: process.env.SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY,
   multipartRetentionHours: process.env.MULTIPART_RETENTION_HOURS,
   orchestratorOrigin: process.env.SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN,
   pagesAccessAudience: process.env.SCRIBE_DROP_STAGING_PAGES_ACCESS_AUDIENCE,

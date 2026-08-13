@@ -44,6 +44,8 @@ R2 CORSは`pnpm cloudflare:config:staging:r2-cors`、R2 lifecycleは
   通常は`disabled`、Phase 14の有限synthetic gateだけ`synthetic-shadow`
 - `SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT`:
   `synthetic-shadow`時だけ必須となる`gpu-runtime@scribe-drop.iam.gserviceaccount.com`の固定staging runtime identity
+- `SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY`:
+  既定は`runpod_serverless_v1`。Phase 15の期限付きstaging acceptanceだけ`cloud_run_jobs_l4_v1`
 - `SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`:
   `https://<team>.cloudflareaccess.com`のexact origin
 - `SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`:
@@ -189,6 +191,7 @@ localでは`apps/orchestrator/.dev.vars.example`を`apps/orchestrator/.dev.vars`
 | `CLOUD_RUN_RUNTIME_DERIVATION_SECRET` |  yes   | runtime session secret導出用HMAC              |
 | `CLOUD_RUN_RUNTIME_MODE`              |   no   | `disabled`またはstaging限定`synthetic-shadow` |
 | `CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT`   |   no   | staging runtime専用service account            |
+| `GPU_EXECUTION_POLICY`                |   no   | 新規attemptの固定provider policy              |
 
 Phase 3のQueue consumerは`APP_ENV`、`CLOUDFLARE_ACCOUNT_ID`、
 `R2_BUCKET_NAME`を起動境界で検証し、raw eventのaccount/bucketと一致しないmessageを
@@ -223,6 +226,8 @@ secretをencrypted secretとして登録する。
 - `CLOUD_RUN_RUNTIME_DERIVATION_SECRET`
 
 両secretは32〜64 byte、paddingなしとし、値をread-back、log、deployment記録へ出さない。
+`GPU_EXECUTION_POLICY=cloud_run_jobs_l4_v1`はstagingかつ`synthetic-shadow`と同時の場合だけ有効で、既存attemptの
+provider selectionは変更しない。productionは`runpod_serverless_v1`以外を設定生成とread-backの両方で拒否する。
 modeまたは必須設定が欠ける場合はruntime serviceを生成せず、shadow routeを404/503へ閉じる。
 
 Phase 5では`WEB_BASE_URL`をuserinfo、query、fragmentのない単一originに限定する。

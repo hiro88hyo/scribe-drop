@@ -1588,6 +1588,15 @@ local preparation（2026-08-11〜12）:
 
 ### Phase 15: `0.2.0` candidate and formal staging
 
+Local implementation status (2026-08-13):
+
+- [ADR 0083](./adr/0083-connect-cloud-run-to-formal-staging-routing.md)に従い、staging限定provider switch、attempt単位の
+  immutable selection、D1 create/reconcile/version recovery、runtime terminalからartifact/job/notificationへの確定、
+  cancel/delete/retentionのcleanup gateを実装した。tracked defaultとproductionはRunPodのままである。
+- このsource変更によりPhase 14 candidate `cdfc394`のpromotion evidenceは失効した。local gateとcommit完了後に新candidateを
+  一度だけbuildし、Phase 14のdark deployment、exact one GPU gate、cleanupからやり直す。現時点ではCI、remote D1、
+  Cloudflare/GCP resource、productionを変更していない。
+
 実装:
 
 - Phase 14のexact candidateを再利用し、provider switchをstagingだけで有効化する。release修正が

@@ -90,6 +90,7 @@ const configuration: CloudRunRuntimeConfiguration = {
 
 const readback: ControllerExecutionReadback = {
   activeExecutionCount: 1,
+  controllerVersion: 7,
   environment: "staging",
   executionHandle: HANDLE,
   executionName: "sd-stg-execution-1",
@@ -128,6 +129,7 @@ class FixedIds {
 function createPorts(
   overrides: {
     readonly cleanup?: CloudRunRuntimeServicePorts["cleanup"];
+    readonly finalizer?: CloudRunRuntimeServicePorts["finalizer"];
     readonly identity?: VerifiedGoogleIdentity;
     readonly identityVerifier?: CloudRunRuntimeServicePorts["identity"];
     readonly readback?: ControllerExecutionReadback;
@@ -160,6 +162,7 @@ function createPorts(
     identity: overrides.identityVerifier ?? {
       verify: () => Promise.resolve(overrides.identity ?? verifiedIdentity),
     },
+    finalizer: overrides.finalizer ?? { finalize: () => Promise.resolve() },
     secrets: new HmacRuntimeSecretDeriver(new Uint8Array(32).fill(7)),
     signatures: new WebCryptoEd25519Verifier(),
     store: overrides.store ?? new InMemoryCloudRunRuntimeStore([context]),

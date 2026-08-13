@@ -83,6 +83,7 @@ export interface CloudRunRuntimeStore {
     readonly now: string;
   }): Promise<ApplySessionEventResult>;
   beginBootstrap(input: {
+    readonly controllerVersion: number;
     readonly context: RuntimeAttemptContext;
     readonly now: string;
     readonly record: RuntimeBootstrapRecord;
@@ -136,6 +137,7 @@ export class InMemoryCloudRunRuntimeStore implements CloudRunRuntimeStore {
 
   // eslint-disable-next-line @typescript-eslint/require-await
   async beginBootstrap(input: {
+    readonly controllerVersion: number;
     readonly context: RuntimeAttemptContext;
     readonly now: string;
     readonly record: RuntimeBootstrapRecord;

@@ -220,9 +220,10 @@ describe("FirestoreControlStore", () => {
       outcome: "duplicate",
       record: accepted.outcome === "accepted" ? accepted.record : undefined,
     });
-    await expect(lifecycle.store.claimRequest(claimInput(2, 0))).resolves.toEqual({
-      outcome: "stale",
-    });
+    const stale = await lifecycle.store.claimRequest(claimInput(2, 0));
+    expect(stale.outcome).toBe("stale");
+    if (stale.outcome !== "stale") throw new Error("expected stale controller version");
+    expect(stale.record.version).toBe(1);
     await expect(lifecycle.store.claimRequest(claimInput(3, 1))).resolves.toEqual({
       outcome: "rate_limited",
     });

@@ -65,6 +65,7 @@ export interface GoogleIdentityVerifier {
 
 export interface ControllerExecutionReadback {
   readonly activeExecutionCount: number;
+  readonly controllerVersion: number;
   readonly environment: "staging" | "production";
   readonly executionHandle: string;
   readonly executionName: string;
@@ -105,6 +106,13 @@ export interface RuntimeCleanupScheduler {
   }): Promise<void>;
 }
 
+export interface RuntimeTerminalFinalizer {
+  finalize(input: {
+    readonly context: RuntimeAttemptContext;
+    readonly request: CloudRunTerminalRequest;
+  }): Promise<void>;
+}
+
 export interface CloudRunRuntimeConfiguration {
   readonly challengeLifetimeMs: number;
   readonly clockSkewMs: number;
@@ -122,6 +130,7 @@ export interface CloudRunRuntimeServicePorts {
   readonly clock: RuntimeClock;
   readonly ids: RuntimeIdGenerator;
   readonly identity: GoogleIdentityVerifier;
+  readonly finalizer: RuntimeTerminalFinalizer;
   readonly secrets: RuntimeSecretDeriver;
   readonly signatures: RuntimeSignatureVerifier;
   readonly store: CloudRunRuntimeStore;
@@ -276,7 +285,7 @@ export class CloudRunRuntimeService {
       throw new CloudRunRuntimeError("AUTHENTICATION_FAILED");
     }
     this.#requireGoogleIdentity(identity, now);
-    await this.#requireReadback(request, context);
+    const readback = await this.#requireReadback(request, context);
 
     const challengeId = this.#ports.ids.next();
     const challengeExpiresAt = addMilliseconds(now, this.#configuration.challengeLifetimeMs);
@@ -307,6 +316,7 @@ export class CloudRunRuntimeService {
       terminalDigest: null,
     };
     const result = await this.#ports.store.beginBootstrap({
+      controllerVersion: readback.controllerVersion,
       context,
       now: now.toISOString(),
       record,
@@ -419,6 +429,7 @@ export class CloudRunRuntimeService {
     request: CloudRunTerminalRequest,
   ): Promise<{ readonly accepted: true; readonly cleanupPending: true }> {
     const applied = await this.#applySessionEvent({ kind: "terminal", request });
+    await this.#ports.finalizer.finalize({ context: applied.context, request });
     await this.#ports.cleanup.schedule({
       environment: applied.context.environment,
       executionHandle: applied.context.executionHandle,
@@ -500,7 +511,7 @@ export class CloudRunRuntimeService {
       "environment" | "executionHandle" | "executionName" | "jobName" | "policyId"
     >,
     context: RuntimeAttemptContext,
-  ): Promise<void> {
+  ): Promise<ControllerExecutionReadback> {
     const readback = await this.#ports.attestor.read(request.executionHandle);
     if (
       readback?.activeExecutionCount !== 1 ||
@@ -517,5 +528,6 @@ export class CloudRunRuntimeService {
     ) {
       throw new CloudRunRuntimeError("RESOURCE_DRIFT");
     }
+    return readback;
   }
 }

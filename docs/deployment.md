@@ -242,6 +242,8 @@ Phase 7のmigration、retention、PWA rolloutは
 - `SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_ORIGIN`（`synthetic-shadow`時だけ必須）
 - `SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_MODE`（省略時`disabled`）
 - `SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT`（`synthetic-shadow`時だけ必須）
+- `SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY`（省略時`runpod_serverless_v1`。Phase 15 acceptance時だけ
+  `cloud_run_jobs_l4_v1`）
 - `MULTIPART_RETENTION_HOURS`（省略時24）
 - `SOURCE_RETENTION_DAYS`（省略時7）
 - `RESULT_RETENTION_DAYS`（省略時90）
@@ -556,7 +558,10 @@ Phase 14のCloud Run runtimeはstaging shadow namespaceに限定する。D1 migr
 controllerのexact `run.app` origin、上記Custom Domainと同じOrchestrator origin、固定runtime
 service accountを同時に生成する。まず`CLOUD_RUN_RUNTIME_MODE=disabled`でdeploy/read-backし、
 controller authorization、D1/R2 fixture、課金上限、cleanup期限をstrict preflightした後だけ
-`synthetic-shadow`へ切り替える。production設定にはこれらのbindingとrouteを追加しない。
+`synthetic-shadow`へ切り替える。Phase 15ではそのread-back後にだけ
+`SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY=cloud_run_jobs_l4_v1`を生成設定へ入れる。rollbackは最初にpolicyを
+`runpod_serverless_v1`へ戻して新規投入を止め、既存Cloud Run attemptのcleanupを継続してからmodeをdisabledへ戻す。
+production設定にはCloud Run runtime bindingとrouteを追加せず、GPU policyもRunPod固定とする。
 
 rollbackはmodeを`disabled`へ戻してshadow endpointを閉じ、実行中Executionのcleanupとcontroller
 authorizationの無効化を確認してから直前のWorker deploymentへ戻す。forward-only migrationは
