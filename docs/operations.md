@@ -322,6 +322,22 @@ timeoutでは「10分ちょうどでprovider queueから消える」と扱わな
   Authorization attestor/policyは作成済みである。KMS active key versionの保持費を監視し、candidate監査とproduction昇格が
   終わる前に削除しない。publisher/signerへuser-managed keyを作らず、candidate workflow外からimage pushまたはOccurrenceを
   発行しない。candidate image/Occurrence、Cloud Run Service/Job、Firestore、Secret Managerはまだ未作成である。
+- Phase 14のCloud Run runtimeをstagingで有効化する前に、[ADR 0082](./adr/0082-skip-browser-integrity-check-for-cloud-run-runtime.md)の
+  BIC exceptionをstrict read-backする。`CLOUDFLARE_WAF_API_TOKEN`はexact staging zoneの
+  `Zone WAF Edit`/`Zone Read`だけを持つ一時tokenとし、local credential storeから注入して次を実行する。
+  `CLOUDFLARE_ZONE_NAME`と`SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN`も実値をGitへ残さずlocal環境から渡す。
+
+  ```bash
+  pnpm cloudflare:waf:cloud-run:read:staging
+  pnpm cloudflare:waf:cloud-run:apply:staging
+  pnpm cloudflare:waf:cloud-run:read:staging
+  ```
+
+  applyは関連ruleの重複を拒否し、host、queryなしPOST、5 exact path、product `bic`だけ、logging
+  enabledを二重read-backする。rollbackで例外を除去する場合はshadow modeとcontroller authorizationを
+  先にdisabled/0へ戻し、active Execution 0を確認してから
+  `pnpm cloudflare:waf:cloud-run:remove:staging`を実行する。tokenは終了後にshellから除去する。
+
 - terminal statusをD1で観測していないjobは、manifestが存在しても`COMPLETED`にしない。
 - 手動修復が必要でもjob/attempt/outboxを直接SQLで更新しない。同じrepositoryとserviceを
   使う専用repair commandを先に実装し、dry-run、CAS、監査eventを必須とする。

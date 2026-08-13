@@ -36,6 +36,8 @@ R2 CORSは`pnpm cloudflare:config:staging:r2-cors`、R2 lifecycleは
 - `SCRIBE_DROP_STAGING_WEB_ORIGIN`: Accessで保護するstaging Webの単一exact HTTPS origin
 - `SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN`:
   RunPodからclaim/heartbeatを受けるOrchestratorの単一exact HTTPS origin
+- `CLOUDFLARE_ZONE_NAME`:
+  Phase 14のstaging BIC exceptionを管理するexact Cloudflare zone名。Gitへ固定しない
 - `SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_ORIGIN`:
   Phase 14の`synthetic-shadow`時だけ必須となるstaging GPU controller専用Cloud Run `run.app` exact HTTPS origin
 - `SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_MODE`:
@@ -297,6 +299,12 @@ R2、Queues、固定Wranglerのzone/route read-backに必要な完成形8権限�
 Pages権限を重複させない。Zone Resourcesはexact application zone 1件だけにする。
 Access変更用の追加tokenは作らない。RunPod keyとendpoint IDはOrchestrator runtime
 secretとは別にGitHub Environmentへ登録し、stagingとproductionで共有しない。
+
+Phase 14のstaging BIC exceptionを管理するときだけ、exact staging zoneに`Zone WAF Edit`と
+`Zone Read`を持つ`CLOUDFLARE_WAF_API_TOKEN`をlocal credential storeから一時注入する。
+管理commandは非secretの`CLOUDFLARE_ZONE_NAME`と`SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN`も
+local環境から受け取り、hostnameがzone配下のstaging originであることを検証する。
+GitHub Environment、`.env`、Wrangler secret、productionへ保存せず、適用後にshellから除去する。
 
 Python依存は`uv.lock`に固定し、RunPod SDK 1.11.0、faster-whisper 1.2.1、
 CTranslate2 4.8.1、Pydantic 2.13.4、httpx 0.28.1、Hugging Face Hub 1.24.0を

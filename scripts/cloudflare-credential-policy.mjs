@@ -1,6 +1,7 @@
 const exactRoleIds = [
   "backend-control-plane",
   "pages-ci",
+  "staging-cloud-run-waf",
   "r2-parent-signer",
   "staging-access-service-principal",
 ];
@@ -15,11 +16,13 @@ const exactApiTokenPermissions = {
     "Workers Scripts Edit",
   ],
   "pages-ci": ["Cloudflare Pages Edit"],
+  "staging-cloud-run-waf": [],
 };
 
 const exactApiTokenZonePermissions = {
   "backend-control-plane": ["Workers Routes Read", "Zone Read"],
   "pages-ci": [],
+  "staging-cloud-run-waf": ["Zone WAF Edit", "Zone Read"],
 };
 
 const forbiddenPermissionFragments = [
@@ -45,6 +48,7 @@ const allowedWorkflowWranglerCommandPrefixes = [
 const exactCloudflareApiFiles = [
   "scripts/cloudflare-readback.mjs",
   "scripts/cloudflare-worker-route-permission.mjs",
+  "scripts/manage-staging-cloud-run-waf.mjs",
   "scripts/pages-promotion.mjs",
   "scripts/pages-upload-permission.mjs",
   "scripts/staging-access-control-plane.mjs",
@@ -130,6 +134,20 @@ export function verifyCloudflareCredentialPolicy(policy, evidence) {
     throw new Error("pages-ci credential name is invalid");
   }
 
+  const wafRole = requireRecord(roles.get("staging-cloud-run-waf"), "staging-cloud-run-waf role");
+  requireExactStrings(
+    wafRole.placement,
+    ["local-credential-store:temporary"],
+    "staging-cloud-run-waf placement",
+  );
+  if (
+    wafRole.credentialName !== "CLOUDFLARE_WAF_API_TOKEN" ||
+    wafRole.zoneScope !== "exact-staging-application-zone" ||
+    wafRole.productionAllowed !== false
+  ) {
+    throw new Error("staging-cloud-run-waf scope is invalid");
+  }
+
   const r2Role = requireRecord(roles.get("r2-parent-signer"), "r2-parent-signer role");
   if (
     r2Role.credentialType !== "r2-s3-api-token" ||
@@ -170,6 +188,7 @@ export function verifyCloudflareCredentialPolicy(policy, evidence) {
     "Workers Routes Read",
     "Zone Read",
     "Cloudflare Pages Edit",
+    "Zone WAF Edit",
     "Object Read & Write",
   ]) {
     if (!documentation.includes(marker)) {

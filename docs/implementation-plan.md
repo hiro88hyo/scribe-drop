@@ -1513,6 +1513,19 @@ local preparation（2026-08-11〜12）:
 - second execution後はCloud Run Job/Execution、Firestore synthetic document、D1 exact targetを0、R2 fixture/result/manifestを
   不存在、shadow routeとauthorizationをdisabled/0へ戻し、local secret/fixtureを削除した。production resource、product routing、
   CI configは変更していない。source変更によりcandidate `c3b1e89`のevidenceは無効となり、新candidateが必要である。
+- identity/JWKS retryとpending attestation修正を含むcandidate `810189b`をbuild run `31673063867`から1回だけpublishし、
+  controller/worker各1 attestation、Binary Authorization、non-GPU manifest preflight、finite 1 execution/250 JPY authorization、
+  L4 quota 3、D1/R2 fixture、shadow bindingをstrict read-backした。承認済みGPU Executionはtask 1、parallelism 1、retry 0のまま
+  image importとcontainer起動に成功したが、約16秒で`SESSION_REJECTED`/exit 1となった。D1 bootstrap/event、R2 capability、
+  source download、CUDA/model load、artifactは0だった。Job/Execution、Firestore、D1、R2を0、不存在へ戻し、shadow routeと
+  controller authorizationをdisabled/0へ戻した。追加GPU executionは行っていない。
+- 同じ署名済みimage/runtime service accountのGPUなしprobeでGoogle metadata tokenのheader/claim/audience/service account/
+  issuer/lifetimeがcontractと一致する一方、bootstrapは403、17 byte、non-JSONでWorkers POST tailへ到達しないことを再現した。
+  Cloudflare Security EventsはSingaporeのCloud Run ASNを`action=block`、`source=bic`として記録した。このPCから同じendpointへ
+  送る無効JSONはWorkerの`INVALID_REQUEST`を返したため、root causeをGoogle OIDCではなくBrowser Integrity Checkのedge blockと
+  確定した。[ADR 0082](./adr/0082-skip-browser-integrity-check-for-cloud-run-runtime.md)に従い、staging host/queryなしPOST/5 exact
+  runtime pathだけでproduct `bic`をskipするstrict planと、GPUなしでOIDC後のcontroller `RESOURCE_DRIFT`まで証明するpreflightを追加する。
+  source/WAF plan変更によりcandidate `810189b` evidenceは無効であり、新commit/new candidateからやり直す。
 
 完了条件:
 

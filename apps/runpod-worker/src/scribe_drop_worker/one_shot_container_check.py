@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Final
 
 from .bounded_container_check import check_bounded_container_core
+from .cloud_run_staging_bootstrap_preflight import PREFLIGHT_OK
 from .one_shot import (
     create_runtime_key_pair,
     frame_runtime_challenge,
@@ -19,6 +20,7 @@ ONE_SHOT_CONTAINER_CHECK_OK: Final = "cloud-run-one-shot-container-check:ok\n"
 EXPECTED_UID: Final = 10001
 EXPECTED_PUBLIC_KEY_LENGTH: Final = 43
 EXPECTED_SIGNATURE_LENGTH: Final = 86
+EXPECTED_PREFLIGHT_MARKER: Final = "cloud-run-staging-bootstrap-preflight:ok:RESOURCE_DRIFT\n"
 
 
 def _environment() -> dict[str, str]:
@@ -52,7 +54,11 @@ def _model_present() -> bool:
 
 def main() -> None:
     """Exercise identity framing, exact-GPU guard, bounded core, and non-root image state."""
-    if _effective_uid() != EXPECTED_UID or not _model_present():
+    if (
+        _effective_uid() != EXPECTED_UID
+        or not _model_present()
+        or PREFLIGHT_OK != EXPECTED_PREFLIGHT_MARKER
+    ):
         msg = "one-shot image identity invariant failed"
         raise RuntimeError(msg)
     load_one_shot_environment(_environment())

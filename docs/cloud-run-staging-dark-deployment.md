@@ -359,6 +359,32 @@ manifest不存在、D1 exact target 0、shadow route 404、controller authorizat
 Authorization/Firestoreのdisabled deploymentも再照合し、localのsecretとfixtureを削除した。production resource、product routing、
 CI configは変更していない。今回のsource変更によりcandidate `c3b1e89`のstaging evidenceは無効である。
 
+## Third exact-one staging execution and edge root cause
+
+identity retry/error normalizationとpending Execution attestationを含むcandidate `810189b`を
+build run `31673063867`から一度だけpublishし、2 image attestation、Binary Authorization、
+controller Service、D1/R2 fixture、finite 1 execution/250 JPY authorization、L4 quota、Execution 0を
+再照合した。承認済みGPU Executionはtask 1、parallelism 1、retry 0のままimage importとcontainer
+起動に成功したが、約16秒で`SESSION_REJECTED`/exit 1となった。D1 bootstrap/session event、R2
+capability、source download、CUDA/model load、transcription、artifact uploadは0だった。
+
+同じcandidate image/runtime service accountのGPUなしprobeで、metadata identity tokenの公開shapeと
+全固定claimがcontractに一致することを確認した。実bootstrap POSTはHTTP 403、17 byte、non-JSONで、
+同時のWorkers POST tailには到達しなかった。Cloudflare Security EventsはCloud Run Singapore ASNの
+probeを`action=block`、`source=bic`として記録し、このPCから同じendpointへ送る無効JSONはWorkerの
+`INVALID_REQUEST` JSONを返した。これによりGoogle OIDC/JWKSではなくBrowser Integrity Checkのedge
+blockをroot causeと確定した。
+
+[ADR 0082](./adr/0082-skip-browser-integrity-check-for-cloud-run-runtime.md)に従い、zone全体ではなく
+staging host、queryなしPOST、5 exact runtime pathだけでproduct `bic`をskipする。ruleはloggingを
+維持し、managed WAF、rate limit、Security Levelなどをskipしない。GPU execution前には同じcandidate
+image/runtime service accountのGPUなしpreflightで、D1 context/Google OIDC後のcontroller
+`RESOURCE_DRIFT` JSONまで到達することを必須にする。edge 403/non-JSONの間はGPUを起動しない。
+
+失敗後はCloud Run Job/Execution、Firestore controller document、D1 exact target、R2 fixture/result/
+manifestを0/不存在へ戻し、shadow routeとcontroller authorizationをdisabled/0へ戻した。production、
+CI workflowは変更していない。WAF planとpreflightのsource変更によりcandidate `810189b`は無効である。
+
 ## Remaining real staging gate
 
 release candidateのPhase境界に従うbranch/commitを作り、次を順番に完了する。

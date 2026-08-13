@@ -63,6 +63,15 @@ pnpm container:sbom:cloud-run
 pnpm container:scan:cloud-run
 ```
 
+staging GPU executionの直前には、同じcandidate imageとruntime service accountをGPUなしJobで
+`python -m scribe_drop_worker.cloud_run_staging_bootstrap_preflight`として起動する。preflightは
+実metadata identity tokenを使ってbootstrapし、D1 active contextとGoogle OIDCを通過した後の
+controller `RESOURCE_DRIFT`だけを成功markerとして受ける。Cloudflare edgeの403/non-JSON、
+`AUTHENTICATION_FAILED`、`EXECUTION_NOT_FOUND`、成功challengeはすべて失敗とし、CUDA discovery、
+capability発行、source download、model loadは行わない。stagingのexact 5 runtime POSTだけに
+[ADR 0082](./adr/0082-skip-browser-integrity-check-for-cloud-run-runtime.md)のBIC skipがstrict
+read-backされていなければ、このpreflightもGPU実行も開始しない。
+
 2026-08-11のlocal gateではimage `sha256:51348577a3682bb190ca1c7f60bc2165cd12551e47b1d6e96dc2298726851d8f`
 を`--network none --read-only`、3 GiB memory-backed `/tmp`、non-rootで起動した。GPU count mock=1、memory-only key、
 8時間virtual PCMの32 sequential window、bounded spool、3形式、manifest-last、task directory cleanupが成功した。
