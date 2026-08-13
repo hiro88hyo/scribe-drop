@@ -419,11 +419,11 @@ GPU-free preflightをexact 1回だけ実行した。Workerのallowlist logは
 `cloud_run_identity_rejected` / `JWKS_TRANSPORT_REJECTED`を1件記録し、3 attemptすべてでGoogle JWKSの
 `fetch`がHTTP response前に例外となったことを確定した。token、claim、URL、provider responseは記録していない。
 
-原因はnetworkやGoogle responseではなく、Google JWKS verifierだけが[ADR 0016](./adr/0016-use-manual-redirects-in-workers.md)に
-反して`redirect: "error"`を指定していたことだった。live Workers runtimeはこの値をrequest構築時に`TypeError`で拒否するため、
-retryしても通信は開始されない。外向きfetchを`redirect: "manual"`へ統一し、3xxを追従せず既存の
-`JWKS_RESPONSE_REJECTED`へfail closedにする。unit testとworkerd integrationは実`Request`を構築して`manual`を固定し、
-redirect responseの拒否も維持する。
+Google JWKS verifierだけが[ADR 0016](./adr/0016-use-manual-redirects-in-workers.md)に反して
+`redirect: "error"`を指定する欠陥を修正した。live Workers runtimeでこの値はrequest構築時に`TypeError`となる既知のため、
+外向きfetchを`redirect: "manual"`へ統一し、3xxを追従せず既存の`JWKS_RESPONSE_REJECTED`へfail closedにした。
+unit testとworkerd integrationは実`Request`を構築してmanual modeとredirect response拒否を固定した。ただし後続の
+同一preflightでもtransport rejectionが継続したため、この欠陥だけを唯一のremote root causeとは扱わない。
 
 preflightではGPU、R2、controller attestation、bootstrap/session eventを使用しなかった。終了後はWorker routeを404、
 controller authorizationを0へ戻し、Cloud Run Job/Execution 0、D1 exact target 5系統0、Firestore controller collection
@@ -431,11 +431,29 @@ controller authorizationを0へ戻し、Cloud Run Job/Execution 0、D1 exact tar
 CI workflowは変更していない。このsource修正によりcandidate `11cabe1`のevidenceは無効であり、次はlocal gateをまとめて
 完了した単一commitからcandidateを1回buildする。
 
+manual redirect修正commit `0ab7bf3`のcandidate build `31687874021`は14分43秒でfull gate、両image
+build/check/SBOM/HIGH・CRITICAL scan、各1 push、KMS署名、各1 attestationを完了した。両digestのBinary
+Authorizationは`VERIFIED`、controller Service generation 17はReady、Worker version
+`f3557ac1-caf4-4c56-bd82-a55728909869`は`synthetic-shadow` bindingとapplication 400をread-backした。
+GPU 0、CPU 1、512 MiB、task 1、parallelism 1、retry 0のpreflightをexact 1回だけ実行したが、約2分で
+terminal failureとなり、allowlist logは再び`JWKS_TRANSPORT_REJECTED`を記録した。追加execution、GPU、R2、
+controller attestation、bootstrap/session eventは使用していない。
+
+同じ即時transport exceptionをlocalで再現できる残存欠陥として、host `fetch`をport objectのmethod
+`this.#ports.fetch(...)`として呼び、Workers提供関数へ誤ったreceiverを渡す実装をGoogle JWKSとcontroller clientの
+両方で確認した。注入関数をlocal変数へ取り出してstandaloneで呼び、receiver-sensitive回帰testを追加する。
+controller clientに残っていた`redirect: "error"`も同じ変更でmanualへ統一する。remote結果で未証明のため、次の
+GPU-free preflightで`RESOURCE_DRIFT`へ到達するまではroot cause確定としない。
+
+失敗後はCloud Run Job/Execution 0、D1 exact target 5系統0、Worker route 404/disabledへ戻し、実行前に空だった
+Firestore controller collectionへは到達していない。local synthetic inputも削除し、productionとCI workflowは
+変更していない。このsource修正によりcandidate `0ab7bf3` evidenceは無効である。
+
 ## Remaining real staging gate
 
 release candidateのPhase境界に従うbranch/commitを作り、次を順番に完了する。
 
-- manual redirect修正と3-attempt bounded JWKS retryを含むversion-pinned `release/0.2.0` commitの全gateと新candidate build
+- standalone fetch/全Workers redirect修正と3-attempt bounded JWKS retryを含むversion-pinned commitの全gateと新candidate build
 - 最終candidateのcontroller/worker attestation各1件、Binary Authorization `VERIFIED`、Service digest差し替え
 - staging D1 migration、相異なるruntime/controller HMAC secret、shadow mode/service injectionのstrict read-back
 - finite controller authorizationとD1/R2 synthetic fixtureを同じexecution handleへ固定したsynthetic execution最大1件

@@ -21,7 +21,7 @@ provider redirectへ追従する要件がなく、redirect先を利用する必�
 
 ## Decision
 
-- RunPod、Discord、Google OAuth JWKSを含むWorkersからの外向き`fetch`は
+- RunPod、Discord、Google OAuth JWKS、Cloud Run controllerを含むWorkersからの外向き`fetch`は
   `redirect: "manual"`を指定する。
 - 3xx responseを追従せず、既存の非成功HTTP statusとしてfail closedに分類する。
 - `Location` header、redirect先body、provider error bodyを読み取らず、logにも残さない。
@@ -46,6 +46,8 @@ provider redirectへ追従する要件がなく、redirect先を利用する必�
 - Phase 14のGoogle OAuth JWKS verifierがこの制約に反して`redirect: "error"`を指定した際も、
   live Workers runtimeは通信開始前に`TypeError`で拒否した。`manual`へ統一し、3xxを非成功statusとして
   fail closedに扱う既存方針を適用する。
+- Workers host `fetch`をport objectのmethodとして呼ぶと誤ったreceiverを渡すため、注入関数をlocal変数へ
+  取り出してstandaloneで呼ぶ。receiver-sensitive回帰testでGoogle JWKSとcontrollerの両経路を固定する。
 
 ## References
 

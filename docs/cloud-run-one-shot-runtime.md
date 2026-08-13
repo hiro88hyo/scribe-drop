@@ -89,10 +89,16 @@ exact speech fixture rowとlive-shaped Google RSA/JWTはworkerd回帰testで成�
 例外は`AUTHENTICATION_FAILED`へ正規化し、未知例外のHTTP 500と区別する。拒否時はtoken、claim、URL、provider responseを
 記録せず、syntax、header、JWKS transport/response/key、verification、claimのallowlist stageだけを構造化logへ1件残す。
 
-後続のGPU-free preflightでallowlist stageは`JWKS_TRANSPORT_REJECTED`を記録し、原因をGoogle JWKS verifierの
-`redirect: "error"`へ確定した。これはWorkers runtimeがrequest構築時に拒否する既知の値であり、3 attemptとも通信開始前に
-失敗していた。[ADR 0016](./adr/0016-use-manual-redirects-in-workers.md)どおり`redirect: "manual"`へ統一し、3xxは追従せず
-非成功responseとして拒否する。unit/workerd testは実`Request`のmanual modeとredirect拒否を固定する。
+後続のGPU-free preflightでallowlist stageは`JWKS_TRANSPORT_REJECTED`を記録した。Google JWKS verifierの
+`redirect: "error"`はWorkers runtimeがrequest構築時に拒否する既知の欠陥なので、[ADR 0016](./adr/0016-use-manual-redirects-in-workers.md)
+どおり`manual`へ統一し、3xxは追従せず非成功responseとして拒否した。unit/workerd testは実`Request`のmanual modeと
+redirect拒否を固定した。しかし修正candidateのexact-one GPU-free preflightでも同じstageが継続したため、redirectだけを
+唯一のremote root causeとは扱わない。
+
+残存する即時例外をlocalで再現できる実装として、Google JWKSとcontroller clientが注入されたhost `fetch`を
+`this.#ports.fetch(...)`とmethod呼出しし、誤ったreceiverを渡していた。注入関数をlocal変数へ取り出してstandaloneで呼ぶ
+receiver-sensitive testを両clientへ追加し、controller側に残っていた`redirect: "error"`もmanualへ統一する。
+次candidateのGPU-free preflightで`RESOURCE_DRIFT`を得るまではremote root causeを確定しない。
 
 またCloud Run taskはcontroller observeより先に起動するため、[ADR 0081](./adr/0081-attest-live-execution-before-controller-observe.md)に
 従い、durable run intent、stored Job UID、exact 1 live Execution、fixed manifestを満たす`EXECUTION_PENDING`だけをread-only

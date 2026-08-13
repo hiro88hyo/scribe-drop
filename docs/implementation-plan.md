@@ -1548,6 +1548,15 @@ local preparation（2026-08-11〜12）:
   Worker route/controller authorizationをdisabled/0、Cloud Run Job/Execution、D1 exact target、Firestore controller documentを
   0へ戻し、R2とGPUは使用せず、local inputも削除した。productionとCI workflowは変更していない。このsource修正により
   candidate `11cabe1` evidenceは無効であり、新commitのlocal gateを一括完了後にcandidateを1回だけbuildする。
+- manual redirect修正commit `0ab7bf3`のcandidate build `31687874021`はfull gate、両imageのbuild/check/SBOM/scan、
+  各1 push/KMS署名/各1 attestation、Binary Authorization `VERIFIED`を完了した。controller Service generation 17と
+  Worker `synthetic-shadow`をread-backし、GPU 0、CPU 1、512 MiB、task 1、parallelism 1、retry 0のpreflightを
+  exact 1回だけ実行したが、allowlist logは再び`JWKS_TRANSPORT_REJECTED`だった。追加execution、GPU、R2、controller
+  attestation、bootstrap/session eventは使用していない。これにより`redirect: "error"`は実欠陥だが唯一のremote rootではない。
+  host `fetch`を`this.#ports.fetch(...)`とmethod呼出しして誤ったreceiverを渡す残存欠陥をGoogle JWKS/controller clientの
+  両方でlocal再現し、standalone呼出しとreceiver-sensitive回帰testへ修正する。controllerに残る`redirect: "error"`もmanualへ
+  統一する。Cloud Run Job/Execution、D1 exact targetを0、Worker routeを404/disabledへ戻し、local inputを削除した。
+  productionとCI workflowは変更していない。remote root確定は次candidateのGPU-free `RESOURCE_DRIFT` evidenceまで保留する。
 
 完了条件:
 

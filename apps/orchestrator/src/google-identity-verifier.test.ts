@@ -103,7 +103,8 @@ function verifier(
 describe("GoogleOidcIdentityVerifier", () => {
   it("verifies an exact service-account token and reuses bounded JWKS cache", async () => {
     let requests = 0;
-    const providerFetch: typeof fetch = (input, init) => {
+    const providerFetch: typeof fetch = function (this: unknown, input, init) {
+      expect(this).toBeUndefined();
       requests += 1;
       expect(input).toBe(GOOGLE_OAUTH_JWKS_URL);
       expect(init?.method).toBe("GET");

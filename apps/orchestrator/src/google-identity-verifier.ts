@@ -296,6 +296,7 @@ export class GoogleOidcIdentityVerifier implements GoogleIdentityVerifier {
   }
 
   async #fetchKeys(): Promise<CachedGoogleJwks> {
+    const providerFetch = this.#ports.fetch;
     let response: Response | undefined;
     for (let attempt = 0; attempt < JWKS_FETCH_ATTEMPTS; attempt += 1) {
       const controller = new AbortController();
@@ -303,7 +304,7 @@ export class GoogleOidcIdentityVerifier implements GoogleIdentityVerifier {
         controller.abort();
       }, this.#configuration.fetchTimeoutMs);
       try {
-        response = await this.#ports.fetch(GOOGLE_OAUTH_JWKS_URL, {
+        response = await providerFetch(GOOGLE_OAUTH_JWKS_URL, {
           headers: { accept: "application/json" },
           method: "GET",
           redirect: "manual",

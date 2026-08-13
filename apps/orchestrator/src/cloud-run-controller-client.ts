@@ -274,9 +274,10 @@ export class CloudRunControllerClient
     const timeout = setTimeout(() => {
       controller.abort();
     }, CONTROLLER_TIMEOUT_MS);
+    const providerFetch = this.#ports.fetch;
     let response: Response;
     try {
-      response = await this.#ports.fetch(new URL(path, this.#baseUrl), {
+      response = await providerFetch(new URL(path, this.#baseUrl), {
         body,
         headers: {
           "content-type": "application/json",
@@ -284,7 +285,7 @@ export class CloudRunControllerClient
           "x-scribe-signature": signature,
         },
         method: "POST",
-        redirect: "error",
+        redirect: "manual",
         signal: controller.signal,
       });
     } catch {

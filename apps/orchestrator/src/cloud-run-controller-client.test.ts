@@ -66,7 +66,7 @@ async function expectSignature(
   );
   expect(new Headers(init?.headers).get("x-scribe-signature")).toBe(expected);
   expect(new Headers(init?.headers).get("x-scribe-key-id")).toBe("primary");
-  expect(init?.redirect).toBe("error");
+  expect(new Request(requestUrl, init).redirect).toBe("manual");
 }
 
 function attestationResponse(requestId: string): Response {
@@ -95,7 +95,8 @@ function attestationResponse(requestId: string): Response {
 describe("Cloud Run controller Orchestrator client", () => {
   it("reads a bounded live attestation with an exact HMAC request", async () => {
     const calls: URL[] = [];
-    const providerFetch: typeof fetch = async (input, init) => {
+    const providerFetch: typeof fetch = async function (this: unknown, input, init) {
+      expect(this).toBeUndefined();
       const requestUrl = url(input);
       calls.push(requestUrl);
       const request = cloudRunControllerAttestationRequestSchema.parse(body(init));
