@@ -2,8 +2,8 @@
 
 ## Status and scope
 
-- Status: Phase 13 local implementation complete
-- Date: 2026-08-11
+- Status: Phase 14 first staging execution failed closed; release fix in progress
+- Date: 2026-08-13
 - Policy: `cloud_run_jobs_l4_v1`
 - Runtime contract: v1 bootstrap/session protocol、bounded execution contract v2、manifest v2
 - Product routing: RunPod Serverlessのまま
@@ -51,6 +51,9 @@ URL、object key、Execution/Job IDをlogへ出さない。
 
 `cloud-run.Dockerfile`は更新済みの固定RunPod worker imageをbaseにし、model、CUDA、FFmpeg、Python、uv lockを再利用して
 entrypointだけをone-shotへ固定する。runtime install/model downloadはなく、`USER 10001:10001`を継承する。
+固定entrypointの`python -m scribe_drop_worker.one_shot`ではentry moduleをruntime adapterからimportし直さない。
+adapterとentrypointが共有するallowlist error classは独立moduleに置き、`__main__`とpackage名でclassが二重化して
+`BOOTSTRAP_REJECTED`を`INTERNAL_ERROR`へ誤分類しない。module entrypointそのものを実行する回帰testで固定する。
 
 ```bash
 pnpm container:build:runpod

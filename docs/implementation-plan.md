@@ -1340,7 +1340,7 @@ pnpm check
   Orchestrator HMAC client、Firestore control-store adapterはPhase 14 local preparationで追加したが、default service
   wiringには接続していない。
 
-### Phase 14: staging dark deployment（non-GPU preflight完了、最終candidate未発行）
+### Phase 14: staging dark deployment（exact 1 GPU実行fail-close、release修正中）
 
 実装:
 
@@ -1486,6 +1486,18 @@ local preparation（2026-08-11〜12）:
   controller/orchestrator origin、dedicated runtime identity、D1/R2/account設定がすべて揃う場合だけD1 store、Google OIDC、controller
   attestation/cleanup、R2 capability、HMAC/Ed25519を結線する。欠落、padding、同一secret、production、origin/identity driftでは
   service生成前にfail closedとし、Workers integrationを50件へ増やした。source defaultはstaging `disabled`、production bindingなしである。
+- 最終candidateの両digest/attestation、controller Service、D1 shadow wiring、finite 1 execution/250 JPY authorization、
+  L4 quota、Execution 0をstrict read-back後、2026-08-13に合成fixtureのGPU Executionをexact 1件だけ起動した。task 1、
+  parallelism 1、retry 0のまま約21秒で`INTERNAL_ERROR`となり、bootstrap/event 0、capability/source download/transcription/
+  artifact upload 0でfail closedした。controller cleanupはresponse lossを結果不明として再観測後`CLEANED`へ収束し、Cloud Run
+  Job/Execution、Firestore synthetic document、R2 fixture/result/manifestを0へ戻し、shadow routeとauthorizationをdisabled/0へ戻した。
+  D1 cleanup mutation後の独立readは最初OAuth 7403となったが、再認証後に今回のexact target 0を確認した。database全体の既存
+  staging fixtureは保持し、全table 0をcleanup条件とはしない。productionは変更していない。
+- 同じcandidate source/imageのlocal CPU・network-none再現で、固定commandの`python -m scribe_drop_worker.one_shot`がentry moduleを
+  `__main__`としてロードした後、HTTP adapterが同moduleをpackage名でruntime importし、例外classを二重化する原因を特定した。
+  shared allowlist errorを独立moduleへ移し、module entrypoint回帰testで`BOOTSTRAP_REJECTED`の同一class処理を固定する。実Cloud Run v2の
+  `Execution.job`が短いJob IDを返すことも確認し、exact requested IDとfull Execution parentを照合してcanonical parentへ正規化する。
+  source変更により既存candidate evidenceは無効となるため、新commit/new candidateからPhase 14 gateをやり直す。
 
 完了条件:
 

@@ -304,6 +304,9 @@ allowlist reasonからsafe error kindへ変換する。
 - GPU Job manifestにもBinary Authorization default policyを固定し、Cloud Run v2 Job read-backで欠落、無効化、
   policy override、breakglassを拒否する。project default policyとexact attestorのauthoritative read-back、worker imageへの
   attestation発行は実staging gateに残す。
+- Cloud Run v2の実Execution listでは`Execution.job`が短いJob IDとして返る。adapterは要求した短いIDまたは同じ
+  canonical full resourceだけを受け、Execution `name`のparentを別に完全照合してからfull parentへ正規化する。別Job、
+  別project/region、path追加は`unavailable`としてfail closedにする。
 - [ADR 0080](./adr/0080-use-kms-backed-binary-authorization-attestations.md)のproject-singleton attestor、global Artifact
   Analysis Note、Singapore KMS signing version、publisher/signer分離、controller/worker両digestをpure deployment planへ固定した。
   attestor/Note/KMS public keyとCRC32C、version 1だけのactive set、resource IAMをstrict read-backし、固定Google API endpointの

@@ -2,8 +2,8 @@
 
 ## Status and scope
 
-- Status: staging non-GPU preflight complete; final release/0.2.0 candidate pending
-- Date: 2026-08-12
+- Status: first exact-one GPU execution failed closed; release fix pending a new candidate
+- Date: 2026-08-13
 - Product routing: RunPod Serverless
 - Cloud/CI mutation: staging release supply chain and disabled controller control plane; production untouched
 
@@ -317,11 +317,30 @@ Workers integrationはbootstrap/claim replay、sequence 0 ACK、heartbeat順序�
 persist-before-revoke、source/result ownership driftをlocal D1で検証する。これはremote D1、Google identity、controller、
 Cloud Run Job、R2 signed request、課金停止のevidenceではない。
 
+## First exact-one staging execution
+
+2026-08-13に最終candidateのdigest/attestation、staging resource、finite 1 execution/250 JPY authorization、L4 quota、
+Execution 0、disabled shadow routeを照合した後、合成fixtureだけでCloud Run GPU Executionをexact 1件起動した。task count 1、
+parallelism 1、retry 0を維持したが、taskは約21秒でallowlist marker `INTERNAL_ERROR`を出して終了した。bootstrap D1 eventは0、
+R2 capability発行、source download、transcription、artifact uploadはいずれも0であり、application data effectより前にfail closedした。
+
+cleanupはcontrollerのresponse lossを結果不明として再観測し、`CLEANED`へ収束した。Cloud Run Job/Execution 0、Firestoreの
+synthetic request/execution/environment document 0、R2 fixture/result/manifest不存在、shadow route 404、controller
+authorization 0へ戻した。D1 synthetic contextのdeleteは成功したが、その直後の独立zero-count readはOAuth 7403で失敗したため、
+再認証後に同じtargetだけをread-only queryし0件を確認した。database全体には既存staging fixtureがあるため、全table 0ではなく
+今回のexact target不存在をcleanup条件とする。production resourceとroutingは変更していない。
+
+同じworker imageをlocalでGPUなし・networkなしに起動してmarkerを再現し、`python -m`でentry moduleが`__main__`、HTTP adapterの
+runtime importがpackage moduleとして二重ロードされ、`OneShotRuntimeError` classが二つになることを確認した。このためmetadata側の
+正常な`BOOTSTRAP_REJECTED`がentrypointのgeneric exceptionへ落ちていた。shared errorを独立moduleへ移し、module entrypoint回帰testを
+追加する。また実Cloud Run v2 responseの`Execution.job`は短いJob IDだったため、exact requested IDとExecution full parentを照合して
+canonical parentへ正規化する。これらのsource変更は既存candidate evidenceを無効化し、新candidateからPhase 14 gateをやり直す。
+
 ## Remaining real staging gate
 
 release candidateのPhase境界に従うbranch/commitを作り、次を順番に完了する。
 
-- staging限定composition rootを含むversion-pinned `release/0.2.0` commitの全gateと最終candidate再build
+- entrypoint/Execution parent修正を含むversion-pinned `release/0.2.0` commitの全gateと新candidate build
 - 最終candidateのcontroller/worker attestation各1件、Binary Authorization `VERIFIED`、Service digest差し替え
 - staging D1 migration、相異なるruntime/controller HMAC secret、shadow mode/service injectionのstrict read-back
 - finite controller authorizationとD1/R2 synthetic fixtureを同じexecution handleへ固定したsynthetic execution最大1件

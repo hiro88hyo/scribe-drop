@@ -13,12 +13,12 @@ from scribe_drop_worker.cloud_run_contracts import (
     BootstrapResponse,
     HeartbeatRequest,
 )
+from scribe_drop_worker.cloud_run_errors import OneShotRuntimeError, UnknownControlOutcomeError
 from scribe_drop_worker.cloud_run_http import (
     CloudRunRuntimeControlClient,
     MetadataIdentityClient,
 )
 from scribe_drop_worker.http_client import CapabilityHttpClient
-from scribe_drop_worker.one_shot import OneShotRuntimeError, UnknownControlOutcomeError
 from scribe_drop_worker.url_policy import UrlPolicy
 
 if TYPE_CHECKING:
