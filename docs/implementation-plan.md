@@ -1526,6 +1526,18 @@ local preparation（2026-08-11〜12）:
   確定した。[ADR 0082](./adr/0082-skip-browser-integrity-check-for-cloud-run-runtime.md)に従い、staging host/queryなしPOST/5 exact
   runtime pathだけでproduct `bic`をskipするstrict planと、GPUなしでOIDC後のcontroller `RESOURCE_DRIFT`まで証明するpreflightを追加する。
   source/WAF plan変更によりcandidate `810189b` evidenceは無効であり、新commit/new candidateからやり直す。
+- WAF/preflight修正commit `4fa6c80`のcandidate build `31678897389`は全gate、controller/worker各1 image push、各1 attestation、
+  Binary Authorization `VERIFIED`を完了し、controller Serviceもcandidate digestへ更新してstrict read-backを通した。ADR 0082の
+  BIC skipはexact host/queryなしPOST/5 path/`bic`だけ/logging有効でapply/read-backに成功した。GPU 0のbootstrap preflightを
+  task 1、parallelism 1、retry 0でexact 1回実行するとSecurity Eventsは`action=skip`、Workerは1 request、edgeは403となり、
+  BIC解消後のapplicationまで到達したが期待する`RESOURCE_DRIFT` markerを得ずexit 1となった。D1 bootstrap/event 0、controller
+  attestation到達証拠なしで、既存metadata probeのtoken shape/claimは全条件に一致した。Cloudflare公式では例外になったfetchを
+  subrequest countへ含めないため、同時刻のsubrequest 0だけでtoken precheckとJWKS transport exceptionを区別しない。
+- blind retryを避け、Google JWKSのtransport/429/5xx retryを最大3 attemptへ強化し、token、claim、URL、provider responseを含まない
+  allowlist rejection stageだけを構造化logへ追加した。このsourceを新candidateにし、GPU-free preflightでOIDC後の
+  `RESOURCE_DRIFT`を証明するまでGPUを起動しない。失敗後はCloud Run Job/Execution、Firestore controller document、D1 exact targetを
+  0、shadow route/controller authorizationをdisabled/0へ戻し、R2は作成しなかった。WAF exact skipとdisabled candidate controller
+  Serviceは維持し、productionとCI workflowは変更していない。
 
 完了条件:
 

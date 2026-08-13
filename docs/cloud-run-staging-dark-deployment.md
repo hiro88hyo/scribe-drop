@@ -265,8 +265,9 @@ source変更を含まないため、最終acceptance evidenceやproduction昇格
 Google OAuth JWKSだけを固定HTTPS URLから取得し、redirect、5秒超過、64 KiB超過、非JSON、invalid Cache-Control、重複・
 不明keyを拒否する。cache lifetimeはresponseの`max-age`と24時間上限の短い方とし、unknown `kid`によるfetch amplificationを
 30秒cooldownで抑え、同時cache missは一つのrequestへまとめる。transport failure、429、5xxだけを指数backoffとbounded jitterで
-最大2 attemptまで再試行し、redirect、schema、signature、claim拒否は再試行しない。verifier例外はruntime boundaryで
-`AUTHENTICATION_FAILED`へ正規化する。
+最大3 attemptまで再試行し、redirect、schema、signature、claim拒否は再試行しない。verifier例外はruntime boundaryで
+`AUTHENTICATION_FAILED`へ正規化する。拒否時はtoken、claim、URL、provider responseを記録せず、allowlist済みの検証stageだけを
+`cloud_run_identity_rejected.errorCode`へ1回記録する。
 
 tokenは8 KiB以下のRS256 JWTに限定し、Google署名、exact audience、`https://accounts.google.com` issuer、issue/expiry、
 1時間上限、`sub == azp`、`email_verified == true`、service-account emailを検証する。Googleの`sub`/`azp`はservice accountの
@@ -385,11 +386,36 @@ image/runtime service accountのGPUなしpreflightで、D1 context/Google OIDC�
 manifestを0/不存在へ戻し、shadow routeとcontroller authorizationをdisabled/0へ戻した。production、
 CI workflowは変更していない。WAF planとpreflightのsource変更によりcandidate `810189b`は無効である。
 
+## Post-BIC GPU-free staging preflight
+
+WAF/preflight修正commit `4fa6c80`のcandidate build `31678897389`はfull application gate、両imageの
+build/check/SBOM/HIGH・CRITICAL scan、各1回のpush、KMS署名、controller/worker各1件のBinary
+Authorization `VERIFIED`を完了した。controller Serviceを同candidate digestへ更新し、Service/IAM/
+Secret/Binary Authorization/Firestoreのstrict read-backも成功した。staging WAFへADR 0082のexact
+BIC skipを適用し、独立read-backでhost、queryなしPOST、5 path、`bic`だけ、logging有効を確認した。
+
+GPU 0、CPU 1、512 MiB、task 1、parallelism 1、retry 0の専用Jobを作成し、実行前のmanifestと
+Execution 0を完全照合してからGPU-free bootstrap preflightを1回だけ実行した。Cloudflare Security
+Eventsは同requestを`action=skip`、Worker analyticsは同時刻の1 requestを記録し、edge statusは403だった。
+BIC blockは解消した一方、preflightは期待するapplication `RESOURCE_DRIFT` markerを得ずexit 1となった。
+D1 context lookup後もbootstrap/session eventは0で、controller attestationへ到達した証拠もないため、
+失敗境界はGoogle identity verificationまでに限定できる。既存の同runtime account metadata probeでは
+header、claim type、audience、issuer、service-account email、`sub == azp`、1時間lifetimeが全てcontractと
+一致している。Cloudflare公式上、例外になったfetchはsubrequest countへ含まれないため、analyticsの
+subrequest 0だけではtoken precheckとJWKS transport exceptionを区別できない。
+
+同じcandidateのblind retryは行わず、JWKS一時障害を最大3 attemptへ強化し、秘密値を含まないallowlist
+rejection stageを構造化logへ追加した。このsource変更を含む新candidateのGPU-free preflightで
+`RESOURCE_DRIFT`まで証明するまではGPU executionへ進まない。preflight後はCloud Run Job/Execution 0、
+Firestore controller collection 3件空、D1 exact target 5系統0、shadow route 404、controller authorization 0へ
+戻した。R2は作成せず、productionとCI workflowは変更していない。WAFのexact BIC skipとdisabled candidate
+controller Serviceは次のpreflightのため維持する。
+
 ## Remaining real staging gate
 
 release candidateのPhase境界に従うbranch/commitを作り、次を順番に完了する。
 
-- identity retry/error normalizationとADR 0081のattestation修正を含むversion-pinned `release/0.2.0` commitの全gateと新candidate build
+- identity rejection stageと3-attempt bounded JWKS retryを含むversion-pinned `release/0.2.0` commitの全gateと新candidate build
 - 最終candidateのcontroller/worker attestation各1件、Binary Authorization `VERIFIED`、Service digest差し替え
 - staging D1 migration、相異なるruntime/controller HMAC secret、shadow mode/service injectionのstrict read-back
 - finite controller authorizationとD1/R2 synthetic fixtureを同じexecution handleへ固定したsynthetic execution最大1件

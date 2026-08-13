@@ -85,8 +85,9 @@ schedule response lossを検証する。Python/TypeScript共有fixtureはlanguag
 second exact-one executionではruntime bootstrapがHTTP 500で拒否され、D1 bootstrap/event 0のまま終了した。remote D1の
 attempt lookupは1 query/1 row、controller attest requestは0、同じWorker invocationのexternal subrequestは0だった。
 exact speech fixture rowとlive-shaped Google RSA/JWTはworkerd回帰testで成功した。Google JWKS transport/429/5xxだけを
-5秒timeout、指数backoff+jitter、最大2 attemptへ限定し、schema、redirect、署名、claim拒否は再試行しない。identity verifierの
-例外は`AUTHENTICATION_FAILED`へ正規化し、未知例外のHTTP 500と区別する。
+5秒timeout、指数backoff+jitter、最大3 attemptへ限定し、schema、redirect、署名、claim拒否は再試行しない。identity verifierの
+例外は`AUTHENTICATION_FAILED`へ正規化し、未知例外のHTTP 500と区別する。拒否時はtoken、claim、URL、provider responseを
+記録せず、syntax、header、JWKS transport/response/key、verification、claimのallowlist stageだけを構造化logへ1件残す。
 
 またCloud Run taskはcontroller observeより先に起動するため、[ADR 0081](./adr/0081-attest-live-execution-before-controller-observe.md)に
 従い、durable run intent、stored Job UID、exact 1 live Execution、fixed manifestを満たす`EXECUTION_PENDING`だけをread-only

@@ -117,6 +117,11 @@ pnpm exec wrangler login
 pnpm exec wrangler whoami
 ```
 
+固定Wrangler 4.114.0のOAuth redirect URIは`http://localhost:8976/oauth/callback`である。
+`wrangler login --callback-port`は待受portだけを変更しredirect URIを変更しないため、このversionでは
+別portを指定しない。8976が使用中なら既存processを停止して同じPCでloginをやり直し、`whoami`を確認する。
+SSH先でbrowserだけをlocalへ開く運用はcallback不在になるため使わない。
+
 対話ログインできないCIでは、
 [cloudflare-permissions.md](./cloudflare-permissions.md)で全操作を先に棚卸しした役割別
 Cloudflare API tokenをCI secretから渡す。Backend/Access用`CLOUDFLARE_API_TOKEN`は完成形

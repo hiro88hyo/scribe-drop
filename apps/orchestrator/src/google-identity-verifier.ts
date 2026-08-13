@@ -14,9 +14,22 @@ const MAX_JWKS_CACHE_MS = 24 * 60 * 60 * 1000;
 const MAX_TOKEN_BYTES = 8 * 1024;
 const MAX_TOKEN_LIFETIME_MS = 60 * 60 * 1000;
 const UNKNOWN_KEY_REFRESH_COOLDOWN_MS = 30_000;
-const JWKS_FETCH_ATTEMPTS = 2;
-const JWKS_RETRY_BASE_MS = 50;
-const JWKS_RETRY_JITTER_MS = 50;
+const JWKS_FETCH_ATTEMPTS = 3;
+const JWKS_RETRY_BASE_MS = 100;
+const JWKS_RETRY_JITTER_MS = 100;
+
+export const GOOGLE_IDENTITY_REJECTION_CODES = [
+  "IDENTITY_INTERNAL_REJECTED",
+  "JWKS_KEY_REJECTED",
+  "JWKS_RESPONSE_REJECTED",
+  "JWKS_TRANSPORT_REJECTED",
+  "TOKEN_CLAIMS_REJECTED",
+  "TOKEN_HEADER_REJECTED",
+  "TOKEN_SYNTAX_REJECTED",
+  "TOKEN_VERIFICATION_REJECTED",
+] as const;
+
+export type GoogleIdentityRejectionCode = (typeof GOOGLE_IDENTITY_REJECTION_CODES)[number];
 
 const serviceAccountEmailSchema = z
   .string()
@@ -83,7 +96,21 @@ export interface GoogleIdentityVerifierConfiguration {
 export interface GoogleIdentityVerifierPorts {
   readonly clock: RuntimeClock;
   readonly fetch: typeof fetch;
+  readonly onRejected?: (code: GoogleIdentityRejectionCode) => void;
   readonly retryDelay?: (attempt: number) => Promise<void>;
+}
+
+class GoogleIdentityRejection extends Error {
+  readonly code: GoogleIdentityRejectionCode;
+
+  constructor(code: GoogleIdentityRejectionCode) {
+    super("Google identity token was rejected");
+    this.code = code;
+  }
+}
+
+function reject(code: GoogleIdentityRejectionCode): never {
+  throw new GoogleIdentityRejection(code);
 }
 
 async function defaultRetryDelay(attempt: number): Promise<void> {
@@ -184,20 +211,33 @@ export class GoogleOidcIdentityVerifier implements GoogleIdentityVerifier {
         audience.length === 0 ||
         audience.length > 2048
       ) {
-        throw new Error("invalid Google identity token syntax");
+        reject("TOKEN_SYNTAX_REJECTED");
       }
-      const header = protectedHeaderSchema.parse(decodeProtectedHeader(token));
+      let header: z.infer<typeof protectedHeaderSchema>;
+      try {
+        header = protectedHeaderSchema.parse(decodeProtectedHeader(token));
+      } catch {
+        reject("TOKEN_HEADER_REJECTED");
+      }
       const key = await this.#getKey(header.kid);
       const now = this.#ports.clock.now();
-      const verified = await jwtVerify(token, key, {
-        algorithms: ["RS256"],
-        audience,
-        clockTolerance: this.#configuration.clockSkewMs / 1000,
-        currentDate: now,
-        issuer: this.#configuration.issuer,
-        requiredClaims: ["aud", "azp", "email", "email_verified", "exp", "iat", "iss", "sub"],
-      });
-      const claims = googleIdentityClaimsSchema.parse(verified.payload);
+      let verifiedPayload: unknown;
+      try {
+        const verified = await jwtVerify(token, key, {
+          algorithms: ["RS256"],
+          audience,
+          clockTolerance: this.#configuration.clockSkewMs / 1000,
+          currentDate: now,
+          issuer: this.#configuration.issuer,
+          requiredClaims: ["aud", "azp", "email", "email_verified", "exp", "iat", "iss", "sub"],
+        });
+        verifiedPayload = verified.payload;
+      } catch {
+        reject("TOKEN_VERIFICATION_REJECTED");
+      }
+      const parsedClaims = googleIdentityClaimsSchema.safeParse(verifiedPayload);
+      if (!parsedClaims.success) reject("TOKEN_CLAIMS_REJECTED");
+      const claims = parsedClaims.data;
       if (
         claims.aud !== audience ||
         claims.azp !== claims.sub ||
@@ -206,7 +246,7 @@ export class GoogleOidcIdentityVerifier implements GoogleIdentityVerifier {
         claims.iat * 1000 > now.getTime() + this.#configuration.clockSkewMs ||
         claims.exp * 1000 <= now.getTime()
       ) {
-        throw new Error("invalid Google identity token claims");
+        reject("TOKEN_CLAIMS_REJECTED");
       }
       return {
         audience: claims.aud,
@@ -216,7 +256,14 @@ export class GoogleOidcIdentityVerifier implements GoogleIdentityVerifier {
         serviceAccountEmail: claims.email,
         subjectId: claims.sub,
       };
-    } catch {
+    } catch (error: unknown) {
+      const code =
+        error instanceof GoogleIdentityRejection ? error.code : "IDENTITY_INTERNAL_REJECTED";
+      try {
+        this.#ports.onRejected?.(code);
+      } catch {
+        // Authentication remains fail-closed even if the allowlisted observer fails.
+      }
       throw new Error("Google identity token was rejected");
     }
   }
@@ -228,11 +275,11 @@ export class GoogleOidcIdentityVerifier implements GoogleIdentityVerifier {
     let key = cache.keys.find((candidate) => candidate.kid === keyId);
     if (key !== undefined) return key;
     if (now - cache.fetchedAtMs < UNKNOWN_KEY_REFRESH_COOLDOWN_MS) {
-      throw new Error("Google identity key was rejected");
+      reject("JWKS_KEY_REJECTED");
     }
     cache = await this.#refreshKeys();
     key = cache.keys.find((candidate) => candidate.kid === keyId);
-    if (key === undefined) throw new Error("Google identity key was rejected");
+    if (key === undefined) reject("JWKS_KEY_REJECTED");
     return key;
   }
 
@@ -270,15 +317,25 @@ export class GoogleOidcIdentityVerifier implements GoogleIdentityVerifier {
       const transientStatus =
         response !== undefined && (response.status === 429 || response.status >= 500);
       if (response !== undefined && !transientStatus) break;
-      await response?.body?.cancel();
+      try {
+        await response?.body?.cancel();
+      } catch {
+        response = undefined;
+      }
       if (attempt + 1 < JWKS_FETCH_ATTEMPTS) {
         await (this.#ports.retryDelay ?? defaultRetryDelay)(attempt);
       }
     }
-    if (response === undefined) throw new Error("Google JWKS response was rejected");
-    if (response.status !== 200) throw new Error("Google JWKS response was rejected");
-    const cacheLifetimeMs = parseMaxAge(response.headers.get("cache-control"));
-    const parsed = googleJwksSchema.parse(await readBoundedJson(response));
+    if (response === undefined) reject("JWKS_TRANSPORT_REJECTED");
+    if (response.status !== 200) reject("JWKS_RESPONSE_REJECTED");
+    let cacheLifetimeMs: number;
+    let parsed: z.infer<typeof googleJwksSchema>;
+    try {
+      cacheLifetimeMs = parseMaxAge(response.headers.get("cache-control"));
+      parsed = googleJwksSchema.parse(await readBoundedJson(response));
+    } catch {
+      reject("JWKS_RESPONSE_REJECTED");
+    }
     const fetchedAtMs = this.#ports.clock.now().getTime();
     return {
       expiresAtMs: fetchedAtMs + cacheLifetimeMs,

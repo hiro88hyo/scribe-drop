@@ -1,4 +1,5 @@
 import { createUlid } from "@scribe-drop/domain";
+import { createStructuredLogger } from "@scribe-drop/observability";
 
 import { CloudRunControllerClient } from "./cloud-run-controller-client.js";
 import { R2RuntimeCapabilityIssuer } from "./cloud-run-runtime-capabilities.js";
@@ -45,6 +46,14 @@ export function createCloudRunRuntimeService(
   if (config === undefined) return undefined;
 
   const clock: RuntimeClock = { now: () => new Date() };
+  const logger = createStructuredLogger({
+    environment: config.appEnvironment,
+    now: () => clock.now(),
+    service: "orchestrator",
+    sink: (record) => {
+      console.warn(record);
+    },
+  });
   const ids: RuntimeIdGenerator = {
     next: () => createUlid(clock.now().getTime(), randomBytes),
   };
@@ -93,7 +102,13 @@ export function createCloudRunRuntimeService(
           fetchTimeoutMs: GOOGLE_JWKS_TIMEOUT_MS,
           issuer: "https://accounts.google.com",
         },
-        { clock, fetch },
+        {
+          clock,
+          fetch,
+          onRejected: (errorCode) => {
+            logger.warn("cloud_run_identity_rejected", { errorCode });
+          },
+        },
       ),
       secrets: new HmacRuntimeSecretDeriver(requireSecret(config.runtimeDerivationSecret)),
       signatures: new WebCryptoEd25519Verifier(),
