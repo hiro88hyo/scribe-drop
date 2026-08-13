@@ -52,7 +52,8 @@ describe("GoogleOidcIdentityVerifier in workerd", () => {
         fetch: (input, init) => {
           requests += 1;
           expect(input).toBe(GOOGLE_OAUTH_JWKS_URL);
-          expect(init?.redirect).toBe("error");
+          const request = new Request(input, init);
+          expect(request.redirect).toBe("manual");
           return Promise.resolve(
             new Response(JSON.stringify({ keys: [jwk] }), {
               headers: {

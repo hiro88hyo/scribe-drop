@@ -306,7 +306,7 @@ export class GoogleOidcIdentityVerifier implements GoogleIdentityVerifier {
         response = await this.#ports.fetch(GOOGLE_OAUTH_JWKS_URL, {
           headers: { accept: "application/json" },
           method: "GET",
-          redirect: "error",
+          redirect: "manual",
           signal: controller.signal,
         });
       } catch {

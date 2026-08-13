@@ -411,11 +411,31 @@ Firestore controller collection 3件空、D1 exact target 5系統0、shadow rout
 戻した。R2は作成せず、productionとCI workflowは変更していない。WAFのexact BIC skipとdisabled candidate
 controller Serviceは次のpreflightのため維持する。
 
+identity rejection stageを含むcommit `11cabe1`のcandidate build `31685398800`はfull application gate、
+両imageのbuild/check/SBOM/HIGH・CRITICAL scan、各1回のpush、KMS署名、各1件のattestationを完了し、
+Binary Authorizationは両digestとも`VERIFIED`だった。controller Serviceをcandidate digestへ更新して
+Service/IAM/Secret/Firestoreをstrict read-backし、GPU 0、CPU 1、512 MiB、task 1、parallelism 1、retry 0の
+GPU-free preflightをexact 1回だけ実行した。Workerのallowlist logは
+`cloud_run_identity_rejected` / `JWKS_TRANSPORT_REJECTED`を1件記録し、3 attemptすべてでGoogle JWKSの
+`fetch`がHTTP response前に例外となったことを確定した。token、claim、URL、provider responseは記録していない。
+
+原因はnetworkやGoogle responseではなく、Google JWKS verifierだけが[ADR 0016](./adr/0016-use-manual-redirects-in-workers.md)に
+反して`redirect: "error"`を指定していたことだった。live Workers runtimeはこの値をrequest構築時に`TypeError`で拒否するため、
+retryしても通信は開始されない。外向きfetchを`redirect: "manual"`へ統一し、3xxを追従せず既存の
+`JWKS_RESPONSE_REJECTED`へfail closedにする。unit testとworkerd integrationは実`Request`を構築して`manual`を固定し、
+redirect responseの拒否も維持する。
+
+preflightではGPU、R2、controller attestation、bootstrap/session eventを使用しなかった。終了後はWorker routeを404、
+controller authorizationを0へ戻し、Cloud Run Job/Execution 0、D1 exact target 5系統0、Firestore controller collection
+3件空を確認した。Service generation 16、IAM/Secret/TTLも再read-backし、local synthetic inputを削除した。productionと
+CI workflowは変更していない。このsource修正によりcandidate `11cabe1`のevidenceは無効であり、次はlocal gateをまとめて
+完了した単一commitからcandidateを1回buildする。
+
 ## Remaining real staging gate
 
 release candidateのPhase境界に従うbranch/commitを作り、次を順番に完了する。
 
-- identity rejection stageと3-attempt bounded JWKS retryを含むversion-pinned `release/0.2.0` commitの全gateと新candidate build
+- manual redirect修正と3-attempt bounded JWKS retryを含むversion-pinned `release/0.2.0` commitの全gateと新candidate build
 - 最終candidateのcontroller/worker attestation各1件、Binary Authorization `VERIFIED`、Service digest差し替え
 - staging D1 migration、相異なるruntime/controller HMAC secret、shadow mode/service injectionのstrict read-back
 - finite controller authorizationとD1/R2 synthetic fixtureを同じexecution handleへ固定したsynthetic execution最大1件

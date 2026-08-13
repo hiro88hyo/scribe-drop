@@ -1538,6 +1538,16 @@ local preparation（2026-08-11〜12）:
   `RESOURCE_DRIFT`を証明するまでGPUを起動しない。失敗後はCloud Run Job/Execution、Firestore controller document、D1 exact targetを
   0、shadow route/controller authorizationをdisabled/0へ戻し、R2は作成しなかった。WAF exact skipとdisabled candidate controller
   Serviceは維持し、productionとCI workflowは変更していない。
+- identity診断commit `11cabe1`のcandidate build `31685398800`はfull gate、両imageの各1 push/KMS署名/各1 attestation、
+  Binary Authorization `VERIFIED`、controller Serviceのstrict read-backを完了した。GPU 0、CPU 1、512 MiB、task 1、
+  parallelism 1、retry 0のpreflightをexact 1回だけ実行し、Worker allowlist logで
+  `cloud_run_identity_rejected` / `JWKS_TRANSPORT_REJECTED`を確定した。3 attemptともHTTP response前の例外であり、
+  Google JWKS verifierだけが[ADR 0016](./adr/0016-use-manual-redirects-in-workers.md)に反して`redirect: "error"`を指定していた。
+  live Workers runtimeはこの値をrequest構築時に`TypeError`で拒否するため、`redirect: "manual"`へ統一し、3xxは追従せず
+  `JWKS_RESPONSE_REJECTED`へfail closedにする。unit/workerd回帰testは実`Request`のmanual modeを固定する。preflight後は
+  Worker route/controller authorizationをdisabled/0、Cloud Run Job/Execution、D1 exact target、Firestore controller documentを
+  0へ戻し、R2とGPUは使用せず、local inputも削除した。productionとCI workflowは変更していない。このsource修正により
+  candidate `11cabe1` evidenceは無効であり、新commitのlocal gateを一括完了後にcandidateを1回だけbuildする。
 
 完了条件:
 

@@ -107,7 +107,8 @@ describe("GoogleOidcIdentityVerifier", () => {
       requests += 1;
       expect(input).toBe(GOOGLE_OAUTH_JWKS_URL);
       expect(init?.method).toBe("GET");
-      expect(init?.redirect).toBe("error");
+      const request = new Request(input, init);
+      expect(request.redirect).toBe("manual");
       return Promise.resolve(jwksResponse([first.jwk]));
     };
     const identity = verifier(providerFetch);

@@ -21,7 +21,8 @@ provider redirectへ追従する要件がなく、redirect先を利用する必�
 
 ## Decision
 
-- RunPodとDiscordの外向き`fetch`は`redirect: "manual"`を指定する。
+- RunPod、Discord、Google OAuth JWKSを含むWorkersからの外向き`fetch`は
+  `redirect: "manual"`を指定する。
 - 3xx responseを追従せず、既存の非成功HTTP statusとしてfail closedに分類する。
 - `Location` header、redirect先body、provider error bodyを読み取らず、logにも残さない。
 - RunPod API origin、Discord webhook host、timeout、bounded response、strict schema、
@@ -42,6 +43,9 @@ provider redirectへ追従する要件がなく、redirect先を利用する必�
   staging結果と同一runtimeでの再現によりsupersedeする。
 - 修正後のstaging smokeでRunPod submissionのaccepted記録、claim、artifact、finalize、
   Discord通知まで確認した。
+- Phase 14のGoogle OAuth JWKS verifierがこの制約に反して`redirect: "error"`を指定した際も、
+  live Workers runtimeは通信開始前に`TypeError`で拒否した。`manual`へ統一し、3xxを非成功statusとして
+  fail closedに扱う既存方針を適用する。
 
 ## References
 
