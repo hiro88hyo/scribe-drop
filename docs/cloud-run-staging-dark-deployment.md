@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-- Status: second exact-one GPU execution failed closed; next candidate fix in local validation
+- Status: final exact-one synthetic GPU execution succeeded; all execution resources cleaned
 - Date: 2026-08-13
 - Product routing: RunPod Serverless
 - Cloud/CI mutation: staging release supply chain and disabled controller control plane; production untouched
@@ -449,15 +449,27 @@ GPU-free preflightで`RESOURCE_DRIFT`へ到達するまではroot cause確定と
 Firestore controller collectionへは到達していない。local synthetic inputも削除し、productionとCI workflowは
 変更していない。このsource修正によりcandidate `0ab7bf3` evidenceは無効である。
 
-## Remaining real staging gate
+## Final exact-one staging gate
 
-release candidateのPhase境界に従うbranch/commitを作り、次を順番に完了する。
+receiver保持修正を含むcandidate `cdfc394`をbuild run `31695586010`から1回だけpublishした。full gate、両imageの
+build/check/SBOM/HIGH・CRITICAL scan、KMS署名、controller/worker各1 attestationを完了し、Binary Authorizationは
+2 digestとも`VERIFIED`だった。controller Service、IAM、fixed Secret Manager version、Firestore database/TTL、L4 no-zonal
+quota 3、Cloud Run Job/Execution 0をstrict read-backした。同candidateのGPU-free preflightはexact 1回でGoogle OIDC、JWKS、
+controller clientを通過し、期待する`RESOURCE_DRIFT` marker 1で成功した。
 
-- standalone fetch/全Workers redirect修正と3-attempt bounded JWKS retryを含むversion-pinned commitの全gateと新candidate build
-- 最終candidateのcontroller/worker attestation各1件、Binary Authorization `VERIFIED`、Service digest差し替え
-- staging D1 migration、相異なるruntime/controller HMAC secret、shadow mode/service injectionのstrict read-back
-- finite controller authorizationとD1/R2 synthetic fixtureを同じexecution handleへ固定したsynthetic execution最大1件
-- timeout/response loss/hard lifetime/reaper、artifact/manifest、resource/storage不存在、課金終了の期限付きevidence
+GPU実行前のfixed Jobは4 vCPU、16 GiB、L4 1、task/parallelism 1、retry 0、timeout 3,300秒、Binary Authorization、worker
+digestを完全照合し、Execution 0だった。finite authorizationは1 execution/250 JPYで、公式Cloud Run単価、USD/JPY ceiling 200、
+税10%、network allowanceを含むworst-caseは233円だった。合成16分WAVだけをR2へ置き、controllerのdurable `RUN_INTENT`後に
+`jobs.run`をexact 1回送った。createとrunのresponse lossを同一request replayで検証し、Firestoreのrequest重複排除により
+Job/Executionは各1件を維持した。
 
-GPU execution直前までsource defaultとdeployed staging bindingを`disabled`へ保ち、strict preflight後だけ
-`synthetic-shadow`へ切り替える。productionへmode、secret、routeを設定しない。
+runtimeはD1 bootstrap 1、event 6を記録し、heartbeatは`bootstrap`、`download`、`transcribe`、`publish`の順だった。
+terminalはduration 960秒、segment 20、artifact 3、manifest written 1、status `succeeded`でsessionをrevokeした。manifest v2は
+completeで、Markdown 1,251 byte、JSON 2,036 byte、SRT 1,589 byteのsize/SHA-256を全件再検証した。Cloud Loggingは同一
+Execution、task attempt/index 0だけ、success marker 1、failure marker 0、Worker analyticsはruntime request 8、error 0だった。
+
+terminalからscheduleされたcleanupを`CLEANUP_PENDING`から`CLEANED`へ再観測し、provider hard timeout 3,300秒を保ったまま
+Job/Execution 0へ収束した。D1今回target 5系統0、R2 fixture/artifact/manifest 5 object不存在、Firestore controller 3 collection空、
+Worker `disabled`/route 404、controller/Firestore authorization 0、active/reserved execution/JPY 0を独立read-backした。
+source defaultは`disabled`のままで、production resource、product routing、CI workflowは変更していない。Phase 15はこの
+exact candidateを再buildせずformal staging acceptanceへ進める。

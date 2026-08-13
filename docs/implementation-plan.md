@@ -1340,7 +1340,7 @@ pnpm check
   Orchestrator HMAC client、Firestore control-store adapterはPhase 14 local preparationで追加したが、default service
   wiringには接続していない。
 
-### Phase 14: staging dark deployment（second exact 1 GPU実行fail-close、release修正中）
+### Phase 14: staging dark deployment（final exact 1 GPU実行成功、全synthetic resource cleanup済み）
 
 実装:
 
@@ -1557,6 +1557,26 @@ local preparation（2026-08-11〜12）:
   両方でlocal再現し、standalone呼出しとreceiver-sensitive回帰testへ修正する。controllerに残る`redirect: "error"`もmanualへ
   統一する。Cloud Run Job/Execution、D1 exact targetを0、Worker routeを404/disabledへ戻し、local inputを削除した。
   productionとCI workflowは変更していない。remote root確定は次candidateのGPU-free `RESOURCE_DRIFT` evidenceまで保留する。
+- receiver保持修正commit `cdfc394`のcandidate build `31695586010`はfull local/application gate、controller/worker両imageの
+  build/check/SBOM/HIGH・CRITICAL scan、各1 push、KMS署名、各1 attestationを完了し、Binary Authorizationは2 digestとも
+  `VERIFIED`だった。controller Serviceを同candidateへ更新し、Service/IAM/Secret/Firestore、L4 no-zonal quota 3、Cloud Run
+  Job/Execution 0をstrict read-backした。同じworker digest/runtime identityのGPU-free preflightはGPU 0、CPU 1、512 MiB、
+  task 1、parallelism 1、retry 0でexact 1回だけ実行し、Google OIDCとcontroller境界を通過した期待どおりの
+  `RESOURCE_DRIFT` marker 1で成功した。終了後はJob/Execution、D1 exact target、Firestore controller documentを0、Worker routeを
+  404へ戻した。
+- 実行直前に4 vCPU、16 GiB、L4 1、task 1、parallelism 1、retry 0、timeout 3,300秒、Binary Authorization、worker digest、
+  Execution 0、有限1 execution/250 JPY authorizationを別processで照合した。公式Cloud Run単価、USD/JPY ceiling 200、税10%、
+  network allowanceを含むworst-caseは233円だった。合成16分WAVだけを使い、承認後にdurable `RUN_INTENT`を保存して
+  `jobs.run`をexact 1回送った。createとrunのresponseをそれぞれ破棄して同一requestをreplayし、Firestore重複排除により
+  Job 1、Execution 1を維持した。
+- runtimeはbootstrap/claim/ack後に`bootstrap`、`download`、`transcribe`、`publish`の順でheartbeatを記録し、duration 960秒、
+  segment 20、artifact 3、manifest written 1、terminal `succeeded`、session revokeへ収束した。manifest v2はcompleteで、Markdown
+  1,251 byte、JSON 2,036 byte、SRT 1,589 byteのsize/SHA-256が全件一致した。Cloud Loggingは同一Executionのentry 10、
+  task attempt/index 0だけ、success marker 1、failure marker 0だった。Worker invocationはruntime request 8件、error 0だった。
+- terminal cleanup schedule後の`CLEANUP_PENDING`を再観測して`CLEANED`へ収束させ、Cloud Run Job/Execution 0、D1今回target
+  5系統0、R2 fixture/artifact/manifest 5 object不存在、Firestore controller 3 collection空を独立read-backした。Workerは
+  `disabled`/route 404、controller Service generation 20とFirestore authorizationは0、active/reserved executionとJPYも0へ
+  戻した。local合成fixture/secretは削除し、production resource、product routing、CI workflowは変更していない。
 
 完了条件:
 

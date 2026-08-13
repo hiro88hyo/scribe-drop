@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-- Status: Phase 14 second staging execution failed closed; next candidate fix in progress
+- Status: Phase 14 final synthetic staging execution succeeded; all execution resources cleaned
 - Date: 2026-08-13
 - Policy: `cloud_run_jobs_l4_v1`
 - Runtime contract: v1 bootstrap/session protocol、bounded execution contract v2、manifest v2
@@ -95,10 +95,11 @@ exact speech fixture rowとlive-shaped Google RSA/JWTはworkerd回帰testで成�
 redirect拒否を固定した。しかし修正candidateのexact-one GPU-free preflightでも同じstageが継続したため、redirectだけを
 唯一のremote root causeとは扱わない。
 
-残存する即時例外をlocalで再現できる実装として、Google JWKSとcontroller clientが注入されたhost `fetch`を
+残存していた即時例外をlocalで再現できる実装として、Google JWKSとcontroller clientが注入されたhost `fetch`を
 `this.#ports.fetch(...)`とmethod呼出しし、誤ったreceiverを渡していた。注入関数をlocal変数へ取り出してstandaloneで呼ぶ
 receiver-sensitive testを両clientへ追加し、controller側に残っていた`redirect: "error"`もmanualへ統一する。
-次candidateのGPU-free preflightで`RESOURCE_DRIFT`を得るまではremote root causeを確定しない。
+candidate `cdfc394`のGPU-free preflightはGoogle OIDC後のcontroller `RESOURCE_DRIFT`まで到達し、このreceiver欠陥が
+残存root causeだったことをremoteで確認した。
 
 またCloud Run taskはcontroller observeより先に起動するため、[ADR 0081](./adr/0081-attest-live-execution-before-controller-observe.md)に
 従い、durable run intent、stored Job UID、exact 1 live Execution、fixed manifestを満たす`EXECUTION_PENDING`だけをread-only
@@ -107,10 +108,11 @@ attestationへ許可する。stored Executionがある場合のUID一致は維�
 ## Residual risk and next gate
 
 Google identity tokenはruntime service accountを署名するがExecution UIDを署名しない。single-active、dedicated identity、
-ephemeral key、controller live read-backは補償controlでありhost attestationではない。Phase 14で実identity/read-back、
-permission/resource manifest parity、hard timeout、resource absence、費用終了をsynthetic staging execution 1件だけで確認し、
-Phase 15 acceptanceまでは実録音とproduction routingを禁止する。
+ephemeral key、controller live read-backは補償controlでありhost attestationではない。Phase 14はcandidate `cdfc394`の
+exact 1 synthetic executionで実identity/read-back、permission/resource manifest parity、hard timeout設定、artifact/manifest、
+resource/storage absence、費用終了を確認した。Phase 15 acceptanceまでは実録音とproduction routingを禁止する。
 
 Phase 14 local preparationのD1 CASとroute gateは
 [staging dark deployment](./cloud-run-staging-dark-deployment.md)に記録する。local D1成功はremote migration、実identity、
-controller read-back、provider cleanup、課金終了の代替ではない。
+controller read-back、provider cleanup、課金終了の代替ではない。これらの実staging evidenceは
+[staging dark deployment](./cloud-run-staging-dark-deployment.md)へ記録した。
