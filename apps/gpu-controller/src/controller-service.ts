@@ -146,10 +146,11 @@ export class GpuControllerService {
       record.executionHandle,
       record.bootstrapRequestId,
     );
+    const storedExecutionMatches =
+      (record.state === "EXECUTION_PENDING" && record.execution === null) ||
+      (record.state === "RUNNING" && record.execution?.uid === execution.uid);
     const storedResourcesMatch =
-      record.state === "RUNNING" &&
-      record.job?.uid === jobRead.job.uid &&
-      record.execution?.uid === execution.uid;
+      record.runIntent && record.job?.uid === jobRead.job.uid && storedExecutionMatches;
     return {
       attestation: {
         activeExecutionCount: 1,

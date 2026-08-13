@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-- Status: Phase 14 first staging execution failed closed; release fix in progress
+- Status: Phase 14 second staging execution failed closed; next candidate fix in progress
 - Date: 2026-08-13
 - Policy: `cloud_run_jobs_l4_v1`
 - Runtime contract: v1 bootstrap/session protocol、bounded execution contract v2、manifest v2
@@ -72,6 +72,16 @@ local integrationはidentity、controller read-back、clock、network、durable 
 audience、resource drift、bootstrap/claim response loss、capability replay、heartbeat stale、terminal conflict/cancel、cleanup
 schedule response lossを検証する。Python/TypeScript共有fixtureはlanguage、VAD、selected format、exact result key、manifest v2を
 同じ値で検証する。
+
+second exact-one executionではruntime bootstrapがHTTP 500で拒否され、D1 bootstrap/event 0のまま終了した。remote D1の
+attempt lookupは1 query/1 row、controller attest requestは0、同じWorker invocationのexternal subrequestは0だった。
+exact speech fixture rowとlive-shaped Google RSA/JWTはworkerd回帰testで成功した。Google JWKS transport/429/5xxだけを
+5秒timeout、指数backoff+jitter、最大2 attemptへ限定し、schema、redirect、署名、claim拒否は再試行しない。identity verifierの
+例外は`AUTHENTICATION_FAILED`へ正規化し、未知例外のHTTP 500と区別する。
+
+またCloud Run taskはcontroller observeより先に起動するため、[ADR 0081](./adr/0081-attest-live-execution-before-controller-observe.md)に
+従い、durable run intent、stored Job UID、exact 1 live Execution、fixed manifestを満たす`EXECUTION_PENDING`だけをread-only
+attestationへ許可する。stored Executionがある場合のUID一致は維持する。
 
 ## Residual risk and next gate
 

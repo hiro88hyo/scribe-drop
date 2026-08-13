@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-- Status: first exact-one GPU execution failed closed; release fix pending a new candidate
+- Status: second exact-one GPU execution failed closed; next candidate fix in local validation
 - Date: 2026-08-13
 - Product routing: RunPod Serverless
 - Cloud/CI mutation: staging release supply chain and disabled controller control plane; production untouched
@@ -38,8 +38,10 @@ UI、通常Queue、RunPod internal routeからこのnamespaceへ分岐しない�
 
 mutationとlive attestationは`@scribe-drop/contracts`のstrict schemaと同じHMAC framingを共有する。controllerの
 `/v1/executions/attest`は署名済みopaque handleを受け、control store record、Cloud Run Job、Execution listを毎回
-照合する。exact 1 execution、fixed manifest、record/live UID、runtime service account、task 1、retry上限のいずれかが
-一致しなければ`found`を返さない。attestationはread-onlyで、provider mutationを発生させない。
+照合する。exact 1 execution、fixed manifest、runtime service account、task 1、retry上限のいずれかが一致しなければ
+`found`を返さない。[ADR 0081](./adr/0081-attest-live-execution-before-controller-observe.md)に従い、controller observe前だけは
+durable run intent、`EXECUTION_PENDING`、stored Job UID、exact 1 live Executionを条件にstored Execution UIDの欠落を許す。
+observe後はstored/live Execution UIDも完全一致させる。attestationはread-onlyで、provider mutationを発生させない。
 
 Orchestrator clientはHTTPS origin、最大60秒の署名lifetime、256 bit以上のsecret、10秒timeout、redirect拒否、
 16 KiBのJSON response上限、request/handle identity一致を強制する。cleanupはlive attestationで得たcontroller versionを
@@ -48,8 +50,8 @@ Orchestrator clientはHTTPS origin、最大60秒の署名lifetime、256 bit以�
 staging限定composition rootはD1 store、Google OIDC verifier、controller attestation/cleanup、R2 capability、HMAC/Ed25519を
 一つのserviceへ結ぶ。mode、2つの相異なるcanonical secret、exact controller/orchestrator origin、runtime identity、R2/account/bucketの
 いずれかが欠ければserviceを生成せず、shadow routeは404または503へ閉じる。production configにはCloud Run runtime bindingを追加しない。
-staging controller Serviceにはdisabled authorizationと固定environment/secretを注入済みで、remote Workerを切り替えるまでは
-OrchestratorからのrequestとGPU executionは0のままである。
+staging controller Serviceとremote Workerはsecond exact-one cleanup後にauthorization 0、shadow route 404へ戻し、
+Cloud Run Job/Executionと今回のsynthetic dataも0へ収束した。
 
 ## Local Firestore controller store
 
@@ -262,7 +264,9 @@ source変更を含まないため、最終acceptance evidenceやproduction昇格
 
 Google OAuth JWKSだけを固定HTTPS URLから取得し、redirect、5秒超過、64 KiB超過、非JSON、invalid Cache-Control、重複・
 不明keyを拒否する。cache lifetimeはresponseの`max-age`と24時間上限の短い方とし、unknown `kid`によるfetch amplificationを
-30秒cooldownで抑え、同時cache missは一つのrequestへまとめる。
+30秒cooldownで抑え、同時cache missは一つのrequestへまとめる。transport failure、429、5xxだけを指数backoffとbounded jitterで
+最大2 attemptまで再試行し、redirect、schema、signature、claim拒否は再試行しない。verifier例外はruntime boundaryで
+`AUTHENTICATION_FAILED`へ正規化する。
 
 tokenは8 KiB以下のRS256 JWTに限定し、Google署名、exact audience、`https://accounts.google.com` issuer、issue/expiry、
 1時間上限、`sub == azp`、`email_verified == true`、service-account emailを検証する。Googleの`sub`/`azp`はservice accountの
@@ -336,11 +340,30 @@ runtime importがpackage moduleとして二重ロードされ、`OneShotRuntimeE
 追加する。また実Cloud Run v2 responseの`Execution.job`は短いJob IDだったため、exact requested IDとExecution full parentを照合して
 canonical parentへ正規化する。これらのsource変更は既存candidate evidenceを無効化し、新candidateからPhase 14 gateをやり直す。
 
+## Second exact-one staging execution
+
+entrypointとExecution parent修正を含むcandidate `c3b1e89`について、controller/worker attestation各1件、Binary Authorization
+`VERIFIED`、controller Service、staging D1/R2、finite 1 execution/250 JPY authorization、L4 quota 3、Execution 0を再照合した。
+2026-08-13に合成WAV fixtureだけでGPU Executionをexact 1件起動し、task 1、parallelism 1、retry 0を維持した。image importは
+約1分37秒、taskは約9秒で`SESSION_REJECTED`となり、D1 bootstrap/event 0、capability、source download、CUDA/model load、
+transcription、artifact uploadはすべて0のままfail closedした。この承認済みexact-oneは消費済みであり、追加実行は別承認を要する。
+
+Cloudflare側ではbootstrap HTTP 500が1件、同じWorker invocationのexternal subrequestは0、remote D1のexact attempt lookupは
+1 query/1 row、controller attest requestは0だった。exact staging rowとlive-shaped Google RSA/JWTをworkerdで再現すると両方成功したため、
+失敗点はapplication parse/Google identity境界まで絞れたが、単一のremote root causeは断定しない。Google JWKSの限定retryと
+authentication error正規化を追加した。またtaskがcontroller observeを追い越す正常な順序では旧attestationが必ず拒否する別のraceを
+特定し、ADR 0081の条件と回帰testで修正した。
+
+失敗後はcontrollerを`FAILED`から`CLEANED`へ収束させ、Cloud Run Job/Execution 0、Firestore synthetic document 0、R2 fixture/result/
+manifest不存在、D1 exact target 0、shadow route 404、controller authorization 0をread-backした。Service/IAM/Secret/Binary
+Authorization/Firestoreのdisabled deploymentも再照合し、localのsecretとfixtureを削除した。production resource、product routing、
+CI configは変更していない。今回のsource変更によりcandidate `c3b1e89`のstaging evidenceは無効である。
+
 ## Remaining real staging gate
 
 release candidateのPhase境界に従うbranch/commitを作り、次を順番に完了する。
 
-- entrypoint/Execution parent修正を含むversion-pinned `release/0.2.0` commitの全gateと新candidate build
+- identity retry/error normalizationとADR 0081のattestation修正を含むversion-pinned `release/0.2.0` commitの全gateと新candidate build
 - 最終candidateのcontroller/worker attestation各1件、Binary Authorization `VERIFIED`、Service digest差し替え
 - staging D1 migration、相異なるruntime/controller HMAC secret、shadow mode/service injectionのstrict read-back
 - finite controller authorizationとD1/R2 synthetic fixtureを同じexecution handleへ固定したsynthetic execution最大1件

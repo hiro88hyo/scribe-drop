@@ -1340,7 +1340,7 @@ pnpm check
   Orchestrator HMAC client、Firestore control-store adapterはPhase 14 local preparationで追加したが、default service
   wiringには接続していない。
 
-### Phase 14: staging dark deployment（exact 1 GPU実行fail-close、release修正中）
+### Phase 14: staging dark deployment（second exact 1 GPU実行fail-close、release修正中）
 
 実装:
 
@@ -1498,6 +1498,21 @@ local preparation（2026-08-11〜12）:
   shared allowlist errorを独立moduleへ移し、module entrypoint回帰testで`BOOTSTRAP_REJECTED`の同一class処理を固定する。実Cloud Run v2の
   `Execution.job`が短いJob IDを返すことも確認し、exact requested IDとfull Execution parentを照合してcanonical parentへ正規化する。
   source変更により既存candidate evidenceは無効となるため、新commit/new candidateからPhase 14 gateをやり直す。
+- entrypoint/Execution parent修正後のcandidate `c3b1e89`について、controller/worker attestation、Binary Authorization、Service、
+  staging D1/R2、finite 1 execution/250 JPY authorization、L4 quota 3、Execution 0をstrict read-backした。2026-08-13に合成WAVの
+  GPU Executionをexact 1件だけ起動し、task 1、parallelism 1、retry 0、image import約1分37秒、task約9秒で
+  `SESSION_REJECTED`となった。bootstrap/event、capability、source download、CUDA/model load、transcription、artifactは0だった。
+- Cloudflare evidenceはbootstrap HTTP 500が1件、同じWorker invocationのexternal subrequest 0、remote D1 exact attempt lookup
+  1 query/1 row、controller attest 0だった。exact staging rowとlive-shaped Google RSA/JWTはworkerdで成功したため、単一のremote
+  root causeは断定せず、Google JWKSのtransport/429/5xxだけを最大2 attemptで再試行し、verifier例外を
+  `AUTHENTICATION_FAILED`へ正規化する。
+- Cloud Run taskがcontroller observeより先に起動する正常な順序では、旧attestationが`EXECUTION_PENDING`と未保存Execution UIDを
+  必ず拒否する別のraceを確認した。[ADR 0081](./adr/0081-attest-live-execution-before-controller-observe.md)に従い、durable run intent、
+  stored Job UID、exact 1 live Execution、fixed manifestを満たすpending recordをread-only attestし、stored Executionがある場合の
+  UID一致は維持する回帰testを追加した。
+- second execution後はCloud Run Job/Execution、Firestore synthetic document、D1 exact targetを0、R2 fixture/result/manifestを
+  不存在、shadow routeとauthorizationをdisabled/0へ戻し、local secret/fixtureを削除した。production resource、product routing、
+  CI configは変更していない。source変更によりcandidate `c3b1e89`のevidenceは無効となり、新candidateが必要である。
 
 完了条件:
 

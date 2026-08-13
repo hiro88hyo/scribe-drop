@@ -266,10 +266,15 @@ export class CloudRunRuntimeService {
 
     const context = await this.#requireContext(request.executionHandle);
     this.#requireRuntimeIdentity(request, context);
-    const identity = await this.#ports.identity.verify(
-      request.identityToken,
-      this.#configuration.identityAudience,
-    );
+    let identity: VerifiedGoogleIdentity;
+    try {
+      identity = await this.#ports.identity.verify(
+        request.identityToken,
+        this.#configuration.identityAudience,
+      );
+    } catch {
+      throw new CloudRunRuntimeError("AUTHENTICATION_FAILED");
+    }
     this.#requireGoogleIdentity(identity, now);
     await this.#requireReadback(request, context);
 

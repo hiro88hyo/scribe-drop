@@ -25,6 +25,7 @@ const OPTIONS = {
   outputFormats: ["markdown", "json", "srt"] as const,
   vad: true,
 };
+const STAGING_OPTIONS = { ...OPTIONS, language: "ja" as const };
 const CLOUD_RUN_CONTROLLER_SECRET = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
 const CLOUD_RUN_DERIVATION_SECRET = "CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg";
 
@@ -32,8 +33,20 @@ beforeAll(async () => {
   await applyD1Migrations(env.SCRIBE_DROP_DB, env.TEST_MIGRATIONS);
 });
 
-beforeEach(async () => {
-  await env.SCRIBE_DROP_DB.exec("DELETE FROM jobs;");
+async function seedRuntimeContext(
+  overrides: {
+    readonly options?: typeof OPTIONS | typeof STAGING_OPTIONS;
+    readonly sourceContentType?: string;
+    readonly sourceEtag?: string;
+    readonly sourceKey?: string;
+    readonly sourceSizeBytes?: number;
+  } = {},
+): Promise<void> {
+  const options = overrides.options ?? OPTIONS;
+  const sourceContentType = overrides.sourceContentType ?? "audio/mp4";
+  const sourceEtag = overrides.sourceEtag ?? "synthetic-etag";
+  const sourceKey = overrides.sourceKey ?? `incoming/${OWNER_HASH}/${JOB_ID}/${NONCE}/source.m4a`;
+  const sourceSizeBytes = overrides.sourceSizeBytes ?? 1024;
   await env.SCRIBE_DROP_DB.prepare(
     `
       INSERT INTO jobs (
@@ -42,15 +55,18 @@ beforeEach(async () => {
         options_json, created_at, updated_at
       ) VALUES (
         ?1, 'owner-sub', 'owner@example.invalid', 'Synthetic runtime', 'source.m4a',
-        'recording-transcriber-test', ?2, 'audio/mp4', 1024, 1024, 'synthetic-etag',
-        'RUNNING', ?3, ?4, ?4
+        'recording-transcriber-test', ?2, ?3, ?4, ?4, ?5,
+        'RUNNING', ?6, ?7, ?7
       )
     `,
   )
     .bind(
       JOB_ID,
-      `incoming/${OWNER_HASH}/${JOB_ID}/${NONCE}/source.m4a`,
-      JSON.stringify(OPTIONS),
+      sourceKey,
+      sourceContentType,
+      sourceSizeBytes,
+      sourceEtag,
+      JSON.stringify(options),
       NOW,
     )
     .run();
@@ -71,13 +87,18 @@ beforeEach(async () => {
       JOB_ID,
       HANDLE,
       `results/${OWNER_HASH}/${JOB_ID}/${ATTEMPT_ID}/`,
-      JSON.stringify(OPTIONS),
+      JSON.stringify(options),
       NOW,
     )
     .run();
   await env.SCRIBE_DROP_DB.prepare("UPDATE jobs SET active_attempt_id = ?2 WHERE id = ?1")
     .bind(JOB_ID, ATTEMPT_ID)
     .run();
+}
+
+beforeEach(async () => {
+  await env.SCRIBE_DROP_DB.exec("DELETE FROM jobs;");
+  await seedRuntimeContext();
 });
 
 describe("Cloud Run runtime composition", () => {
@@ -168,6 +189,25 @@ async function claim(repository: D1CloudRunRuntimeStore): Promise<void> {
 }
 
 describe("Cloud Run runtime D1 store", () => {
+  it("loads the exact staging speech fixture row shape", async () => {
+    const sourceKey = `incoming/${OWNER_HASH}/${JOB_ID}/-R11Ugfp9MqCogQ0ts4R6Q/source.wav`;
+    await env.SCRIBE_DROP_DB.exec("DELETE FROM jobs;");
+    await seedRuntimeContext({
+      options: STAGING_OPTIONS,
+      sourceContentType: "audio/wav",
+      sourceEtag: "e3509457b255603cf39afd39f3281d46",
+      sourceKey,
+      sourceSizeBytes: 30_720_044,
+    });
+    await expect(store().getAttempt(HANDLE)).resolves.toMatchObject({
+      options: STAGING_OPTIONS,
+      sourceEtag: "e3509457b255603cf39afd39f3281d46",
+      sourceKey,
+      sourceSizeBytes: 30_720_044,
+      status: "PENDING_BOOTSTRAP",
+    });
+  });
+
   it("loads only an exact active provider binding and converges bootstrap replay", async () => {
     const repository = store();
     await expect(repository.getAttempt(HANDLE)).resolves.toMatchObject({

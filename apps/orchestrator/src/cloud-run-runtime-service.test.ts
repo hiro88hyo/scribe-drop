@@ -129,6 +129,7 @@ function createPorts(
   overrides: {
     readonly cleanup?: CloudRunRuntimeServicePorts["cleanup"];
     readonly identity?: VerifiedGoogleIdentity;
+    readonly identityVerifier?: CloudRunRuntimeServicePorts["identity"];
     readonly readback?: ControllerExecutionReadback;
     readonly store?: InMemoryCloudRunRuntimeStore;
   } = {},
@@ -156,7 +157,9 @@ function createPorts(
     cleanup: overrides.cleanup ?? { schedule: () => Promise.resolve() },
     clock: { now: () => new Date("2026-08-11T00:00:00.000Z") },
     ids: new FixedIds(),
-    identity: { verify: () => Promise.resolve(overrides.identity ?? verifiedIdentity) },
+    identity: overrides.identityVerifier ?? {
+      verify: () => Promise.resolve(overrides.identity ?? verifiedIdentity),
+    },
     secrets: new HmacRuntimeSecretDeriver(new Uint8Array(32).fill(7)),
     signatures: new WebCryptoEd25519Verifier(),
     store: overrides.store ?? new InMemoryCloudRunRuntimeStore([context]),
@@ -308,6 +311,21 @@ describe("CloudRunRuntimeService", () => {
   ])("rejects %s", async (_case, identity) => {
     const keys = await keyPair();
     const service = new CloudRunRuntimeService(configuration, createPorts({ identity }));
+    await expect(service.bootstrap(bootstrapRequest(keys.publicKey))).rejects.toMatchObject({
+      code: "AUTHENTICATION_FAILED",
+    });
+  });
+
+  it("normalizes verifier failures to the authentication boundary", async () => {
+    const keys = await keyPair();
+    const service = new CloudRunRuntimeService(
+      configuration,
+      createPorts({
+        identityVerifier: {
+          verify: () => Promise.reject(new Error("untrusted verifier detail")),
+        },
+      }),
+    );
     await expect(service.bootstrap(bootstrapRequest(keys.publicKey))).rejects.toMatchObject({
       code: "AUTHENTICATION_FAILED",
     });

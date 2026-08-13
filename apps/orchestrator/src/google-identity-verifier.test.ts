@@ -172,6 +172,67 @@ describe("GoogleOidcIdentityVerifier", () => {
     expect(requests).toBe(1);
   });
 
+  it("retries one transient JWKS transport failure with bounded caller-owned delay", async () => {
+    let requests = 0;
+    const delays: number[] = [];
+    const identity = new GoogleOidcIdentityVerifier(
+      { clockSkewMs: 30_000, fetchTimeoutMs: 5_000, issuer: ISSUER },
+      {
+        clock: new MutableClock(),
+        fetch: () => {
+          requests += 1;
+          if (requests === 1) return Promise.reject(new TypeError("transient transport failure"));
+          return Promise.resolve(jwksResponse([first.jwk]));
+        },
+        retryDelay: (attempt) => {
+          delays.push(attempt);
+          return Promise.resolve();
+        },
+      },
+    );
+
+    await expect(identity.verify(await token(first), AUDIENCE)).resolves.toBeDefined();
+    expect(requests).toBe(2);
+    expect(delays).toEqual([0]);
+  });
+
+  it("retries only transient JWKS response statuses", async () => {
+    const signed = await token(first);
+    for (const status of [429, 503]) {
+      let requests = 0;
+      const delays: number[] = [];
+      const identity = new GoogleOidcIdentityVerifier(
+        { clockSkewMs: 30_000, fetchTimeoutMs: 5_000, issuer: ISSUER },
+        {
+          clock: new MutableClock(),
+          fetch: () => {
+            requests += 1;
+            return Promise.resolve(
+              requests === 1 ? new Response(null, { status }) : jwksResponse([first.jwk]),
+            );
+          },
+          retryDelay: (attempt) => {
+            delays.push(attempt);
+            return Promise.resolve();
+          },
+        },
+      );
+      await expect(identity.verify(signed, AUDIENCE)).resolves.toBeDefined();
+      expect(requests).toBe(2);
+      expect(delays).toEqual([0]);
+    }
+
+    let permanentRequests = 0;
+    const permanent = verifier(() => {
+      permanentRequests += 1;
+      return Promise.resolve(new Response(null, { status: 400 }));
+    });
+    await expect(permanent.verify(signed, AUDIENCE)).rejects.toThrow(
+      "Google identity token was rejected",
+    );
+    expect(permanentRequests).toBe(1);
+  });
+
   it("rejects redirect, oversized, and cache-policy drift without exposing responses", async () => {
     const signed = await token(first);
     const responses = [

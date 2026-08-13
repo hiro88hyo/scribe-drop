@@ -14,6 +14,9 @@ const MAX_JWKS_CACHE_MS = 24 * 60 * 60 * 1000;
 const MAX_TOKEN_BYTES = 8 * 1024;
 const MAX_TOKEN_LIFETIME_MS = 60 * 60 * 1000;
 const UNKNOWN_KEY_REFRESH_COOLDOWN_MS = 30_000;
+const JWKS_FETCH_ATTEMPTS = 2;
+const JWKS_RETRY_BASE_MS = 50;
+const JWKS_RETRY_JITTER_MS = 50;
 
 const serviceAccountEmailSchema = z
   .string()
@@ -80,6 +83,14 @@ export interface GoogleIdentityVerifierConfiguration {
 export interface GoogleIdentityVerifierPorts {
   readonly clock: RuntimeClock;
   readonly fetch: typeof fetch;
+  readonly retryDelay?: (attempt: number) => Promise<void>;
+}
+
+async function defaultRetryDelay(attempt: number): Promise<void> {
+  const random = crypto.getRandomValues(new Uint8Array(1))[0] ?? 0;
+  const exponential = JWKS_RETRY_BASE_MS * 2 ** attempt;
+  const milliseconds = exponential + (random % (JWKS_RETRY_JITTER_MS + 1));
+  await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
@@ -238,21 +249,33 @@ export class GoogleOidcIdentityVerifier implements GoogleIdentityVerifier {
   }
 
   async #fetchKeys(): Promise<CachedGoogleJwks> {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => {
-      controller.abort();
-    }, this.#configuration.fetchTimeoutMs);
-    let response: Response;
-    try {
-      response = await this.#ports.fetch(GOOGLE_OAUTH_JWKS_URL, {
-        headers: { accept: "application/json" },
-        method: "GET",
-        redirect: "error",
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(timeout);
+    let response: Response | undefined;
+    for (let attempt = 0; attempt < JWKS_FETCH_ATTEMPTS; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => {
+        controller.abort();
+      }, this.#configuration.fetchTimeoutMs);
+      try {
+        response = await this.#ports.fetch(GOOGLE_OAUTH_JWKS_URL, {
+          headers: { accept: "application/json" },
+          method: "GET",
+          redirect: "error",
+          signal: controller.signal,
+        });
+      } catch {
+        response = undefined;
+      } finally {
+        clearTimeout(timeout);
+      }
+      const transientStatus =
+        response !== undefined && (response.status === 429 || response.status >= 500);
+      if (response !== undefined && !transientStatus) break;
+      await response?.body?.cancel();
+      if (attempt + 1 < JWKS_FETCH_ATTEMPTS) {
+        await (this.#ports.retryDelay ?? defaultRetryDelay)(attempt);
+      }
     }
+    if (response === undefined) throw new Error("Google JWKS response was rejected");
     if (response.status !== 200) throw new Error("Google JWKS response was rejected");
     const cacheLifetimeMs = parseMaxAge(response.headers.get("cache-control"));
     const parsed = googleJwksSchema.parse(await readBoundedJson(response));

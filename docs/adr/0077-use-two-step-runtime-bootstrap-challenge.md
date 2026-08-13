@@ -52,3 +52,6 @@ account ID tokenの`sub`は数値IDであるため、`sub == azp`と検証済み
 rotation key decoder、bounded Node process entrypointまでをlocal実装した。remote migration、named database/TTL policy、
 Secret Manager binding、controller container/hosting、cloud resource、CIは未接続であり、Decisionのstaging review条件は
 継続する。
+
+2026-08-13のPhase 14実stagingで、Cloud Run taskがcontrollerの最初のobserveより先に起動する正常な順序を確認した。
+このraceのlive attestation条件は[ADR 0081](./0081-attest-live-execution-before-controller-observe.md)で固定する。
