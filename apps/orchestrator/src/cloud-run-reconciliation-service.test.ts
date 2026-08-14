@@ -68,7 +68,7 @@ function logger(): StructuredLogger {
 }
 
 describe("Cloud Run reconciliation", () => {
-  it("replays one exact reconcile request and persists stale-version recovery", async () => {
+  it("replays one exact request and completes one stale-version recovery in the same sweep", async () => {
     const mutate = vi
       .fn<(request: CloudRunControllerRequest) => Promise<CloudRunControllerResponse>>()
       .mockRejectedValueOnce(new Error("lost"))
@@ -81,30 +81,147 @@ describe("Cloud Run reconciliation", () => {
           schemaVersion: 1,
           version: 5,
         }),
+      )
+      .mockImplementationOnce((request) =>
+        Promise.resolve({
+          errorCode: null,
+          executionHandle: request.executionHandle,
+          outcome: "cleaned",
+          requestId: request.requestId,
+          schemaVersion: 1,
+          version: 6,
+        }),
       );
-    const selectedRepository = repository(candidate);
+    const selectedRepository = repository({
+      ...candidate,
+      cleanupStatus: "PENDING",
+      executionStatus: "TERMINAL",
+      providerVersion: 3,
+      terminalStatus: "COMPLETED",
+    });
     const apply = vi.spyOn(selectedRepository, "applyControllerResponse");
+    let randomByte = 1;
     await expect(
       reconcileCloudRunJobs(environment(), logger(), {
         createController: () => ({ mutate }),
         createRepository: () => selectedRepository,
         now: () => NOW,
-        randomBytes: () => new Uint8Array(10).fill(1),
+        randomBytes: (length) => new Uint8Array(length).fill(randomByte++),
       }),
     ).resolves.toEqual({
-      appliedCount: 1,
+      appliedCount: 2,
       deferredCount: 0,
       dispatch: "none",
       failedMissingTerminalCount: 0,
     });
-    expect(mutate).toHaveBeenCalledTimes(2);
+    expect(mutate).toHaveBeenCalledTimes(3);
     expect(mutate.mock.calls[0]?.[0]).toEqual(mutate.mock.calls[1]?.[0]);
-    expect(apply).toHaveBeenCalledOnce();
-    expect(apply.mock.calls[0]?.[0].action).toBe("reconcile");
+    expect(mutate.mock.calls[2]?.[0]).toMatchObject({
+      action: "cleanup",
+      expectedVersion: 5,
+    });
+    expect(mutate.mock.calls[2]?.[0].requestId).not.toBe(mutate.mock.calls[0]?.[0].requestId);
+    expect(apply).toHaveBeenCalledTimes(2);
+    expect(apply.mock.calls[0]?.[0].action).toBe("cleanup");
     expect(apply.mock.calls[0]?.[0].response).toMatchObject({
       errorCode: "STALE_VERSION",
       version: 5,
     });
+    expect(apply.mock.calls[1]?.[0]).toMatchObject({
+      action: "cleanup",
+      candidate: {
+        executionVersion: candidate.executionVersion + 1,
+        providerVersion: 5,
+      },
+      response: { errorCode: null, outcome: "cleaned", version: 6 },
+    });
+  });
+
+  it("defers after one stale-version recovery when the controller version moves again", async () => {
+    const mutate = vi
+      .fn<(request: CloudRunControllerRequest) => Promise<CloudRunControllerResponse>>()
+      .mockImplementationOnce((request) =>
+        Promise.resolve({
+          errorCode: "STALE_VERSION",
+          executionHandle: request.executionHandle,
+          outcome: "rejected",
+          requestId: request.requestId,
+          schemaVersion: 1,
+          version: 5,
+        }),
+      )
+      .mockImplementationOnce((request) =>
+        Promise.resolve({
+          errorCode: "STALE_VERSION",
+          executionHandle: request.executionHandle,
+          outcome: "rejected",
+          requestId: request.requestId,
+          schemaVersion: 1,
+          version: 6,
+        }),
+      );
+    const selectedRepository = repository({
+      ...candidate,
+      cleanupStatus: "PENDING",
+      executionStatus: "TERMINAL",
+      terminalStatus: "COMPLETED",
+    });
+    const apply = vi.spyOn(selectedRepository, "applyControllerResponse");
+    let randomByte = 1;
+
+    await expect(
+      reconcileCloudRunJobs(environment(), logger(), {
+        createController: () => ({ mutate }),
+        createRepository: () => selectedRepository,
+        now: () => NOW,
+        randomBytes: (length) => new Uint8Array(length).fill(randomByte++),
+      }),
+    ).resolves.toEqual({
+      appliedCount: 2,
+      deferredCount: 1,
+      dispatch: "none",
+      failedMissingTerminalCount: 0,
+    });
+    expect(mutate).toHaveBeenCalledTimes(2);
+    expect(apply).toHaveBeenCalledTimes(2);
+    expect(mutate.mock.calls[1]?.[0]).toMatchObject({ expectedVersion: 5 });
+  });
+
+  it("does not issue a fresh request when the stale-version D1 CAS loses", async () => {
+    const mutate = vi
+      .fn<(request: CloudRunControllerRequest) => Promise<CloudRunControllerResponse>>()
+      .mockImplementation((request) =>
+        Promise.resolve({
+          errorCode: "STALE_VERSION",
+          executionHandle: request.executionHandle,
+          outcome: "rejected",
+          requestId: request.requestId,
+          schemaVersion: 1,
+          version: 5,
+        }),
+      );
+    const selectedRepository = repository({
+      ...candidate,
+      cleanupStatus: "PENDING",
+      executionStatus: "TERMINAL",
+      terminalStatus: "COMPLETED",
+    });
+    const apply = vi.spyOn(selectedRepository, "applyControllerResponse").mockResolvedValue(false);
+
+    await expect(
+      reconcileCloudRunJobs(environment(), logger(), {
+        createController: () => ({ mutate }),
+        createRepository: () => selectedRepository,
+        now: () => NOW,
+      }),
+    ).resolves.toEqual({
+      appliedCount: 0,
+      deferredCount: 1,
+      dispatch: "none",
+      failedMissingTerminalCount: 0,
+    });
+    expect(mutate).toHaveBeenCalledOnce();
+    expect(apply).toHaveBeenCalledOnce();
   });
 
   it("fails a provider-terminal job without a runtime terminal before cleanup", async () => {

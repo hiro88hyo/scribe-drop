@@ -62,6 +62,19 @@ execution handle、object key、image参照、credential、署名URL、音声内
   job、attempt、provider execution、runtime bootstrap/event、notificationの対象D1 rowは0となり、
   remote R2 bindingからexact source prefixとresult prefixを独立listしてobject 0を確認した。
 
+## Follow-up remediation
+
+実runのD1 provider version 6とcontroller version 8の差に対し、従来実装は最初の
+`STALE_VERSION`をD1へCAS適用するだけでsweepを終え、次の5分Cronまでcleanup本体を
+送らなかった。後続のlocal修正では、同じrequestのtransport replayを最大2回に保ったまま、
+stale-version CAS成功後だけ更新versionと新request IDで同じactionを最大1回再要求する。
+二度目のdriftまたはD1 CAS競合は次のCronへdeferする。unit testに加え、実D1 repositoryを
+使うWorkers integration testでversion 6 -> 8 -> cleanup 9への同一sweep収束を検証した。
+
+この修正は`0280e5b`より後のsource変更であるため、この文書のremote evidenceを修正版の
+staging acceptanceまたはproduction promotionへ流用しない。新しいbuild-once candidateで
+Phase 14 gateから再検証する。修正時点でCI、remote staging、GPU、productionは変更していない。
+
 ## 未完了条件
 
 成功系のartifact、利用者delete、費用境界は成立したが、deployed Cronだけでprovider cleanupを

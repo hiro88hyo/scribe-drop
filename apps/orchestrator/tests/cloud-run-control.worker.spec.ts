@@ -1,8 +1,11 @@
+import type { CloudRunControllerRequest, CloudRunControllerResponse } from "@scribe-drop/contracts";
+import { createStructuredLogger } from "@scribe-drop/observability";
 import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createD1CloudRunControlRepository } from "../src/cloud-run-control-repository.js";
+import { reconcileCloudRunJobs } from "../src/cloud-run-reconciliation-service.js";
 
 const NOW = "2026-08-13T00:00:00.000Z";
 const FINISHED = "2026-08-13T00:00:01.000Z";
@@ -349,6 +352,110 @@ describe("D1 Cloud Run control repository", () => {
       execution_status: "TERMINAL",
       job_status: "FAILED",
     });
+  });
+
+  it("persists stale-version recovery and cleanup in one reconciliation sweep", async () => {
+    const repository = createD1CloudRunControlRepository(env.SCRIBE_DROP_DB);
+    const submission = await repository.findSubmissionCandidate(JOB_ID);
+    if (submission === undefined) throw new Error("missing Cloud Run candidate");
+    await repository.prepareSubmission({
+      candidate: submission,
+      executionHandle: HANDLE,
+      timestamp: NOW,
+    });
+    await repository.recordCreateResponse({
+      attemptId: ATTEMPT_ID,
+      executionHandle: HANDLE,
+      jobId: JOB_ID,
+      response: {
+        errorCode: null,
+        executionHandle: HANDLE,
+        outcome: "pending",
+        requestId: ATTEMPT_ID,
+        schemaVersion: 1,
+        version: 3,
+      },
+      timestamp: FINISHED,
+    });
+    const creating = (await repository.findReconciliationCandidates(10))[0];
+    if (creating === undefined) throw new Error("missing reconciliation candidate");
+    await repository.applyControllerResponse({
+      action: "reconcile",
+      candidate: creating,
+      response: {
+        errorCode: "PROVIDER_PERMANENT",
+        executionHandle: HANDLE,
+        outcome: "failed",
+        requestId: ATTEMPT_ID,
+        schemaVersion: 1,
+        version: 6,
+      },
+      timestamp: TERMINAL,
+    });
+    const requests: CloudRunControllerRequest[] = [];
+    const mutate = vi
+      .fn<(request: CloudRunControllerRequest) => Promise<CloudRunControllerResponse>>()
+      .mockImplementation((request) => {
+        requests.push(request);
+        return Promise.resolve({
+          errorCode: requests.length === 1 ? "STALE_VERSION" : null,
+          executionHandle: request.executionHandle,
+          outcome: requests.length === 1 ? "rejected" : "cleaned",
+          requestId: request.requestId,
+          schemaVersion: 1,
+          version: requests.length === 1 ? 8 : 9,
+        });
+      });
+    const sweepTime = new Date("2026-08-13T00:00:05.000Z");
+    let randomByte = 1;
+
+    await expect(
+      reconcileCloudRunJobs(
+        {
+          APP_ENV: "staging",
+          CLOUDFLARE_ACCOUNT_ID: "a".repeat(32),
+          CLOUD_RUN_CONTROLLER_HMAC_PRIMARY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+          CLOUD_RUN_CONTROLLER_ORIGIN:
+            "https://scribe-drop-staging-gpu-controller-123456789012.asia-southeast1.run.app",
+          CLOUD_RUN_ORCHESTRATOR_ORIGIN: "https://orchestrator-staging.example.invalid",
+          CLOUD_RUN_RUNTIME_DERIVATION_SECRET: "CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg",
+          CLOUD_RUN_RUNTIME_MODE: "synthetic-shadow",
+          CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT: "gpu-runtime@scribe-drop.iam.gserviceaccount.com",
+          R2_ACCESS_KEY_ID: "r2-access-key-placeholder",
+          R2_BUCKET_NAME: "recording-transcriber-staging",
+          R2_SECRET_ACCESS_KEY: "0000000000000000",
+          SCRIBE_DROP_DB: env.SCRIBE_DROP_DB,
+        },
+        createStructuredLogger({
+          environment: "staging",
+          now: () => sweepTime,
+          service: "orchestrator",
+          sink: () => undefined,
+        }),
+        {
+          createController: () => ({ mutate }),
+          createRepository: () => repository,
+          now: () => sweepTime,
+          randomBytes: (length) => new Uint8Array(length).fill(randomByte++),
+        },
+      ),
+    ).resolves.toEqual({
+      appliedCount: 2,
+      deferredCount: 0,
+      dispatch: "none",
+      failedMissingTerminalCount: 0,
+    });
+    expect(requests).toEqual([
+      expect.objectContaining({ action: "cleanup", expectedVersion: 6 }),
+      expect.objectContaining({ action: "cleanup", expectedVersion: 8 }),
+    ]);
+    await expect(
+      env.SCRIBE_DROP_DB.prepare(
+        `SELECT cleanup_status, provider_version FROM provider_executions WHERE attempt_id = ?1`,
+      )
+        .bind(ATTEMPT_ID)
+        .first(),
+    ).resolves.toEqual({ cleanup_status: "SUCCEEDED", provider_version: 9 });
   });
 
   it("marks an unsubmitted cancelled Cloud Run attempt as already cleaned", async () => {

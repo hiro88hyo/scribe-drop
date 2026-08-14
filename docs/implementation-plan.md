@@ -1618,6 +1618,18 @@ Remote acceptance status (2026-08-14):
   exact source/result prefix listingもobject 0だった。provider cleanup自体はdeployed Cronだけで収束した証拠がなく、残りの
   failure/cancel acceptanceも未完了である。このrunだけでPhase 15完了またはproduction promotion可とは判定しない。
 
+Local follow-up status (2026-08-14):
+
+- 実runではD1のprovider version 6に対してcontrollerがversion 8まで進んでいた。従来のscheduled reconciliationは最初の
+  `STALE_VERSION` responseをD1へCAS適用した時点で終了し、次の5分Cronまで本来のcleanup requestを送らないため、cleanupの
+  自動収束確認を一巡余分に遅らせていた。
+- exact requestのtransport replayは同一request ID/bodyで最大2回のまま維持し、`STALE_VERSION`のD1 CAS成功後だけ、更新後の
+  versionと新request IDで同じactionを同一sweep内に最大1回再要求するよう修正した。二度目のversion driftまたはD1 CAS競合は
+  次のCronへdeferする。unit testと実D1 repositoryを使うWorkers integration testで、version 6 -> 8 -> cleanup 9、bounded
+  retry、CAS競合を検証した。
+- このsource変更により`0280e5b`のstaging evidenceは次candidateのpromotionには使用できない。CI、remote staging、GPU、
+  productionは変更しておらず、新commitからbuild-once candidateを作成してPhase 14 gateとPhase 15 acceptanceをやり直す。
+
 実装:
 
 - Phase 14のexact candidateを再利用し、provider switchをstagingだけで有効化する。release修正が

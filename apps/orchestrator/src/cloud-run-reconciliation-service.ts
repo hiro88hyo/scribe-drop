@@ -29,6 +29,7 @@ import {
 import type { SubmissionDispatchResult } from "./runpod-submission-service.js";
 
 const BATCH_SIZE = 25;
+const MAX_STALE_VERSION_RECOVERIES = 1;
 const REQUEST_LIFETIME_MS = 30_000;
 export const MISSING_RUNTIME_TERMINAL_GRACE_MS = 5 * 60 * 1_000;
 
@@ -168,43 +169,70 @@ export async function reconcileCloudRunJobs(
       deferredCount += failed ? 0 : 1;
       continue;
     }
-    const selectedAction = action(candidate);
-    const issuedAt = now();
-    const request = cloudRunControllerRequestSchema.parse({
-      action: selectedAction,
-      environment: config?.appEnvironment,
-      executionHandle: candidate.providerHandle,
-      expectedVersion: candidate.providerVersion,
-      expiresAt: new Date(
-        issuedAt.getTime() +
-          Math.min(REQUEST_LIFETIME_MS, CLOUD_RUN_CONTROLLER_MAX_REQUEST_LIFETIME_MS),
-      ).toISOString(),
-      issuedAt: issuedAt.toISOString(),
-      policyId: CLOUD_RUN_RUNTIME_POLICY,
-      requestId: createUlid(issuedAt.getTime(), bytes),
-      schemaVersion: 1,
-    });
-    let response: CloudRunControllerResponse | undefined;
-    for (let requestAttempt = 0; requestAttempt < 2; requestAttempt += 1) {
-      try {
-        response = await selectedController?.mutate(request);
-        break;
-      } catch {
-        // Replay only the exact bounded request; a later Cron uses STALE_VERSION recovery.
+    let currentCandidate = candidate;
+    for (
+      let staleVersionRecovery = 0;
+      staleVersionRecovery <= MAX_STALE_VERSION_RECOVERIES;
+      staleVersionRecovery += 1
+    ) {
+      const selectedAction = action(currentCandidate);
+      const issuedAt = now();
+      const request = cloudRunControllerRequestSchema.parse({
+        action: selectedAction,
+        environment: config?.appEnvironment,
+        executionHandle: currentCandidate.providerHandle,
+        expectedVersion: currentCandidate.providerVersion,
+        expiresAt: new Date(
+          issuedAt.getTime() +
+            Math.min(REQUEST_LIFETIME_MS, CLOUD_RUN_CONTROLLER_MAX_REQUEST_LIFETIME_MS),
+        ).toISOString(),
+        issuedAt: issuedAt.toISOString(),
+        policyId: CLOUD_RUN_RUNTIME_POLICY,
+        requestId: createUlid(issuedAt.getTime(), bytes),
+        schemaVersion: 1,
+      });
+      let response: CloudRunControllerResponse | undefined;
+      for (let requestAttempt = 0; requestAttempt < 2; requestAttempt += 1) {
+        try {
+          response = await selectedController?.mutate(request);
+          break;
+        } catch {
+          // Replay only the exact bounded request so an unknown effect cannot be duplicated.
+        }
       }
+      if (response === undefined) {
+        deferredCount += 1;
+        break;
+      }
+      const responseTimestamp = now().toISOString();
+      const applied = await repository.applyControllerResponse({
+        action: selectedAction,
+        candidate: currentCandidate,
+        response,
+        timestamp: responseTimestamp,
+      });
+      if (!applied) {
+        deferredCount += 1;
+        break;
+      }
+      appliedCount += 1;
+      const staleVersionResponse =
+        response.outcome === "rejected" && response.errorCode === "STALE_VERSION";
+      if (!staleVersionResponse) break;
+      if (
+        response.version === currentCandidate.providerVersion ||
+        staleVersionRecovery === MAX_STALE_VERSION_RECOVERIES
+      ) {
+        deferredCount += 1;
+        break;
+      }
+      currentCandidate = {
+        ...currentCandidate,
+        executionUpdatedAt: responseTimestamp,
+        executionVersion: currentCandidate.executionVersion + 1,
+        providerVersion: response.version,
+      };
     }
-    if (response === undefined) {
-      deferredCount += 1;
-      continue;
-    }
-    const applied = await repository.applyControllerResponse({
-      action: selectedAction,
-      candidate,
-      response,
-      timestamp: now().toISOString(),
-    });
-    appliedCount += applied ? 1 : 0;
-    deferredCount += applied ? 0 : 1;
   }
   const pendingJobId = await repository.findDispatchablePendingJobId();
   let dispatch: SubmissionDispatchResult | "none" = "none";
