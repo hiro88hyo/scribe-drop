@@ -154,6 +154,45 @@ describe("Cloud Run controller Orchestrator client", () => {
     ]);
   });
 
+  it("returns a bounded structured mutation rejection for stale-version recovery", async () => {
+    const providerFetch: typeof fetch = async (input, init) => {
+      const requestUrl = url(input);
+      const request = cloudRunControllerRequestSchema.parse(body(init));
+      await expectSignature(requestUrl, init, request);
+      return Response.json(
+        {
+          errorCode: "STALE_VERSION",
+          executionHandle: request.executionHandle,
+          outcome: "rejected",
+          requestId: request.requestId,
+          schemaVersion: 1,
+          version: 8,
+        },
+        { status: 409 },
+      );
+    };
+    const request = cloudRunControllerRequestSchema.parse({
+      action: "cleanup",
+      environment: "staging",
+      executionHandle: HANDLE,
+      expectedVersion: 6,
+      expiresAt: new Date(NOW.getTime() + 30_000).toISOString(),
+      issuedAt: NOW.toISOString(),
+      policyId: "cloud_run_jobs_l4_v1",
+      requestId: IDS[0],
+      schemaVersion: 1,
+    });
+
+    await expect(client(providerFetch).mutate(request)).resolves.toEqual({
+      errorCode: "STALE_VERSION",
+      executionHandle: HANDLE,
+      outcome: "rejected",
+      requestId: IDS[0],
+      schemaVersion: 1,
+      version: 8,
+    });
+  });
+
   it("does not retry an unknown cleanup mutation outcome", async () => {
     let calls = 0;
     const providerFetch: typeof fetch = (input, init) => {

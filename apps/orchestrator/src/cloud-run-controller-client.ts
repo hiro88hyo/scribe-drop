@@ -310,7 +310,11 @@ export class CloudRunControllerClient
     } finally {
       clearTimeout(timeout);
     }
-    if (response.status !== 200) throw new Error("Cloud Run controller request failed");
+    const structuredMutationRejection =
+      path === CLOUD_RUN_CONTROLLER_MUTATION_PATH && response.status === 409;
+    if (response.status !== 200 && !structuredMutationRejection) {
+      throw new Error("Cloud Run controller request failed");
+    }
     return readBoundedJson(response);
   }
 }
