@@ -65,10 +65,11 @@ pnpm container:scan:cloud-run
 
 staging GPU executionの直前には、同じcandidate imageとruntime service accountをGPUなしJobで
 `python -m scribe_drop_worker.cloud_run_staging_bootstrap_preflight`として起動する。preflightは
-実metadata identity tokenを使ってbootstrapし、D1 active contextとGoogle OIDCを通過した後の
-controller `RESOURCE_DRIFT`だけを成功markerとして受ける。Cloudflare edgeの403/non-JSON、
-`AUTHENTICATION_FAILED`、`EXECUTION_NOT_FOUND`、成功challengeはすべて失敗とし、CUDA discovery、
-capability発行、source download、model loadは行わない。stagingのexact 5 runtime POSTだけに
+実metadata identity tokenとD1に存在しないfresh execution handleを使ってbootstrapする。runtime serviceは
+Google OIDCをcontext lookupより先に検証し、認証後のapplication `EXECUTION_NOT_FOUND` JSONだけを
+成功markerとして受ける。Cloudflare edgeの403/non-JSON、`AUTHENTICATION_FAILED`、`RESOURCE_DRIFT`、
+成功challengeはすべて失敗とする。この順序により未認証requestへexecutionの存在有無を露出しない。
+preflightはCUDA discovery、capability発行、source download、model loadを行わない。stagingのexact 5 runtime POSTだけに
 [ADR 0082](./adr/0082-skip-browser-integrity-check-for-cloud-run-runtime.md)のBIC skipがstrict
 read-backされていなければ、このpreflightもGPU実行も開始しない。
 
@@ -100,6 +101,11 @@ redirect拒否を固定した。しかし修正candidateのexact-one GPU-free pr
 receiver-sensitive testを両clientへ追加し、controller側に残っていた`redirect: "error"`もmanualへ統一する。
 candidate `cdfc394`のGPU-free preflightはGoogle OIDC後のcontroller `RESOURCE_DRIFT`まで到達し、このreceiver欠陥が
 残存root causeだったことをremoteで確認した。
+
+このhistorical preflightは既存D1 contextに依存していたため、fresh candidateの再現可能な実行前gateには使用しない。
+以後はD1に存在しないhandleを使い、Google OIDC検証後の`EXECUTION_NOT_FOUND`だけを成功とする。runtime serviceは
+identity verificationをcontext lookupより先に行い、無効なidentityにはhandleの存在有無にかかわらず
+`AUTHENTICATION_FAILED`を返す回帰testで順序を固定する。
 
 またCloud Run taskはcontroller observeより先に起動するため、[ADR 0081](./adr/0081-attest-live-execution-before-controller-observe.md)に
 従い、durable run intent、stored Job UID、exact 1 live Execution、fixed manifestを満たす`EXECUTION_PENDING`だけをread-only

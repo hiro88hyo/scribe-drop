@@ -75,6 +75,29 @@ stale-version CAS成功後だけ更新versionと新request IDで同じactionを�
 staging acceptanceまたはproduction promotionへ流用しない。新しいbuild-once candidateで
 Phase 14 gateから再検証する。修正時点でCI、remote staging、GPU、productionは変更していない。
 
+## Second candidateのGPU-free preflight remediation
+
+follow-up source `3ea5d21`についてrelease candidate workflow `31773131482`とCloud Run image
+workflow `31773131847`を一度だけ成功させ、両imageのKMS attestation/Binary Authorization、
+controller Service、Workerのexact shadow bundleをstrict read-backした。production resourceとCI
+workflowは変更していない。
+
+同candidate imageとruntime service accountを使い、D1に存在しないfresh execution handleでGPU-free
+preflightを1回実行した。JobはGPU 0、CPU 1、512 MiB、task/parallelism 1、retry 0、timeout 60秒で、
+GPU、D1 fixture、R2 objectを使用せず固定failure markerで終了した。Job/Executionは直後に0へ戻し、
+controller authorizationは0、Orchestratorのuser execution policyはRunPodのまま維持した。
+
+原因はruntime serviceの処理順序だった。Google OIDCより先にD1 contextをlookupしていたため、fresh
+handleは認証検証へ進まず`EXECUTION_NOT_FOUND`となる一方、preflightは既存contextを前提とする
+`RESOURCE_DRIFT`だけを成功とした。過去のpreflight成功は既存contextに依存しており、新candidateの
+再現可能なgate evidenceには使わない。identity verificationをcontext lookupより先へ移し、認証済みの
+fresh handleに対する404 JSON `EXECUTION_NOT_FOUND`だけを成功markerに変更した。無効identityでは
+同じhandleでも`AUTHENTICATION_FAILED`となりexecutionの存在有無を露出しない回帰testを追加した。
+
+このsource変更により`3ea5d21`のpublication/dark-deployment evidenceはpromotionへ使用しない。全local
+gateを通した新commitからbuild-once candidateを作成し、GPU-free preflightが成功してからのみ承認済み
+exact-one GPU gateへ進む。
+
 ## 未完了条件
 
 成功系のartifact、利用者delete、費用境界は成立したが、deployed Cronだけでprovider cleanupを

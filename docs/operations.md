@@ -322,6 +322,10 @@ timeoutでは「10分ちょうどでprovider queueから消える」と扱わな
   requestのtransport replayはexact bodyで最大2回とし、二度目のversion driftまたはCAS競合は次のCronへdeferする。この変更後は
   新candidateでPhase 14 gateからやり直す。現在はprovider switch RunPod、Cloud Run Job/Execution 0、fixture D1/R2 0、controller
   authorization 0である。D1 eventのsequenceやrevokeを直接更新せず、repository経由のexact replayだけを使う。
+- staging GPU実行前のbootstrap preflightにはD1に存在しないfresh execution handleを使う。runtime serviceはGoogle OIDCを
+  context lookupより先に検証し、preflightは認証後の404 JSON `EXECUTION_NOT_FOUND`だけを成功とする。edge 403/non-JSON、
+  `AUTHENTICATION_FAILED`、`RESOURCE_DRIFT`、success challengeはすべて失敗である。過去の既存contextに依存した
+  `RESOURCE_DRIFT` preflight evidenceを新candidateへ流用しない。
 - Phase 14 staging release foundationのArtifact Registry、WIF、service account、KMS key、Artifact Analysis Note、Binary
   Authorization attestor/policyは作成済みである。KMS active key versionの保持費を監視し、candidate監査とproduction昇格が
   終わる前に削除しない。publisher/signerへuser-managed keyを作らず、candidate workflow外からimage pushまたはOccurrenceを

@@ -32,15 +32,15 @@ from .url_policy import UrlPolicy, UrlPurpose
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-PREFLIGHT_OK: Final = "cloud-run-staging-bootstrap-preflight:ok:RESOURCE_DRIFT\n"
+PREFLIGHT_OK: Final = "cloud-run-staging-bootstrap-preflight:ok:EXECUTION_NOT_FOUND\n"
 PREFLIGHT_FAILED: Final = "cloud-run-staging-bootstrap-preflight:failed\n"
-HTTP_FORBIDDEN: Final = 403
+HTTP_NOT_FOUND: Final = 404
 
 
 class _RuntimeErrorBody(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    code: Literal["RESOURCE_DRIFT"]
+    code: Literal["EXECUTION_NOT_FOUND"]
     message: Literal["Runtime request was rejected."]
 
 
@@ -125,7 +125,7 @@ def _read_bounded(response: httpx.Response, limit: int) -> bytes:
 
 
 def _validate_response(response: httpx.Response) -> None:
-    if response.status_code != HTTP_FORBIDDEN or not response.headers.get(
+    if response.status_code != HTTP_NOT_FOUND or not response.headers.get(
         "content-type", ""
     ).lower().startswith("application/json"):
         message = "staging bootstrap preflight response rejected"

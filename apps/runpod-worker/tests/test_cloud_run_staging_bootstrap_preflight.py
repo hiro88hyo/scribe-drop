@@ -72,11 +72,11 @@ def _run(status: int, body: bytes, content_type: str = "application/json") -> No
     )
 
 
-def test_accepts_only_application_resource_drift_after_identity_verification() -> None:
-    """Accept only the post-identity controller attestation boundary."""
+def test_accepts_only_authenticated_missing_execution_context() -> None:
+    """Accept only the missing-context response reached after valid Google identity."""
     _run(
-        403,
-        b'{"error":{"code":"RESOURCE_DRIFT","message":"Runtime request was rejected."}}',
+        404,
+        b'{"error":{"code":"EXECUTION_NOT_FOUND","message":"Runtime request was rejected."}}',
     )
 
 
@@ -84,6 +84,11 @@ def test_accepts_only_application_resource_drift_after_identity_verification() -
     ("status", "body", "content_type"),
     [
         (403, b"error code: 1010\n", "text/plain"),
+        (
+            403,
+            b'{"error":{"code":"RESOURCE_DRIFT","message":"Runtime request was rejected."}}',
+            "application/json",
+        ),
         (
             403,
             b'{"error":{"code":"AUTHENTICATION_FAILED","message":"Runtime request was rejected."}}',
@@ -129,8 +134,8 @@ def test_process_boundary_emits_only_fixed_markers(
     monkeypatch.setattr(
         "scribe_drop_worker.cloud_run_staging_bootstrap_preflight._create_transport",
         lambda _settings: _transport(
-            403,
-            b'{"error":{"code":"RESOURCE_DRIFT","message":"Runtime request was rejected."}}',
+            404,
+            b'{"error":{"code":"EXECUTION_NOT_FOUND","message":"Runtime request was rejected."}}',
             "application/json",
         ),
     )

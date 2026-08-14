@@ -1629,6 +1629,14 @@ Local follow-up status (2026-08-14):
   retry、CAS競合を検証した。
 - このsource変更により`0280e5b`のstaging evidenceは次candidateのpromotionには使用できない。CI、remote staging、GPU、
   productionは変更しておらず、新commitからbuild-once candidateを作成してPhase 14 gateとPhase 15 acceptanceをやり直す。
+- follow-up source `3ea5d21`のrelease candidate workflow `31773131482`とCloud Run image workflow `31773131847`は成功し、
+  両imageのKMS attestation/Binary Authorization、controller Service、Worker shadow bundleをstrict read-backした。
+  GPU 0、CPU 1、512 MiB、retry 0のfresh bootstrap preflightはGPU、D1 fixture、R2 objectを使わず固定failure markerで終了し、
+  Job/Executionを0へcleanupした。controller authorizationは0、provider policyはRunPod、productionとCI workflowは未変更である。
+- 原因はruntime serviceがGoogle OIDCより先にD1 contextをlookupし、不存在handleへ`EXECUTION_NOT_FOUND`を返す一方、preflightが
+  既存context前提の`RESOURCE_DRIFT`だけを成功としていた順序不整合だった。identity verificationをcontext lookupより先へ移し、
+  fresh handleでは認証後の404 `EXECUTION_NOT_FOUND`だけを成功markerとする。無効identityにはhandleの存在有無を露出せず
+  `AUTHENTICATION_FAILED`を返す回帰testを追加した。このsource変更により`3ea5d21` evidenceは失効し、新candidateが必要である。
 
 実装:
 

@@ -20,7 +20,7 @@ ONE_SHOT_CONTAINER_CHECK_OK: Final = "cloud-run-one-shot-container-check:ok\n"
 EXPECTED_UID: Final = 10001
 EXPECTED_PUBLIC_KEY_LENGTH: Final = 43
 EXPECTED_SIGNATURE_LENGTH: Final = 86
-EXPECTED_PREFLIGHT_MARKER: Final = "cloud-run-staging-bootstrap-preflight:ok:RESOURCE_DRIFT\n"
+EXPECTED_PREFLIGHT_MARKER: Final = "cloud-run-staging-bootstrap-preflight:ok:EXECUTION_NOT_FOUND\n"
 
 
 def _environment() -> dict[str, str]:

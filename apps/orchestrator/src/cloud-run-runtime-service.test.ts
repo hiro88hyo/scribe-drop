@@ -334,6 +334,28 @@ describe("CloudRunRuntimeService", () => {
     });
   });
 
+  it("verifies identity before revealing a missing execution context", async () => {
+    const keys = await keyPair();
+    const store = new InMemoryCloudRunRuntimeStore([]);
+    const rejected = new CloudRunRuntimeService(
+      configuration,
+      createPorts({
+        identityVerifier: {
+          verify: () => Promise.reject(new Error("untrusted verifier detail")),
+        },
+        store,
+      }),
+    );
+    await expect(rejected.bootstrap(bootstrapRequest(keys.publicKey))).rejects.toMatchObject({
+      code: "AUTHENTICATION_FAILED",
+    });
+
+    const verified = new CloudRunRuntimeService(configuration, createPorts({ store }));
+    await expect(verified.bootstrap(bootstrapRequest(keys.publicKey))).rejects.toMatchObject({
+      code: "EXECUTION_NOT_FOUND",
+    });
+  });
+
   it("rejects controller manifest drift and stale session sequence", async () => {
     const keys = await keyPair();
     const drifted = new CloudRunRuntimeService(

@@ -379,8 +379,9 @@ blockをroot causeと確定した。
 [ADR 0082](./adr/0082-skip-browser-integrity-check-for-cloud-run-runtime.md)に従い、zone全体ではなく
 staging host、queryなしPOST、5 exact runtime pathだけでproduct `bic`をskipする。ruleはloggingを
 維持し、managed WAF、rate limit、Security Levelなどをskipしない。GPU execution前には同じcandidate
-image/runtime service accountのGPUなしpreflightで、D1 context/Google OIDC後のcontroller
-`RESOURCE_DRIFT` JSONまで到達することを必須にする。edge 403/non-JSONの間はGPUを起動しない。
+image/runtime service accountとD1に存在しないfresh execution handleのGPUなしpreflightで、Google OIDC後の
+controller `EXECUTION_NOT_FOUND` JSONまで到達することを必須にする。runtime serviceはidentityをcontext lookupより
+先に検証し、edge 403/non-JSON、`AUTHENTICATION_FAILED`、`RESOURCE_DRIFT`の間はGPUを起動しない。
 
 失敗後はCloud Run Job/Execution、Firestore controller document、D1 exact target、R2 fixture/result/
 manifestを0/不存在へ戻し、shadow routeとcontroller authorizationをdisabled/0へ戻した。production、
@@ -473,3 +474,19 @@ Job/Execution 0へ収束した。D1今回target 5系統0、R2 fixture/artifact/m
 Worker `disabled`/route 404、controller/Firestore authorization 0、active/reserved execution/JPY 0を独立read-backした。
 source defaultは`disabled`のままで、production resource、product routing、CI workflowは変更していない。Phase 15はこの
 exact candidateを再buildせずformal staging acceptanceへ進める。
+
+## Fresh bootstrap preflight remediation
+
+Phase 15 follow-up candidate `3ea5d21`ではrelease candidate workflow `31773131482`とCloud Run image workflow
+`31773131847`が成功し、KMS attestation、Binary Authorization、controller Service、Worker shadow bundleをstrict
+read-backした。GPU、D1 fixture、R2 objectを使わず、GPU 0、CPU 1、512 MiB、retry 0のfresh bootstrap preflightを
+1回実行したところ、固定failure markerで終了した。Job/Executionは直後に0へ戻し、controller authorizationは0、
+provider policyはRunPodのまま維持した。
+
+原因はruntime serviceがD1 context lookupをGoogle OIDC検証より先に行い、fresh handleへ
+`EXECUTION_NOT_FOUND`を返していた一方、preflightが既存contextを前提とする`RESOURCE_DRIFT`だけを成功としていた
+順序不整合である。過去の`cdfc394`成功は既存contextに依存しており、fresh candidateの再現可能なgate evidenceとして
+流用しない。identity verificationをcontext lookupより先へ移し、有効なidentityと不存在handleに限りapplication
+`EXECUTION_NOT_FOUND`を返す。無効なidentityは同じ不存在handleでも`AUTHENTICATION_FAILED`となることを回帰testで固定し、
+preflightは404 JSONのexact code/messageだけを受理する。このsource変更により`3ea5d21`のcandidate evidenceは失効し、
+新commitからbuild-once candidateを作成する。production resourceとCI workflowは変更していない。
