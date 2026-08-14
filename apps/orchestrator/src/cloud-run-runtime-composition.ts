@@ -19,6 +19,12 @@ import {
 } from "./config.js";
 import { GoogleOidcIdentityVerifier } from "./google-identity-verifier.js";
 import { createR2CapabilityIssuer } from "./r2-capability-issuer.js";
+import type { CloudRunRuntimeHttpService } from "./cloud-run-runtime-http.js";
+import {
+  createD1RuntimeFaultTargetRepository,
+  createStagingAcceptanceRuntimeService,
+} from "./cloud-run-runtime-fault-service.js";
+import { parseStagingAcceptanceFault } from "./staging-acceptance-fault.js";
 
 const CHALLENGE_LIFETIME_MS = 5 * 60 * 1_000;
 const CLOCK_SKEW_MS = 30_000;
@@ -43,7 +49,8 @@ function requireSecret(value: string): Uint8Array {
 
 export function createCloudRunRuntimeService(
   environment: CloudRunRuntimeCompositionEnvironment,
-): CloudRunRuntimeService | undefined {
+): CloudRunRuntimeHttpService | undefined {
+  const acceptanceFault = parseStagingAcceptanceFault(environment);
   const config = parseCloudRunRuntimeServiceConfig(environment);
   if (config === undefined) return undefined;
 
@@ -79,7 +86,7 @@ export function createCloudRunRuntimeService(
     }),
   );
 
-  return new CloudRunRuntimeService(
+  const service = new CloudRunRuntimeService(
     {
       challengeLifetimeMs: CHALLENGE_LIFETIME_MS,
       clockSkewMs: CLOCK_SKEW_MS,
@@ -121,5 +128,11 @@ export function createCloudRunRuntimeService(
       signatures: new WebCryptoEd25519Verifier(),
       store: new D1CloudRunRuntimeStore(environment.SCRIBE_DROP_DB, config.appEnvironment),
     },
+  );
+  return createStagingAcceptanceRuntimeService(
+    service,
+    acceptanceFault,
+    createD1RuntimeFaultTargetRepository(environment.SCRIBE_DROP_DB),
+    clock,
   );
 }

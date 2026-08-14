@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
+import { validateStagingAcceptanceFaultIdentifiers } from "./cloudflare-environment-config.mjs";
 import { validateRunpodPlan } from "./runpod-environment-config.mjs";
 
 function countOccurrences(value, needle) {
@@ -486,6 +487,42 @@ export async function runCloudflareReadback(input) {
       text: process.env.SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT,
       type: "plain_text",
     });
+  }
+  const acceptanceFaultIdentifiers = {
+    acceptanceFault: process.env.SCRIBE_DROP_STAGING_ACCEPTANCE_FAULT,
+    acceptanceFaultExpiresAt: process.env.SCRIBE_DROP_STAGING_ACCEPTANCE_FAULT_EXPIRES_AT,
+    acceptanceFaultIssuedAt: process.env.SCRIBE_DROP_STAGING_ACCEPTANCE_FAULT_ISSUED_AT,
+    acceptanceFaultJobId: process.env.SCRIBE_DROP_STAGING_ACCEPTANCE_FAULT_JOB_ID,
+  };
+  if (
+    input.environment === "production" &&
+    Object.values(acceptanceFaultIdentifiers).some((value) => value !== undefined)
+  ) {
+    throw new Error("Staging acceptance fault configuration is forbidden in production");
+  }
+  if (input.environment === "staging") {
+    const acceptanceFault = validateStagingAcceptanceFaultIdentifiers(
+      acceptanceFaultIdentifiers,
+      cloudRunMode,
+    );
+    if (acceptanceFault !== undefined) {
+      expectedBindings.set("STAGING_ACCEPTANCE_FAULT", {
+        text: acceptanceFault.fault,
+        type: "plain_text",
+      });
+      expectedBindings.set("STAGING_ACCEPTANCE_FAULT_EXPIRES_AT", {
+        text: acceptanceFault.expiresAt,
+        type: "plain_text",
+      });
+      expectedBindings.set("STAGING_ACCEPTANCE_FAULT_ISSUED_AT", {
+        text: acceptanceFault.issuedAt,
+        type: "plain_text",
+      });
+      expectedBindings.set("STAGING_ACCEPTANCE_FAULT_JOB_ID", {
+        text: acceptanceFault.jobId,
+        type: "plain_text",
+      });
+    }
   }
   verifyCloudflareReadback(outputs, {
     bucketName,

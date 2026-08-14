@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createCloudRunRuntimeService } from "../src/cloud-run-runtime-composition.js";
+import { createD1RuntimeFaultTargetRepository } from "../src/cloud-run-runtime-fault-service.js";
 import { D1CloudRunRuntimeStore } from "../src/cloud-run-runtime-d1-store.js";
 import { CloudRunTerminalFinalizer } from "../src/cloud-run-terminal-finalizer.js";
 import { createD1NotificationOutboxRepository } from "../src/notification-outbox-repository.js";
@@ -136,6 +137,28 @@ describe("Cloud Run runtime composition", () => {
     expect(
       createCloudRunRuntimeService({ ...env, ...configuration, APP_ENV: "production" }),
     ).toBeUndefined();
+  });
+
+  it("rejects a staging acceptance fault lease in production composition", () => {
+    expect(() =>
+      createCloudRunRuntimeService({
+        ...env,
+        ...configuration,
+        APP_ENV: "production",
+        STAGING_ACCEPTANCE_FAULT: "worker_disconnect_after_claim",
+        STAGING_ACCEPTANCE_FAULT_EXPIRES_AT: "2026-08-11T00:30:00.000Z",
+        STAGING_ACCEPTANCE_FAULT_ISSUED_AT: "2026-08-11T00:00:00.000Z",
+        STAGING_ACCEPTANCE_FAULT_JOB_ID: JOB_ID,
+      }),
+    ).toThrow("Staging acceptance fault configuration is invalid");
+  });
+});
+
+describe("Cloud Run staging acceptance fault target", () => {
+  it("resolves only the active Cloud Run attempt from the real D1 schema", async () => {
+    const repository = createD1RuntimeFaultTargetRepository(env.SCRIBE_DROP_DB);
+    await expect(repository.findJobId(HANDLE)).resolves.toBe(JOB_ID);
+    await expect(repository.findJobId("z".repeat(43))).resolves.toBeUndefined();
   });
 });
 

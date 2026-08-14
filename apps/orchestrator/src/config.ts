@@ -1,6 +1,8 @@
 import { DEPLOYMENT_ENVIRONMENTS, type DeploymentEnvironment } from "@scribe-drop/observability";
 import { z } from "zod";
 
+import type { StagingAcceptanceFaultEnvironment } from "./staging-acceptance-fault.js";
+
 const orchestratorConfigSchema = z
   .object({
     appEnvironment: z.enum(DEPLOYMENT_ENVIRONMENTS),
@@ -259,7 +261,7 @@ export interface RunpodConfigEnvironment extends OrchestratorConfigEnvironment {
   readonly RUNPOD_WORKER_IMAGE: string;
 }
 
-export interface NotificationConfigEnvironment {
+export interface NotificationConfigEnvironment extends StagingAcceptanceFaultEnvironment {
   readonly APP_ENV: string;
   readonly DISCORD_WEBHOOK_URL?: string;
   readonly WEB_BASE_URL?: string;
@@ -277,7 +279,8 @@ export interface CloudRunRuntimeShadowConfigEnvironment {
   readonly CLOUD_RUN_RUNTIME_MODE?: string;
 }
 
-export interface CloudRunRuntimeServiceConfigEnvironment extends CloudRunRuntimeShadowConfigEnvironment {
+export interface CloudRunRuntimeServiceConfigEnvironment
+  extends CloudRunRuntimeShadowConfigEnvironment, StagingAcceptanceFaultEnvironment {
   readonly CLOUDFLARE_ACCOUNT_ID: string;
   readonly CLOUD_RUN_CONTROLLER_HMAC_PRIMARY?: string;
   readonly CLOUD_RUN_CONTROLLER_ORIGIN?: string;

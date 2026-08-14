@@ -12,8 +12,10 @@ Miniflare D1/R2、型付きfake transportを使って障害と回復を再現す
 自動検査する。Python Workerもstable error codeだけを検査し、URL queryと本文fixtureを
 stdout、例外、RunPod outputへ残さない。
 
-fault harnessはtest専用であり、本番codeからimportしない。本番environmentに障害注入用の
-変数、endpoint、分岐を追加しない。
+Phase 6のfault harnessはtest専用であり、本番codeからimportしない。本番environmentに障害注入用の
+変数、endpoint、分岐を追加しない。Phase 15の同一artifactによる実service acceptanceに限る例外は
+[ADR 0084](./adr/0084-bound-staging-fault-acceptance-by-job-and-time.md)を正とし、productionで有効化できない
+最大30分・単一job・固定3 scenarioのleaseへ限定する。Phase 6の汎用fault planをruntimeへ持ち込まない。
 
 ## 必須scenarioと証明
 

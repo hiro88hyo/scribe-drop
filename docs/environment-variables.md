@@ -230,6 +230,20 @@ secretをencrypted secretとして登録する。
 provider selectionは変更しない。productionは`runpod_serverless_v1`以外を設定生成とread-backの両方で拒否する。
 modeまたは必須設定が欠ける場合はruntime serviceを生成せず、shadow routeを404/503へ閉じる。
 
+Phase 15の実service fault acceptance時だけ、[ADR 0084](./adr/0084-bound-staging-fault-acceptance-by-job-and-time.md)
+に従う次の非secret 4変数を、追跡外のstaging deployment configへ一時的に全件設定できる。
+
+| Variable                              | 制約                                               |
+| ------------------------------------- | -------------------------------------------------- |
+| `STAGING_ACCEPTANCE_FAULT`            | 固定allowlist 3件のいずれか                        |
+| `STAGING_ACCEPTANCE_FAULT_JOB_ID`     | upload-complete前に確定した単一jobのuppercase ULID |
+| `STAGING_ACCEPTANCE_FAULT_ISSUED_AT`  | UTC ISO 8601のlease開始                            |
+| `STAGING_ACCEPTANCE_FAULT_EXPIRES_AT` | 開始より後、かつ開始から最大30分のUTC ISO 8601     |
+
+4件がすべて未設定ならdisabledである。部分設定、staging以外、30分超過は起動境界で拒否する。
+GitHub Environment、追跡対象Wrangler設定、productionへ保存せず、各scenario後に同じcandidate bundleから4件を
+除去してactive configをread-backする。
+
 Phase 5では`WEB_BASE_URL`をuserinfo、query、fragmentのない単一originに限定する。
 stagingとproductionはHTTPSを必須とし、stagingでは`SCRIBE_DROP_STAGING_WEB_ORIGIN`から
 追跡外Wrangler設定へ生成する。`APP_ENV=local`だけはローカル開発用の

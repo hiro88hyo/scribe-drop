@@ -126,6 +126,37 @@ database_id = "00000000-0000-0000-0000-000000000101"
       }),
     /requires the staging runtime service/u,
   );
+
+  const faulted = renderOrchestratorStagingConfig(template, {
+    ...identifiers,
+    acceptanceFault: "runtime_heartbeat_response_loss",
+    acceptanceFaultExpiresAt: "2026-08-14T01:30:00.000Z",
+    acceptanceFaultIssuedAt: "2026-08-14T01:00:00.000Z",
+    acceptanceFaultJobId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  });
+  assert.match(faulted, /STAGING_ACCEPTANCE_FAULT = "runtime_heartbeat_response_loss"/u);
+  assert.match(faulted, /STAGING_ACCEPTANCE_FAULT_JOB_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"/u);
+  assert.doesNotMatch(rendered, /STAGING_ACCEPTANCE_FAULT/u);
+  assert.throws(
+    () =>
+      renderOrchestratorStagingConfig(template, {
+        ...identifiers,
+        acceptanceFault: "runtime_heartbeat_response_loss",
+        acceptanceFaultJobId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      }),
+    /incomplete or unavailable/u,
+  );
+  assert.throws(
+    () =>
+      renderOrchestratorStagingConfig(template, {
+        ...identifiers,
+        acceptanceFault: "runtime_heartbeat_response_loss",
+        acceptanceFaultExpiresAt: "2026-08-14T01:30:00.001Z",
+        acceptanceFaultIssuedAt: "2026-08-14T01:00:00.000Z",
+        acceptanceFaultJobId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      }),
+    /lifetime is invalid/u,
+  );
 });
 
 test("renders the web staging identifiers and ignored-config build path", () => {
@@ -340,6 +371,29 @@ database_id = "00000000-0000-0000-0000-000000000201"
     new RegExp(`RUNPOD_WORKER_IMAGE = "${productionIdentifiers.runpodWorkerImage}"`),
   );
   assert.match(rendered, /WEB_BASE_URL = "https:\/\/scribe-drop-production\.example\.invalid"/u);
+  assert.doesNotMatch(rendered, /STAGING_ACCEPTANCE_FAULT/u);
+  assert.throws(
+    () =>
+      renderOrchestratorProductionConfig(template, {
+        ...productionIdentifiers,
+        acceptanceFault: "notification_unavailable",
+        acceptanceFaultExpiresAt: "2026-08-14T01:30:00.000Z",
+        acceptanceFaultIssuedAt: "2026-08-14T01:00:00.000Z",
+        acceptanceFaultJobId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      }),
+    /forbidden in production/u,
+  );
+  assert.throws(
+    () =>
+      renderOrchestratorProductionConfig(
+        template.replace(
+          "[env.production.vars]\n",
+          '[env.production.vars]\n  STAGING_ACCEPTANCE_FAULT = "notification_unavailable"\n',
+        ),
+        productionIdentifiers,
+      ),
+    /forbidden in production/u,
+  );
   assert.throws(
     () =>
       renderOrchestratorProductionConfig(template, {

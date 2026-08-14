@@ -7,6 +7,18 @@ const d1DatabaseIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0
 const runpodGpuIdPattern = /^[A-Za-z0-9][A-Za-z0-9 ._-]{1,126}[A-Za-z0-9]$/u;
 const runpodImagePattern =
   /^ghcr\.io\/[a-z0-9]+(?:[._-][a-z0-9]+)*\/scribe-drop-runpod-worker@sha256:[0-9a-f]{64}$/u;
+const ulidPattern = /^[0-9A-HJKMNP-TV-Z]{26}$/u;
+const stagingAcceptanceFaults = new Set([
+  "notification_unavailable",
+  "runtime_heartbeat_response_loss",
+  "worker_disconnect_after_claim",
+]);
+const stagingAcceptanceFaultIdentifierKeys = [
+  "acceptanceFault",
+  "acceptanceFaultExpiresAt",
+  "acceptanceFaultIssuedAt",
+  "acceptanceFaultJobId",
+];
 
 const accountIdPlaceholder = "0".repeat(32);
 const accessAudiencePlaceholder = "replace-with-access-audience";
@@ -122,6 +134,42 @@ function validatedStagingGpuExecutionPolicy(identifiers, cloudRun) {
     throw new Error("Cloud Run execution requires the staging runtime service");
   }
   return policy;
+}
+
+export function validateStagingAcceptanceFaultIdentifiers(identifiers, cloudRunMode) {
+  const values = stagingAcceptanceFaultIdentifierKeys.map((key) => identifiers[key]);
+  if (values.every((value) => value === undefined)) return undefined;
+  if (values.some((value) => typeof value !== "string") || cloudRunMode !== "synthetic-shadow") {
+    throw new Error("Staging acceptance fault configuration is incomplete or unavailable");
+  }
+  if (!stagingAcceptanceFaults.has(identifiers.acceptanceFault)) {
+    throw new Error("Staging acceptance fault is invalid");
+  }
+  const jobId = requireIdentifier(
+    identifiers.acceptanceFaultJobId,
+    ulidPattern,
+    "STAGING_ACCEPTANCE_FAULT_JOB_ID",
+  );
+  const issuedAt = identifiers.acceptanceFaultIssuedAt;
+  const expiresAt = identifiers.acceptanceFaultExpiresAt;
+  const issuedMilliseconds = Date.parse(issuedAt);
+  const expiresMilliseconds = Date.parse(expiresAt);
+  if (
+    !Number.isFinite(issuedMilliseconds) ||
+    !Number.isFinite(expiresMilliseconds) ||
+    new Date(issuedMilliseconds).toISOString() !== issuedAt ||
+    new Date(expiresMilliseconds).toISOString() !== expiresAt ||
+    expiresMilliseconds <= issuedMilliseconds ||
+    expiresMilliseconds - issuedMilliseconds > 30 * 60 * 1_000
+  ) {
+    throw new Error("Staging acceptance fault lifetime is invalid");
+  }
+  return {
+    expiresAt,
+    fault: identifiers.acceptanceFault,
+    issuedAt,
+    jobId,
+  };
 }
 
 function rejectEnvironmentMarker(value, marker, name) {
@@ -242,6 +290,7 @@ export function renderOrchestratorStagingConfig(template, identifiers) {
   const orchestratorHostname = new URL(orchestratorOrigin).hostname;
   const cloudRun = validatedStagingCloudRunConfiguration(identifiers, orchestratorOrigin);
   const gpuExecutionPolicy = validatedStagingGpuExecutionPolicy(identifiers, cloudRun);
+  const acceptanceFault = validateStagingAcceptanceFaultIdentifiers(identifiers, cloudRun.mode);
   const webOrigin = requireExactHttpsOrigin(
     identifiers.webOrigin,
     "SCRIBE_DROP_STAGING_WEB_ORIGIN",
@@ -316,6 +365,21 @@ export function renderOrchestratorStagingConfig(template, identifiers) {
       `${source}\n`,
       cloudRun.mode === "disabled" ? "" : `${activeValue}\n`,
       label,
+    );
+  }
+  if (acceptanceFault !== undefined) {
+    stagingConfig = replaceOnce(
+      stagingConfig,
+      "[env.staging.vars]\n",
+      [
+        "[env.staging.vars]",
+        `STAGING_ACCEPTANCE_FAULT = "${acceptanceFault.fault}"`,
+        `STAGING_ACCEPTANCE_FAULT_EXPIRES_AT = "${acceptanceFault.expiresAt}"`,
+        `STAGING_ACCEPTANCE_FAULT_ISSUED_AT = "${acceptanceFault.issuedAt}"`,
+        `STAGING_ACCEPTANCE_FAULT_JOB_ID = "${acceptanceFault.jobId}"`,
+        "",
+      ].join("\n"),
+      "orchestrator staging acceptance fault variables",
     );
   }
   stagingConfig = replaceOnce(
@@ -512,6 +576,9 @@ export function renderOrchestratorProductionConfig(template, identifiers) {
   ) {
     throw new Error("Production GPU execution policy is not adopted");
   }
+  if (stagingAcceptanceFaultIdentifierKeys.some((key) => identifiers[key] !== undefined)) {
+    throw new Error("Staging acceptance fault configuration is forbidden in production");
+  }
   const orchestratorOrigin = requireExactHttpsOrigin(
     identifiers.orchestratorOrigin,
     "SCRIBE_DROP_PRODUCTION_ORCHESTRATOR_ORIGIN",
@@ -537,6 +604,9 @@ export function renderOrchestratorProductionConfig(template, identifiers) {
   const stagingIndex = precedingConfig.indexOf("[env.staging");
   const baseConfig = stagingIndex === -1 ? precedingConfig : precedingConfig.slice(0, stagingIndex);
   let productionConfig = template.slice(productionIndex);
+  if (/^[\t ]*STAGING_ACCEPTANCE_FAULT(?:_[A-Z_]+)?[\t ]*=/mu.test(productionConfig)) {
+    throw new Error("Staging acceptance fault variables are forbidden in production");
+  }
   productionConfig = replaceOnce(
     productionConfig,
     `CLOUDFLARE_ACCOUNT_ID = "${accountIdPlaceholder}"`,

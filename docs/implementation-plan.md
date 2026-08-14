@@ -1656,6 +1656,19 @@ Remote rerun status (2026-08-14):
   Firestore controller 3 collection空、R2 source/result prefix空、検査用read-only Worker不存在を独立read-backした。
   failure/cancel系を含む残りのformal staging条件は未完了であり、この成功系だけでPhase 15完了またはproduction promotion可とはしない。
 
+Local bounded-fault preparation (2026-08-14):
+
+- worker停止、heartbeat response loss、通知一時障害を同一candidateで再現するため、[ADR 0084](./adr/0084-bound-staging-fault-acceptance-by-job-and-time.md)
+  のstaging-only leaseを実装した。固定3 scenario、単一job ULID、最大30分の完全設定だけを受理し、部分設定、任意fault、
+  local/production設定をfail closedにする。公開管理endpoint、D1 fault table、title/filename triggerは追加していない。
+- runtime faultはD1のcurrent active Cloud Run attemptとjob IDを完全一致させ、session認証とack/heartbeat永続化が成功した後だけ
+  responseを失わせる。認証失敗をfault responseで上書きしない。通知faultは対象jobのoutboxだけをretryableへ戻し、Discordを
+  呼ばない。lease除去後は通常outbox retryを使う。
+- targeted unit 50件と実migrationを使うWorkers integration 66件を通した。staging renderer/read-backはfault時だけ4件をexact照合し、
+  production renderer/read-backは入力・active bindingの両方で4件を拒否する。CI workflow、remote staging、GPU、cloud resource、
+  productionは変更していない。このsource変更により`26a09dc`の成功系evidenceは次candidate promotionへ使用できず、全local gate後の
+  新commitをbuild-onceする。
+
 実装:
 
 - Phase 14のexact candidateを再利用し、provider switchをstagingだけで有効化する。release修正が

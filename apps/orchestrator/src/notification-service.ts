@@ -8,6 +8,10 @@ import {
   type NotificationErrorCode,
   type NotificationOutboxRepository,
 } from "./notification-outbox-repository.js";
+import {
+  matchesStagingAcceptanceFault,
+  parseStagingAcceptanceFault,
+} from "./staging-acceptance-fault.js";
 
 const NOTIFICATION_LEASE_MS = 2 * 60 * 1_000;
 const MAX_NOTIFICATION_ATTEMPTS = 8;
@@ -89,6 +93,7 @@ export async function dispatchNextNotification(
   logger: StructuredLogger,
   dependencies: NotificationDependencies = {},
 ): Promise<NotificationDispatchResult> {
+  const fault = parseStagingAcceptanceFault(environment);
   const config = parseNotificationConfig(environment);
   if (config === undefined) {
     logger.error("notification.configuration_invalid", {
@@ -131,7 +136,14 @@ export async function dispatchNextNotification(
           resultUrl,
         )
       : failureNotificationContent(delivery.title, resultUrl);
-  const result = await clientFactory(config.discordWebhookUrl).send(content);
+  const result = matchesStagingAcceptanceFault(
+    fault,
+    "notification_unavailable",
+    delivery.jobId,
+    claimedAt,
+  )
+    ? { outcome: "unavailable" as const }
+    : await clientFactory(config.discordWebhookUrl).send(content);
   if (result.outcome === "sent") {
     const marked = await repository.markSent(delivery, now().toISOString());
     if (!marked) {

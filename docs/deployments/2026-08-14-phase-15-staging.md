@@ -134,3 +134,15 @@ current candidateでは成功系artifact、利用者delete、費用境界、depl
 heartbeat stale、controller outage、通知失敗を含むPhase 15の残りを完了し、
 新規投入停止、provider resource 0、storage不存在を同じ期限付きevidenceへ結び付けるまで
 production promotionを行わない。
+
+## 次candidateのbounded fault preparation
+
+残りのうちworker停止、heartbeat response loss、通知一時障害を対象外jobへ波及させず再現するため、
+[ADR 0084](../adr/0084-bound-staging-fault-acceptance-by-job-and-time.md)のlocal実装を追加した。leaseは
+staging、単一job ULID、最大30分、固定3 scenarioへ限定し、runtime session認証とD1 effectの後だけresponseを
+失わせる。公開管理endpoint、D1 fault table、任意error指定は追加していない。
+
+unit 50件と実migrationを使うWorkers integration 66件は成功した。staging config/read-backはlease 4件をexact照合し、productionは
+入力とactive bindingの両方で拒否する。この記録のremote resource、CI workflow、GPU、productionは変更していない。
+source変更後のcommitから新candidateをbuildするまで、この節はremote acceptance evidenceではない。
+新candidateでは各scenario後にlease 4変数を全削除し、通常binding、provider switch、resource/storage 0をread-backする。

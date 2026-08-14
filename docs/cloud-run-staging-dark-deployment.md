@@ -490,3 +490,19 @@ provider policyはRunPodのまま維持した。
 `EXECUTION_NOT_FOUND`を返す。無効なidentityは同じ不存在handleでも`AUTHENTICATION_FAILED`となることを回帰testで固定し、
 preflightは404 JSONのexact code/messageだけを受理する。このsource変更により`3ea5d21`のcandidate evidenceは失効し、
 新commitからbuild-once candidateを作成する。production resourceとCI workflowは変更していない。
+
+## Phase 15 bounded fault lease
+
+formal stagingのworker停止、heartbeat response loss、通知一時障害は
+[ADR 0084](./adr/0084-bound-staging-fault-acceptance-by-job-and-time.md)の期限付きleaseだけで再現する。
+acceptance driverはupload session作成後、upload-complete前に得たjob IDを固定し、同じcandidate bundleの追跡外
+staging configへfault kind、job ID、issued at、expires atの4件を一度に設定する。期限は最大30分である。
+
+runtime faultはbootstrap/claimを通し、session認証とackまたはheartbeatのD1永続化後にだけresponseを失わせる。
+通知faultは対象jobのoutboxだけを`DISCORD_UNAVAILABLE`としてretry待ちへ戻す。各scenario後はprovider switchで
+新規投入を止め、terminal、notification、controller cleanup、Cloud Run Job/Execution 0、R2対象prefix不存在を確認してから、
+同じcandidate bundleのconfigから4変数をすべて除去する。active Worker 1 version、traffic 100%、通常bindingを
+read-backするまで次のjobを作成しない。
+
+破損media、capacity rejection、利用者cancel、controller outageはfault leaseへ追加せず、実境界で個別に検証する。
+production config、GitHub Environment、追跡対象Wrangler設定にleaseを保存しない。

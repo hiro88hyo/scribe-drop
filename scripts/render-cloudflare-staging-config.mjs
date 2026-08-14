@@ -45,6 +45,10 @@ const runpodWorkerImage = requiresOrchestratorPolicy
       }).runpodWorker.image
   : undefined;
 const identifiers = {
+  acceptanceFault: process.env.SCRIBE_DROP_STAGING_ACCEPTANCE_FAULT,
+  acceptanceFaultExpiresAt: process.env.SCRIBE_DROP_STAGING_ACCEPTANCE_FAULT_EXPIRES_AT,
+  acceptanceFaultIssuedAt: process.env.SCRIBE_DROP_STAGING_ACCEPTANCE_FAULT_ISSUED_AT,
+  acceptanceFaultJobId: process.env.SCRIBE_DROP_STAGING_ACCEPTANCE_FAULT_JOB_ID,
   accessAudience: process.env.SCRIBE_DROP_STAGING_ACCESS_AUDIENCE,
   accessTeamDomain: process.env.SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN,
   accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
