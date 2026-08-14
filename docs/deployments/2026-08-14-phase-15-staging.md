@@ -2,12 +2,12 @@
 
 ## 状態
 
-- Release candidate: `0.2.0` / source `0280e5b`
-- Candidate publication workflow: `31707314433`
-- Cloud Run image publication workflow: `31705079966`
+- Current release candidate: `0.2.0` / source `26a09dc`
+- Candidate publication workflow: `31779830488`
+- Cloud Run image publication workflow: `31779830806`
 - Date: 2026-08-13 UTC / 2026-08-14 JST
 - Successful product lifecycle: Pass
-- Automatic cleanup acceptance: Follow-up required
+- Automatic cleanup acceptance: Pass
 - Phase 15 overall: In progress
 - Production and CI configuration: Unchanged
 
@@ -98,11 +98,39 @@ fresh handleに対する404 JSON `EXECUTION_NOT_FOUND`だけを成功markerに�
 gateを通した新commitからbuild-once candidateを作成し、GPU-free preflightが成功してからのみ承認済み
 exact-one GPU gateへ進む。
 
+## Current candidateのautomatic cleanup rerun
+
+source `26a09dc`のrelease candidate workflow `31779830488`とCloud Run image workflow
+`31779830806`を成功させ、release manifest、Orchestrator bundle、controller/worker両image、KMS
+attestation、Binary Authorizationを照合した。同じworker imageのfresh GPU-free preflightはGPU 0、
+CPU 1、512 MiB、task/parallelism 1、retry 0で、Google OIDC検証後の404
+`EXECUTION_NOT_FOUND` marker 1だけを成功として終了した。Job/Executionは0へ戻し、production resourceと
+CI workflowは変更していない。
+
+staging authorizationを1 execution、250 JPY、8時間へ限定し、実行前worst-case 233 JPYを再照合した。
+Access保護済みWebからcandidateの合成M4Aをuploadし、通常Queue経路が
+`cloud_run_jobs_l4_v1`を一度だけ選択した。D1はjob、attempt、provider execution各1件、runtime
+bootstrap 1件、runtime event 6件を記録した。runtimeは`bootstrap`、`download`、`transcribe`、
+`publish`のheartbeat、terminal `succeeded`、artifact 3、manifest written、session revokeへ収束した。
+manifest v2とMarkdown/JSON/SRTはsize、SHA-256、JSON contractをすべて満たし、notification outboxは
+`SENT`となった。
+
+追加投入を止めるため、成功判定後すぐprovider policyを`runpod_serverless_v1`へ戻した。active Workerは
+candidate tag/message、1 version、traffic 100%、binding 25を照合した。deployed CronはD1 provider
+version 6とcontroller version 8の差を`STALE_VERSION` responseからCAS適用し、同じsweep内のbounded
+retryでcleanupを再要求した。D1 cleanupは`SUCCEEDED`、provider version 9、Firestore executionは
+`CLEANED` version 9へ収束した。manual repository repair、直接SQL mutation、追加GPU executionはない。
+
+controller ServiceとFirestore authorizationをdisabled/0へ戻し、Cloud Run Job/Execution 0を照合した。
+利用者delete後の次のdeployed Cronはjobと全子rowを自動削除した。remote R2 bindingによるsource/result
+prefix listingはobject 0で、検査に用いたread-only WorkerもCloudflare API code `10007`で不存在を
+read-backした。Firestore controller 3 collection、D1対象row、Cloud Run Job/Executionはいずれも0で、
+staging WorkerはRunPod policyへ復帰している。
+
 ## 未完了条件
 
-成功系のartifact、利用者delete、費用境界は成立したが、deployed Cronだけでprovider cleanupを
-自動収束できた証拠は得られていない。このmanual repairを含むrunは、完全自動のcleanup
-acceptanceとしては扱わない。Android実機file picker、合成破損media、capacity rejection、
-cancel、worker crash、heartbeat stale、controller outage、通知失敗を含むPhase 15の残りを完了し、
+current candidateでは成功系artifact、利用者delete、費用境界、deployed Cronだけによるprovider cleanupの
+自動収束が成立した。Android実機file picker、合成破損media、capacity rejection、cancel、worker crash、
+heartbeat stale、controller outage、通知失敗を含むPhase 15の残りを完了し、
 新規投入停止、provider resource 0、storage不存在を同じ期限付きevidenceへ結び付けるまで
 production promotionを行わない。

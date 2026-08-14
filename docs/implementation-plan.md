@@ -1638,6 +1638,24 @@ Local follow-up status (2026-08-14):
   fresh handleでは認証後の404 `EXECUTION_NOT_FOUND`だけを成功markerとする。無効identityにはhandleの存在有無を露出せず
   `AUTHENTICATION_FAILED`を返す回帰testを追加した。このsource変更により`3ea5d21` evidenceは失効し、新candidateが必要である。
 
+Remote rerun status (2026-08-14):
+
+- source `26a09dc`のrelease candidate workflow `31779830488`とCloud Run image workflow `31779830806`は成功した。
+  build-once candidate、controller/worker両image、KMS attestation、Binary Authorization、controller Service、Worker bundleを
+  strict read-backし、同じworker imageによるGPU 0、CPU 1、512 MiB、retry 0のfresh preflightは認証後の
+  `EXECUTION_NOT_FOUND` marker 1で成功した。production resourceとCI workflowは変更していない。
+- stagingを有限1 execution/250 JPY authorizationと`cloud_run_jobs_l4_v1`へ切り替え、Access保護済みWebの通常upload/Queue経路から
+  合成M4Aを1件だけ投入した。D1はjob、attempt、provider executionを各1件、runtime bootstrap 1件、runtime event 6件として記録し、
+  `bootstrap`、`download`、`transcribe`、`publish` heartbeat、terminal `succeeded`、session revokeへ収束した。
+- manifest-lastとMarkdown/JSON/SRTの3 artifactはsize、SHA-256、JSON contractが一致し、notificationは`SENT`へ収束した。
+  新規投入停止を先に行うためprovider policyをRunPodへ戻し、active Worker 1 version、traffic 100%、binding 25を照合した。
+- deployed CronはD1 provider version 6に対するcontroller version 8の`STALE_VERSION`をCAS適用後、同じsweep内のbounded retryで
+  cleanupを再要求した。D1 cleanupは`SUCCEEDED`、provider version 9、Firestore executionは`CLEANED` version 9となり、
+  手動repository repairや直接SQL mutationなしでautomatic cleanup acceptanceが成功した。
+- controller/Firestore authorizationを0へ戻し、利用者delete後の次のCronでD1対象rowを0へ削除した。Cloud Run Job/Execution 0、
+  Firestore controller 3 collection空、R2 source/result prefix空、検査用read-only Worker不存在を独立read-backした。
+  failure/cancel系を含む残りのformal staging条件は未完了であり、この成功系だけでPhase 15完了またはproduction promotion可とはしない。
+
 実装:
 
 - Phase 14のexact candidateを再利用し、provider switchをstagingだけで有効化する。release修正が
