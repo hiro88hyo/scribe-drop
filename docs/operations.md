@@ -314,10 +314,12 @@ timeoutでは「10分ちょうどでprovider queueから消える」と扱わな
   `pnpm container:check:cloud-run`、`container:sbom:cloud-run`、`container:scan:cloud-run`で再生成する。SBOMを
   repositoryへ追加せず、local imageをregistryへpushしない。terminal reportはcleanup pendingであり、provider
   Execution/Job不存在とartifact/finalizeを確認するまで手動で`COMPLETED`へ変更しない。
-- Phase 14で`0011` migrationとshadow namespaceをstagingへ適用し、candidate `cdfc394`のexact one L4 gateと全cleanupを
-  完了した。ただしPhase 15接続のsource変更によりpromotion evidenceは失効している。新candidateでPhase 14をやり直すまで
-  `0012`をremote D1へ適用せず、provider switchも変更しない。D1 eventのsequenceやrevokeを直接更新せず、repository経由の
-  exact replayだけを使う。
+- Phase 15 candidate `0280e5b`で`0012` migration、通常uploadからexact one L4 execution、artifact、通知、利用者deleteを
+  stagingで検証した。provider cleanupのcontroller responseは`CLEANED`だったがdeployed CronからD1へ反映されず、dry-runと
+  exact version条件付きの同じrepository CASで`SUCCEEDED`へ一度だけ収束した。直接SQL mutationは行わない。このrunを完全自動の
+  cleanup acceptanceやproduction promotionへ使わず、残りのfailure/cancel経路と自動cleanupを完了する。現在はprovider switch
+  RunPod、Cloud Run Job/Execution 0、fixture D1/R2 0、controller authorization 0である。D1 eventのsequenceやrevokeを直接更新せず、
+  repository経由のexact replayだけを使う。
 - Phase 14 staging release foundationのArtifact Registry、WIF、service account、KMS key、Artifact Analysis Note、Binary
   Authorization attestor/policyは作成済みである。KMS active key versionの保持費を監視し、candidate監査とproduction昇格が
   終わる前に削除しない。publisher/signerへuser-managed keyを作らず、candidate workflow外からimage pushまたはOccurrenceを

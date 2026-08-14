@@ -2,15 +2,17 @@
 
 ## 1. Status and scope
 
-- Status: `Formal staging routing implemented locally`、新candidate/remote適用前
-- Date: 2026-08-13
+- Status: `Formal staging success path verified`、Phase 15残余acceptance未完了
+- Date: 2026-08-14
 - Decision: [ADR 0076](./adr/0076-select-cloud-run-jobs-for-synthetic-provider-implementation.md)、
   [ADR 0083](./adr/0083-connect-cloud-run-to-formal-staging-routing.md)
 - Product routing: 現行RunPod Serverlessのまま
 
-この文書はPhase 12からPhase 15のprovider境界を固定する。Phase 15接続実装はlocalにあり、既存Phase 14
-candidate evidenceは失効している。新candidate、remote D1、provider switch、CI、productionはまだ変更していない。
-実録音、R2 capability、利用者metadataをcontrollerへ渡さない。
+この文書はPhase 12からPhase 15のprovider境界を固定する。Phase 15 candidate `0280e5b`はremote D1 migration、
+exact one synthetic GPU lifecycle、artifact、通知、利用者deleteまでstagingで通過した。provider cleanupのD1反映には
+guarded manual repository CASを要したため、完全自動のcleanup acceptanceと残りのfailure/cancel経路は未完了である。
+staging switchはRunPod、Cloud Run Job/Executionとfixture storageは0、controller authorizationは0へ戻した。CIと
+productionは変更していない。実録音、R2 capability、利用者metadataをcontrollerへ渡さない。
 
 ## 2. Components and trust boundaries
 
@@ -326,6 +328,9 @@ allowlist reasonからsafe error kindへ変換する。
 
 - service identityのExecution非結合、default outbound、Singaporeへのdata transfer、HMAC-protected public controller、
   capacity、budget、CI identity、rollbackをformal staging acceptanceで再判定する。
+- 2026-08-14のsuccess pathは10分start SLO、exact one L4 execution、manifest/3 artifact、通知、利用者delete、
+  provider resource/storage 0を確認した。一方、provider cleanupはdeployed CronだけでD1へ収束せずmanual repository CASを
+  要したため、残りのfailure/cancel経路とともにproduction blockerとして維持する。
 - successful acceptanceと別`Production adopted` ADRなしにPhase 16 routingを変更しない。
 
 ## 13. Official references

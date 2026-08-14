@@ -1597,6 +1597,27 @@ Local implementation status (2026-08-13):
   一度だけbuildし、Phase 14のdark deployment、exact one GPU gate、cleanupからやり直す。現時点ではCI、remote D1、
   Cloudflare/GCP resource、productionを変更していない。
 
+Remote acceptance status (2026-08-14):
+
+- source `0280e5b`のbuild-once candidateについて、両image、KMS attestation、Binary Authorization、controller Service、
+  migration `0012`、WAF、shadow binding、有限1 execution/250 JPY authorization、L4 quota 3、Job/Execution 0をstrict
+  read-backした。production resourceとCI workflowは変更していない。
+- Access保護済みWebからcandidate合成fixtureをuploadし、通常Queue経路がCloud Run providerをexact 1回選択した。
+  L4 1、4 vCPU、16 GiB、task 1、parallelism 1、retry 0、timeout 3,300秒のJob/Execution各1件だけを作成した。
+  submission開始からruntime claimまで約5分5秒、claimからterminal successまで約16秒で、10分start SLOと233 JPYの
+  実行前worst-case上限を満たした。
+- runtimeはCUDA/float16 transcriptionとmanifest-lastを完了した。D1 job/attemptは`COMPLETED`、notificationは`SENT`、
+  manifest v2とMarkdown/JSON/SRTの3 artifactはsize、SHA-256、JSON contractが一致した。
+- provider policyを最初にRunPodへ戻して新規Cloud Run投入を停止した後、controllerは`CLEANED`、Cloud Run Job/Executionは0へ
+  収束した。deployed Cronを観測できなかったため、確定したcontroller responseをdry-runとexact version条件付きの同じrepository
+  CASへ一度だけ適用し、D1 cleanupを`SUCCEEDED`へ収束した。直接SQL mutationは行っていない。
+- controller/Firestore authorizationはactive/reserved execution、request rate、JPYを0へ戻した。同じcandidate bundleをexact
+  byte uploadしたWorkerはCloud Run平文bindingなし、RunPod policy、traffic 100%、bootstrap route 404である。詳細は
+  [Phase 15 staging record](./deployments/2026-08-14-phase-15-staging.md)に記録する。
+- 利用者deleteはWebで受理され、capability grace後の次のdeployed CronでD1親子rowを0へ削除した。remote R2 bindingの
+  exact source/result prefix listingもobject 0だった。provider cleanup自体はdeployed Cronだけで収束した証拠がなく、残りの
+  failure/cancel acceptanceも未完了である。このrunだけでPhase 15完了またはproduction promotion可とは判定しない。
+
 実装:
 
 - Phase 14のexact candidateを再利用し、provider switchをstagingだけで有効化する。release修正が
