@@ -1843,6 +1843,12 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
 - 同じcommitのworkflow dispatchとjob re-runを拒否する。failed acceptanceのrecoveryは新規GPUを作らず、同じrunの
   stateだけを安全状態へ収束し、evidenceを発行しない。local source変更だけであり、この時点ではGitHub Environment、
   GCP IAM、staging resource、CI run、GPU、productionを変更していない。
+- candidate deploymentはpreflight、migration、Pages、R2、RunPod、Orchestrator promotion後、acceptance最初の
+  candidate identity検証で停止した。`EXPECTED_RELEASE_BRANCH`がpreflightにだけあり、acceptanceとrecoveryに
+  伝播していなかったため、両jobとも同じfail-closed verifierを実行できなかった。acceptance mutation前の停止と
+  resource zero convergenceを確認し、`verify-workflow-run.mjs`を呼ぶ全jobをYAML ASTから列挙してcommit、branch、
+  workflow別dispatch input bindingの完全一致を`pnpm ci:verify`でPublish前に強制した。acceptance欠落、recovery欠落、
+  untrusted run ID、新規jobの検査漏れをそれぞれlocal回帰testで拒否する。
 
 実装:
 

@@ -61,6 +61,19 @@ function job(workflow, name) {
   return mappingValue(mappingValue(rootMapping(workflow), "jobs"), name);
 }
 
+function jobEntries(workflow) {
+  const jobs = unwrap(mappingValue(rootMapping(workflow), "jobs"));
+  if (jobs?.type !== "mapping") throw new Error("Workflow jobs are not a mapping");
+  return (jobs.children ?? []).map((item) => {
+    const name = keyOf(item);
+    const mapping = unwrap(item.children?.[1]);
+    if (name === undefined || mapping?.type !== "mapping") {
+      throw new Error("Workflow job entry is invalid");
+    }
+    return [name, mapping];
+  });
+}
+
 function jobEnvironment(jobMapping) {
   return mappingObject(mappingValue(jobMapping, "env"));
 }
@@ -74,6 +87,15 @@ function step(jobMapping, name) {
   });
   if (found === undefined) throw new Error(`Workflow step is missing ${name}`);
   return found;
+}
+
+function namedSteps(jobMapping) {
+  const steps = mappingValue(jobMapping, "steps");
+  if (steps?.type !== "sequence") throw new Error("Workflow steps are not a sequence");
+  return (steps.children ?? []).map(unwrap).map((item) => ({
+    mapping: item,
+    name: String(optionalMappingValue(item, "name")?.value ?? "unnamed step"),
+  }));
 }
 
 function profile(environment) {
@@ -113,8 +135,88 @@ const runpodBaseline = Object.freeze({
   policy: "runpod_serverless_v1",
 });
 
+const workflowRunInputs = Object.freeze({
+  ".github/workflows/publish-cloud-run-candidate.yml": Object.freeze({
+    expression: "${{ inputs.cloud_run_candidate_run_id }}",
+    variable: "CLOUD_RUN_CANDIDATE_RUN_ID",
+  }),
+  ".github/workflows/publish-runpod-worker.yml": Object.freeze({
+    expression: "${{ inputs.candidate_run_id }}",
+    variable: "CANDIDATE_RUN_ID",
+  }),
+});
+
+function countOccurrences(value, needle) {
+  return value.split(needle).length - 1;
+}
+
+function requireWorkflowRunIdentity(jobName, jobMapping) {
+  const identitySteps = namedSteps(jobMapping).filter(({ mapping }) =>
+    String(optionalMappingValue(mapping, "run")?.value ?? "").includes(
+      "scripts/verify-workflow-run.mjs",
+    ),
+  );
+  if (identitySteps.length === 0) return 0;
+
+  const environment = jobEnvironment(jobMapping);
+  for (const [name, expected] of [
+    ["EXPECTED_COMMIT_SHA", "${{ github.sha }}"],
+    ["EXPECTED_RELEASE_BRANCH", "${{ github.ref_name }}"],
+  ]) {
+    if (environment[name] !== expected) {
+      throw new Error(
+        `${jobName} job ${name} must be ${expected}, received ${environment[name] ?? "missing"}`,
+      );
+    }
+  }
+
+  let verifiedCalls = 0;
+  for (const identityStep of identitySteps) {
+    const run = String(optionalMappingValue(identityStep.mapping, "run")?.value ?? "");
+    const callCount = countOccurrences(run, "node scripts/verify-workflow-run.mjs");
+    const matches = [
+      ...run.matchAll(
+        /node scripts\/verify-workflow-run\.mjs\s+\\\s+[^\n]+\s+\\\s+(\.github\/workflows\/[^\s]+)\s+\\\s+"\$\{([A-Z][A-Z0-9_]*)\}"/gu,
+      ),
+    ];
+    if (matches.length !== callCount) {
+      throw new Error(
+        `${jobName} job ${identityStep.name} must bind every workflow verifier to an input run ID`,
+      );
+    }
+
+    const stepEnvironment = {
+      ...environment,
+      ...mappingObject(optionalMappingValue(identityStep.mapping, "env")),
+    };
+    for (const match of matches) {
+      const workflowPath = match[1];
+      const runIdVariable = match[2];
+      const expectedInput = workflowRunInputs[workflowPath];
+      if (expectedInput === undefined) {
+        throw new Error(
+          `${jobName} job ${identityStep.name} verifies an unsupported workflow ${workflowPath}`,
+        );
+      }
+      if (runIdVariable !== expectedInput.variable) {
+        throw new Error(
+          `${jobName} job ${identityStep.name} must verify ${workflowPath} with ${expectedInput.variable}`,
+        );
+      }
+      if (stepEnvironment[runIdVariable] !== expectedInput.expression) {
+        throw new Error(
+          `${jobName} job ${identityStep.name} ${runIdVariable} must be ${expectedInput.expression}, received ${stepEnvironment[runIdVariable] ?? "missing"}`,
+        );
+      }
+      verifiedCalls += 1;
+    }
+  }
+  return verifiedCalls;
+}
+
 export async function verifyStagingWorkflowStateContract(source) {
   const workflow = await parsers.yaml.parse(source, { filepath: "deploy-staging-candidate.yml" });
+  const allJobs = jobEntries(workflow);
   const jobs = Object.fromEntries(
     ["preflight", "migrate", "deploy-backend", "acceptance", "recover-acceptance"].map((name) => [
       name,
@@ -179,10 +281,18 @@ export async function verifyStagingWorkflowStateContract(source) {
     "recovery verification",
   );
 
+  const workflowIdentity = Object.fromEntries(
+    allJobs.flatMap(([name, jobMapping]) => {
+      const verifiedCalls = requireWorkflowRunIdentity(name, jobMapping);
+      return verifiedCalls === 0 ? [] : [[name, verifiedCalls]];
+    }),
+  );
+
   return {
     acceptedParity: finalPolicy,
     paidExecutions: 1,
     preAcceptanceDeployment: runpodBaseline,
     recovery: runpodBaseline,
+    workflowIdentity,
   };
 }

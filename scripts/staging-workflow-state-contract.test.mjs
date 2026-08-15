@@ -24,6 +24,11 @@ test("accepts the reviewed staging state transition contract", async () => {
       mode: "synthetic-shadow",
       policy: "runpod_serverless_v1",
     },
+    workflowIdentity: {
+      acceptance: 1,
+      preflight: 2,
+      "recover-acceptance": 1,
+    },
   });
 });
 
@@ -35,5 +40,64 @@ test("reproduces the rejected preflight RunPod parity regression", async () => {
   await assert.rejects(
     verifyStagingWorkflowStateContract(regressed),
     /preflight job policy must be cloud_run_jobs_l4_v1, received runpod_serverless_v1/u,
+  );
+});
+
+test("rejects a missing acceptance workflow branch identity before publish", async () => {
+  const regressed = workflow.replace(
+    /( {2}acceptance:\n[\s\S]*? {6}EXPECTED_COMMIT_SHA: \$\{\{ github\.sha \}\}\n) {6}EXPECTED_RELEASE_BRANCH: \$\{\{ github\.ref_name \}\}\n/u,
+    "$1",
+  );
+  assert.notEqual(regressed, workflow);
+  await assert.rejects(
+    verifyStagingWorkflowStateContract(regressed),
+    /acceptance job EXPECTED_RELEASE_BRANCH must be \$\{\{ github\.ref_name \}\}, received missing/u,
+  );
+});
+
+test("rejects a missing recovery workflow branch identity before publish", async () => {
+  const regressed = workflow.replace(
+    /( {2}recover-acceptance:\n[\s\S]*? {6}EXPECTED_COMMIT_SHA: \$\{\{ github\.sha \}\}\n) {6}EXPECTED_RELEASE_BRANCH: \$\{\{ github\.ref_name \}\}\n/u,
+    "$1",
+  );
+  assert.notEqual(regressed, workflow);
+  await assert.rejects(
+    verifyStagingWorkflowStateContract(regressed),
+    /recover-acceptance job EXPECTED_RELEASE_BRANCH must be \$\{\{ github\.ref_name \}\}, received missing/u,
+  );
+});
+
+test("rejects a workflow verifier whose run ID is not bound to dispatch input", async () => {
+  const regressed = workflow.replace(
+    "CLOUD_RUN_CANDIDATE_RUN_ID: ${{ inputs.cloud_run_candidate_run_id }}",
+    "CLOUD_RUN_CANDIDATE_RUN_ID: untrusted-run-id",
+  );
+  await assert.rejects(
+    verifyStagingWorkflowStateContract(regressed),
+    /preflight job Validate release and candidate run identities CLOUD_RUN_CANDIDATE_RUN_ID must be \$\{\{ inputs\.cloud_run_candidate_run_id \}\}, received untrusted-run-id/u,
+  );
+});
+
+test("checks workflow identity in every newly added verifier job", async () => {
+  const regressed = workflow.replace(
+    "jobs:\n",
+    `jobs:
+  auxiliary-verifier:
+    env:
+      EXPECTED_COMMIT_SHA: \${{ github.sha }}
+    steps:
+      - name: Verify an additional candidate
+        env:
+          CANDIDATE_RUN_ID: \${{ inputs.candidate_run_id }}
+        run: |
+          node scripts/verify-workflow-run.mjs \\
+            "\${RUNNER_TEMP}/candidate-run.json" \\
+            .github/workflows/publish-runpod-worker.yml \\
+            "\${CANDIDATE_RUN_ID}"
+`,
+  );
+  await assert.rejects(
+    verifyStagingWorkflowStateContract(regressed),
+    /auxiliary-verifier job EXPECTED_RELEASE_BRANCH must be \$\{\{ github\.ref_name \}\}, received missing/u,
   );
 });

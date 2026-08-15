@@ -466,6 +466,7 @@ jobs:
       AUDIT_RETENTION_DAYS: ${{ vars.AUDIT_RETENTION_DAYS }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       EXPECTED_COMMIT_SHA: ${{ github.sha }}
+      EXPECTED_RELEASE_BRANCH: ${{ github.ref_name }}
       MULTIPART_RETENTION_HOURS: ${{ vars.MULTIPART_RETENTION_HOURS }}
       RELEASE_CANDIDATE_DIRECTORY: ${{ github.workspace }}/release-candidate
       RESULT_RETENTION_DAYS: ${{ vars.RESULT_RETENTION_DAYS }}
@@ -731,6 +732,7 @@ jobs:
       AUDIT_RETENTION_DAYS: ${{ vars.AUDIT_RETENTION_DAYS }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       EXPECTED_COMMIT_SHA: ${{ github.sha }}
+      EXPECTED_RELEASE_BRANCH: ${{ github.ref_name }}
       MULTIPART_RETENTION_HOURS: ${{ vars.MULTIPART_RETENTION_HOURS }}
       RELEASE_CANDIDATE_DIRECTORY: ${{ github.workspace }}/release-candidate
       RESULT_RETENTION_DAYS: ${{ vars.RESULT_RETENTION_DAYS }}
