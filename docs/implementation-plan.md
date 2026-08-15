@@ -1586,7 +1586,7 @@ local preparation（2026-08-11〜12）:
   timeout/lifetime、reaperを実環境で検証する。
 - stagingにactive execution、provider resource、persistent storage、operation、fixture、capabilityが残らない。
 
-### Phase 15: `0.2.0` candidate and formal staging
+### Phase 15: `0.2.0` candidate and formal staging（完了、2026-08-15）
 
 Local implementation status (2026-08-13):
 
@@ -1784,6 +1784,29 @@ Remote remaining bounded-failure batch (2026-08-15):
 - candidate `b7ae428`のcancel、通知障害、worker停止、heartbeat response loss、破損media、capacity rejectionは成功した。
   Phase 15 overallはAndroid実機file picker/upload、利用者向けartifact download、controller outageの同candidate evidenceが
   完了するまでIn progressを維持し、Phase 16 production promotionは開始しない。
+
+Remote final Android/download/controller-outage gate (2026-08-15):
+
+- 同じsource `b7ae428`とbuild-once artifactについて、staging限定L4 exact 1 execution、上限250 JPYを追加承認した。
+  実行直前にcontroller/Firestore authorization 1 execution/250 JPY、Cloud Run Job/Execution 0、active job 0、
+  cleanup未完了Cloud Run provider 0、L4 quota、exact Worker/Pages candidateを一括照合した。worst-caseは233 JPYで、
+  task/parallelism 1、retry 0、timeout 3,300秒を維持した。
+- Android実機のfile pickerから非機密M4Aを通常Web upload/Queue経路へ1件だけ投入した。承認後に作成されたjobは
+  正確に1件だったため、そのauthorization windowで対象を固定し、再uploadを行わなかった。runtimeは`ack` 1、
+  heartbeat 4へ進み、provider `RUNNING`中に実controller Service ingressをinternalへ変更した。candidate revisionを
+  変えずに実transportを遮断し、terminal 1、job/attempt `COMPLETED`、manifestと3 artifact、provider `TERMINAL`、
+  cleanup `PENDING`を遮断中に確認した。
+- terminal後も35秒以上遮断を維持してからpublic ingressへ戻し、同じrevisionをread-backした。deployed Cronだけで
+  cleanupは`IN_PROGRESS`から`SUCCEEDED`、通知は`SENT`へ収束した。追加GPU executionや手動cleanup requestはない。
+- 利用者はAndroid実機でMarkdownをdownloadして端末で開いた。独立read-backはmanifest identity、Markdown/JSON/SRT
+  3 artifactのsize、SHA-256、JSON contractをすべて照合した。利用者delete後はD1 job graph 1件を0、保存済みexact
+  keyへのR2 source/manifest/3 artifact計5 objectを404として確認した。
+- controller authorizationをdisabled/0、OrchestratorをRunPod policyへ戻した。exact `CLEANED` execution 1件、request
+  4件、disabled environment 1件だけをupdate-time条件付きで削除した。最終read-backはCloud Run Job/Execution 0、
+  Firestore 3 collection空、controller Service generation 47、fault不存在、exact candidate単一Worker version 100% / binding
+  25、Pages exact candidateだった。production resourceとCI workflowは変更していない。
+- Android file picker/upload、artifact download、controller outageを含むPhase 15の全完了条件を同じcandidateへ結び付けた。
+  Phase 15を完了とし、Phase 16はこのevidenceとcandidateだけを入力にする。
 
 実装:
 

@@ -266,13 +266,30 @@ update-time条件付きで削除し、3 collection空となった。最終状態
 generation 43、Orchestrator RunPod policy、fault不存在、active Worker 1 version / traffic 100% / binding 25、Pages
 exact candidateである。production resourceとCI workflowは変更していない。
 
-## 未完了条件
+## Final Android/download/controller-outage gate
 
-current candidateではPhase 14 gate、cancel、通知一時障害、worker停止、heartbeat response loss、破損media、capacity
-rejection、利用者delete、費用境界、deployed Cronだけによるprovider cleanup、resource/storage不存在を検証した。
-Android実機file picker/upload、利用者向けartifact download、controller outageを同じcandidateの期限付きevidenceへ
-結び付けるまでPhase 15 overallはIn progressであり、production promotionを行わない。新しいGPU executionは別の明示承認なしに
-開始しない。
+同じsource `b7ae428`とbuild-once artifactについて、staging限定L4 exact 1 execution、上限250 JPYの追加承認を得た。
+controller/Firestore authorization 1 execution/250 JPY、Cloud Run Job/Execution 0、active job 0、cleanup未完了Cloud Run
+provider 0、L4 quota、Worker/Pages exact candidateを単一preflightで確認した。task/parallelism 1、retry 0、timeout
+3,300秒、worst-case 233 JPYである。
+
+Android実機のfile pickerから非機密M4Aを通常Web upload/Queue経路へ1件だけ投入した。authorization window内の新規jobは
+正確に1件で、再uploadを行っていない。runtime `ack` 1、heartbeat 4、provider `RUNNING`を確認後、controller Serviceの
+実ingressをinternalへ変更した。candidate revisionを維持したままtransportを遮断し、遮断中にterminal 1、job/attempt
+`COMPLETED`、manifestとMarkdown/JSON/SRT 3 artifact、provider `TERMINAL`、cleanup `PENDING`を確認した。
+
+terminal後も35秒以上遮断を維持してからpublic ingressへ戻し、同じrevisionをread-backした。deployed Cronだけでcleanupは
+`IN_PROGRESS`から`SUCCEEDED`、通知は`SENT`へ収束した。利用者はAndroid実機でMarkdownをdownloadし、端末で開いた。
+独立read-backはmanifest identity、3 artifactのsize、SHA-256、JSON contractをすべて照合した。
+
+利用者delete後、D1 job graph 1件を0、保存済みexact keyへのR2 source、manifest、3 artifact計5 objectを404として確認した。
+controller authorizationをdisabled/0、OrchestratorをRunPod policyへ戻し、exact `CLEANED` execution 1件、request 4件、
+disabled environment 1件だけをupdate-time条件付きで削除した。最終状態はCloud Run Job/Execution 0、Firestore 3 collection空、
+controller Service generation 47、fault不存在、active Worker 1 version / traffic 100% / binding 25、Pages exact candidateである。
+production resourceとCI workflowは変更していない。
+
+これによりAndroid file picker/upload、artifact download、controller outageを含むPhase 15の全完了条件を同じcandidateへ
+結び付けた。Phase 15を完了とし、Phase 16 production promotionはこのcandidateとevidenceだけを入力にする。
 
 ## 次candidateのbounded fault preparation
 
