@@ -329,6 +329,18 @@ timeoutでは「10分ちょうどでprovider queueから消える」と扱わな
   context lookupより先に検証し、preflightは認証後の404 JSON `EXECUTION_NOT_FOUND`だけを成功とする。edge 403/non-JSON、
   `AUTHENTICATION_FAILED`、`RESOURCE_DRIFT`、success challengeはすべて失敗である。過去の既存contextに依存した
   `RESOURCE_DRIFT` preflight evidenceを新candidateへ流用しない。
+- Phase 16 workflowはbootstrap preflightをCPU 1、512 MiB、GPU 0、task/parallelism 1、retry 0、60秒へ
+  固定し、exact Jobを成否にかかわらず削除してJob/Execution 0まで待つ。手動jobで代替せず、同じcommitの
+  workflow dispatchとjob attemptは各1回だけとする。
+- backend promotionからpaid readinessまではRunPod選択を維持する。GPU 0 proof後にdisabled/zero、exact
+  L4 quota、fixed manifest、233円/250円を一括照合し、成功後だけCloud Run admissionをactiveにする。
+- acceptance失敗/cancel時は同じjobをrerunしない。失敗専用recovery jobは事前のarm outputへ依存せず、
+  RunPod policyでadmissionをpauseし、E2Eの
+  未解決fixtureがある場合だけmode 0600の短命evidenceを使ってowner-scoped deleteを行う。5分周期のdeployed
+  reaperでCloud Run Job/Execution/active execution 0へ収束後、同じworkflow runのsmoke epochだけをdisabledへ
+  CAS更新し、RunPodをactiveへ戻す。各安全stepは先行する非必須stepの失敗で暗黙skipせず、安全な依存条件を
+  満たす操作だけを試行して最後に全outcomeを集約する。recoveryはacceptanceを成功へ変更せず、収束しない場合も
+  productionをblockedにする。
 - Phase 14 staging release foundationのArtifact Registry、WIF、service account、KMS key、Artifact Analysis Note、Binary
   Authorization attestor/policyは作成済みである。KMS active key versionの保持費を監視し、candidate監査とproduction昇格が
   終わる前に削除しない。publisher/signerへuser-managed keyを作らず、candidate workflow外からimage pushまたはOccurrenceを

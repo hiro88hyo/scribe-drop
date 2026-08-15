@@ -140,6 +140,34 @@ export function isAllowedControllerDisable(observed, expectedReservedExecutions)
   );
 }
 
+export function isAllowedControllerRecoveryDisable(observed, expectedEpoch) {
+  if (
+    typeof expectedEpoch !== "string" ||
+    !expectedEpoch.startsWith("phase16-smoke-") ||
+    !AUTHORIZATION_EPOCH_PATTERN.test(expectedEpoch) ||
+    observed.activeExecutions !== 0 ||
+    observed.environment !== "staging" ||
+    !new Set([0, 1]).has(observed.reservedExecutions) ||
+    observed.reservedWorstCaseJpy !== observed.reservedExecutions * WORST_CASE_JPY_PER_EXECUTION
+  ) {
+    return false;
+  }
+  if (observed.epoch === "disabled") {
+    return (
+      observed.maxExecutions === 0 &&
+      observed.maxWorstCaseJpy === 0 &&
+      observed.reservedExecutions === 0 &&
+      observed.worstCaseJpyPerExecution === 0
+    );
+  }
+  return (
+    observed.epoch === expectedEpoch &&
+    observed.maxExecutions === 1 &&
+    observed.maxWorstCaseJpy === WORST_CASE_JPY_PER_EXECUTION &&
+    observed.worstCaseJpyPerExecution === WORST_CASE_JPY_PER_EXECUTION
+  );
+}
+
 export function createControllerDeploymentConfiguration({
   authorization,
   candidate,

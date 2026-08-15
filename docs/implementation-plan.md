@@ -1826,6 +1826,24 @@ Remote final Android/download/controller-outage gate (2026-08-15):
 
 ### Phase 16: production cutover and `v0.2.0`
 
+Local gate hardening after the first Phase 16 preflight (2026-08-15):
+
+- 最初のstaging workflowはEnvironmentのcontroller origin欠落によりremote mutation、Cloud Run Job、GPU、課金の
+  前に停止した。read-only監査でcontroller HMAC secret version、controller origin、runtime service account、R2 hostの
+  計4 variable欠落を確認した。値を手作業で追加して再dispatchせず、[ADR 0087](./adr/0087-fail-before-paid-staging-acceptance-and-recover.md)
+  に従い20 variable/6 secretの完全一致contractと4値の実resource read-backをsourceへ追加した。
+- Phase 14/15の手動GPU 0 bootstrap proof、Playwright install順序、3,600秒token、acceptance発行前のRunPod復帰と
+  disabled/zero read-back、失敗時fixture/controller/resource回収を一つのworkflowへ固定した。staging専用preflight
+  roleはproduction deployerへ権限を広げず、`runWithOverrides`を持たない。GPU固有に制限できない`run.jobs.run`は
+  exact workflow identityとGPU fieldを拒否するsource-controlled managerで閉じる。
+- Phase 15で確定済みのL4 quota 3、fixed manifest、worst-case 233円/authorization 250円を再評価せず
+  source-controlled paid-readinessへ移植した。backend promotionはRunPod選択を維持し、Cloud Run選択を
+  readiness後だけに限定する。acceptanceが失敗/cancelされた場合はarm outputなしでrecoveryを起動し、
+  YAML重複keyとrecovery stepの暗黙skipをCI static verifierで拒否する。
+- 同じcommitのworkflow dispatchとjob re-runを拒否する。failed acceptanceのrecoveryは新規GPUを作らず、同じrunの
+  stateだけを安全状態へ収束し、evidenceを発行しない。local source変更だけであり、この時点ではGitHub Environment、
+  GCP IAM、staging resource、CI run、GPU、productionを変更していない。
+
 実装:
 
 - ADR 0086のproduction port、admission、promotion workflowを含む単一release commitからapplication/Cloud Run

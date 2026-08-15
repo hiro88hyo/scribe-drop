@@ -156,9 +156,8 @@ function ensureProvider(identity) {
   }
 }
 
-function ensureDeploymentRole() {
-  const role = plan.deploymentRole;
-  let observed = readJson(["iam", "roles", "describe", role.id], "deployment role read");
+function ensureCustomRole(role, label, { updateExisting = false } = {}) {
+  let observed = readJson(["iam", "roles", "describe", role.id], `${label} role read`);
   if (observed === undefined) {
     gcloudRun(
       [
@@ -171,13 +170,36 @@ function ensureDeploymentRole() {
         `--permissions=${role.permissions.join(",")}`,
         `--stage=${role.stage}`,
       ],
-      { label: "deployment role creation" },
+      { label: `${label} role creation` },
     );
-    observed = readJson(["iam", "roles", "describe", role.id], "deployment role read");
+    observed = readJson(["iam", "roles", "describe", role.id], `${label} role read`);
   }
-  const permissions = Array.isArray(observed?.includedPermissions)
+  let permissions = Array.isArray(observed?.includedPermissions)
     ? [...observed.includedPermissions].sort()
     : [];
+  if (
+    observed !== undefined &&
+    updateExisting &&
+    JSON.stringify(permissions) !== JSON.stringify([...role.permissions].sort())
+  ) {
+    gcloudRun(
+      [
+        "iam",
+        "roles",
+        "update",
+        role.id,
+        `--title=${role.title}`,
+        `--description=${role.description}`,
+        `--permissions=${role.permissions.join(",")}`,
+        `--stage=${role.stage}`,
+      ],
+      { label: `${label} role update` },
+    );
+    observed = readJson(["iam", "roles", "describe", role.id], `${label} role read`);
+    permissions = Array.isArray(observed?.includedPermissions)
+      ? [...observed.includedPermissions].sort()
+      : [];
+  }
   if (
     observed?.name !== role.name ||
     observed?.title !== role.title ||
@@ -185,7 +207,7 @@ function ensureDeploymentRole() {
     observed?.stage !== role.stage ||
     JSON.stringify(permissions) !== JSON.stringify([...role.permissions].sort())
   ) {
-    throw new Error("Deployment role does not match the reviewed plan");
+    throw new Error(`${label} role does not match the reviewed plan`);
   }
 }
 
@@ -434,7 +456,10 @@ function rotatePrimarySecret() {
 }
 
 function applyFoundation() {
-  ensureDeploymentRole();
+  ensureCustomRole(plan.deploymentRole, "deployment");
+  ensureCustomRole(plan.stagingBootstrapPreflightRole, "staging bootstrap preflight", {
+    updateExisting: true,
+  });
   for (const identity of plan.identities) ensureServiceAccount(identity.account);
   ensureServiceAccount(plan.controller.account);
   ensureServiceAccount(plan.controller.runtimeAccount);
@@ -446,6 +471,12 @@ function applyFoundation() {
       "roles/iam.workloadIdentityUser",
     );
     addProjectBinding(`serviceAccount:${identity.account.email}`, plan.deploymentRole.name);
+    if (identity.environment === "staging") {
+      addProjectBinding(
+        `serviceAccount:${identity.account.email}`,
+        plan.stagingBootstrapPreflightRole.name,
+      );
+    }
   }
   addServiceAccountBinding(
     plan.controller.account.email,
@@ -454,6 +485,11 @@ function applyFoundation() {
   );
   addServiceAccountBinding(
     "gpu-controller@scribe-drop.iam.gserviceaccount.com",
+    `serviceAccount:${plan.identities[0].account.email}`,
+    "roles/iam.serviceAccountUser",
+  );
+  addServiceAccountBinding(
+    "gpu-runtime@scribe-drop.iam.gserviceaccount.com",
     `serviceAccount:${plan.identities[0].account.email}`,
     "roles/iam.serviceAccountUser",
   );
@@ -481,19 +517,61 @@ function applyFoundation() {
   );
 }
 
+function applyStagingBootstrapPreflightFoundation() {
+  const stagingIdentity = plan.identities.find(({ environment }) => environment === "staging");
+  if (stagingIdentity === undefined) {
+    throw new Error("Staging deployment identity is missing from the reviewed plan");
+  }
+  ensureServiceAccount(stagingIdentity.account);
+  ensureCustomRole(plan.stagingBootstrapPreflightRole, "staging bootstrap preflight", {
+    updateExisting: true,
+  });
+  addProjectBinding(
+    `serviceAccount:${stagingIdentity.account.email}`,
+    plan.stagingBootstrapPreflightRole.name,
+  );
+  addServiceAccountBinding(
+    "gpu-controller@scribe-drop.iam.gserviceaccount.com",
+    `serviceAccount:${stagingIdentity.account.email}`,
+    "roles/iam.serviceAccountUser",
+  );
+  addServiceAccountBinding(
+    "gpu-runtime@scribe-drop.iam.gserviceaccount.com",
+    `serviceAccount:${stagingIdentity.account.email}`,
+    "roles/iam.serviceAccountUser",
+  );
+  run(process.execPath, ["scripts/verify-cloud-run-deployment-foundation.mjs", "staging"], {
+    label: "staging bootstrap preflight foundation final read-back",
+  });
+  console.log(
+    JSON.stringify({
+      environment: "staging",
+      gpuFreeManagerPolicy: "verified",
+      preflightRole: "verified",
+      quotaRead: "verified",
+      runtimeImpersonation: "verified",
+    }),
+  );
+}
+
 const [command, confirmation] = process.argv.slice(2);
-if (
-  command !== "apply" ||
-  confirmation !== "--confirm-production-foundation" ||
-  process.argv.length !== 4
-) {
+const productionApply =
+  command === "apply" &&
+  confirmation === "--confirm-production-foundation" &&
+  process.argv.length === 4;
+const stagingPreflightApply =
+  command === "apply-staging-preflight" &&
+  confirmation === "--confirm-staging-preflight-foundation" &&
+  process.argv.length === 4;
+if (!productionApply && !stagingPreflightApply) {
   throw new Error(
-    "Usage: manage-cloud-run-deployment-foundation apply --confirm-production-foundation",
+    "Usage: manage-cloud-run-deployment-foundation <apply --confirm-production-foundation|apply-staging-preflight --confirm-staging-preflight-foundation>",
   );
 }
 
 try {
-  applyFoundation();
+  if (productionApply) applyFoundation();
+  else applyStagingBootstrapPreflightFoundation();
 } catch (error) {
   console.error(error instanceof Error ? error.message : "Cloud Run deployment foundation failed");
   process.exitCode = 1;

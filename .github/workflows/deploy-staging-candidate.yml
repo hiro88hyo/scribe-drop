@@ -49,14 +49,16 @@ jobs:
       SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN: ${{ vars.SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN }}
       SCRIBE_DROP_STAGING_D1_DATABASE_ID: ${{ vars.SCRIBE_DROP_STAGING_D1_DATABASE_ID }}
       SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_ORIGIN: ${{ vars.SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_ORIGIN }}
+      SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_HMAC_SECRET_VERSION: ${{ vars.SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_HMAC_SECRET_VERSION }}
       SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_MODE: synthetic-shadow
       SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT: ${{ vars.SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT }}
       SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME: ${{ vars.SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME }}
       SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN: ${{ vars.SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN }}
-      SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY: cloud_run_jobs_l4_v1
+      SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY: runpod_serverless_v1
       SCRIBE_DROP_STAGING_GPU_EXECUTION_ADMISSION: active
       SCRIBE_DROP_STAGING_PAGES_ACCESS_AUDIENCE: ${{ vars.SCRIBE_DROP_STAGING_PAGES_ACCESS_AUDIENCE }}
       SCRIBE_DROP_STAGING_PAGES_PROJECT: ${{ vars.SCRIBE_DROP_STAGING_PAGES_PROJECT }}
+      SCRIBE_DROP_STAGING_R2_HOST: ${{ vars.SCRIBE_DROP_STAGING_R2_HOST }}
       SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS: ${{ vars.SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS }}
       SCRIBE_DROP_STAGING_RUNPOD_IMAGE_VISIBILITY: ${{ vars.SCRIBE_DROP_STAGING_RUNPOD_IMAGE_VISIBILITY }}
       SCRIBE_DROP_STAGING_RUNPOD_REGISTRY_AUTH_ID: ${{ vars.SCRIBE_DROP_STAGING_RUNPOD_REGISTRY_AUTH_ID }}
@@ -75,11 +77,14 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Authenticate and read back the isolated staging deployment identity
+        id: google-auth
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: projects/601035271372/locations/global/workloadIdentityPools/scribe-drop-release/providers/github-staging-deployment
           service_account: sd-staging-deployer@scribe-drop.iam.gserviceaccount.com
           project_id: scribe-drop
+          token_format: access_token
+          access_token_lifetime: 900s
 
       - name: Set up pinned Google Cloud CLI for foundation preflight
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
@@ -89,6 +94,11 @@ jobs:
 
       - name: Verify staging deployment foundation before candidate mutation
         run: pnpm run cloud-run:foundation:read staging
+
+      - name: Verify exact staging release inputs before candidate mutation
+        env:
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+        run: pnpm run cloud-run:staging:inputs:verify
 
       - name: Verify both staging Access applications before remote work
         env:
@@ -151,6 +161,10 @@ jobs:
             "${RUNNER_TEMP}/cloud-run-candidate-run.json" \
             .github/workflows/publish-cloud-run-candidate.yml \
             "${CLOUD_RUN_CANDIDATE_RUN_ID}"
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-staging-candidate.yml/runs?event=workflow_dispatch&head_sha=${GITHUB_SHA}&per_page=100" \
+            >"${RUNNER_TEMP}/staging-workflow-runs.json"
+          pnpm run staging:dispatch:verify "${RUNNER_TEMP}/staging-workflow-runs.json"
           cloud_run_attempt="$(node -p "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')).run_attempt" "${RUNNER_TEMP}/cloud-run-candidate-run.json")"
           printf 'CLOUD_RUN_CANDIDATE_RUN_ATTEMPT=%s\n' "${cloud_run_attempt}" >>"${GITHUB_ENV}"
 
@@ -241,7 +255,7 @@ jobs:
       SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_MODE: synthetic-shadow
       SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT: ${{ vars.SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT }}
       SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN: ${{ vars.SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN }}
-      SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY: cloud_run_jobs_l4_v1
+      SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY: runpod_serverless_v1
       SCRIBE_DROP_STAGING_GPU_EXECUTION_ADMISSION: active
       SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS: ${{ vars.SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS }}
       SCRIBE_DROP_STAGING_WEB_ORIGIN: ${{ vars.SCRIBE_DROP_STAGING_WEB_ORIGIN }}
@@ -361,7 +375,7 @@ jobs:
       SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT: ${{ vars.SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT }}
       SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME: ${{ vars.SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME }}
       SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN: ${{ vars.SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN }}
-      SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY: cloud_run_jobs_l4_v1
+      SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY: runpod_serverless_v1
       SCRIBE_DROP_STAGING_GPU_EXECUTION_ADMISSION: active
       SCRIBE_DROP_STAGING_PAGES_ACCESS_AUDIENCE: ${{ vars.SCRIBE_DROP_STAGING_PAGES_ACCESS_AUDIENCE }}
       SCRIBE_DROP_STAGING_PAGES_PROJECT: ${{ vars.SCRIBE_DROP_STAGING_PAGES_PROJECT }}
@@ -458,6 +472,7 @@ jobs:
       SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN: ${{ vars.SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN }}
       SCRIBE_DROP_STAGING_D1_DATABASE_ID: ${{ vars.SCRIBE_DROP_STAGING_D1_DATABASE_ID }}
       SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_ORIGIN: ${{ vars.SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_ORIGIN }}
+      SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_HMAC_SECRET_VERSION: ${{ vars.SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_HMAC_SECRET_VERSION }}
       SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_MODE: synthetic-shadow
       SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT: ${{ vars.SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT }}
       SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME: ${{ vars.SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME }}
@@ -466,6 +481,7 @@ jobs:
       SCRIBE_DROP_STAGING_GPU_EXECUTION_ADMISSION: active
       SCRIBE_DROP_STAGING_PAGES_ACCESS_AUDIENCE: ${{ vars.SCRIBE_DROP_STAGING_PAGES_ACCESS_AUDIENCE }}
       SCRIBE_DROP_STAGING_PAGES_PROJECT: ${{ vars.SCRIBE_DROP_STAGING_PAGES_PROJECT }}
+      SCRIBE_DROP_STAGING_R2_HOST: ${{ vars.SCRIBE_DROP_STAGING_R2_HOST }}
       SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS: ${{ vars.SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS }}
       SCRIBE_DROP_STAGING_RUNPOD_IMAGE_VISIBILITY: ${{ vars.SCRIBE_DROP_STAGING_RUNPOD_IMAGE_VISIBILITY }}
       SCRIBE_DROP_STAGING_RUNPOD_REGISTRY_AUTH_ID: ${{ vars.SCRIBE_DROP_STAGING_RUNPOD_REGISTRY_AUTH_ID }}
@@ -491,7 +507,7 @@ jobs:
           service_account: sd-staging-deployer@scribe-drop.iam.gserviceaccount.com
           project_id: scribe-drop
           token_format: access_token
-          access_token_lifetime: 900s
+          access_token_lifetime: 3600s
 
       - name: Set up pinned Google Cloud CLI
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
@@ -538,6 +554,9 @@ jobs:
       - name: Build the controller deployment verifier
         run: pnpm --filter @scribe-drop/gpu-controller build
 
+      - name: Install fixed Playwright browser before controller mutation
+        run: pnpm --filter @scribe-drop/e2e exec playwright install --with-deps chromium
+
       - name: Pause staging admission before bounded authorization
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -552,12 +571,31 @@ jobs:
             --config .wrangler/deploy/orchestrator-staging.toml \
             --env staging
 
+      - name: Deploy the candidate controller with authorization disabled
+        env:
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+          SCRIBE_DROP_CLOUD_RUN_EXPECTED_RESERVED_EXECUTIONS: "0"
+        run: |
+          pnpm run cloud-run:controller:deploy apply staging disabled \
+            "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
+
+      - name: Prove the exact candidate runtime boundary without a GPU
+        run: |
+          pnpm run cloud-run:staging:bootstrap-preflight \
+            "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
+
+      - name: Verify the complete known paid preflight before authorization
+        env:
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+        run: |
+          pnpm run cloud-run:staging:safety read
+          pnpm run cloud-run:staging:paid-readiness \
+            "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
+
       - name: Authorize exact one bounded staging execution and deploy the candidate controller
         env:
           GH_TOKEN: ${{ github.token }}
           GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
-          SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_HMAC_SECRET_VERSION: ${{ vars.SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_HMAC_SECRET_VERSION }}
-          SCRIBE_DROP_STAGING_R2_HOST: ${{ vars.SCRIBE_DROP_STAGING_R2_HOST }}
         run: |
           workflow_created_at="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" --jq .created_at)"
           authorization_expiry="$(node -p 'new Date(Date.parse(process.argv[1]) + 2 * 60 * 60 * 1000).toISOString()' "${workflow_created_at}")"
@@ -599,14 +637,25 @@ jobs:
           pnpm run cloudflare:access:verify:staging
           pnpm run runpod:preflight:staging
 
-      - name: Install fixed Playwright browser
-        run: pnpm --filter @scribe-drop/e2e exec playwright install --with-deps chromium
-
       - name: Verify authenticated data plane, then run real staging M4A lifecycle
         env:
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
-        run: pnpm run test:e2e:staging
+        run: |
+          mkdir -p "${RUNNER_TEMP}/staging-acceptance-cleanup"
+          printf 'STAGING_FAILURE_EVIDENCE_PATH=%s\n' \
+            "${RUNNER_TEMP}/staging-acceptance-cleanup/job.json" >>"${GITHUB_ENV}"
+          STAGING_FAILURE_EVIDENCE_PATH="${RUNNER_TEMP}/staging-acceptance-cleanup/job.json" \
+            pnpm run test:e2e:staging
+
+      - name: Preserve only unresolved fixture identity for automatic recovery
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scribe-drop-staging-cleanup-${{ github.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/staging-acceptance-cleanup/job.json
+          if-no-files-found: ignore
+          retention-days: 1
 
       - name: Verify exact-one Cloud Run cleanup and provider storage convergence
         env:
@@ -617,26 +666,9 @@ jobs:
         env:
           GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
           SCRIBE_DROP_CLOUD_RUN_EXPECTED_RESERVED_EXECUTIONS: "1"
-          SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_HMAC_SECRET_VERSION: ${{ vars.SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_HMAC_SECRET_VERSION }}
-          SCRIBE_DROP_STAGING_R2_HOST: ${{ vars.SCRIBE_DROP_STAGING_R2_HOST }}
         run: |
           pnpm run cloud-run:controller:deploy apply staging disabled \
             "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
-
-      - name: Issue short-lived staging acceptance
-        env:
-          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
-          EXPECTED_CLOUD_RUN_CANDIDATE_RUN_ID: ${{ inputs.cloud_run_candidate_run_id }}
-        run: |
-          mkdir staging-acceptance
-          pnpm run staging:acceptance:create \
-            "${RELEASE_CANDIDATE_DIRECTORY}" \
-            staging-acceptance
-          EXPECTED_CANDIDATE_RUN_ID="${CANDIDATE_RUN_ID}" \
-            EXPECTED_STAGING_RUN_ID="${GITHUB_RUN_ID}" \
-            pnpm run staging:acceptance:verify \
-              "${RELEASE_CANDIDATE_DIRECTORY}" \
-              staging-acceptance
 
       - name: Restore RunPod selection while preserving the Cloud Run reaper
         env:
@@ -654,6 +686,26 @@ jobs:
             --env staging
           pnpm run cloudflare:readback:staging
 
+      - name: Verify final disabled zero state before issuing acceptance
+        env:
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+        run: pnpm run cloud-run:staging:safety read
+
+      - name: Issue short-lived staging acceptance
+        env:
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          EXPECTED_CLOUD_RUN_CANDIDATE_RUN_ID: ${{ inputs.cloud_run_candidate_run_id }}
+        run: |
+          mkdir staging-acceptance
+          pnpm run staging:acceptance:create \
+            "${RELEASE_CANDIDATE_DIRECTORY}" \
+            staging-acceptance
+          EXPECTED_CANDIDATE_RUN_ID="${CANDIDATE_RUN_ID}" \
+            EXPECTED_STAGING_RUN_ID="${GITHUB_RUN_ID}" \
+            pnpm run staging:acceptance:verify \
+              "${RELEASE_CANDIDATE_DIRECTORY}" \
+              staging-acceptance
+
       - name: Upload immutable staging acceptance
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -661,3 +713,243 @@ jobs:
           path: staging-acceptance
           if-no-files-found: error
           retention-days: 2
+
+  recover-acceptance:
+    name: Converge a failed staging acceptance to the safe state
+    needs: acceptance
+    if: ${{ always() && (needs.acceptance.result == 'failure' || needs.acceptance.result == 'cancelled') }}
+    environment: staging
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      AUDIT_RETENTION_DAYS: ${{ vars.AUDIT_RETENTION_DAYS }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      EXPECTED_COMMIT_SHA: ${{ github.sha }}
+      MULTIPART_RETENTION_HOURS: ${{ vars.MULTIPART_RETENTION_HOURS }}
+      RELEASE_CANDIDATE_DIRECTORY: ${{ github.workspace }}/release-candidate
+      RESULT_RETENTION_DAYS: ${{ vars.RESULT_RETENTION_DAYS }}
+      SCRIBE_DROP_CANDIDATE_MIGRATIONS_DIR: ../../release-candidate/migrations
+      SCRIBE_DROP_CLOUD_RUN_RECOVERY_EPOCH: phase16-smoke-${{ github.sha }}-${{ github.run_id }}
+      SCRIBE_DROP_STAGING_ACCESS_AUDIENCE: ${{ vars.SCRIBE_DROP_STAGING_ACCESS_AUDIENCE }}
+      SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN: ${{ vars.SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN }}
+      SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_HMAC_SECRET_VERSION: ${{ vars.SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_HMAC_SECRET_VERSION }}
+      SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_ORIGIN: ${{ vars.SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_ORIGIN }}
+      SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_MODE: synthetic-shadow
+      SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT: ${{ vars.SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT }}
+      SCRIBE_DROP_STAGING_D1_DATABASE_ID: ${{ vars.SCRIBE_DROP_STAGING_D1_DATABASE_ID }}
+      SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME: ${{ vars.SCRIBE_DROP_STAGING_E2E_SERVICE_TOKEN_COMMON_NAME }}
+      SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN: ${{ vars.SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN }}
+      SCRIBE_DROP_STAGING_PAGES_ACCESS_AUDIENCE: ${{ vars.SCRIBE_DROP_STAGING_PAGES_ACCESS_AUDIENCE }}
+      SCRIBE_DROP_STAGING_PAGES_PROJECT: ${{ vars.SCRIBE_DROP_STAGING_PAGES_PROJECT }}
+      SCRIBE_DROP_STAGING_R2_HOST: ${{ vars.SCRIBE_DROP_STAGING_R2_HOST }}
+      SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS: ${{ vars.SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS }}
+      SCRIBE_DROP_STAGING_RUNPOD_IMAGE_VISIBILITY: ${{ vars.SCRIBE_DROP_STAGING_RUNPOD_IMAGE_VISIBILITY }}
+      SCRIBE_DROP_STAGING_RUNPOD_REGISTRY_AUTH_ID: ${{ vars.SCRIBE_DROP_STAGING_RUNPOD_REGISTRY_AUTH_ID }}
+      SCRIBE_DROP_STAGING_WEB_ORIGIN: ${{ vars.SCRIBE_DROP_STAGING_WEB_ORIGIN }}
+      SOURCE_RETENTION_DAYS: ${{ vars.SOURCE_RETENTION_DAYS }}
+    steps:
+      - name: Check out release commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Volta
+        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
+        with:
+          volta-version: 2.0.2
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Re-authenticate the isolated staging deployer for recovery
+        id: google-auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: projects/601035271372/locations/global/workloadIdentityPools/scribe-drop-release/providers/github-staging-deployment
+          service_account: sd-staging-deployer@scribe-drop.iam.gserviceaccount.com
+          project_id: scribe-drop
+          token_format: access_token
+          access_token_lifetime: 3600s
+
+      - name: Set up pinned Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          version: 579.0.0
+          project_id: scribe-drop
+
+      - name: Export release version
+        run: printf 'EXPECTED_RELEASE_VERSION=%s\n' "$(node -p "require('./package.json').version")" >>"${GITHUB_ENV}"
+
+      - name: Download and verify immutable release candidate
+        env:
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "${CANDIDATE_RUN_ID}" \
+            --name "scribe-drop-release-candidate-${GITHUB_SHA}" \
+            --dir "${RELEASE_CANDIDATE_DIRECTORY}"
+          pnpm run candidate:verify "${RELEASE_CANDIDATE_DIRECTORY}"
+
+      - name: Download and verify immutable Cloud Run candidate
+        env:
+          CLOUD_RUN_CANDIDATE_RUN_ID: ${{ inputs.cloud_run_candidate_run_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${CLOUD_RUN_CANDIDATE_RUN_ID}" \
+            >"${RUNNER_TEMP}/cloud-run-candidate-run.json"
+          node scripts/verify-workflow-run.mjs \
+            "${RUNNER_TEMP}/cloud-run-candidate-run.json" \
+            .github/workflows/publish-cloud-run-candidate.yml \
+            "${CLOUD_RUN_CANDIDATE_RUN_ID}"
+          cloud_run_attempt="$(node -p "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')).run_attempt" "${RUNNER_TEMP}/cloud-run-candidate-run.json")"
+          gh run download "${CLOUD_RUN_CANDIDATE_RUN_ID}" \
+            --name "scribe-drop-cloud-run-candidate-${GITHUB_SHA}-${CLOUD_RUN_CANDIDATE_RUN_ID}-${cloud_run_attempt}" \
+            --dir cloud-run-candidate
+          pnpm run cloud-run:candidate:evidence verify cloud-run-candidate/cloud-run-candidate.json
+          printf 'CLOUD_RUN_CANDIDATE_EVIDENCE_PATH=%s\n' \
+            "${GITHUB_WORKSPACE}/cloud-run-candidate/cloud-run-candidate.json" >>"${GITHUB_ENV}"
+
+      - name: Pause all new GPU admission on the RunPod recovery policy
+        id: pause-admission
+        continue-on-error: true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          SCRIBE_DROP_STAGING_GPU_EXECUTION_ADMISSION: paused
+          SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY: runpod_serverless_v1
+        run: |
+          pnpm run cloudflare:config:staging:orchestrator
+          pnpm exec wrangler deploy "${RELEASE_CANDIDATE_DIRECTORY}/orchestrator/index.js" \
+            --no-bundle \
+            --strict \
+            --tag "candidate-${GITHUB_SHA}" \
+            --message "release candidate ${GITHUB_SHA}" \
+            --config .wrangler/deploy/orchestrator-staging.toml \
+            --env staging
+
+      - name: Download unresolved fixture identity if one exists
+        id: cleanup-evidence
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          artifact_name="scribe-drop-staging-cleanup-${GITHUB_SHA}-${GITHUB_RUN_ID}"
+          artifact_count="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
+            --jq "[.artifacts[] | select(.name == \"${artifact_name}\" and .expired == false)] | length")"
+          case "${artifact_count}" in
+            0)
+              printf 'found=false\n' >>"${GITHUB_OUTPUT}"
+              ;;
+            1)
+              mkdir -p "${RUNNER_TEMP}/staging-acceptance-cleanup"
+              gh run download "${GITHUB_RUN_ID}" \
+                --name "${artifact_name}" \
+                --dir "${RUNNER_TEMP}/staging-acceptance-cleanup"
+              test -s "${RUNNER_TEMP}/staging-acceptance-cleanup/job.json"
+              printf 'found=true\n' >>"${GITHUB_OUTPUT}"
+              ;;
+            *)
+              echo "Staging cleanup artifact identity is not unique" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Install fixed Playwright browser only for unresolved fixture recovery
+        id: install-cleanup-browser
+        if: ${{ always() && steps.cleanup-evidence.outcome == 'success' && steps.cleanup-evidence.outputs.found == 'true' }}
+        continue-on-error: true
+        run: pnpm --filter @scribe-drop/e2e exec playwright install --with-deps chromium
+
+      - name: Delete the unresolved fixture through the authenticated owner path
+        id: cleanup-fixture
+        if: ${{ always() && steps.install-cleanup-browser.outcome == 'success' && steps.cleanup-evidence.outputs.found == 'true' }}
+        continue-on-error: true
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          STAGING_FAILURE_EVIDENCE_PATH: ${{ runner.temp }}/staging-acceptance-cleanup/job.json
+        run: pnpm --filter @scribe-drop/e2e run test:staging:failure-cleanup
+
+      - name: Wait for the deployed reaper and Cloud Run resources to converge
+        id: wait-convergence
+        if: ${{ always() }}
+        continue-on-error: true
+        env:
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+        run: pnpm run cloud-run:staging:safety wait
+
+      - name: Build the controller deployment verifier
+        id: build-controller
+        if: ${{ always() }}
+        continue-on-error: true
+        run: pnpm --filter @scribe-drop/gpu-controller build
+
+      - name: Disable only this failed run's staging controller authorization
+        id: disable-controller
+        if: ${{ always() && steps.wait-convergence.outcome == 'success' && steps.build-controller.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+        run: |
+          pnpm run cloud-run:controller:deploy recover staging disabled \
+            "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
+
+      - name: Reactivate RunPod only after Cloud Run is disabled and empty
+        id: reactivate-runpod
+        if: ${{ always() && steps.wait-convergence.outcome == 'success' && steps.disable-controller.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          SCRIBE_DROP_STAGING_GPU_EXECUTION_ADMISSION: active
+          SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY: runpod_serverless_v1
+        run: |
+          pnpm run cloudflare:config:staging:orchestrator
+          pnpm exec wrangler deploy "${RELEASE_CANDIDATE_DIRECTORY}/orchestrator/index.js" \
+            --no-bundle \
+            --strict \
+            --tag "candidate-${GITHUB_SHA}" \
+            --message "release candidate ${GITHUB_SHA}" \
+            --config .wrangler/deploy/orchestrator-staging.toml \
+            --env staging
+
+      - name: Verify recovered staging safety without issuing acceptance
+        id: verify-recovery
+        if: ${{ always() && steps.disable-controller.outcome == 'success' && steps.reactivate-runpod.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+          SCRIBE_DROP_STAGING_GPU_EXECUTION_ADMISSION: active
+          SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY: runpod_serverless_v1
+        run: |
+          pnpm run cloudflare:config:staging:orchestrator
+          pnpm run cloudflare:readback:staging
+          pnpm run cloud-run:staging:safety read
+
+      - name: Reject any incomplete automatic recovery action
+        if: ${{ always() }}
+        env:
+          CLEANUP_BROWSER_OUTCOME: ${{ steps.install-cleanup-browser.outcome }}
+          CLEANUP_EVIDENCE_OUTCOME: ${{ steps.cleanup-evidence.outcome }}
+          CLEANUP_EVIDENCE_FOUND: ${{ steps.cleanup-evidence.outputs.found }}
+          CLEANUP_FIXTURE_OUTCOME: ${{ steps.cleanup-fixture.outcome }}
+          CONTROLLER_BUILD_OUTCOME: ${{ steps.build-controller.outcome }}
+          CONTROLLER_OUTCOME: ${{ steps.disable-controller.outcome }}
+          CONVERGENCE_OUTCOME: ${{ steps.wait-convergence.outcome }}
+          FINAL_VERIFY_OUTCOME: ${{ steps.verify-recovery.outcome }}
+          PAUSE_OUTCOME: ${{ steps.pause-admission.outcome }}
+          RUNPOD_OUTCOME: ${{ steps.reactivate-runpod.outcome }}
+        run: |
+          test "${PAUSE_OUTCOME}" = "success"
+          test "${CLEANUP_EVIDENCE_OUTCOME}" = "success"
+          test "${CONVERGENCE_OUTCOME}" = "success"
+          test "${CONTROLLER_BUILD_OUTCOME}" = "success"
+          test "${CONTROLLER_OUTCOME}" = "success"
+          test "${RUNPOD_OUTCOME}" = "success"
+          test "${FINAL_VERIFY_OUTCOME}" = "success"
+          if [ "${CLEANUP_EVIDENCE_FOUND}" = "true" ]; then
+            test "${CLEANUP_BROWSER_OUTCOME}" = "success"
+            test "${CLEANUP_FIXTURE_OUTCOME}" = "success"
+          fi

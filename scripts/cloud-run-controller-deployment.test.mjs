@@ -7,6 +7,7 @@ import {
   createControllerDeploymentConfiguration,
   createControllerServiceRequest,
   isAllowedControllerDisable,
+  isAllowedControllerRecoveryDisable,
   isExactControllerAuthorizationRetry,
 } from "./cloud-run-controller-deployment.mjs";
 
@@ -181,6 +182,50 @@ test("distinguishes an unconsumed rearm from a consumed smoke disable", () => {
   assert.equal(isAllowedControllerDisable({ ...smoke, reservedExecutions: 1 }, 0), false);
   assert.equal(
     isAllowedControllerDisable({ ...smoke, reservedExecutions: 1, reservedWorstCaseJpy: 250 }, 1),
+    true,
+  );
+});
+
+test("recovery disables only the same staging smoke epoch after capacity reaches zero", () => {
+  const epoch = `phase16-smoke-${"a".repeat(40)}-123`;
+  const smoke = {
+    activeExecutions: 0,
+    environment: "staging",
+    epoch,
+    maxExecutions: 1,
+    maxWorstCaseJpy: 250,
+    reservedExecutions: 0,
+    reservedWorstCaseJpy: 0,
+    worstCaseJpyPerExecution: 250,
+  };
+  assert.equal(isAllowedControllerRecoveryDisable(smoke, epoch), true);
+  assert.equal(
+    isAllowedControllerRecoveryDisable(
+      { ...smoke, reservedExecutions: 1, reservedWorstCaseJpy: 250 },
+      epoch,
+    ),
+    true,
+  );
+  assert.equal(isAllowedControllerRecoveryDisable({ ...smoke, activeExecutions: 1 }, epoch), false);
+  assert.equal(
+    isAllowedControllerRecoveryDisable(smoke, `phase16-smoke-${"b".repeat(40)}-123`),
+    false,
+  );
+  assert.equal(
+    isAllowedControllerRecoveryDisable({ ...smoke, environment: "production" }, epoch),
+    false,
+  );
+  assert.equal(
+    isAllowedControllerRecoveryDisable(
+      {
+        ...smoke,
+        epoch: "disabled",
+        maxExecutions: 0,
+        maxWorstCaseJpy: 0,
+        worstCaseJpyPerExecution: 0,
+      },
+      epoch,
+    ),
     true,
   );
 });

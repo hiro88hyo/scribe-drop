@@ -9,6 +9,7 @@ import {
   createControllerDeploymentConfiguration,
   createControllerServiceRequest,
   isAllowedControllerDisable,
+  isAllowedControllerRecoveryDisable,
   isExactControllerAuthorizationRetry,
 } from "./cloud-run-controller-deployment.mjs";
 
@@ -125,7 +126,22 @@ function stringField(document, name) {
   return value;
 }
 
-async function writeAuthorization(selected, expectedReservedExecutions) {
+function observedAuthorization(document) {
+  return {
+    activeExecutions: integerField(document, "activeExecutions"),
+    environment: stringField(document, "environment"),
+    epoch: stringField(document, "epoch"),
+    maxExecutions: integerField(document, "maxExecutions"),
+    maxRequestsPerMinute: integerField(document, "maxRequestsPerMinute"),
+    maxWorstCaseJpy: integerField(document, "maxWorstCaseJpy"),
+    reservedExecutions: integerField(document, "reservedExecutions"),
+    reservedWorstCaseJpy: integerField(document, "reservedWorstCaseJpy"),
+    validUntil: stringField(document, "validUntil"),
+    worstCaseJpyPerExecution: integerField(document, "worstCaseJpyPerExecution"),
+  };
+}
+
+async function readAuthorizationDocument() {
   const documentUrl =
     `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/${deployment.databaseId}` +
     `/documents/scribe_drop_controller_environments/${selectedEnvironment}`;
@@ -133,6 +149,19 @@ async function writeAuthorization(selected, expectedReservedExecutions) {
   if (current.status !== 200 && current.status !== 404) {
     throw new Error(`Controller authorization read failed: ${current.status}`);
   }
+  return { current, documentUrl };
+}
+
+async function requireRecoveryReady(expectedEpoch) {
+  const { current } = await readAuthorizationDocument();
+  if (current.status === 404) return;
+  if (!isAllowedControllerRecoveryDisable(observedAuthorization(current.body), expectedEpoch)) {
+    throw new Error("Controller recovery state does not match this staging workflow run");
+  }
+}
+
+async function writeAuthorization(selected, expectedReservedExecutions, recoveryEpoch) {
+  const { current, documentUrl } = await readAuthorizationDocument();
   if (current.status === 200 && integerField(current.body, "activeExecutions") !== 0) {
     throw new Error("Controller authorization cannot change while capacity is reserved");
   }
@@ -140,18 +169,15 @@ async function writeAuthorization(selected, expectedReservedExecutions) {
     selected.epoch === "disabled" &&
     ((current.status === 404 && expectedReservedExecutions !== 0) ||
       (current.status === 200 &&
-        !isAllowedControllerDisable(
-          {
-            activeExecutions: integerField(current.body, "activeExecutions"),
-            epoch: stringField(current.body, "epoch"),
-            maxExecutions: integerField(current.body, "maxExecutions"),
-            maxWorstCaseJpy: integerField(current.body, "maxWorstCaseJpy"),
-            reservedExecutions: integerField(current.body, "reservedExecutions"),
-            reservedWorstCaseJpy: integerField(current.body, "reservedWorstCaseJpy"),
-            worstCaseJpyPerExecution: integerField(current.body, "worstCaseJpyPerExecution"),
-          },
-          expectedReservedExecutions,
-        )))
+        !(recoveryEpoch === undefined
+          ? isAllowedControllerDisable(
+              observedAuthorization(current.body),
+              expectedReservedExecutions,
+            )
+          : isAllowedControllerRecoveryDisable(
+              observedAuthorization(current.body),
+              recoveryEpoch,
+            ))))
   ) {
     throw new Error("Controller disable reservation expectation does not match");
   }
@@ -246,15 +272,21 @@ async function readAndVerify(deploymentConfiguration) {
 
 const [command, selectedEnvironment, authorizationMode, candidatePath] = process.argv.slice(2);
 if (
-  !new Set(["apply", "read"]).has(command) ||
+  !new Set(["apply", "read", "recover"]).has(command) ||
   !new Set(["staging", "production"]).has(selectedEnvironment) ||
   !new Set(["disabled", "operational", "smoke"]).has(authorizationMode) ||
   candidatePath === undefined ||
   process.argv.length !== 6
 ) {
   throw new Error(
-    "Usage: manage-cloud-run-controller-deployment <apply|read> <staging|production> <disabled|operational|smoke> <candidate-evidence>",
+    "Usage: manage-cloud-run-controller-deployment <apply|read|recover> <staging|production> <disabled|operational|smoke> <candidate-evidence>",
   );
+}
+if (
+  command === "recover" &&
+  (selectedEnvironment !== "staging" || authorizationMode !== "disabled")
+) {
+  throw new Error("Controller recovery is restricted to disabled staging authorization");
 }
 const deployment = controllerDeployment(selectedEnvironment);
 const environmentPrefix = `SCRIBE_DROP_${selectedEnvironment.toUpperCase()}`;
@@ -291,6 +323,14 @@ const expectedDisabledReservations = (() => {
   }
   return Number(value);
 })();
+const recoveryEpoch =
+  command === "recover"
+    ? requireValue(
+        process.env.SCRIBE_DROP_CLOUD_RUN_RECOVERY_EPOCH,
+        /^phase16-smoke-[a-f0-9]{7,40}-[1-9][0-9]*$/u,
+        "Controller recovery epoch",
+      )
+    : undefined;
 const deploymentConfiguration = createControllerDeploymentConfiguration({
   authorization: selectedAuthorization,
   candidate,
@@ -304,14 +344,10 @@ try {
   const { createControllerServiceDeploymentPlan } =
     await import("../apps/gpu-controller/dist/index.js");
   const plan = createControllerServiceDeploymentPlan(deploymentConfiguration);
-  if (command === "apply") {
-    if (authorizationMode !== "disabled") {
-      await deployService(plan);
-      await writeAuthorization(selectedAuthorization, expectedDisabledReservations);
-    } else {
-      await deployService(plan);
-      await writeAuthorization(selectedAuthorization, expectedDisabledReservations);
-    }
+  if (command === "apply" || command === "recover") {
+    if (command === "recover") await requireRecoveryReady(recoveryEpoch);
+    await deployService(plan);
+    await writeAuthorization(selectedAuthorization, expectedDisabledReservations, recoveryEpoch);
   }
   const evidence = await readAndVerify(deploymentConfiguration);
   console.log(

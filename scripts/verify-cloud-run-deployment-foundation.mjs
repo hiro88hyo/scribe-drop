@@ -157,7 +157,12 @@ function requireIdentity(identity) {
   requirePrincipalBindings(
     ["projects", "get-iam-policy", plan.projectId],
     `serviceAccount:${identity.account.email}`,
-    [{ role: plan.deploymentRole.name }],
+    [
+      { role: plan.deploymentRole.name },
+      ...(identity.environment === "staging"
+        ? [{ role: plan.stagingBootstrapPreflightRole.name }]
+        : []),
+    ],
     `${identity.environment} deployment project`,
   );
   requirePrincipalBindings(
@@ -165,6 +170,32 @@ function requireIdentity(identity) {
     `serviceAccount:${identity.account.email}`,
     [{ role: "roles/artifactregistry.reader" }],
     `${identity.environment} controller repository`,
+  );
+}
+
+function requireStagingBootstrapPreflight(identity) {
+  requireRole(plan.stagingBootstrapPreflightRole);
+  requirePrincipalBindings(
+    [
+      "iam",
+      "service-accounts",
+      "get-iam-policy",
+      "gpu-controller@scribe-drop.iam.gserviceaccount.com",
+    ],
+    `serviceAccount:${identity.account.email}`,
+    [{ role: "roles/iam.serviceAccountUser" }],
+    "staging controller service account",
+  );
+  requirePrincipalBindings(
+    [
+      "iam",
+      "service-accounts",
+      "get-iam-policy",
+      "gpu-runtime@scribe-drop.iam.gserviceaccount.com",
+    ],
+    `serviceAccount:${identity.account.email}`,
+    [{ role: "roles/iam.serviceAccountUser" }],
+    "staging runtime service account",
   );
 }
 
@@ -303,6 +334,7 @@ try {
   const identity = plan.identities.find((candidate) => candidate.environment === environment);
   if (identity === undefined) throw new Error("Deployment identity is missing from the plan");
   requireIdentity(identity);
+  if (environment === "staging") requireStagingBootstrapPreflight(identity);
   if (environment === "production") requireProductionController(identity);
   console.log(
     JSON.stringify({

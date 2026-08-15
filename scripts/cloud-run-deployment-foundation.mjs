@@ -38,6 +38,19 @@ export const deploymentRolePermissions = Object.freeze([
   "secretmanager.versions.get",
 ]);
 
+export const stagingBootstrapPreflightRolePermissions = Object.freeze([
+  "cloudquotas.quotas.get",
+  "logging.logEntries.list",
+  "run.executions.get",
+  "run.executions.list",
+  "run.jobs.create",
+  "run.jobs.delete",
+  "run.jobs.get",
+  "run.jobs.list",
+  "run.jobs.run",
+  "run.operations.get",
+]);
+
 function githubCondition(environment, workflowPath) {
   const subject = `repo:${GITHUB_OWNER}@${GITHUB_OWNER_ID}/scribe-drop@${GITHUB_REPOSITORY_ID}:environment:${environment}`;
   const workflowRef = `${GITHUB_REPOSITORY}/${workflowPath}@refs/heads/release/`;
@@ -163,6 +176,15 @@ export function createCloudRunDeploymentFoundationPlan() {
       permissions: [...deploymentRolePermissions],
       stage: "GA",
       title: "ScribeDrop release deployer",
+    },
+    stagingBootstrapPreflightRole: {
+      description:
+        "Reads exact L4 quota and creates, verifies, executes, and removes the staging GPU-free bootstrap preflight.",
+      id: "scribeDropStagingBootstrapPreflight",
+      name: `projects/${PROJECT_ID}/roles/scribeDropStagingBootstrapPreflight`,
+      permissions: [...stagingBootstrapPreflightRolePermissions],
+      stage: "GA",
+      title: "ScribeDrop staging bootstrap preflight",
     },
     existingControllerRoles: [
       {

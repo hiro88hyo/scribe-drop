@@ -3,7 +3,10 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+import { parsers as yamlParsers } from "prettier/plugins/yaml";
+
 import { findRunnerContextBeforeSteps } from "./github-workflow-static-analysis.mjs";
+import { findYamlMappingDuplicates } from "./yaml-mapping-duplicates.mjs";
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(scriptDirectory, "..");
@@ -107,6 +110,21 @@ const productionGithubControlsVerifierPath = path.join(
   "scripts",
   "verify-production-github-controls.mjs",
 );
+const stagingGithubControlsVerifierPath = path.join(
+  repositoryRoot,
+  "scripts",
+  "verify-staging-github-controls.mjs",
+);
+const stagingBootstrapPreflightManagerPath = path.join(
+  repositoryRoot,
+  "scripts",
+  "manage-cloud-run-staging-bootstrap-preflight.mjs",
+);
+const stagingPaidReadinessVerifierPath = path.join(
+  repositoryRoot,
+  "scripts",
+  "verify-staging-cloud-run-paid-readiness.mjs",
+);
 const stagingPagesSecretsScriptPath = path.join(
   repositoryRoot,
   "scripts",
@@ -199,6 +217,12 @@ if (workflowFiles.length === 0) {
 
 for (const filename of workflowFiles) {
   const contents = readFileSync(path.join(workflowsDirectory, filename), "utf8");
+  const yaml = await yamlParsers.yaml.parse(contents, { filepath: filename });
+  for (const duplicate of findYamlMappingDuplicates(yaml)) {
+    failures.push(
+      `${filename}:${duplicate.line}: duplicate YAML key ${duplicate.key} (first at line ${duplicate.firstLine})`,
+    );
+  }
   for (const jobName of findRunnerContextBeforeSteps(contents)) {
     failures.push(`${filename} ${jobName}: runner context is unavailable before step evaluation`);
   }
@@ -261,6 +285,15 @@ const productionGithubControlsVerifierContents = readFileSync(
   productionGithubControlsVerifierPath,
   "utf8",
 );
+const stagingGithubControlsVerifierContents = readFileSync(
+  stagingGithubControlsVerifierPath,
+  "utf8",
+);
+const stagingBootstrapPreflightManagerContents = readFileSync(
+  stagingBootstrapPreflightManagerPath,
+  "utf8",
+);
+const stagingPaidReadinessVerifierContents = readFileSync(stagingPaidReadinessVerifierPath, "utf8");
 const stagingPagesSecretsScriptContents = readFileSync(stagingPagesSecretsScriptPath, "utf8");
 const promotePagesCandidateScriptContents = readFileSync(promotePagesCandidateScriptPath, "utf8");
 const dockerfileContents = readFileSync(dockerfilePath, "utf8");
@@ -300,6 +333,11 @@ const stagingBackendJob = workflowJob(
 const stagingAcceptanceJob = workflowJob(
   stagingWorkflowContents,
   "acceptance",
+  "deploy-staging-candidate.yml",
+);
+const stagingRecoveryJob = workflowJob(
+  stagingWorkflowContents,
+  "recover-acceptance",
   "deploy-staging-candidate.yml",
 );
 const stagingSecretVerificationStep = workflowStep(
@@ -388,6 +426,30 @@ for (const [description, expected] of Object.entries({
     description,
   );
 }
+for (const [description, expected] of Object.entries({
+  "fixed CPU limit": '"--cpu=1"',
+  "fixed memory limit": '"--memory=512Mi"',
+  "single task": '"--tasks=1"',
+  "single parallelism": '"--parallelism=1"',
+  "disabled retries": '"--max-retries=0"',
+  "bounded task timeout": '"--task-timeout=60s"',
+  "Binary Authorization enforcement": '"--binary-authorization=default"',
+  "exact preflight Job cleanup": '"run", "jobs", "delete", plan.jobId',
+  "cleanup convergence": "await waitForStagingZero(plan)",
+})) {
+  requireText(
+    stagingBootstrapPreflightManagerContents,
+    expected,
+    "manage-cloud-run-staging-bootstrap-preflight.mjs",
+    description,
+  );
+}
+forbidText(
+  stagingBootstrapPreflightManagerContents,
+  '"--gpu',
+  "manage-cloud-run-staging-bootstrap-preflight.mjs",
+  "GPU allocation flag",
+);
 
 requireTextCount(
   cloudRunPublicationJob,
@@ -861,9 +923,15 @@ for (const [description, value] of Object.entries({
   "Cloud Run candidate workflow verification": ".github/workflows/publish-cloud-run-candidate.yml",
   "Cloud Run candidate evidence verification": "cloud-run:candidate:evidence verify",
   "staging foundation preflight": "pnpm run cloud-run:foundation:read staging",
+  "staging release input read-back": "pnpm run cloud-run:staging:inputs:verify",
+  "single-dispatch candidate gate": "pnpm run staging:dispatch:verify",
   "staging deployment workload identity": "providers/github-staging-deployment",
   "staging admission pause before authorization":
     "Pause staging admission before bounded authorization",
+  "disabled candidate controller before boundary proof":
+    "Deploy the candidate controller with authorization disabled",
+  "GPU-free candidate boundary proof": "Prove the exact candidate runtime boundary without a GPU",
+  "known paid preflight": "Verify the complete known paid preflight before authorization",
   "exact-one controller authorization":
     "Authorize exact one bounded staging execution and deploy the candidate controller",
   "staging admission activation after authorization":
@@ -878,6 +946,9 @@ for (const [description, value] of Object.entries({
     "CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}",
   "staging acceptance creation": "pnpm run staging:acceptance:create",
   "staging acceptance artifact": "scribe-drop-staging-acceptance-${{ github.sha }}",
+  "automatic failed acceptance recovery": "Converge a failed staging acceptance to the safe state",
+  "RunPod baseline before acceptance":
+    "SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY: runpod_serverless_v1",
 })) {
   requireText(stagingWorkflowContents, value, "deploy-staging-candidate.yml", description);
 }
@@ -887,7 +958,7 @@ const absoluteCandidateDirectory =
 requireTextCount(
   stagingWorkflowContents,
   absoluteCandidateDirectory,
-  5,
+  6,
   "deploy-staging-candidate.yml",
   "workspace-absolute candidate directory",
 );
@@ -936,6 +1007,20 @@ requireText(
 );
 requireTextOrder(
   stagingPreflightJob,
+  "pnpm run staging:dispatch:verify",
+  "gh run download",
+  "deploy-staging-candidate.yml preflight job",
+  "single-dispatch gate before candidate download",
+);
+requireTextCount(
+  stagingWorkflowContents,
+  "pnpm run staging:dispatch:verify",
+  1,
+  "deploy-staging-candidate.yml",
+  "single staging dispatch verifier",
+);
+requireTextOrder(
+  stagingPreflightJob,
   'pnpm run candidate:verify "${RELEASE_CANDIDATE_DIRECTORY}"',
   "pnpm run staging:e2e:fixture:verify",
   "deploy-staging-candidate.yml preflight job",
@@ -975,6 +1060,7 @@ for (const [job, expected, description] of [
   [stagingPagesDeploymentJob, "needs: migrate", "Pages dependency on migration"],
   [stagingBackendJob, "needs: deploy-pages", "backend dependency on exact Pages deployment"],
   [stagingAcceptanceJob, "needs: deploy-backend", "acceptance dependency on backend promotion"],
+  [stagingRecoveryJob, "needs: acceptance", "recovery dependency on acceptance"],
 ]) {
   requireText(job, expected, "deploy-staging-candidate.yml", description);
 }
@@ -1048,7 +1134,7 @@ requireTextOrder(
 requireTextCount(
   stagingWorkflowContents,
   "SCRIBE_DROP_STAGING_PAGES_ACCESS_AUDIENCE: ${{ vars.SCRIBE_DROP_STAGING_PAGES_ACCESS_AUDIENCE }}",
-  4,
+  5,
   "deploy-staging-candidate.yml",
   "Pages Access audience in every staging job that renders or verifies Web configuration",
 );
@@ -1128,17 +1214,59 @@ requireTextOrder(
 );
 requireTextOrder(
   stagingAcceptanceJob,
-  "Authorize exact one bounded staging execution and deploy the candidate controller",
-  "Install fixed Playwright browser",
+  "Install fixed Playwright browser before controller mutation",
+  "Pause staging admission before bounded authorization",
   "deploy-staging-candidate.yml acceptance job",
-  "controller admission before browser acceptance",
+  "browser installation before any controller or admission mutation",
 );
 requireTextOrder(
   stagingAcceptanceJob,
-  "Install fixed Playwright browser",
-  "Verify authenticated data plane, then run real staging M4A lifecycle",
+  "Deploy the candidate controller with authorization disabled",
+  "Prove the exact candidate runtime boundary without a GPU",
   "deploy-staging-candidate.yml acceptance job",
-  "browser installation before the acceptance data-plane gate",
+  "disabled candidate controller before GPU-free boundary proof",
+);
+requireTextOrder(
+  stagingAcceptanceJob,
+  "Prove the exact candidate runtime boundary without a GPU",
+  "Verify the complete known paid preflight before authorization",
+  "deploy-staging-candidate.yml acceptance job",
+  "GPU-free boundary proof before complete paid preflight",
+);
+requireTextOrder(
+  stagingAcceptanceJob,
+  "Verify the complete known paid preflight before authorization",
+  "Authorize exact one bounded staging execution and deploy the candidate controller",
+  "deploy-staging-candidate.yml acceptance job",
+  "complete known paid preflight before authorization",
+);
+requireTextCount(
+  stagingAcceptanceJob,
+  "pnpm run cloud-run:staging:paid-readiness",
+  1,
+  "deploy-staging-candidate.yml acceptance job",
+  "single paid-readiness gate",
+);
+for (const [description, expected] of Object.entries({
+  "disabled-zero read before paid readiness": "pnpm run cloud-run:staging:safety read",
+  "exact L4 quota ID": "NvidiaL4GpuAllocNoZonalRedundancyPerProjectRegion",
+  "exact quota describe": '"quotas",\n      "info",\n      "describe"',
+  "fixed manifest construction": "createFixedJobManifest",
+})) {
+  requireText(
+    description === "disabled-zero read before paid readiness"
+      ? stagingAcceptanceJob
+      : stagingPaidReadinessVerifierContents,
+    expected,
+    "deploy-staging-candidate.yml paid-readiness gate",
+    description,
+  );
+}
+forbidText(
+  stagingPaidReadinessVerifierContents,
+  '"run", "jobs", "run"',
+  "verify-staging-cloud-run-paid-readiness.mjs",
+  "provider execution from read-only paid readiness",
 );
 requireTextCount(
   stagingWorkflowContents,
@@ -1184,10 +1312,96 @@ requireTextOrder(
 );
 requireTextOrder(
   stagingAcceptanceJob,
-  "Issue short-lived staging acceptance",
   "Restore RunPod selection while preserving the Cloud Run reaper",
+  "Verify final disabled zero state before issuing acceptance",
   "deploy-staging-candidate.yml acceptance job",
-  "acceptance issuance before staging selection restore",
+  "staging selection restore before final safety read-back",
+);
+requireTextOrder(
+  stagingAcceptanceJob,
+  "Verify final disabled zero state before issuing acceptance",
+  "Issue short-lived staging acceptance",
+  "deploy-staging-candidate.yml acceptance job",
+  "final safety read-back before acceptance issuance",
+);
+requireTextCount(
+  stagingAcceptanceJob,
+  "access_token_lifetime: 3600s",
+  1,
+  "deploy-staging-candidate.yml acceptance job",
+  "one-hour acceptance control-plane token",
+);
+for (const [description, expected] of Object.entries({
+  "failure-only recovery condition":
+    "needs.acceptance.result == 'failure' || needs.acceptance.result == 'cancelled'",
+  "fresh recovery authentication": "Re-authenticate the isolated staging deployer for recovery",
+  "one-hour recovery token": "access_token_lifetime: 3600s",
+  "paused RunPod recovery policy": "Pause all new GPU admission on the RunPod recovery policy",
+  "bounded reaper convergence": "pnpm run cloud-run:staging:safety wait",
+  "same-run authorization recovery":
+    "pnpm run cloud-run:controller:deploy recover staging disabled",
+  "RunPod reactivation after disable":
+    "Reactivate RunPod only after Cloud Run is disabled and empty",
+  "no acceptance on recovery": "Verify recovered staging safety without issuing acceptance",
+  "recovery convergence continues after earlier failure":
+    "id: wait-convergence\n        if: ${{ always() }}\n        continue-on-error: true",
+  "controller recovery requires convergence":
+    "steps.wait-convergence.outcome == 'success' && steps.build-controller.outcome == 'success'",
+  "RunPod recovery requires disabled controller":
+    "steps.wait-convergence.outcome == 'success' && steps.disable-controller.outcome == 'success'",
+  "final recovery aggregation": "FINAL_VERIFY_OUTCOME",
+})) {
+  requireText(
+    stagingRecoveryJob,
+    expected,
+    "deploy-staging-candidate.yml recovery job",
+    description,
+  );
+}
+forbidText(
+  stagingAcceptanceJob,
+  "arm-recovery",
+  "deploy-staging-candidate.yml acceptance job",
+  "fragile recovery arm output",
+);
+requireText(
+  stagingBackendJob,
+  "SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY: runpod_serverless_v1",
+  "deploy-staging-candidate.yml deploy-backend job",
+  "RunPod selection before staging acceptance",
+);
+forbidText(
+  stagingBackendJob,
+  "SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY: cloud_run_jobs_l4_v1",
+  "deploy-staging-candidate.yml deploy-backend job",
+  "Cloud Run selection before paid staging acceptance",
+);
+forbidText(
+  stagingRecoveryJob,
+  "pnpm run staging:acceptance:create",
+  "deploy-staging-candidate.yml recovery job",
+  "acceptance issuance from a failed run",
+);
+requireTextOrder(
+  stagingRecoveryJob,
+  "Pause all new GPU admission on the RunPod recovery policy",
+  "Wait for the deployed reaper and Cloud Run resources to converge",
+  "deploy-staging-candidate.yml recovery job",
+  "admission pause before recovery convergence",
+);
+requireTextOrder(
+  stagingRecoveryJob,
+  "Wait for the deployed reaper and Cloud Run resources to converge",
+  "Disable only this failed run's staging controller authorization",
+  "deploy-staging-candidate.yml recovery job",
+  "resource zero before recovery disable",
+);
+requireTextOrder(
+  stagingRecoveryJob,
+  "Disable only this failed run's staging controller authorization",
+  "Reactivate RunPod only after Cloud Run is disabled and empty",
+  "deploy-staging-candidate.yml recovery job",
+  "controller disable before RunPod reactivation",
 );
 for (const forbidden of [
   "pnpm run runpod:prewarm:staging",
@@ -1486,6 +1700,24 @@ requireText(
   "pnpm build && pnpm candidate:pages-functions:verify",
   "package.json",
   "pre-candidate Pages route gate",
+);
+requireText(
+  packageManifestContents,
+  '"github:controls:verify:staging": "node scripts/verify-staging-github-controls.mjs"',
+  "package.json",
+  "pre-dispatch staging GitHub controls gate",
+);
+requireText(
+  stagingGithubControlsVerifierContents,
+  "environments/staging/variables?per_page=100",
+  "verify-staging-github-controls.mjs",
+  "live staging variable-name read-back",
+);
+requireText(
+  stagingGithubControlsVerifierContents,
+  "environments/staging/secrets?per_page=100",
+  "verify-staging-github-controls.mjs",
+  "live staging secret-name read-back",
 );
 requireText(
   packageManifestContents,

@@ -6,6 +6,7 @@ import {
   createFirestoreTtlUpdateArguments,
   createStandardFirestoreDatabaseArguments,
   deploymentRolePermissions,
+  stagingBootstrapPreflightRolePermissions,
 } from "./cloud-run-deployment-foundation.mjs";
 
 test("isolates exact staging and production deployment subjects", () => {
@@ -106,6 +107,37 @@ test("keeps deployment role mutation and secret payload access out of scope", ()
   assert.equal(deploymentRolePermissions.includes("run.jobs.create"), false);
   assert.equal(deploymentRolePermissions.includes("run.jobs.run"), false);
   assert.equal(deploymentRolePermissions.includes("iam.workloadIdentityPoolProviders.get"), true);
+});
+
+test("isolates GPU-free bootstrap mutation to a staging-only role", () => {
+  const plan = createCloudRunDeploymentFoundationPlan();
+  assert.equal(
+    plan.stagingBootstrapPreflightRole.name,
+    "projects/scribe-drop/roles/scribeDropStagingBootstrapPreflight",
+  );
+  assert.deepEqual(stagingBootstrapPreflightRolePermissions, [
+    "cloudquotas.quotas.get",
+    "logging.logEntries.list",
+    "run.executions.get",
+    "run.executions.list",
+    "run.jobs.create",
+    "run.jobs.delete",
+    "run.jobs.get",
+    "run.jobs.list",
+    "run.jobs.run",
+    "run.operations.get",
+  ]);
+  assert.equal(new Set(stagingBootstrapPreflightRolePermissions).size, 10);
+  assert.equal(
+    stagingBootstrapPreflightRolePermissions.includes("run.jobs.runWithOverrides"),
+    false,
+  );
+  assert.equal(stagingBootstrapPreflightRolePermissions.includes("run.services.update"), false);
+  assert.equal(
+    stagingBootstrapPreflightRolePermissions.includes("cloudquotas.quotas.update"),
+    false,
+  );
+  assert.equal(deploymentRolePermissions.includes("run.jobs.create"), false);
 });
 
 test("reuses only the already reviewed controller roles", () => {

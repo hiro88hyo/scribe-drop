@@ -45,6 +45,10 @@ R2 CORSは`pnpm cloudflare:config:staging:r2-cors`、R2 lifecycleは
   通常は`disabled`、Phase 14の有限synthetic gateだけ`synthetic-shadow`
 - `SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT`:
   `synthetic-shadow`時だけ必須となる`gpu-runtime@scribe-drop.iam.gserviceaccount.com`の固定staging runtime identity
+- `SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_HMAC_SECRET_VERSION`:
+  staging controllerが参照するSecret Managerのenabled数値version。secret payloadはvariableへ保存しない
+- `SCRIBE_DROP_STAGING_R2_HOST`:
+  `CLOUDFLARE_ACCOUNT_ID`から導くstaging source/result用R2 S3 API host。署名URLやcredentialを含めない
 - `SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY`:
   既定は`runpod_serverless_v1`。Phase 15の期限付きstaging acceptanceだけ`cloud_run_jobs_l4_v1`
 - `SCRIBE_DROP_STAGING_GPU_EXECUTION_ADMISSION`:
@@ -74,7 +78,10 @@ APIの`gpuTypeIds`を完全一致でread-backする。data center selectionは�
 固定する。
 GPUは公式REST API、data centerとcomplianceはConsole-equivalent GraphQLから取得して
 結合検証する。GitHub staging Environmentのendpoint設定を同期し、local gateを通すまで
-release workflowを実行しない。
+release workflowを実行しない。staging Environmentは上記を含む20 variable名と6 secret名を完全一致で管理し、
+`pnpm github:controls:verify:staging`で名前とbranch policy、workflow登録を確認する。Phase 16 workflowは
+4個のCloud Run/R2入力を`pnpm cloud-run:staging:inputs:verify`で実resourceへ照合し、不足または値driftを
+candidate downloadより前に拒否する。
 
 実originはCloudflareとgit ignoredの生成設定だけに保持し、追跡対象ファイルやdeployment
 記録へ保存しない。

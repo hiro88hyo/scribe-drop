@@ -425,7 +425,7 @@ imageと合成する。applicationの生成・再検証に失敗した場合はc
 
 1. production workflowの同一pathがdefault branch `develop`へ登録済みであること、
    `main`、`develop`、現行release branchのprotection、GitHub production Environmentの
-   review、`release/*` policy、15変数名、4 secret名を
+   review、`release/*` policy、15変数名、6 secret名を
    `pnpm github:controls:verify:production`で確認する。失敗中はcandidateを開始しない。
 2. release-to-main PRがclosedであることを確認し、
    `Publish RunPod release candidate`を`release/<version>`で実行する。
@@ -448,10 +448,11 @@ PRをreopenした後にcode、dependency、migration、deployment設定を変更
 staging workflowは[ADR 0036](./adr/0036-defer-custom-domain-readiness-to-acceptance.md)の
 job境界を維持する。Pages promotionはcompiled routeと公式APIのexact read-backで確定し、
 デプロイ直後の任意地域custom domain probeを成立条件にしない。認証済みreadinessは
-`acceptance`のupload前に実行する。404ではworkflow全体を再dispatchせず、原因確認後に
-同じrunのfailed `acceptance` jobだけを再実行する。成功済み`migrate`、`deploy-pages`、
-`deploy-backend`を再実行しない。Pages promotion自体を再開する場合も、公式APIのexact
-read-backが一致すればdeployを省略し、結果不明のmutationを自動再送しない。
+`acceptance`のupload前に実行する。404ではworkflow全体を再dispatchせず、同じrunのfailed
+`acceptance` jobも再実行しない。[ADR 0087](./adr/0087-fail-before-paid-staging-acceptance-and-recover.md)の
+recoveryだけでRunPod policy、controller authorization、Cloud Run resource、未解決fixtureを安全状態へ
+収束し、acceptanceは失敗のまま維持する。原因をsource/testへ還元した新commitと新candidateを作り、同じ
+commitのstaging dispatchまたはjob re-runで追加GPU executionを開かない。
 
 candidate、staging、production workflowを起動する前に、変更対象のlocal testと標準local
 gateを完了する。remote workflowをlocal検証の代替に使用しない。
@@ -569,6 +570,25 @@ Phase 16 productionでは[ADR 0086](./adr/0086-adopt-cloud-run-jobs-for-producti
 新attemptのpolicyだけをCloud Runへ切り替える。別途承認されたexact-one controller authorizationを適用してから
 admissionをactiveにする。rollbackでは最初にadmissionをpauseし、policyをRunPodへ戻す。runtime/reaperは
 Cloud Run resource不存在まで維持する。
+
+Phase 16のbounded staging acceptance前に次を順に確認する。値やtokenを標準出力へ出さない。
+
+```bash
+pnpm github:controls:verify:staging
+pnpm cloud-run:foundation:read staging
+```
+
+staging bootstrap preflight roleが未適用の場合だけ、project、staging deployer、runtime identityを
+read-onlyで確認して明示承認後に`pnpm cloud-run:foundation:apply:staging-preflight`を1回実行し、直後に
+foundation read-backを再実行する。このcommandはproduction secret、production IAM、controller Serviceを
+変更しない。workflowはさらにEnvironmentの4個のCloud Run/R2入力をGoogle APIへ照合する。
+acceptance jobはbrowser installを先に完了し、candidate controllerをdisabledでdeployしてから
+`pnpm cloud-run:staging:bootstrap-preflight <candidate-evidence>`を実行する。GPU 0のexact-one
+`EXECUTION_NOT_FOUND` evidenceとJob/Execution 0が得られるまでpaid authorizationを開かない。
+続けて`pnpm cloud-run:staging:safety read`と
+`pnpm cloud-run:staging:paid-readiness <candidate-evidence>`を同じstepで実行し、disabled/zero、exact L4
+quota、Phase 15固定manifest、233円worst-caseが250円authorization内であることを照合する。backend
+promotion時点ではRunPod選択を維持し、Cloud Run選択はこのstep成功後だけに行う。
 
 production foundationはdashboardで手作業せず、project/account/environmentと下記planをread-onlyで確認し、
 明示承認後に一度だけ適用する。
