@@ -1695,6 +1695,33 @@ Local immediate-cancel remediation (2026-08-15):
 - このsource変更により`c03fd7f`の全remote evidenceはpromotionへ使用できない。local gateとcommit後、新candidateを一度だけ
   buildし、Phase 14 gateからやり直す。新しいGPU executionは別の明示承認まで開始しない。
 
+Remote immediate-cancel candidate check (2026-08-15):
+
+- source `fe90b14`のbuild-once candidateでPhase 14 gateを通し、staging限定、最大5 L4 execution、1,250 JPY、
+  task/parallelism 1、retry 0のauthorizationを設定した。監視titleの不一致で最初のVAD有効fixtureはcancel前に正常完了したが、
+  artifact 3件、notification `SENT`、provider cleanup、Cloud Run Job/Execution 0へ収束し、利用者delete後にD1親子row 0を確認した。
+- 2本目はVADを無効化してruntime ack後にWeb UIからcancelを一度だけ要求した。D1のcancel requestは
+  `2026-08-15T03:51:31.929Z`、Cloud Run Executionのcancel完了は`2026-08-15T03:52:03.423015Z`で、約31.5秒後に
+  `cancelledCount=1`、failed/succeeded 0へ停止した。Queue即時dispatchは機能し、artifactとnotificationは0を維持した。
+- 一方、controllerのdurable recordは最初のcancel前に保存した`running` execution snapshotを保持し、以後のcancel actionで
+  providerを再観測せず同じcancelを再送した。04:00、04:05のCron後もD1は`CANCEL_REQUESTED`のままterminal/cleanupへ
+  収束しなかったため、このscenarioはformal acceptance failureとする。残り3 GPU scenarioは実行せず、provider policyを
+  RunPodへ戻した。productionとCIは変更していない。
+- failure確定後は利用者deleteからcontroller cleanupを行い、Cloud Run Job/Execution 0、対象2 fixtureのD1親子row 0へ
+  収束した。controller ServiceとFirestore authorizationをdisabled/0へ戻し、cleaned execution 2件と対応request 13件を
+  update-time条件付きで削除した。最終read-backはFirestore controller 3 collection空、OrchestratorのRunPod policy、
+  exact candidate単一version 100%を確認した。
+
+Local cancel convergence remediation (2026-08-15):
+
+- controllerは初回cancelを従来どおり即時送信し、`cancelIntent`が既に永続化された次のcancel actionではprovider executionを
+  先に再観測する。既にcancelledなら新しいcancel mutationを送らずdurable stateを`CANCELLED`へ進める。
+- 実providerと同じ「cancel mutation後に保存snapshotはrunningのまま、provider readはcancelled」の再現testを追加した。
+  修正前は`pending`となって失敗し、修正後は`cancelled`、cancel call 1件を確認した。gpu-controller全106 testとstrict
+  typecheckは成功した。
+- このsource変更で`fe90b14`のremote evidenceはpromotionへ使用できない。全local gate、commit、build-once、Phase 14、
+  Phase 15を新candidateでやり直し、別の明示承認なしに追加GPU executionを開始しない。
+
 実装:
 
 - Phase 14のexact candidateを再利用し、provider switchをstagingだけで有効化する。release修正が

@@ -163,6 +163,38 @@ Pagesの`CONTROL_EVENTS` producer bindingと、main Queueのproducer 2件（R2�
 read-backの必須条件へ追加した。このsource変更は`c03fd7f`のstaging evidenceを無効化する。local gateとcommit後、
 新candidateを一度だけbuildしてPhase 14から再検証するまでPhase 15は未完了であり、production promotionはblockedとする。
 
+## Immediate-cancel candidate check
+
+source `fe90b14`のbuild-once candidateはPhase 14 gateを通過した。staging限定、最大5 L4 execution、合計1,250 JPY、
+task/parallelism 1、retry 0のauthorization下で2 executionを使用した。監視titleの不一致で最初のVAD有効fixtureはcancel前に
+正常完了したが、artifact 3件、notification `SENT`、provider cleanup、Cloud Run Job/Execution 0へ収束し、利用者delete後に
+D1親子row 0を確認した。
+
+2本目はVADを無効化し、runtime ack後にWeb UIからcancelを一度だけ要求した。D1のcancel requestは
+`2026-08-15T03:51:31.929Z`、Cloud Run Executionのcancel完了は`2026-08-15T03:52:03.423015Z`で、約31.5秒後に
+`cancelledCount=1`、failed/succeeded 0へ停止した。Queue即時dispatchは機能し、artifactとnotificationは0を維持した。
+
+ただしcontrollerのdurable recordは最初のcancel前に保存した`running` execution snapshotを保持し、後続cancel actionで
+providerを再観測せず同じmutationを再送した。04:00、04:05のCron後もD1は`CANCEL_REQUESTED`のままterminal/cleanupへ
+収束しなかった。このscenarioをformal acceptance failureとし、残り3 GPU scenarioは実行せずprovider policyをRunPodへ戻した。
+production resourceとCI workflowは変更していない。
+
+failure確定後は利用者deleteからcontroller cleanupを行い、Cloud Run Job/Execution 0、対象2 fixtureのD1親子row 0へ
+収束した。controller ServiceとFirestore authorizationをdisabled/0へ戻し、cleaned execution 2件と対応request 13件を
+update-time条件付きで削除した。最終read-backはFirestore controller 3 collection空、OrchestratorのRunPod policy、
+exact candidate単一version 100%を確認した。
+
+## Cancel convergence remediation
+
+初回cancelの即時性を維持し、`cancelIntent`が既に永続化された後続cancel actionだけprovider executionを先に再観測する
+local修正を追加した。provider readがcancelledならcancelを再送せずdurable stateを`CANCELLED`へ進める。実providerと同じ
+stale running snapshotを再現するtestは修正前に`pending`で失敗し、修正後は`cancelled`、cancel call 1件となった。
+gpu-controller全106 testとstrict typecheckは成功した。
+
+このsource変更で`fe90b14`のremote evidenceはpromotionへ使用できない。全local gate、commit、新candidateのbuild-once、
+Phase 14 gateとPhase 15 acceptanceをやり直すまでproduction promotionはblockedであり、別の明示承認なしに追加GPU
+executionを開始しない。
+
 ## 未完了条件
 
 過去candidateでは成功系artifact、利用者delete、費用境界、deployed Cronだけによるprovider cleanup、

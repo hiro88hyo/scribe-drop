@@ -405,7 +405,9 @@ export class GpuControllerService {
 
   async #cancelRecord(record: ControlRecord): Promise<ControlRecord> {
     let current = record;
-    if (current.execution === null) current = await this.#observeExecution(current);
+    if (current.execution === null || current.cancelIntent) {
+      current = await this.#observeExecution(current);
+    }
     if (
       current.execution === null ||
       ["SUCCEEDED", "FAILED", "CANCELLED"].includes(current.state)

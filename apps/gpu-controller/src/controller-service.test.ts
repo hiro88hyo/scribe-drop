@@ -455,6 +455,38 @@ describe("GPU controller durable lifecycle", () => {
     expect(provider.jobs.size).toBe(0);
   });
 
+  it("re-observes a previously requested cancellation instead of resending it forever", async () => {
+    const provider = new FakeCloudRun();
+    const clock = new MutableClock();
+    const lifecycle = service(provider, clock);
+    await createAndReconcile(lifecycle.service, lifecycle.store);
+    let record = await lifecycle.store.get(HANDLE);
+    const pending = record === null ? undefined : provider.executions.get(record.jobId)?.[0];
+    if (record === null || pending === undefined) throw new Error("execution missing");
+    provider.replaceExecution(pending, { ...pending, status: "running" });
+    await lifecycle.service.execute(request("observe", 3, record.version), "observe-running");
+    record = await lifecycle.store.get(HANDLE);
+    if (record === null) throw new Error("record missing");
+
+    const first = await lifecycle.service.execute(
+      request("cancel", 4, record.version),
+      "cancel-first",
+    );
+    expect(first.outcome).toBe("pending");
+    expect(provider.cancelCalls).toBe(1);
+
+    record = await lifecycle.store.get(HANDLE);
+    if (record === null) throw new Error("record missing");
+    const recovered = await lifecycle.service.execute(
+      request("cancel", 5, record.version),
+      "cancel-reobserve",
+    );
+
+    expect(recovered.outcome).toBe("cancelled");
+    expect(provider.cancelCalls).toBe(1);
+    expect((await lifecycle.store.get(HANDLE))?.state).toBe("CANCELLED");
+  });
+
   it("reaps only expired or explicitly cleanup-marked records", async () => {
     const provider = new FakeCloudRun();
     const clock = new MutableClock();
