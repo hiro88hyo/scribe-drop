@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 
 import {
   createCloudRunDeploymentFoundationPlan,
+  createFirestoreTtlUpdateArguments,
   createStandardFirestoreDatabaseArguments,
 } from "./cloud-run-deployment-foundation.mjs";
 
@@ -53,6 +54,21 @@ function readJson(arguments_, label) {
   } catch {
     throw new Error(`${label} returned invalid JSON`);
   }
+}
+
+function readJsonArray(arguments_, label) {
+  const result = gcloudRun([...arguments_, "--format=json"], { label });
+  try {
+    const parsed = JSON.parse(result.stdout);
+    if (!Array.isArray(parsed)) throw new Error("not an array");
+    return parsed;
+  } catch {
+    throw new Error(`${label} returned invalid JSON`);
+  }
+}
+
+function sleep(milliseconds) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
 }
 
 function canonicalRecord(value) {
@@ -210,22 +226,46 @@ function ensureDatabase() {
       label: "production controller database creation",
     });
   }
+  const expectedTtlNames = new Set(
+    database.ttlCollectionGroups.map(
+      (collectionGroup) =>
+        `projects/${plan.projectId}/databases/${database.id}/collectionGroups/${collectionGroup}/fields/ttlExpiresAt`,
+    ),
+  );
+  const initialTtlFields = readJsonArray(
+    ["firestore", "fields", "ttls", "list", `--database=${database.id}`],
+    "production controller TTL read",
+  );
+  const activeTtlNames = new Set(
+    initialTtlFields
+      .filter((field) => field?.ttlConfig?.state === "ACTIVE")
+      .map((field) => field.name),
+  );
   for (const collectionGroup of database.ttlCollectionGroups) {
-    gcloudRun(
-      [
-        "firestore",
-        "fields",
-        "ttls",
-        "update",
-        "ttlExpiresAt",
-        `--collection-group=${collectionGroup}`,
-        `--database=${database.id}`,
-        "--enable-ttl",
-        "--expiration-offset=0s",
-      ],
-      { label: `TTL policy for ${collectionGroup}` },
-    );
+    const name =
+      `projects/${plan.projectId}/databases/${database.id}` +
+      `/collectionGroups/${collectionGroup}/fields/ttlExpiresAt`;
+    if (!activeTtlNames.has(name)) {
+      gcloudRun(createFirestoreTtlUpdateArguments(database, collectionGroup), {
+        label: `TTL policy for ${collectionGroup}`,
+      });
+    }
   }
+  for (let attempt = 0; attempt < 90; attempt += 1) {
+    const ttlFields = readJsonArray(
+      ["firestore", "fields", "ttls", "list", `--database=${database.id}`],
+      "production controller TTL convergence read",
+    );
+    if (ttlFields.some((field) => field?.ttlConfig?.state === "NEEDS_REPAIR")) {
+      throw new Error("Production controller TTL policy needs repair");
+    }
+    const observedActiveNames = new Set(
+      ttlFields.filter((field) => field?.ttlConfig?.state === "ACTIVE").map((field) => field.name),
+    );
+    if ([...expectedTtlNames].every((name) => observedActiveNames.has(name))) return;
+    if (attempt < 89) sleep(10_000);
+  }
+  throw new Error("Production controller TTL policies did not become active within 15 minutes");
 }
 
 function addControllerBindings() {

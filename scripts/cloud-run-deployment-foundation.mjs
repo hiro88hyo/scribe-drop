@@ -104,6 +104,21 @@ export function createStandardFirestoreDatabaseArguments(database) {
   ];
 }
 
+export function createFirestoreTtlUpdateArguments(database, collectionGroup) {
+  return [
+    "firestore",
+    "fields",
+    "ttls",
+    "update",
+    "ttlExpiresAt",
+    `--collection-group=${collectionGroup}`,
+    `--database=${database.id}`,
+    "--enable-ttl",
+    "--expiration-offset=0s",
+    "--async",
+  ];
+}
+
 export function createCloudRunDeploymentFoundationPlan() {
   return {
     controller: {

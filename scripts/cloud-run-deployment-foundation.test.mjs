@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   createCloudRunDeploymentFoundationPlan,
+  createFirestoreTtlUpdateArguments,
   createStandardFirestoreDatabaseArguments,
   deploymentRolePermissions,
 } from "./cloud-run-deployment-foundation.mjs";
@@ -71,6 +72,25 @@ test("uses only Standard Edition Firestore creation flags", () => {
   assert.equal(
     arguments_.some((argument) => argument.includes("realtime")),
     false,
+  );
+});
+
+test("submits Firestore TTL updates asynchronously for explicit convergence polling", () => {
+  const database = createCloudRunDeploymentFoundationPlan().controller.database;
+  assert.deepEqual(
+    createFirestoreTtlUpdateArguments(database, "scribe_drop_controller_executions"),
+    [
+      "firestore",
+      "fields",
+      "ttls",
+      "update",
+      "ttlExpiresAt",
+      "--collection-group=scribe_drop_controller_executions",
+      "--database=scribe-production-controller",
+      "--enable-ttl",
+      "--expiration-offset=0s",
+      "--async",
+    ],
   );
 });
 
