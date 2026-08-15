@@ -145,6 +145,49 @@ describe("D1 Cloud Run control repository", () => {
     ]);
   });
 
+  it("finds only the exact current Cloud Run cancellation candidate", async () => {
+    const repository = createD1CloudRunControlRepository(env.SCRIBE_DROP_DB);
+    const candidate = await repository.findSubmissionCandidate(JOB_ID);
+    if (candidate === undefined) throw new Error("missing Cloud Run candidate");
+    await repository.prepareSubmission({ candidate, executionHandle: HANDLE, timestamp: NOW });
+    await repository.recordCreateResponse({
+      attemptId: ATTEMPT_ID,
+      executionHandle: HANDLE,
+      jobId: JOB_ID,
+      response: {
+        errorCode: null,
+        executionHandle: HANDLE,
+        outcome: "running",
+        requestId: ATTEMPT_ID,
+        schemaVersion: 1,
+        version: 3,
+      },
+      timestamp: FINISHED,
+    });
+    await env.SCRIBE_DROP_DB.batch([
+      env.SCRIBE_DROP_DB.prepare(
+        "UPDATE job_attempts SET status = 'CANCEL_REQUESTED', updated_at = ?2 WHERE id = ?1 AND status = 'RUNNING'",
+      ).bind(ATTEMPT_ID, RECONCILED),
+      env.SCRIBE_DROP_DB.prepare(
+        "UPDATE jobs SET status = 'CANCEL_REQUESTED', updated_at = ?2, version = version + 1 WHERE id = ?1 AND status = 'RUNNING'",
+      ).bind(JOB_ID, RECONCILED),
+    ]);
+
+    await expect(repository.findCancellationCandidate(JOB_ID)).resolves.toEqual(
+      expect.objectContaining({
+        attemptId: ATTEMPT_ID,
+        executionStatus: "CANCEL_REQUESTED",
+        jobId: JOB_ID,
+        jobStatus: "CANCEL_REQUESTED",
+        providerHandle: HANDLE,
+        providerVersion: 3,
+      }),
+    );
+    await expect(
+      repository.findCancellationCandidate("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
+    ).resolves.toBeUndefined();
+  });
+
   it("keeps a conflicting create response nonterminal for versioned recovery", async () => {
     const repository = createD1CloudRunControlRepository(env.SCRIBE_DROP_DB);
     const candidate = await repository.findSubmissionCandidate(JOB_ID);

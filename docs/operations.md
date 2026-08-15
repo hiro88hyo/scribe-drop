@@ -74,6 +74,9 @@ pnpm exec wrangler queues consumer list recording-uploaded-staging
 
 consumerはbatch全体ではなくmessageごとに次を決める。
 
+- strictな`job-control` cancel eventは、D1 primaryのcurrent active attemptとprovider aggregateを
+  再検証する。exact Cloud Run candidateだけを即時controller cancelへ渡し、effect不明またはCAS競合は
+  retryする。terminal、対象外provider、Cloud Run未採用environmentは冪等なno-opとしてackする。
 - strict schema、account、bucket、生成規則、D1 sourceが不一致のmessageは恒久拒否として
   ackする。raw body、object key、ETagはlogへ出さない。
 - sourceのサイズ不一致や不許可actionは、可能な場合にjobへ安全なerror codeと

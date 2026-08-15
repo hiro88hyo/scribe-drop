@@ -167,6 +167,9 @@ ALLOWED_ORIGIN = "https://replace-with-staging-web.example.invalid"
 CLOUDFLARE_ACCOUNT_ID = "${"0".repeat(32)}"
 STAGING_E2E_SERVICE_TOKEN_COMMON_NAME = "replace-with-staging-e2e-service-token"
 database_id = "00000000-0000-0000-0000-000000000101"
+[[queues.producers]]
+binding = "CONTROL_EVENTS"
+queue = "recording-uploaded-staging"
 `;
 
   const rendered = renderWebStagingConfig(template, identifiers);
@@ -184,6 +187,7 @@ database_id = "00000000-0000-0000-0000-000000000101"
   assert.match(rendered, new RegExp(`CLOUDFLARE_ACCOUNT_ID = "${"a".repeat(32)}"`));
   assert.match(rendered, /database_id = "12345678-1234-4abc-8def-1234567890ab"/u);
   assert.match(rendered, /STAGING_E2E_SERVICE_TOKEN_COMMON_NAME = "staging-e2e-token\.access"/u);
+  assert.match(rendered, /binding = "CONTROL_EVENTS"\nqueue = "recording-uploaded-staging"/u);
 });
 
 test("renders the R2 CORS staging origin", () => {
@@ -411,6 +415,9 @@ ACCESS_TEAM_DOMAIN = "https://replace-with-team.cloudflareaccess.com"
 ALLOWED_ORIGIN = "https://replace-with-production-web.example.invalid"
 CLOUDFLARE_ACCOUNT_ID = "${"0".repeat(32)}"
 database_id = "00000000-0000-0000-0000-000000000201"
+[[queues.producers]]
+binding = "CONTROL_EVENTS"
+queue = "recording-uploaded-production"
 `;
   const corsTemplate =
     '{"rules":[{"allowed":{"origins": ["https://replace-with-production-web.example.invalid"]}}]}';
@@ -450,6 +457,7 @@ database_id = "00000000-0000-0000-0000-000000000201"
 
   assert.match(web, /ACCESS_AUDIENCES = "\[\\"production-access-audience\\"\]"/u);
   assert.match(web, /ALLOWED_ORIGIN = "https:\/\/scribe-drop-production\.example\.invalid"/u);
+  assert.match(web, /binding = "CONTROL_EVENTS"\nqueue = "recording-uploaded-production"/u);
   assert.doesNotMatch(web, /staging/u);
   assert.match(cors, /https:\/\/scribe-drop-production\.example\.invalid/u);
   assert.doesNotMatch(cors, /staging/u);

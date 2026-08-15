@@ -1669,6 +1669,32 @@ Local bounded-fault preparation (2026-08-14):
   productionは変更していない。このsource変更により`26a09dc`の成功系evidenceは次candidate promotionへ使用できず、全local gate後の
   新commitをbuild-onceする。
 
+Remote bounded-failure batch (2026-08-14):
+
+- source `c03fd7f`の同一candidateを使い、承認済み上限5 L4 execution、1,250 JPY、task/parallelism 1、retry 0の
+  範囲でformal stagingを実行した。通常成功と通知一時障害、claim後worker停止、heartbeat response loss、実破損M4Aは
+  expected terminal、通知、artifact有無、cleanupへ収束した。5 execution消費後の追加投入はauthorization境界でGPUを作らず
+  rejectされ、Cloud Run Job/Execution 0を維持した。
+- 実行中jobをWeb UIから一度cancelした試験では、D1は直ちに`CANCEL_REQUESTED`となったがcontroller cancel requestは0件のまま、
+  44秒後にruntimeの`TRANSCRIPTION_FAILED`が先に確定した。Web cancelからprovider伝播が5分Cronだけに依存する実装欠陥であり、
+  このscenarioはacceptance failureとする。Phase 15は未完了、production promotionはblockedである。
+- provider policyとfault bindingを通常RunPodへ戻し、controller authorization/Firestore budgetを0へ無効化した。Cloud Run
+  Job/Executionは0、Firestore controller 3 collectionは空、対象6 fixtureのD1親子rowは0へ収束した。D1物理削除はapplication
+  deletion serviceのR2 delete-and-verify後だけ成立するが、承認待ち中にrowが削除されたため、このbatch固有R2 keyの独立HEAD
+  再検証はできなかった。productionとCIは変更していない。
+
+Local immediate-cancel remediation (2026-08-15):
+
+- [ADR 0085](./adr/0085-dispatch-user-cancellation-through-existing-queue.md)に従い、owner検証済みWeb cancelのD1確定後にstrictな
+  `job-control` eventを既存environment Queueへawait送信し、OrchestratorがD1 primaryからexact current Cloud Run candidateを
+  再検証してcontroller cancelを即時dispatchする経路を追加した。送信失敗はHTTP retry、duplicateはD1/controller version CAS、
+  effect不明はQueue retry、最終的なlost wake-upは既存Cronで回復する。
+- Pagesの`CONTROL_EVENTS` producer bindingをtracked staging/production configへ追加し、read-backはmain Queueのproducer 2件
+  （R2、Web）、consumer 1件とPages production configのexact bindingを要求する。新規Queue resource、public control endpoint、
+  Webへのcontroller secretは追加しない。修正時点でremote staging、GPU、CI、productionは変更していない。
+- このsource変更により`c03fd7f`の全remote evidenceはpromotionへ使用できない。local gateとcommit後、新candidateを一度だけ
+  buildし、Phase 14 gateからやり直す。新しいGPU executionは別の明示承認まで開始しない。
+
 実装:
 
 - Phase 14のexact candidateを再利用し、provider switchをstagingだけで有効化する。release修正が

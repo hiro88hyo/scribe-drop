@@ -166,7 +166,8 @@ candidate directoryは全promotion jobで`${{ github.workspace }}/release-candid
 release branch、commit、成功statusをGitHub APIで照合する。applicationを再buildせず、
 compiled bundleを`--no-bundle`でdeployする。R2 notification、Queue producer/consumer、
 DLQ/retry、CORS、lifecycle、D1 migration、PagesのGit provider無効、active Worker versionと
-binding、RunPod endpointをread-backする。Pagesはdeploy済みproduction
+binding、RunPod endpointをread-backする。main QueueはR2 notificationとWeb `CONTROL_EVENTS`の
+producer 2件、Orchestrator consumer 1件を必須とする。Pagesはdeploy済みproduction
 `wrangler_config_hash`と生成した追跡外configのSHA-256も照合する。Access service tokenの
 claimと認証済み`GET /api/me`をupload前に検証し、実M4A、manifest-last、3成果物download、
 削除受付を確認する。続いて音声を含まない合成破損M4Aを同じ経路へ投入し、exact

@@ -495,6 +495,16 @@ export function renderWebStagingConfig(template, identifiers) {
     "web staging E2E service token common name",
   );
 
+  const queueProducer = `[[queues.producers]]
+binding = "CONTROL_EVENTS"
+queue = "recording-uploaded-staging"`;
+  rendered = replaceOnce(
+    rendered,
+    queueProducer,
+    queueProducer,
+    "web staging control Queue producer",
+  );
+
   return replaceOnce(
     rendered,
     'pages_build_output_dir = "./dist"',
@@ -726,6 +736,16 @@ export function renderWebProductionConfig(template, identifiers) {
     `ALLOWED_ORIGIN = "${productionWebOriginPlaceholder}"`,
     `ALLOWED_ORIGIN = "${webOrigin}"`,
     "web production origin",
+  );
+
+  const queueProducer = `[[queues.producers]]
+binding = "CONTROL_EVENTS"
+queue = "recording-uploaded-production"`;
+  rendered = replaceOnce(
+    rendered,
+    queueProducer,
+    queueProducer,
+    "web production control Queue producer",
   );
 
   return replaceOnce(

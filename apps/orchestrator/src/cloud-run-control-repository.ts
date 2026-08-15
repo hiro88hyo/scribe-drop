@@ -310,6 +310,36 @@ const FIND_RECONCILIATION_CANDIDATES_SQL = `
   LIMIT ?1
 `;
 
+const FIND_CANCELLATION_CANDIDATE_SQL = `
+  SELECT
+    attempts.id AS attempt_id,
+    executions.cleanup_status,
+    executions.status AS execution_status,
+    executions.updated_at AS execution_updated_at,
+    executions.version AS execution_version,
+    0 AS job_deleted,
+    jobs.id AS job_id,
+    jobs.status AS job_status,
+    executions.provider_handle,
+    COALESCE(executions.provider_version, 0) AS provider_version,
+    executions.terminal_status
+  FROM jobs
+  INNER JOIN job_attempts AS attempts ON attempts.id = jobs.active_attempt_id
+  INNER JOIN provider_executions AS executions ON executions.attempt_id = attempts.id
+  WHERE jobs.id = ?1
+    AND jobs.deleted_at IS NULL
+    AND jobs.status = 'CANCEL_REQUESTED'
+    AND attempts.job_id = jobs.id
+    AND attempts.status = 'CANCEL_REQUESTED'
+    AND attempts.provider_kind = 'cloud_run_jobs'
+    AND attempts.provider_policy = 'cloud_run_jobs_l4_v1'
+    AND executions.provider_kind = attempts.provider_kind
+    AND executions.provider_policy = attempts.provider_policy
+    AND executions.provider_handle IS NOT NULL
+    AND executions.status IN ('CREATING', 'RUNNING', 'CANCEL_REQUESTED')
+  LIMIT 1
+`;
+
 const FIND_DISPATCHABLE_PENDING_JOB_SQL = `
   SELECT jobs.id
   FROM jobs
@@ -499,6 +529,7 @@ export interface CloudRunControlRepository {
     readonly candidate: CloudRunReconciliationCandidate;
     readonly timestamp: string;
   }): Promise<boolean>;
+  findCancellationCandidate(jobId: string): Promise<CloudRunReconciliationCandidate | undefined>;
   findDispatchablePendingJobId(): Promise<string | undefined>;
   findReconciliationCandidates(limit: number): Promise<readonly CloudRunReconciliationCandidate[]>;
   findSubmissionCandidate(jobId: string): Promise<CloudRunSubmissionCandidate | undefined>;
@@ -528,6 +559,24 @@ export interface CloudRunControlRepository {
     readonly jobId: string;
     readonly timestamp: string;
   }): Promise<boolean>;
+}
+
+function mapReconciliationCandidate(
+  row: z.infer<typeof reconciliationCandidateRowSchema>,
+): CloudRunReconciliationCandidate {
+  return {
+    attemptId: row.attempt_id,
+    cleanupStatus: row.cleanup_status,
+    executionStatus: row.execution_status,
+    executionUpdatedAt: row.execution_updated_at,
+    executionVersion: row.execution_version,
+    jobDeleted: row.job_deleted === 1,
+    jobId: row.job_id,
+    jobStatus: row.job_status,
+    providerHandle: row.provider_handle,
+    providerVersion: row.provider_version,
+    terminalStatus: row.terminal_status,
+  };
 }
 
 function mutationSucceeded(results: readonly D1Result[]): boolean {
@@ -591,6 +640,17 @@ export function createD1CloudRunControlRepository(database: D1Database): CloudRu
       return mutationSucceeded(results);
     },
 
+    async findCancellationCandidate(jobId) {
+      const row = await database
+        .withSession("first-primary")
+        .prepare(FIND_CANCELLATION_CANDIDATE_SQL)
+        .bind(ulidSchema.parse(jobId))
+        .first();
+      return row === null
+        ? undefined
+        : mapReconciliationCandidate(reconciliationCandidateRowSchema.parse(row));
+    },
+
     async findReconciliationCandidates(limit) {
       const rows = await database
         .withSession("first-primary")
@@ -600,19 +660,7 @@ export function createD1CloudRunControlRepository(database: D1Database): CloudRu
       return reconciliationCandidateRowSchema
         .array()
         .parse(rows.results)
-        .map((row) => ({
-          attemptId: row.attempt_id,
-          cleanupStatus: row.cleanup_status,
-          executionStatus: row.execution_status,
-          executionUpdatedAt: row.execution_updated_at,
-          executionVersion: row.execution_version,
-          jobDeleted: row.job_deleted === 1,
-          jobId: row.job_id,
-          jobStatus: row.job_status,
-          providerHandle: row.provider_handle,
-          providerVersion: row.provider_version,
-          terminalStatus: row.terminal_status,
-        }));
+        .map(mapReconciliationCandidate);
     },
 
     async findDispatchablePendingJobId() {

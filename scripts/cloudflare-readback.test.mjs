@@ -96,8 +96,8 @@ event_type:  PutObject,CompleteMultipartUpload,CopyObject
     },
   ]),
   queue: `Queue Name: recording-uploaded-staging
-Number of Producers: 1
-Producers: r2_bucket:recording-transcriber-staging
+Number of Producers: 2
+Producers: r2_bucket:recording-transcriber-staging, worker:scribe-drop-web-staging
 Number of Consumers: 1
 Consumers: worker:scribe-drop-orchestrator-staging
 `,
@@ -183,6 +183,9 @@ test("requires the exact active Worker and Pages candidate when a commit is expe
     pagesProject: JSON.stringify({
       deployment_configs: {
         production: {
+          queue_producers: {
+            CONTROL_EVENTS: { name: candidateExpected.queueName },
+          },
           wrangler_config_hash: candidateExpected.pagesConfigHash,
         },
       },

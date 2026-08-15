@@ -7,6 +7,7 @@ import type {
   CloudRunReconciliationCandidate,
 } from "./cloud-run-control-repository.js";
 import {
+  reconcileCloudRunCancellation,
   reconcileCloudRunJobs,
   type CloudRunReconciliationEnvironment,
 } from "./cloud-run-reconciliation-service.js";
@@ -48,6 +49,8 @@ function repository(selected: CloudRunReconciliationCandidate): CloudRunControlR
   return {
     applyControllerResponse: () => Promise.resolve(true),
     failMissingTerminal: () => Promise.resolve(true),
+    findCancellationCandidate: (jobId) =>
+      Promise.resolve(jobId === selected.jobId ? selected : undefined),
     findDispatchablePendingJobId: () => Promise.resolve(undefined),
     findReconciliationCandidates: () => Promise.resolve([selected]),
     findSubmissionCandidate: () => Promise.resolve(undefined),
@@ -68,6 +71,71 @@ function logger(): StructuredLogger {
 }
 
 describe("Cloud Run reconciliation", () => {
+  it("dispatches an exact user cancellation without waiting for the scheduled sweep", async () => {
+    const selected = {
+      ...candidate,
+      executionStatus: "RUNNING" as const,
+      jobStatus: "CANCEL_REQUESTED" as const,
+    };
+    const selectedRepository = repository(selected);
+    const mutate = vi
+      .fn<(request: CloudRunControllerRequest) => Promise<CloudRunControllerResponse>>()
+      .mockImplementation((request) =>
+        Promise.resolve({
+          errorCode: null,
+          executionHandle: request.executionHandle,
+          outcome: "cancelled",
+          requestId: request.requestId,
+          schemaVersion: 1,
+          version: 4,
+        }),
+      );
+
+    await expect(
+      reconcileCloudRunCancellation(selected.jobId, environment(), logger(), {
+        createController: () => ({ mutate }),
+        createRepository: () => selectedRepository,
+        now: () => NOW,
+      }),
+    ).resolves.toEqual({ appliedCount: 1, deferredCount: 0, outcome: "applied" });
+    expect(mutate).toHaveBeenCalledOnce();
+    expect(mutate.mock.calls[0]?.[0]).toMatchObject({
+      action: "cancel",
+      executionHandle: selected.providerHandle,
+      expectedVersion: selected.providerVersion,
+    });
+  });
+
+  it("defers an immediate cancellation when the controller effect is unknown", async () => {
+    const selected = {
+      ...candidate,
+      executionStatus: "RUNNING" as const,
+      jobStatus: "CANCEL_REQUESTED" as const,
+    };
+    const selectedRepository = repository(selected);
+    const mutate = vi
+      .fn<(request: CloudRunControllerRequest) => Promise<CloudRunControllerResponse>>()
+      .mockImplementation((request) =>
+        Promise.resolve({
+          errorCode: "UNKNOWN_OUTCOME",
+          executionHandle: request.executionHandle,
+          outcome: "unknown",
+          requestId: request.requestId,
+          schemaVersion: 1,
+          version: 4,
+        }),
+      );
+
+    await expect(
+      reconcileCloudRunCancellation(selected.jobId, environment(), logger(), {
+        createController: () => ({ mutate }),
+        createRepository: () => selectedRepository,
+        now: () => NOW,
+      }),
+    ).resolves.toEqual({ appliedCount: 1, deferredCount: 1, outcome: "deferred" });
+    expect(mutate).toHaveBeenCalledOnce();
+  });
+
   it("replays one exact request and completes one stale-version recovery in the same sweep", async () => {
     const mutate = vi
       .fn<(request: CloudRunControllerRequest) => Promise<CloudRunControllerResponse>>()

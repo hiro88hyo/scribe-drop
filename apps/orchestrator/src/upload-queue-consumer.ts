@@ -1,4 +1,5 @@
 import {
+  jobControlEventSchema,
   normalizedR2ObjectCreatedEventSchema,
   r2EventNotificationSchema,
 } from "@scribe-drop/contracts";
@@ -19,6 +20,11 @@ import {
   createD1UploadIngestionRepository,
   type UploadIngestionRepository,
 } from "./upload-ingestion-repository.js";
+import {
+  reconcileCloudRunCancellation,
+  type CloudRunCancellationResult,
+  type CloudRunReconciliationEnvironment,
+} from "./cloud-run-reconciliation-service.js";
 
 const MAX_RETRY_DELAY_SECONDS = 15 * 60;
 const BASE_RETRY_DELAY_SECONDS = 15;
@@ -42,7 +48,11 @@ const r2HeadResultSchema = z.object({
 });
 
 export interface UploadQueueEnvironment
-  extends OrchestratorConfigEnvironment, GpuExecutionSelectionEnvironment, RunpodConfigEnvironment {
+  extends
+    OrchestratorConfigEnvironment,
+    GpuExecutionSelectionEnvironment,
+    RunpodConfigEnvironment,
+    CloudRunReconciliationEnvironment {
   readonly RECORDINGS: R2Bucket;
   readonly SCRIBE_DROP_DB: D1Database;
 }
@@ -67,6 +77,11 @@ export interface UploadQueueDependencies {
   readonly now?: () => Date;
   readonly random?: () => number;
   readonly randomBytes?: RandomBytes;
+  readonly reconcileCancellation?: (
+    jobId: string,
+    environment: UploadQueueEnvironment,
+    logger: StructuredLogger,
+  ) => Promise<CloudRunCancellationResult>;
   readonly submitPendingJob?: (
     jobId: string,
     database: D1Database,
@@ -97,8 +112,36 @@ async function processMessage(
   logger: StructuredLogger,
 ): Promise<"ack" | "retry"> {
   const config = parseOrchestratorConfig(environment);
+  if (config === undefined) {
+    logger.error("upload_event_configuration_invalid", {
+      errorCode: "INTERNAL_ERROR",
+    });
+    return "retry";
+  }
+
+  const controlEvent = jobControlEventSchema.safeParse(message.body);
+  if (controlEvent.success) {
+    const reconcile =
+      dependencies.reconcileCancellation ??
+      ((jobId: string, selectedEnvironment: UploadQueueEnvironment, selectedLogger) =>
+        reconcileCloudRunCancellation(jobId, selectedEnvironment, selectedLogger));
+    const result = await reconcile(controlEvent.data.jobId, environment, logger);
+    const event =
+      result.outcome === "applied"
+        ? "job.cancel_dispatch_applied"
+        : result.outcome === "deferred"
+          ? "job.cancel_dispatch_deferred"
+          : "job.cancel_dispatch_ignored";
+    if (result.outcome === "deferred") {
+      logger.warn(event, { jobId: controlEvent.data.jobId, status: "CANCEL_REQUESTED" });
+      return "retry";
+    }
+    logger.info(event, { jobId: controlEvent.data.jobId, status: "CANCEL_REQUESTED" });
+    return "ack";
+  }
+
   const configuredSelection = parseGpuExecutionSelection(environment);
-  if (config === undefined || configuredSelection === undefined) {
+  if (configuredSelection === undefined) {
     logger.error("upload_event_configuration_invalid", {
       errorCode: "INTERNAL_ERROR",
     });

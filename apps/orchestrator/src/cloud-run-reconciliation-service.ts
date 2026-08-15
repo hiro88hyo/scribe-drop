@@ -63,6 +63,12 @@ export interface CloudRunReconciliationResult {
   readonly failedMissingTerminalCount: number;
 }
 
+export interface CloudRunCancellationResult {
+  readonly appliedCount: number;
+  readonly deferredCount: number;
+  readonly outcome: "applied" | "deferred" | "ignored";
+}
+
 function randomBytes(length: number): Uint8Array {
   return crypto.getRandomValues(new Uint8Array(length));
 }
@@ -115,6 +121,142 @@ function action(
   return candidate.executionStatus === "CREATING" ? "reconcile" : "observe";
 }
 
+function controllerResponseRequiresRetry(response: CloudRunControllerResponse): boolean {
+  if (response.outcome === "unknown") return true;
+  return (
+    response.outcome === "rejected" &&
+    response.errorCode !== null &&
+    [
+      "CONFLICT",
+      "INTERNAL_ERROR",
+      "PROVIDER_RETRYABLE",
+      "RATE_LIMITED",
+      "UNKNOWN_OUTCOME",
+    ].includes(response.errorCode)
+  );
+}
+
+async function applyControllerAction(
+  candidate: CloudRunReconciliationCandidate,
+  selectedAction: "cancel" | "cleanup" | "observe" | "reconcile",
+  appEnvironment: "staging",
+  controller: CloudRunReconciliationController,
+  repository: CloudRunControlRepository,
+  now: () => Date,
+  bytes: RandomBytes,
+): Promise<{ readonly appliedCount: number; readonly deferredCount: number }> {
+  let appliedCount = 0;
+  let deferredCount = 0;
+  let currentCandidate = candidate;
+  for (
+    let staleVersionRecovery = 0;
+    staleVersionRecovery <= MAX_STALE_VERSION_RECOVERIES;
+    staleVersionRecovery += 1
+  ) {
+    const issuedAt = now();
+    const request = cloudRunControllerRequestSchema.parse({
+      action: selectedAction,
+      environment: appEnvironment,
+      executionHandle: currentCandidate.providerHandle,
+      expectedVersion: currentCandidate.providerVersion,
+      expiresAt: new Date(
+        issuedAt.getTime() +
+          Math.min(REQUEST_LIFETIME_MS, CLOUD_RUN_CONTROLLER_MAX_REQUEST_LIFETIME_MS),
+      ).toISOString(),
+      issuedAt: issuedAt.toISOString(),
+      policyId: CLOUD_RUN_RUNTIME_POLICY,
+      requestId: createUlid(issuedAt.getTime(), bytes),
+      schemaVersion: 1,
+    });
+    let response: CloudRunControllerResponse | undefined;
+    for (let requestAttempt = 0; requestAttempt < 2; requestAttempt += 1) {
+      try {
+        response = await controller.mutate(request);
+        break;
+      } catch {
+        // Replay only the exact bounded request so an unknown effect cannot be duplicated.
+      }
+    }
+    if (response === undefined) {
+      deferredCount += 1;
+      break;
+    }
+    const responseTimestamp = now().toISOString();
+    const applied = await repository.applyControllerResponse({
+      action: selectedAction,
+      candidate: currentCandidate,
+      response,
+      timestamp: responseTimestamp,
+    });
+    if (!applied) {
+      deferredCount += 1;
+      break;
+    }
+    appliedCount += 1;
+    const staleVersionResponse =
+      response.outcome === "rejected" && response.errorCode === "STALE_VERSION";
+    if (staleVersionResponse) {
+      if (
+        response.version === currentCandidate.providerVersion ||
+        staleVersionRecovery === MAX_STALE_VERSION_RECOVERIES
+      ) {
+        deferredCount += 1;
+        break;
+      }
+      currentCandidate = {
+        ...currentCandidate,
+        executionUpdatedAt: responseTimestamp,
+        executionVersion: currentCandidate.executionVersion + 1,
+        providerVersion: response.version,
+      };
+      continue;
+    }
+    if (controllerResponseRequiresRetry(response)) deferredCount += 1;
+    break;
+  }
+  return { appliedCount, deferredCount };
+}
+
+export async function reconcileCloudRunCancellation(
+  jobId: string,
+  environment: CloudRunReconciliationEnvironment,
+  _logger: StructuredLogger,
+  dependencies: CloudRunReconciliationDependencies = {},
+): Promise<CloudRunCancellationResult> {
+  if (
+    environment.APP_ENV !== "staging" ||
+    environment.CLOUD_RUN_RUNTIME_MODE !== "synthetic-shadow"
+  ) {
+    return { appliedCount: 0, deferredCount: 0, outcome: "ignored" };
+  }
+  const config = parseCloudRunRuntimeServiceConfig(environment);
+  const now = dependencies.now ?? (() => new Date());
+  const repositoryFactory = dependencies.createRepository ?? createD1CloudRunControlRepository;
+  const repository = repositoryFactory(environment.SCRIBE_DROP_DB);
+  const candidate = await repository.findCancellationCandidate(jobId);
+  if (candidate === undefined) {
+    return { appliedCount: 0, deferredCount: 0, outcome: "ignored" };
+  }
+  const selectedController =
+    dependencies.createController?.(environment, now) ?? createController(environment, now);
+  if (config === undefined || selectedController === undefined) {
+    throw new Error("Cloud Run cancellation configuration is invalid");
+  }
+  const result = await applyControllerAction(
+    candidate,
+    "cancel",
+    config.appEnvironment,
+    selectedController,
+    repository,
+    now,
+    dependencies.randomBytes ?? randomBytes,
+  );
+  return {
+    ...result,
+    outcome: result.deferredCount > 0 ? "deferred" : "applied",
+  };
+}
+
 export async function reconcileCloudRunJobs(
   environment: CloudRunReconciliationEnvironment,
   logger: StructuredLogger,
@@ -148,6 +290,9 @@ export async function reconcileCloudRunJobs(
     throw new Error("Cloud Run reconciliation configuration is invalid");
   }
   for (const candidate of candidates) {
+    if (config === undefined || selectedController === undefined) {
+      throw new Error("Cloud Run reconciliation configuration is invalid");
+    }
     if (
       candidate.executionStatus === "TERMINAL" &&
       candidate.cleanupStatus === "NOT_REQUESTED" &&
@@ -169,70 +314,17 @@ export async function reconcileCloudRunJobs(
       deferredCount += failed ? 0 : 1;
       continue;
     }
-    let currentCandidate = candidate;
-    for (
-      let staleVersionRecovery = 0;
-      staleVersionRecovery <= MAX_STALE_VERSION_RECOVERIES;
-      staleVersionRecovery += 1
-    ) {
-      const selectedAction = action(currentCandidate);
-      const issuedAt = now();
-      const request = cloudRunControllerRequestSchema.parse({
-        action: selectedAction,
-        environment: config?.appEnvironment,
-        executionHandle: currentCandidate.providerHandle,
-        expectedVersion: currentCandidate.providerVersion,
-        expiresAt: new Date(
-          issuedAt.getTime() +
-            Math.min(REQUEST_LIFETIME_MS, CLOUD_RUN_CONTROLLER_MAX_REQUEST_LIFETIME_MS),
-        ).toISOString(),
-        issuedAt: issuedAt.toISOString(),
-        policyId: CLOUD_RUN_RUNTIME_POLICY,
-        requestId: createUlid(issuedAt.getTime(), bytes),
-        schemaVersion: 1,
-      });
-      let response: CloudRunControllerResponse | undefined;
-      for (let requestAttempt = 0; requestAttempt < 2; requestAttempt += 1) {
-        try {
-          response = await selectedController?.mutate(request);
-          break;
-        } catch {
-          // Replay only the exact bounded request so an unknown effect cannot be duplicated.
-        }
-      }
-      if (response === undefined) {
-        deferredCount += 1;
-        break;
-      }
-      const responseTimestamp = now().toISOString();
-      const applied = await repository.applyControllerResponse({
-        action: selectedAction,
-        candidate: currentCandidate,
-        response,
-        timestamp: responseTimestamp,
-      });
-      if (!applied) {
-        deferredCount += 1;
-        break;
-      }
-      appliedCount += 1;
-      const staleVersionResponse =
-        response.outcome === "rejected" && response.errorCode === "STALE_VERSION";
-      if (!staleVersionResponse) break;
-      if (
-        response.version === currentCandidate.providerVersion ||
-        staleVersionRecovery === MAX_STALE_VERSION_RECOVERIES
-      ) {
-        deferredCount += 1;
-        break;
-      }
-      currentCandidate = {
-        ...currentCandidate,
-        executionUpdatedAt: responseTimestamp,
-        executionVersion: currentCandidate.executionVersion + 1,
-        providerVersion: response.version,
-      };
-    }
+    const result = await applyControllerAction(
+      candidate,
+      action(candidate),
+      config.appEnvironment,
+      selectedController,
+      repository,
+      now,
+      bytes,
+    );
+    appliedCount += result.appliedCount;
+    deferredCount += result.deferredCount;
   }
   const pendingJobId = await repository.findDispatchablePendingJobId();
   let dispatch: SubmissionDispatchResult | "none" = "none";

@@ -2,7 +2,8 @@
 
 ## 状態
 
-- Current release candidate: `0.2.0` / source `26a09dc`
+- Last successful lifecycle candidate: `0.2.0` / source `26a09dc`
+- Bounded-failure candidate: `0.2.0` / source `c03fd7f`
 - Candidate publication workflow: `31779830488`
 - Cloud Run image publication workflow: `31779830806`
 - Date: 2026-08-13 UTC / 2026-08-14 JST
@@ -127,13 +128,48 @@ prefix listingはobject 0で、検査に用いたread-only WorkerもCloudflare A
 read-backした。Firestore controller 3 collection、D1対象row、Cloud Run Job/Executionはいずれも0で、
 staging WorkerはRunPod policyへ復帰している。
 
+## Bounded-failure batch
+
+source `c03fd7f`の同一candidateに対し、明示承認された上限5 L4 execution、合計1,250 JPY、
+task/parallelism 1、retry 0の範囲でfailure acceptanceを実行した。通常成功と通知一時障害、
+claim後worker停止、heartbeat response loss、実破損M4Aは、それぞれ期待terminal、通知、
+artifact有無、cleanupへ収束した。5 executionを使い切った後のcapacity rejection fixtureは、
+authorization境界で拒否され、追加GPU、Cloud Run Job、Executionを作成しなかった。
+
+実行中jobをWeb UIから一度cancelした試験では、D1へ
+`2026-08-14T14:06:14.974Z`にcancel requestが保存されたが、controller cancel actionは0件のまま、
+`2026-08-14T14:06:58.571Z`にruntimeの`TRANSCRIPTION_FAILED`が先に確定した。最終job状態も
+`CANCELLED`ではなく`FAILED`となった。Web cancelからprovider control-planeへの伝播が5分Cronだけに
+依存していたためであり、このscenarioはformal acceptance failureと判定する。
+
+試験後はprovider policyを`runpod_serverless_v1`へ戻し、staging fault bindingを除去した。
+controller authorizationとFirestore budgetはdisabled/0、Cloud Run Job/Executionは0となった。
+対象5 execution document、22 request document、1 environment documentをupdate-time条件付きで削除し、
+Firestore controller 3 collectionが空であることを別read-backで確認した。対象6 fixtureのjobと全子rowも
+D1で0へ収束した。D1の物理削除はapplication deletion serviceのR2 delete-and-verify成功後だけ行われるが、
+承認待ち中にrowが削除されてexact object keyを失ったため、このbatch固有R2 keyへの独立HEADは再実行できなかった。
+この制約をR2不存在の独立証拠として扱わない。production resourceとCI workflowは変更していない。
+
+## Immediate-cancel remediation
+
+[ADR 0085](../adr/0085-dispatch-user-cancellation-through-existing-queue.md)に従い、owner検証済みWeb cancelの
+D1確定後、strictな`job-control` eventを既存environment Queueへawait送信するlocal修正を追加した。
+Orchestratorは受信eventを認可情報とせず、D1 primaryからexact current Cloud Run attempt、status、handleを
+再検証してから既存controller cancellationを即時dispatchする。Queue失敗時のHTTP再送、at-least-once duplicate、
+effect不明時のmessage retry、最終的なCron fallbackを残し、新規Queue、公開control endpoint、Webへのcontroller
+secretは追加しない。
+
+Pagesの`CONTROL_EVENTS` producer bindingと、main Queueのproducer 2件（R2、Web）、consumer 1件をcandidate
+read-backの必須条件へ追加した。このsource変更は`c03fd7f`のstaging evidenceを無効化する。local gateとcommit後、
+新candidateを一度だけbuildしてPhase 14から再検証するまでPhase 15は未完了であり、production promotionはblockedとする。
+
 ## 未完了条件
 
-current candidateでは成功系artifact、利用者delete、費用境界、deployed Cronだけによるprovider cleanupの
-自動収束が成立した。Android実機file picker、合成破損media、capacity rejection、cancel、worker crash、
-heartbeat stale、controller outage、通知失敗を含むPhase 15の残りを完了し、
-新規投入停止、provider resource 0、storage不存在を同じ期限付きevidenceへ結び付けるまで
-production promotionを行わない。
+過去candidateでは成功系artifact、利用者delete、費用境界、deployed Cronだけによるprovider cleanup、
+破損media、capacity rejection、worker停止、heartbeat response loss、通知一時障害を検証した。しかしcancelは
+formal acceptance failureであり、その修正は新sourceである。新candidateのPhase 14 gate、cancel再試験、
+Android実機file picker、controller outageを含む残りを完了し、新規投入停止、provider resource 0、storage不存在を
+同じ期限付きevidenceへ結び付けるまでproduction promotionを行わない。新しいGPU executionは別の明示承認なしに開始しない。
 
 ## 次candidateのbounded fault preparation
 

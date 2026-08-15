@@ -69,7 +69,11 @@ export function verifyCloudflareReadback(outputs, expected) {
       pagesProject?.name !== expected.pagesProjectName ||
       pagesProject?.production_branch !== expected.pagesBranch ||
       pagesProject?.deployment_configs?.production?.wrangler_config_hash !==
-        expected.pagesConfigHash
+        expected.pagesConfigHash ||
+      Object.keys(pagesProject?.deployment_configs?.production?.queue_producers ?? {}).length !==
+        1 ||
+      pagesProject?.deployment_configs?.production?.queue_producers?.CONTROL_EVENTS?.name !==
+        expected.queueName
     ) {
       throw new Error("Cloudflare Pages deployed configuration read-back does not match");
     }
@@ -129,8 +133,9 @@ export function verifyCloudflareReadback(outputs, expected) {
   );
 
   requireOnce(outputs.queue, `Queue Name: ${expected.queueName}`, "Queue name");
-  requireOnce(outputs.queue, "Number of Producers: 1", "Queue producer count");
+  requireOnce(outputs.queue, "Number of Producers: 2", "Queue producer count");
   requireOnce(outputs.queue, `Producers: r2_bucket:${expected.bucketName}`, "Queue producer");
+  requireOnce(outputs.queue, `worker:${expected.pagesProjectName}`, "Pages Queue producer");
   requireOnce(outputs.queue, "Number of Consumers: 1", "Queue consumer count");
   requireOnce(outputs.queue, `Consumers: worker:${expected.workerName}`, "Queue consumer");
 

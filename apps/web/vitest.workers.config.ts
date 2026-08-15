@@ -32,6 +32,9 @@ export default defineConfig({
         d1Databases: {
           SCRIBE_DROP_DB: "00000000-0000-0000-0000-000000000301",
         },
+        queueProducers: {
+          CONTROL_EVENTS: "recording-uploaded-test",
+        },
         r2Buckets: ["RECORDINGS"],
         serviceBindings: {
           ASSETS: await buildPagesASSETSBinding(path.join(projectDirectory, "dist")),

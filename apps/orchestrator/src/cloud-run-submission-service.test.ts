@@ -36,6 +36,7 @@ function repository(): CloudRunControlRepository {
   return {
     applyControllerResponse: () => Promise.resolve(false),
     failMissingTerminal: () => Promise.resolve(false),
+    findCancellationCandidate: () => Promise.resolve(undefined),
     findDispatchablePendingJobId: () => Promise.resolve(undefined),
     findReconciliationCandidates: () => Promise.resolve([]),
     findSubmissionCandidate: () =>

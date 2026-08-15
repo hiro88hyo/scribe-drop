@@ -16,6 +16,7 @@ bindingは環境変数ではなくWranglerが実行時に注入する。
 | ---------------- | ----------------- | -------------------------------------- |
 | `SCRIBE_DROP_DB` | Web, Orchestrator | 環境別D1 database                      |
 | `RECORDINGS`     | Web, Orchestrator | 非公開R2 bucket                        |
+| `CONTROL_EVENTS` | Web               | `recording-uploaded-<environment>`     |
 | Queue consumer   | Orchestrator      | `recording-uploaded-<environment>`     |
 | DLQ              | Orchestrator      | `recording-uploaded-dlq-<environment>` |
 
