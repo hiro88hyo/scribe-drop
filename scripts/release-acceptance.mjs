@@ -1,10 +1,11 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
+import { parseCloudRunCandidateEvidence } from "./cloud-run-candidate-evidence.mjs";
 import { verifyReleaseCandidate } from "./release-candidate.mjs";
 
-const schemaVersion = 3;
-const policyVersion = "adr-0059-v1";
+const schemaVersion = 4;
+const policyVersion = "adr-0086-v1";
 const sha256Pattern = /^[0-9a-f]{64}$/u;
 const commitShaPattern = /^[0-9a-f]{40}$/u;
 const runIdPattern = /^[1-9][0-9]*$/u;
@@ -12,11 +13,12 @@ const maximumEvidenceAgeMilliseconds = 24 * 60 * 60 * 1_000;
 const requiredCheckNames = [
   "artifactsDownloaded",
   "candidateVerified",
+  "cloudRunCandidateVerified",
+  "cloudRunEndToEndM4a",
+  "cloudRunProviderStorageCleaned",
+  "cloudRunResourcesCleaned",
   "cloudflareResourceReadback",
   "endToEndM4a",
-  "failedEndToEndM4a",
-  "failureJobCleanupRequested",
-  "failureNotificationDelivered",
   "jobCleanupRequested",
   "manifestLast",
   "migrationsApplied",
@@ -76,6 +78,7 @@ export function validateStagingAcceptance(value) {
       "candidateId",
       "candidateRunId",
       "checks",
+      "cloudRunCandidate",
       "commitSha",
       "environment",
       "environmentPolicyId",
@@ -95,6 +98,7 @@ export function validateStagingAcceptance(value) {
   if (evidence.environment !== "staging") {
     throw new Error("Staging acceptance environment is invalid");
   }
+  const cloudRunCandidate = parseCloudRunCandidateEvidence(evidence.cloudRunCandidate);
   const acceptedAt = requireTimestamp(evidence.acceptedAt, "Staging acceptance time");
   const expiresAt = requireTimestamp(evidence.expiresAt, "Staging acceptance expiry");
   const lifetime = new Date(expiresAt).getTime() - new Date(acceptedAt).getTime();
@@ -121,6 +125,7 @@ export function validateStagingAcceptance(value) {
       runIdPattern,
       "Staging acceptance candidate run ID",
     ),
+    cloudRunCandidate,
     stagingRunId: requirePattern(
       evidence.stagingRunId,
       runIdPattern,
@@ -139,6 +144,12 @@ export function createStagingAcceptance(input) {
     expectedReleaseVersion: input.expectedReleaseVersion,
   });
   const acceptedAtDate = new Date(input.acceptedAt ?? new Date());
+  const cloudRunCandidate = parseCloudRunCandidateEvidence(
+    JSON.parse(readFileSync(input.cloudRunCandidateEvidencePath, "utf8")),
+  );
+  if (cloudRunCandidate.commit !== manifest.commitSha) {
+    throw new Error("Cloud Run candidate does not match the release candidate");
+  }
   const evidence = validateStagingAcceptance({
     schemaVersion,
     policyVersion,
@@ -147,6 +158,7 @@ export function createStagingAcceptance(input) {
     candidateId: manifest.candidateId,
     commitSha: manifest.commitSha,
     candidateRunId: input.candidateRunId,
+    cloudRunCandidate,
     stagingRunId: input.stagingRunId,
     acceptedAt: acceptedAtDate.toISOString(),
     expiresAt: new Date(acceptedAtDate.getTime() + maximumEvidenceAgeMilliseconds).toISOString(),
@@ -168,6 +180,15 @@ export function verifyStagingAcceptance(input) {
   });
   if (evidence.candidateId !== manifest.candidateId || evidence.commitSha !== manifest.commitSha) {
     throw new Error("Staging acceptance does not match the release candidate");
+  }
+  if (evidence.cloudRunCandidate.commit !== manifest.commitSha) {
+    throw new Error("Staging acceptance Cloud Run candidate does not match");
+  }
+  if (
+    input.expectedCloudRunCandidateRunId !== undefined &&
+    evidence.cloudRunCandidate.runId !== input.expectedCloudRunCandidateRunId
+  ) {
+    throw new Error("Staging acceptance Cloud Run candidate run does not match");
   }
   if (
     input.expectedCandidateRunId !== undefined &&

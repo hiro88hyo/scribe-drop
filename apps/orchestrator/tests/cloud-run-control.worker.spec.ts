@@ -219,15 +219,14 @@ describe("D1 Cloud Run control repository", () => {
     ]);
   });
 
-  it("records a controller create rejection as a terminal product failure", async () => {
+  it("returns a pre-admission capacity rejection to the dispatchable pending state", async () => {
     const repository = createD1CloudRunControlRepository(env.SCRIBE_DROP_DB);
     const candidate = await repository.findSubmissionCandidate(JOB_ID);
     if (candidate === undefined) throw new Error("missing Cloud Run candidate");
     await repository.prepareSubmission({ candidate, executionHandle: HANDLE, timestamp: NOW });
     await expect(
-      repository.recordCreateRejected({
+      repository.recordCreateDeferred({
         attemptId: ATTEMPT_ID,
-        eventId: "01ARZ3NDEKTSV4RRFFQ69G5FAX",
         executionHandle: HANDLE,
         jobId: JOB_ID,
         response: {
@@ -257,13 +256,14 @@ describe("D1 Cloud Run control repository", () => {
         .bind(JOB_ID)
         .first(),
     ).resolves.toEqual({
-      attempt_status: "FAILED",
-      cleanup_status: "SUCCEEDED",
-      create_outcome: "rejected",
-      execution_status: "TERMINAL",
-      job_status: "FAILED",
-      provider_version: 1,
+      attempt_status: "SUBMISSION_PENDING",
+      cleanup_status: "NOT_REQUESTED",
+      create_outcome: null,
+      execution_status: "PENDING",
+      job_status: "SUBMISSION_PENDING",
+      provider_version: null,
     });
+    await expect(repository.findDispatchablePendingJobId()).resolves.toBe(JOB_ID);
   });
 
   it("reconciles versions, fails a missing runtime terminal, and records cleanup", async () => {
@@ -464,6 +464,7 @@ describe("D1 Cloud Run control repository", () => {
           CLOUD_RUN_RUNTIME_DERIVATION_SECRET: "CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg",
           CLOUD_RUN_RUNTIME_MODE: "synthetic-shadow",
           CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT: "gpu-runtime@scribe-drop.iam.gserviceaccount.com",
+          GPU_EXECUTION_POLICY: "cloud_run_jobs_l4_v1",
           R2_ACCESS_KEY_ID: "r2-access-key-placeholder",
           R2_BUCKET_NAME: "recording-transcriber-staging",
           R2_SECRET_ACCESS_KEY: "0000000000000000",

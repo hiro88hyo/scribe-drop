@@ -1828,13 +1828,21 @@ Remote final Android/download/controller-outage gate (2026-08-15):
 
 実装:
 
-- Phase 15のexact candidateと未失効acceptanceだけをproduction workflowへ渡す。
+- ADR 0086のproduction port、admission、promotion workflowを含む単一release commitからapplication/Cloud Run
+  candidateを各1回buildし、GPU前のWIF/foundation preflightとexact-one正常lifecycleだけのbounded staging
+  acceptanceを1回通す。Phase 15のfault matrixは採用根拠として保持するが、この新candidateの代替にしない。
+- source-controlled bootstrapでstaging/production deployment WIF、deployer identity、production controller/runtime
+  identity、Firestore/TTL、regional secret、最小IAMを作成・strict read-backする。production controller Serviceは
+  staging acceptance前に作らない。
+- 新candidateのexact artifactと未失効acceptanceだけをproduction workflowへ渡す。
 - migration適用後、new-provider switch disabledのままcontroller、Orchestrator、Web、policyをdeployし、
   production read-backを先に完了する。
 - 新規executionを一時停止し、既存RunPod attemptがterminalまたは安全なpendingへ収束してから、
   provider switchを新attemptにだけ有効化する。
-- synthetic production smoke 1件のidentity、artifact、通知、provider resource/storage不存在、費用guardを
-  確認する。
+- `cutover`は別途承認されたL4 exact 1件・250円だけを開ける。production Accessへservice principalを追加せず、
+  利用者が実画面で1件uploadし、artifact/通知を確認する。
+- `finalize`は指定されたsmoke job IDのidentity、artifact、通知、provider resource/storage不存在、費用guardを
+  確認し、admissionをpauseしてsmoke authorizationをdisabledへ戻してから、明示された有限運用枠を設定する。
 
 完了条件:
 

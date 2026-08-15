@@ -9,8 +9,10 @@ import { z } from "zod";
 
 import {
   parseOrchestratorConfig,
+  parseGpuExecutionAdmission,
   parseGpuExecutionSelection,
   type GpuExecutionSelection,
+  type GpuExecutionAdmissionEnvironment,
   type GpuExecutionSelectionEnvironment,
   type OrchestratorConfigEnvironment,
   type RunpodConfigEnvironment,
@@ -51,6 +53,7 @@ export interface UploadQueueEnvironment
   extends
     OrchestratorConfigEnvironment,
     GpuExecutionSelectionEnvironment,
+    GpuExecutionAdmissionEnvironment,
     RunpodConfigEnvironment,
     CloudRunReconciliationEnvironment {
   readonly RECORDINGS: R2Bucket;
@@ -141,7 +144,8 @@ async function processMessage(
   }
 
   const configuredSelection = parseGpuExecutionSelection(environment);
-  if (configuredSelection === undefined) {
+  const executionAdmission = parseGpuExecutionAdmission(environment);
+  if (configuredSelection === undefined || executionAdmission === undefined) {
     logger.error("upload_event_configuration_invalid", {
       errorCode: "INTERNAL_ERROR",
     });
@@ -348,6 +352,7 @@ async function processMessage(
     status: "SUBMISSION_PENDING",
   });
   if (
+    executionAdmission === "active" &&
     dependencies.submitPendingJob !== undefined &&
     (result === "ingested" || result === "duplicate")
   ) {

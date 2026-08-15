@@ -19,8 +19,12 @@ import {
 } from "./cloud-run-control-repository.js";
 import {
   decodeCloudRunRuntimeSecret,
+  parseGpuExecutionAdmission,
+  parseGpuExecutionSelection,
   parseCloudRunRuntimeServiceConfig,
   type CloudRunRuntimeServiceConfigEnvironment,
+  type GpuExecutionAdmissionEnvironment,
+  type GpuExecutionSelectionEnvironment,
 } from "./config.js";
 import {
   submitPendingCloudRunJob,
@@ -33,7 +37,11 @@ const MAX_STALE_VERSION_RECOVERIES = 1;
 const REQUEST_LIFETIME_MS = 30_000;
 export const MISSING_RUNTIME_TERMINAL_GRACE_MS = 5 * 60 * 1_000;
 
-export interface CloudRunReconciliationEnvironment extends CloudRunRuntimeServiceConfigEnvironment {
+export interface CloudRunReconciliationEnvironment
+  extends
+    CloudRunRuntimeServiceConfigEnvironment,
+    GpuExecutionAdmissionEnvironment,
+    GpuExecutionSelectionEnvironment {
   readonly SCRIBE_DROP_DB: D1Database;
 }
 
@@ -139,7 +147,7 @@ function controllerResponseRequiresRetry(response: CloudRunControllerResponse): 
 async function applyControllerAction(
   candidate: CloudRunReconciliationCandidate,
   selectedAction: "cancel" | "cleanup" | "observe" | "reconcile",
-  appEnvironment: "staging",
+  appEnvironment: "production" | "staging",
   controller: CloudRunReconciliationController,
   repository: CloudRunControlRepository,
   now: () => Date,
@@ -223,13 +231,10 @@ export async function reconcileCloudRunCancellation(
   _logger: StructuredLogger,
   dependencies: CloudRunReconciliationDependencies = {},
 ): Promise<CloudRunCancellationResult> {
-  if (
-    environment.APP_ENV !== "staging" ||
-    environment.CLOUD_RUN_RUNTIME_MODE !== "synthetic-shadow"
-  ) {
+  const config = parseCloudRunRuntimeServiceConfig(environment);
+  if (config === undefined) {
     return { appliedCount: 0, deferredCount: 0, outcome: "ignored" };
   }
-  const config = parseCloudRunRuntimeServiceConfig(environment);
   const now = dependencies.now ?? (() => new Date());
   const repositoryFactory = dependencies.createRepository ?? createD1CloudRunControlRepository;
   const repository = repositoryFactory(environment.SCRIBE_DROP_DB);
@@ -239,7 +244,7 @@ export async function reconcileCloudRunCancellation(
   }
   const selectedController =
     dependencies.createController?.(environment, now) ?? createController(environment, now);
-  if (config === undefined || selectedController === undefined) {
+  if (selectedController === undefined) {
     throw new Error("Cloud Run cancellation configuration is invalid");
   }
   const result = await applyControllerAction(
@@ -262,10 +267,8 @@ export async function reconcileCloudRunJobs(
   logger: StructuredLogger,
   dependencies: CloudRunReconciliationDependencies = {},
 ): Promise<CloudRunReconciliationResult> {
-  if (
-    environment.APP_ENV !== "staging" ||
-    environment.CLOUD_RUN_RUNTIME_MODE !== "synthetic-shadow"
-  ) {
+  const config = parseCloudRunRuntimeServiceConfig(environment);
+  if (config === undefined) {
     return {
       appliedCount: 0,
       deferredCount: 0,
@@ -273,7 +276,6 @@ export async function reconcileCloudRunJobs(
       failedMissingTerminalCount: 0,
     };
   }
-  const config = parseCloudRunRuntimeServiceConfig(environment);
   const now = dependencies.now ?? (() => new Date());
   const repositoryFactory = dependencies.createRepository ?? createD1CloudRunControlRepository;
   const repository = repositoryFactory(environment.SCRIBE_DROP_DB);
@@ -286,11 +288,11 @@ export async function reconcileCloudRunJobs(
     candidates.length === 0
       ? undefined
       : (dependencies.createController?.(environment, now) ?? createController(environment, now));
-  if (candidates.length > 0 && (config === undefined || selectedController === undefined)) {
+  if (candidates.length > 0 && selectedController === undefined) {
     throw new Error("Cloud Run reconciliation configuration is invalid");
   }
   for (const candidate of candidates) {
-    if (config === undefined || selectedController === undefined) {
+    if (selectedController === undefined) {
       throw new Error("Cloud Run reconciliation configuration is invalid");
     }
     if (
@@ -326,7 +328,12 @@ export async function reconcileCloudRunJobs(
     appliedCount += result.appliedCount;
     deferredCount += result.deferredCount;
   }
-  const pendingJobId = await repository.findDispatchablePendingJobId();
+  const selectedProvider = parseGpuExecutionSelection(environment);
+  const pendingJobId =
+    parseGpuExecutionAdmission(environment) === "active" &&
+    selectedProvider?.kind === "cloud_run_jobs"
+      ? await repository.findDispatchablePendingJobId()
+      : undefined;
   let dispatch: SubmissionDispatchResult | "none" = "none";
   if (pendingJobId !== undefined) {
     const submit =

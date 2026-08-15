@@ -32,6 +32,10 @@ test("accepts environment-specific Orchestrator secret names without values", ()
     listedCount: 7,
     requiredCount: 5,
   });
+  assert.deepEqual(verifyRequiredOrchestratorSecrets(completeOutput, "production", "active"), {
+    listedCount: 7,
+    requiredCount: 7,
+  });
 });
 
 test("rejects missing, malformed, and value-bearing Worker secret output", () => {
@@ -51,6 +55,10 @@ test("rejects missing, malformed, and value-bearing Worker secret output", () =>
   );
   assert.throws(
     () => verifyRequiredOrchestratorSecrets(completeOutput, "staging", "invalid"),
+    /mode is invalid/u,
+  );
+  assert.throws(
+    () => verifyRequiredOrchestratorSecrets(completeOutput, "production", "synthetic-shadow"),
     /mode is invalid/u,
   );
 });

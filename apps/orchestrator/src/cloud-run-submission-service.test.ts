@@ -47,6 +47,7 @@ function repository(): CloudRunControlRepository {
         executionHandle,
         submissionStartedAt: timestamp,
       }),
+    recordCreateDeferred: () => Promise.resolve(true),
     recordCreateResponse: () => Promise.resolve(true),
     recordCreateRejected: () => Promise.resolve(true),
     recordCreateUnknown: () => Promise.resolve(true),
@@ -68,6 +69,25 @@ describe("Cloud Run submission", () => {
     expect(first).toHaveLength(43);
     expect(first).not.toContain(ATTEMPT_ID);
     await expect(deriveCloudRunExecutionHandle(ATTEMPT_ID)).resolves.toBe(first);
+  });
+
+  it("rejects invalid runtime configuration before changing submission state", async () => {
+    const selectedRepository = repository();
+    const findSubmissionCandidate = vi.spyOn(selectedRepository, "findSubmissionCandidate");
+    const prepareSubmission = vi.spyOn(selectedRepository, "prepareSubmission");
+    await expect(
+      submitPendingCloudRunJob(
+        JOB_ID,
+        { ...environment(), CLOUD_RUN_RUNTIME_MODE: "disabled" },
+        {
+          createRepository: () => selectedRepository,
+          logger: logger(),
+          now: () => NOW,
+        },
+      ),
+    ).rejects.toThrow(/configuration is invalid/u);
+    expect(findSubmissionCandidate).not.toHaveBeenCalled();
+    expect(prepareSubmission).not.toHaveBeenCalled();
   });
 
   it("replays the exact create request once after a lost response", async () => {
@@ -117,7 +137,7 @@ describe("Cloud Run submission", () => {
     expect(recordCreateUnknown).toHaveBeenCalledOnce();
   });
 
-  it("persists a capacity rejection as terminal without scheduling cleanup", async () => {
+  it("returns a pre-admission capacity rejection to pending without scheduling cleanup", async () => {
     const mutate = vi.fn().mockResolvedValue({
       errorCode: "BUDGET_EXHAUSTED",
       executionHandle: await deriveCloudRunExecutionHandle(ATTEMPT_ID),
@@ -127,17 +147,16 @@ describe("Cloud Run submission", () => {
       version: 1,
     });
     const selectedRepository = repository();
-    const recordCreateRejected = vi.spyOn(selectedRepository, "recordCreateRejected");
+    const recordCreateDeferred = vi.spyOn(selectedRepository, "recordCreateDeferred");
     await expect(
       submitPendingCloudRunJob(JOB_ID, environment(), {
         createController: () => ({ mutate }),
-        createEventId: () => "01ARZ3NDEKTSV4RRFFQ69G5FAX",
         createRepository: () => selectedRepository,
         logger: logger(),
         now: () => NOW,
       }),
-    ).resolves.toBe("rejected");
-    expect(recordCreateRejected).toHaveBeenCalledOnce();
+    ).resolves.toBe("deferred");
+    expect(recordCreateDeferred).toHaveBeenCalledOnce();
   });
 
   it("keeps a conflicting create in unknown reconciliation instead of declaring cleanup", async () => {
@@ -151,6 +170,7 @@ describe("Cloud Run submission", () => {
     });
     const selectedRepository = repository();
     const recordCreateResponse = vi.spyOn(selectedRepository, "recordCreateResponse");
+    const recordCreateDeferred = vi.spyOn(selectedRepository, "recordCreateDeferred");
     const recordCreateRejected = vi.spyOn(selectedRepository, "recordCreateRejected");
     await expect(
       submitPendingCloudRunJob(JOB_ID, environment(), {
@@ -161,6 +181,7 @@ describe("Cloud Run submission", () => {
       }),
     ).resolves.toBe("unknown");
     expect(recordCreateResponse).toHaveBeenCalledOnce();
+    expect(recordCreateDeferred).not.toHaveBeenCalled();
     expect(recordCreateRejected).not.toHaveBeenCalled();
   });
 });

@@ -38,12 +38,15 @@ describe("Cloud Run synthetic shadow route", () => {
     [{ APP_ENV: "staging" }],
     [{ APP_ENV: "production", CLOUD_RUN_RUNTIME_MODE: "synthetic-shadow" }],
     [{ APP_ENV: "staging", CLOUD_RUN_RUNTIME_MODE: "enabled" }],
-  ])("returns an indistinguishable 404 unless the exact staging mode is enabled", async (env) => {
-    const service = fakeService();
-    const response = await handleCloudRunRuntimeShadowRequest(request(), env, service);
-    expect(response?.status).toBe(404);
-    expect(service.bootstrap).not.toHaveBeenCalled();
-  });
+  ])(
+    "returns an indistinguishable 404 unless the exact environment mode is enabled",
+    async (env) => {
+      const service = fakeService();
+      const response = await handleCloudRunRuntimeShadowRequest(request(), env, service);
+      expect(response?.status).toBe(404);
+      expect(service.bootstrap).not.toHaveBeenCalled();
+    },
+  );
 
   it("fails closed when configuration is enabled before production ports are injected", async () => {
     const response = await handleCloudRunRuntimeShadowRequest(request(), {
@@ -59,6 +62,17 @@ describe("Cloud Run synthetic shadow route", () => {
     const response = await handleCloudRunRuntimeShadowRequest(
       request(),
       { APP_ENV: "staging", CLOUD_RUN_RUNTIME_MODE: "synthetic-shadow" },
+      service,
+    );
+    expect(response?.status).toBe(200);
+    expect(service.bootstrap).toHaveBeenCalledOnce();
+  });
+
+  it("dispatches the isolated production runtime mode", async () => {
+    const service = fakeService();
+    const response = await handleCloudRunRuntimeShadowRequest(
+      request(),
+      { APP_ENV: "production", CLOUD_RUN_RUNTIME_MODE: "active" },
       service,
     );
     expect(response?.status).toBe(200);

@@ -322,21 +322,6 @@ const stagingReadbackStep = workflowStep(
   "Verify candidate and live resource read-back",
   "deploy-staging-candidate.yml acceptance job",
 );
-const stagingFailureLifecycleStep = workflowStep(
-  stagingAcceptanceJob,
-  "Run real staging failure notification lifecycle",
-  "deploy-staging-candidate.yml acceptance job",
-);
-const stagingFailureNotificationStep = workflowStep(
-  stagingAcceptanceJob,
-  "Verify the synthetic failure notification was delivered",
-  "deploy-staging-candidate.yml acceptance job",
-);
-const stagingFailureCleanupStep = workflowStep(
-  stagingAcceptanceJob,
-  "Delete the synthetic staging failure fixture",
-  "deploy-staging-candidate.yml acceptance job",
-);
 
 for (const [filename, contents] of [
   ["publish-runpod-worker.yml", publicationWorkflowContents],
@@ -872,13 +857,22 @@ for (const [description, value] of Object.entries({
   "idempotent Pages promotion": "pnpm run cloudflare:pages:promote:staging pages-candidate",
   "live Cloudflare read-back": "pnpm run cloudflare:readback:staging",
   "real service E2E": "pnpm run test:e2e:staging",
-  "synthetic failure evidence in runner temp":
-    "STAGING_FAILURE_EVIDENCE_PATH: ${{ runner.temp }}/staging-failure-evidence.json",
-  "real failure notification verification":
-    'pnpm run staging:failure-notification:verify "${STAGING_FAILURE_EVIDENCE_PATH}"',
-  "real failure notification lifecycle":
-    "pnpm --filter @scribe-drop/e2e run test:staging:failure-notification",
-  "synthetic failure cleanup": "pnpm --filter @scribe-drop/e2e run test:staging:failure-cleanup",
+  "Cloud Run candidate input": "cloud_run_candidate_run_id:",
+  "Cloud Run candidate workflow verification": ".github/workflows/publish-cloud-run-candidate.yml",
+  "Cloud Run candidate evidence verification": "cloud-run:candidate:evidence verify",
+  "staging foundation preflight": "pnpm run cloud-run:foundation:read staging",
+  "staging deployment workload identity": "providers/github-staging-deployment",
+  "staging admission pause before authorization":
+    "Pause staging admission before bounded authorization",
+  "exact-one controller authorization":
+    "Authorize exact one bounded staging execution and deploy the candidate controller",
+  "staging admission activation after authorization":
+    "Activate staging admission and render exact acceptance configuration",
+  "Cloud Run cleanup verification":
+    "Verify exact-one Cloud Run cleanup and provider storage convergence",
+  "controller authorization disable": "Disable staging controller authorization after cleanup",
+  "post-acceptance RunPod selection restore":
+    "Restore RunPod selection while preserving the Cloud Run reaper",
   "staging-only Access client ID": "CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}",
   "staging-only Access client secret":
     "CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}",
@@ -1134,17 +1128,17 @@ requireTextOrder(
 );
 requireTextOrder(
   stagingAcceptanceJob,
+  "Authorize exact one bounded staging execution and deploy the candidate controller",
   "Install fixed Playwright browser",
-  "Prewarm the exact candidate worker before creating a job",
   "deploy-staging-candidate.yml acceptance job",
-  "browser installation before candidate worker prewarm",
+  "controller admission before browser acceptance",
 );
 requireTextOrder(
   stagingAcceptanceJob,
-  "Prewarm the exact candidate worker before creating a job",
+  "Install fixed Playwright browser",
   "Verify authenticated data plane, then run real staging M4A lifecycle",
   "deploy-staging-candidate.yml acceptance job",
-  "candidate worker readiness before the acceptance data-plane gate",
+  "browser installation before the acceptance data-plane gate",
 );
 requireTextCount(
   stagingWorkflowContents,
@@ -1153,152 +1147,66 @@ requireTextCount(
   "deploy-staging-candidate.yml",
   "RunPod preflight and pre-lifecycle read-back",
 );
-requireTextCount(
-  stagingWorkflowContents,
-  "pnpm run runpod:verify-worker:staging",
-  2,
-  "deploy-staging-candidate.yml",
-  "post-success and post-failure candidate worker evidence",
-);
-requireText(
-  packageManifestContents,
-  '"runpod:prewarm:staging": "node scripts/manage-staging-runpod-active-worker.mjs prewarm"',
-  "package.json",
-  "bounded staging candidate worker prewarm script",
-);
-requireText(
-  packageManifestContents,
-  '"runpod:prewarm-after-refresh:staging": "node scripts/manage-staging-runpod-active-worker.mjs prewarm-after-refresh"',
-  "package.json",
-  "post-refresh staging candidate worker prewarm script",
-);
-requireText(
-  packageManifestContents,
-  '"runpod:cooldown:staging": "node scripts/manage-staging-runpod-active-worker.mjs cooldown"',
-  "package.json",
-  "staging scale-to-zero restoration script",
-);
-requireText(
-  stagingAcceptanceJob,
-  "if: ${{ always() }}",
-  "deploy-staging-candidate.yml acceptance job",
-  "scale-to-zero cleanup after every staging outcome",
-);
-requireTextCount(
-  stagingAcceptanceJob,
-  "pnpm run runpod:prewarm:staging",
-  1,
-  "deploy-staging-candidate.yml acceptance job",
-  "initial candidate worker gate before the first real job",
-);
-requireTextCount(
-  stagingAcceptanceJob,
-  "pnpm run runpod:prewarm-after-refresh:staging",
-  1,
-  "deploy-staging-candidate.yml acceptance job",
-  "refresh-evidenced candidate worker gate before the failure fixture",
-);
-requireTextCount(
-  stagingAcceptanceJob,
-  "STAGING_RUNPOD_WORKER_EVIDENCE_PATH: ${{ runner.temp }}/staging-runpod-worker-evidence.json",
-  3,
-  "deploy-staging-candidate.yml acceptance job",
-  "runner-temporary worker refresh evidence path",
-);
-requireTextCount(
-  stagingAcceptanceJob,
-  "STAGING_FAILURE_EVIDENCE_PATH: ${{ runner.temp }}/staging-failure-evidence.json",
-  3,
-  "deploy-staging-candidate.yml acceptance job",
-  "step-scoped runner-temporary failure evidence path",
-);
-for (const [step, description] of [
-  [stagingFailureLifecycleStep, "failure lifecycle evidence path"],
-  [stagingFailureNotificationStep, "failure notification evidence path"],
-  [stagingFailureCleanupStep, "failure cleanup evidence path"],
-]) {
-  requireText(
-    step,
-    "STAGING_FAILURE_EVIDENCE_PATH: ${{ runner.temp }}/staging-failure-evidence.json",
-    "deploy-staging-candidate.yml acceptance job",
-    description,
-  );
-}
-requireTextCount(
-  stagingAcceptanceJob,
-  "pnpm run runpod:cooldown:staging",
-  1,
-  "deploy-staging-candidate.yml acceptance job",
-  "single staging scale-to-zero restoration",
-);
-requireText(
-  packageManifestContents,
-  '"runpod:verify-worker:staging": "node scripts/promote-runpod-candidate.mjs staging .runpod/deploy/staging-plan.json --preflight-only --require-candidate-worker"',
-  "package.json",
-  "post-lifecycle candidate worker verification script",
-);
 requireTextOrder(
   stagingAcceptanceJob,
   "Verify authenticated data plane, then run real staging M4A lifecycle",
-  "Verify the candidate RunPod worker handled the successful lifecycle",
+  "Verify exact-one Cloud Run cleanup and provider storage convergence",
   "deploy-staging-candidate.yml acceptance job",
-  "candidate worker read-back after real staging E2E",
+  "Cloud Run cleanup read-back after real staging E2E",
 );
 requireTextOrder(
   stagingAcceptanceJob,
-  "Verify the candidate RunPod worker handled the successful lifecycle",
-  "Wait for an idle candidate worker before the failure fixture",
+  "Verify exact-one Cloud Run cleanup and provider storage convergence",
+  "Disable staging controller authorization after cleanup",
   "deploy-staging-candidate.yml acceptance job",
-  "successful worker evidence before second idle gate",
+  "cleanup before controller authorization disable",
 );
 requireTextOrder(
   stagingAcceptanceJob,
-  "Wait for an idle candidate worker before the failure fixture",
-  "Run real staging failure notification lifecycle",
+  "Pause staging admission before bounded authorization",
+  "Authorize exact one bounded staging execution and deploy the candidate controller",
   "deploy-staging-candidate.yml acceptance job",
-  "second idle candidate gate before the failure fixture",
+  "staging admission pause before controller authorization",
 );
 requireTextOrder(
   stagingAcceptanceJob,
-  "Run real staging failure notification lifecycle",
-  "Verify the candidate RunPod worker handled the failure fixture",
+  "Authorize exact one bounded staging execution and deploy the candidate controller",
+  "Activate staging admission and render exact acceptance configuration",
   "deploy-staging-candidate.yml acceptance job",
-  "failure lifecycle before candidate worker evidence",
+  "controller authorization before staging admission",
 );
 requireTextOrder(
   stagingAcceptanceJob,
-  "Verify the candidate RunPod worker handled the failure fixture",
-  "Verify the synthetic failure notification was delivered",
-  "deploy-staging-candidate.yml acceptance job",
-  "failure worker evidence before failure notification verification",
-);
-requireTextOrder(
-  stagingAcceptanceJob,
-  "Verify the synthetic failure notification was delivered",
-  "Delete the synthetic staging failure fixture",
-  "deploy-staging-candidate.yml acceptance job",
-  "failure notification delivery before fixture deletion",
-);
-requireTextOrder(
-  stagingAcceptanceJob,
-  "Delete the synthetic staging failure fixture",
-  "Restore staging scale-to-zero",
-  "deploy-staging-candidate.yml acceptance job",
-  "failure fixture cleanup before scale-to-zero restoration",
-);
-requireTextOrder(
-  stagingAcceptanceJob,
-  "Restore staging scale-to-zero",
+  "Disable staging controller authorization after cleanup",
   "Issue short-lived staging acceptance",
   "deploy-staging-candidate.yml acceptance job",
-  "scale-to-zero restoration before staging acceptance issuance",
+  "authorization disable before staging acceptance issuance",
 );
+requireTextOrder(
+  stagingAcceptanceJob,
+  "Issue short-lived staging acceptance",
+  "Restore RunPod selection while preserving the Cloud Run reaper",
+  "deploy-staging-candidate.yml acceptance job",
+  "acceptance issuance before staging selection restore",
+);
+for (const forbidden of [
+  "pnpm run runpod:prewarm:staging",
+  "pnpm run runpod:verify-worker:staging",
+  "pnpm --filter @scribe-drop/e2e run test:staging:failure-notification",
+]) {
+  forbidText(
+    stagingAcceptanceJob,
+    forbidden,
+    "deploy-staging-candidate.yml acceptance job",
+    "extra paid staging execution path",
+  );
+}
 requireTextCount(
   productionWorkflowContents,
   "pnpm run runpod:preflight:production",
-  2,
+  1,
   "deploy-production-candidate.yml",
-  "RunPod preflight and post-promotion read-back",
+  "pre-mutation RunPod read-back",
 );
 
 for (const [description, expected] of Object.entries({
@@ -1609,12 +1517,21 @@ for (const [description, value] of Object.entries({
 
 for (const [description, value] of Object.entries({
   "production promotion workflow name": "name: Promote staging-accepted candidate to production",
-  "verification before production Environment":
-    "needs: verify-promotion\n    environment: production",
+  "bounded operation input": "operation:",
+  "cutover operation": "- cutover",
+  "finalize operation": "- finalize",
+  "operation input validation": "pnpm run production:promotion:inputs:verify",
   "trusted staging run verification": ".github/workflows/deploy-staging-candidate.yml",
   "trusted candidate run verification": ".github/workflows/publish-runpod-worker.yml",
+  "trusted Cloud Run candidate run verification":
+    ".github/workflows/publish-cloud-run-candidate.yml",
   "staging acceptance verification": "pnpm run staging:acceptance:verify",
   "candidate verification": "pnpm run candidate:verify",
+  "Cloud Run candidate verification": "pnpm run cloud-run:candidate:evidence verify",
+  "isolated production workload identity provider": "providers/github-production-deployment",
+  "isolated production deployment service account":
+    "sd-production-deployer@scribe-drop.iam.gserviceaccount.com",
+  "strict production foundation read-back": "pnpm run cloud-run:foundation:read production",
   "production Pages upload capability preflight":
     "pnpm run cloudflare:pages:upload-permission:verify:production",
   "production Worker route capability preflight":
@@ -1625,7 +1542,16 @@ for (const [description, value] of Object.entries({
   "read-only RunPod preflight": "pnpm run runpod:preflight:production",
   "candidate migration directory":
     "SCRIBE_DROP_CANDIDATE_MIGRATIONS_DIR: ../../release-candidate/migrations",
-  "candidate-only production RunPod promotion": "pnpm run runpod:promote:production",
+  "rollback-compatible production RunPod promotion": "pnpm run runpod:promote:production",
+  "paused production admission": "SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION: paused",
+  "Cloud Run production selection":
+    "SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_POLICY: cloud_run_jobs_l4_v1",
+  "exact-one production authorization": "Verify exact-one L4 authorization and activate admission",
+  "production smoke lifecycle verification": "pnpm run cloud-run:production:smoke:verify",
+  "exact provider cleanup verification": "pnpm run cloud-run:acceptance:clean production",
+  "finite operational authorization": "cloud-run:controller:deploy apply production operational",
+  "cutover evidence": "pnpm run production:cutover:evidence",
+  "release evidence": "pnpm run production:release:evidence",
   "production environment parity comparison": "pnpm run environment:policy:export production",
   "minimum production acceptance validity": 'MINIMUM_ACCEPTANCE_REMAINING_SECONDS: "1800"',
   "production no-rebuild deployment": "--no-bundle",
@@ -1644,59 +1570,52 @@ requireTextCount(
 );
 requireTextOrder(
   productionWorkflowContents,
-  "Verify Pages upload permission before any mutation",
-  "Apply candidate D1 migrations",
+  "Verify every external control plane before production mutation",
+  "Apply candidate migrations and reviewed R2 policies",
   "deploy-production-candidate.yml",
-  "Pages upload permission before production mutation",
+  "all preflights before production mutation",
 );
 requireTextOrder(
   productionWorkflowContents,
-  "Verify Pages deploy configuration and target",
-  "Apply candidate D1 migrations",
+  "Deploy bounded controller behind the existing RunPod selection",
+  "Deploy exact application candidate with admission paused",
   "deploy-production-candidate.yml",
-  "Pages preflight before production mutation",
+  "inert controller before application deployment",
 );
 requireTextOrder(
   productionWorkflowContents,
-  "pnpm run cloudflare:config:production",
-  "pnpm run cloudflare:worker-route:verify:production",
+  "Drain old provider before changing new-attempt selection",
+  "Select Cloud Run while keeping admission paused",
   "deploy-production-candidate.yml",
-  "rendered custom-domain configuration before production Worker route preflight",
+  "old provider drain before provider selection",
 );
 requireTextOrder(
   productionWorkflowContents,
-  "pnpm run cloudflare:worker-route:verify:production",
-  "Apply candidate D1 migrations",
+  "Select Cloud Run while keeping admission paused",
+  "Verify exact-one L4 authorization and activate admission",
   "deploy-production-candidate.yml",
-  "Worker route preflight before production mutation",
-);
-requireTextCount(
-  productionWorkflowContents,
-  "${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}",
-  5,
-  "deploy-production-candidate.yml",
-  "dedicated production Pages token usage",
+  "paused provider selection before exact-one admission",
 );
 requireTextOrder(
   productionWorkflowContents,
-  "Verify RunPod control plane before any mutation",
-  "Apply candidate D1 migrations",
+  "Verify production smoke and exact provider cleanup before mutation",
+  "Pause admission and disable the consumed smoke authorization",
   "deploy-production-candidate.yml",
-  "RunPod preflight before production mutation",
+  "smoke proof before disabling its authorization",
 );
 requireTextOrder(
   productionWorkflowContents,
-  "Reject staging and production policy drift",
-  "Apply candidate D1 migrations",
+  "Pause admission and disable the consumed smoke authorization",
+  "Apply reviewed finite operating authorization and reactivate admission",
   "deploy-production-candidate.yml",
-  "policy verification before production mutation",
+  "paused zero state before operating authorization",
 );
 requireTextOrder(
   productionWorkflowContents,
-  "Promote the exact candidate RunPod image",
-  "Deploy exact candidate Pages output",
+  "Promote exact rollback-compatible RunPod image without execution",
+  "Deploy exact application candidate with admission paused",
   "deploy-production-candidate.yml",
-  "RunPod promotion before public Web deployment",
+  "rollback image promotion before public Web deployment",
 );
 requireText(
   cloudflareReadbackScriptContents,

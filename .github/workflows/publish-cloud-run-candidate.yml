@@ -201,12 +201,19 @@ jobs:
               --quiet
           done
 
-      - name: Upload metadata-only candidate evidence and SBOMs
+      - name: Upload metadata-only candidate evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: scribe-drop-cloud-run-candidate-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cloud-run-candidate.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload candidate SBOMs separately
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scribe-drop-cloud-run-sboms-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            ${{ runner.temp }}/cloud-run-candidate.json
             /tmp/scribe-drop-gpu-controller.cdx.json
             /tmp/scribe-drop-cloud-run-worker.cdx.json
           if-no-files-found: error

@@ -26,7 +26,7 @@ function unavailable(): Response {
 
 /**
  * Returns undefined only when the request is outside the Cloud Run runtime namespace.
- * The default production wiring deliberately supplies no service until Phase 14 cloud review.
+ * The runtime namespace is available only for the environment-specific reviewed active mode.
  */
 export async function handleCloudRunRuntimeShadowRequest(
   request: Request,

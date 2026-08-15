@@ -450,46 +450,49 @@ export async function runCloudflareReadback(input) {
       },
     ],
   ]);
-  const cloudRunMode = process.env.SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_MODE ?? "disabled";
-  if (cloudRunMode !== "disabled" && cloudRunMode !== "synthetic-shadow") {
-    throw new Error("Staging Cloud Run runtime mode is invalid");
+  const cloudRunMode = process.env[`${environmentPrefix}_CLOUD_RUN_RUNTIME_MODE`] ?? "disabled";
+  const activeCloudRunMode = input.environment === "staging" ? "synthetic-shadow" : "active";
+  if (cloudRunMode !== "disabled" && cloudRunMode !== activeCloudRunMode) {
+    throw new Error(`${input.environment} Cloud Run runtime mode is invalid`);
   }
   const gpuExecutionPolicy =
     process.env[`${environmentPrefix}_GPU_EXECUTION_POLICY`] ?? "runpod_serverless_v1";
   if (!new Set(["runpod_serverless_v1", "cloud_run_jobs_l4_v1"]).has(gpuExecutionPolicy)) {
     throw new Error(`${input.environment} GPU execution policy is invalid`);
   }
-  if (input.environment === "production" && gpuExecutionPolicy !== "runpod_serverless_v1") {
-    throw new Error("Production GPU execution policy is not adopted");
-  }
-  if (
-    input.environment === "staging" &&
-    gpuExecutionPolicy === "cloud_run_jobs_l4_v1" &&
-    cloudRunMode !== "synthetic-shadow"
-  ) {
-    throw new Error("Cloud Run execution requires the staging runtime service");
+  if (gpuExecutionPolicy === "cloud_run_jobs_l4_v1" && cloudRunMode !== activeCloudRunMode) {
+    throw new Error(`Cloud Run execution requires the ${input.environment} runtime service`);
   }
   expectedBindings.set("GPU_EXECUTION_POLICY", {
     text: gpuExecutionPolicy,
     type: "plain_text",
   });
-  if (input.environment === "staging" && cloudRunMode === "synthetic-shadow") {
+  const gpuExecutionAdmission =
+    process.env[`${environmentPrefix}_GPU_EXECUTION_ADMISSION`] ?? "active";
+  if (gpuExecutionAdmission !== "active" && gpuExecutionAdmission !== "paused") {
+    throw new Error(`${input.environment} GPU execution admission is invalid`);
+  }
+  expectedBindings.set("GPU_EXECUTION_ADMISSION", {
+    text: gpuExecutionAdmission,
+    type: "plain_text",
+  });
+  if (cloudRunMode === activeCloudRunMode) {
     expectedBindings.set("CLOUD_RUN_CONTROLLER_HMAC_PRIMARY", { type: "secret_text" });
     expectedBindings.set("CLOUD_RUN_RUNTIME_DERIVATION_SECRET", { type: "secret_text" });
     expectedBindings.set("CLOUD_RUN_CONTROLLER_ORIGIN", {
-      text: process.env.SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_ORIGIN,
+      text: process.env[`${environmentPrefix}_CLOUD_RUN_CONTROLLER_ORIGIN`],
       type: "plain_text",
     });
     expectedBindings.set("CLOUD_RUN_ORCHESTRATOR_ORIGIN", {
-      text: process.env.SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN,
+      text: process.env[`${environmentPrefix}_ORCHESTRATOR_ORIGIN`],
       type: "plain_text",
     });
     expectedBindings.set("CLOUD_RUN_RUNTIME_MODE", {
-      text: process.env.SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_MODE,
+      text: cloudRunMode,
       type: "plain_text",
     });
     expectedBindings.set("CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT", {
-      text: process.env.SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT,
+      text: process.env[`${environmentPrefix}_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT`],
       type: "plain_text",
     });
   }

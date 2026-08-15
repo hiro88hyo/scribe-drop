@@ -3,8 +3,12 @@ import { createStructuredLogger, type StructuredLogger } from "@scribe-drop/obse
 
 import { reconcileRunpodCompletions, type CompletionResult } from "./completion-service.js";
 import {
+  parseGpuExecutionAdmission,
+  parseGpuExecutionSelection,
   parseOrchestratorConfig,
   parseRunpodConfig,
+  type GpuExecutionAdmissionEnvironment,
+  type GpuExecutionSelectionEnvironment,
   type RunpodConfig,
   type RunpodConfigEnvironment,
   type NotificationConfigEnvironment,
@@ -40,6 +44,8 @@ export interface ReconciliationEnvironment
     RunpodConfigEnvironment,
     NotificationConfigEnvironment,
     RetentionConfigEnvironment,
+    GpuExecutionAdmissionEnvironment,
+    GpuExecutionSelectionEnvironment,
     CloudRunRuntimeServiceConfigEnvironment {
   readonly RECORDINGS: R2Bucket;
   readonly SCRIBE_DROP_DB: D1Database;
@@ -334,7 +340,12 @@ export async function reconcileJobs(
           now,
         }));
     const notification = await dispatchNotification(environment, logger);
-    const pendingJobId = await repository.findDispatchablePendingJobId();
+    const selectedProvider = parseGpuExecutionSelection(environment);
+    const pendingJobId =
+      parseGpuExecutionAdmission(environment) === "active" &&
+      selectedProvider?.kind === "runpod_serverless"
+        ? await repository.findDispatchablePendingJobId()
+        : undefined;
     let dispatch: SubmissionDispatchResult | "none" = "none";
     if (pendingJobId !== undefined) {
       const submit =

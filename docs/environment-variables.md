@@ -47,6 +47,8 @@ R2 CORSは`pnpm cloudflare:config:staging:r2-cors`、R2 lifecycleは
   `synthetic-shadow`時だけ必須となる`gpu-runtime@scribe-drop.iam.gserviceaccount.com`の固定staging runtime identity
 - `SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY`:
   既定は`runpod_serverless_v1`。Phase 15の期限付きstaging acceptanceだけ`cloud_run_jobs_l4_v1`
+- `SCRIBE_DROP_STAGING_GPU_EXECUTION_ADMISSION`:
+  既定は`active`。controller authorizationを安全に遷移する短時間だけ`paused`
 - `SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`:
   `https://<team>.cloudflareaccess.com`のexact origin
 - `SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`:
@@ -187,12 +189,13 @@ localでは`apps/orchestrator/.dev.vars.example`を`apps/orchestrator/.dev.vars`
 | `RESULT_RETENTION_DAYS`               |   no   | 結果保持日数、初期値90                        |
 | `AUDIT_RETENTION_DAYS`                |   no   | 監査情報保持日数、初期値180                   |
 | `CLOUD_RUN_CONTROLLER_HMAC_PRIMARY`   |  yes   | Phase 14 controller request HMAC              |
-| `CLOUD_RUN_CONTROLLER_ORIGIN`         |   no   | staging controllerのexact root origin         |
-| `CLOUD_RUN_ORCHESTRATOR_ORIGIN`       |   no   | OIDC audience用staging Orchestrator origin    |
+| `CLOUD_RUN_CONTROLLER_ORIGIN`         |   no   | environment別controllerのexact root origin    |
+| `CLOUD_RUN_ORCHESTRATOR_ORIGIN`       |   no   | OIDC audience用environment別origin            |
 | `CLOUD_RUN_RUNTIME_DERIVATION_SECRET` |  yes   | runtime session secret導出用HMAC              |
-| `CLOUD_RUN_RUNTIME_MODE`              |   no   | `disabled`またはstaging限定`synthetic-shadow` |
-| `CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT`   |   no   | staging runtime専用service account            |
+| `CLOUD_RUN_RUNTIME_MODE`              |   no   | `disabled`、staging shadow、production active |
+| `CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT`   |   no   | environment別runtime service account          |
 | `GPU_EXECUTION_POLICY`                |   no   | 新規attemptの固定provider policy              |
+| `GPU_EXECUTION_ADMISSION`             |   no   | 新規GPU投入の`active`/`paused` gate           |
 
 Phase 3のQueue consumerは`APP_ENV`、`CLOUDFLARE_ACCOUNT_ID`、
 `R2_BUCKET_NAME`を起動境界で検証し、raw eventのaccount/bucketと一致しないmessageを
@@ -217,9 +220,10 @@ productionでは`DISCORD_WEBHOOK_URL`を含む必須5件を
 `pnpm cloudflare:secrets:verify:production:orchestrator`で名前だけ検証する。CLIのJSON
 応答にvalue fieldが含まれる場合はfail closedとし、値をlogへ出さない。
 
-Phase 14のCloud Run runtimeはstaging限定である。追跡対象設定では
-`CLOUD_RUN_RUNTIME_MODE=disabled`とし、production設定には6件のCloud Run runtime bindingを
-追加しない。staging gateではcontroller origin、Orchestrator origin、固定runtime identity、
+Phase 14のCloud Run runtimeはstaging限定で開始した。Phase 16では[ADR 0086](./adr/0086-adopt-cloud-run-jobs-for-production.md)に
+従い、production専用controller、runtime identity、secretを使う`CLOUD_RUN_RUNTIME_MODE=active`を追加する。
+追跡対象設定はstaging/productionとも`disabled`を既定とし、environment固有設定を完全に揃えた場合だけ
+runtime bindingを生成する。staging gateではcontroller origin、Orchestrator origin、固定runtime identity、
 `synthetic-shadow`を追跡外設定へ生成し、既存5件に加えて次の相異なるcanonical base64url
 secretをencrypted secretとして登録する。
 
@@ -227,8 +231,11 @@ secretをencrypted secretとして登録する。
 - `CLOUD_RUN_RUNTIME_DERIVATION_SECRET`
 
 両secretは32〜64 byte、paddingなしとし、値をread-back、log、deployment記録へ出さない。
-`GPU_EXECUTION_POLICY=cloud_run_jobs_l4_v1`はstagingかつ`synthetic-shadow`と同時の場合だけ有効で、既存attemptの
-provider selectionは変更しない。productionは`runpod_serverless_v1`以外を設定生成とread-backの両方で拒否する。
+`GPU_EXECUTION_POLICY=cloud_run_jobs_l4_v1`はstagingでは`synthetic-shadow`、productionでは`active`と同時の場合だけ
+有効で、既存attemptのprovider selectionは変更しない。`GPU_EXECUTION_ADMISSION=paused`でもQueueをackして
+`SUBMISSION_PENDING`へ保持し、reaper/cancel/cleanupは継続する。production cutoverはruntimeをactiveにしたまま
+最初はadmission pausedかつ`runpod_serverless_v1`を維持し、drain/read-back後もpausedのまま新attemptだけを
+Cloud Runへ切り替え、finite controller authorizationの適用後だけactiveへ戻す。
 modeまたは必須設定が欠ける場合はruntime serviceを生成せず、shadow routeを404/503へ閉じる。
 
 Phase 15の実service fault acceptance時だけ、[ADR 0084](./adr/0084-bound-staging-fault-acceptance-by-job-and-time.md)
@@ -307,7 +314,11 @@ promotion workflowのcredentialと非secret設定はrepository共通へ置かず
 
 `production` Environmentは同じ役割の`SCRIBE_DROP_PRODUCTION_*` Variablesと、
 `CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_PAGES_API_TOKEN`、`RUNPOD_API_KEY`、
-`SCRIBE_DROP_PRODUCTION_RUNPOD_ENDPOINT_ID` Secretsだけを持つ。Access E2E service tokenを
+`SCRIBE_DROP_PRODUCTION_RUNPOD_ENDPOINT_ID`、
+`SCRIBE_DROP_PRODUCTION_CLOUD_RUN_CONTROLLER_HMAC_PRIMARY`、
+`SCRIBE_DROP_PRODUCTION_CLOUD_RUN_RUNTIME_DERIVATION_SECRET` Secretsを持つ。controller HMACは
+同じ値をproduction専用Secret Manager versionにも保存し、workflowは値をread-backせずWorkerへ注入する。
+Variablesには数値の`SCRIBE_DROP_PRODUCTION_CLOUD_RUN_CONTROLLER_HMAC_SECRET_VERSION`も置く。Access E2E service tokenを
 productionへ置かない。production Environmentにはrequired reviewerと`release/*` branch
 制限を必須とする。
 

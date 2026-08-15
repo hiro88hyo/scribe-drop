@@ -20,8 +20,14 @@ try {
     throw new Error(`${prefix}_WEB_ORIGIN is missing`);
   }
   const readJson = (relativePath) => JSON.parse(readFileSync(path.resolve(relativePath), "utf8"));
+  const cloudRunCandidatePath = process.env["CLOUD_RUN_CANDIDATE_EVIDENCE_PATH"];
+  if (cloudRunCandidatePath === undefined) {
+    throw new Error("CLOUD_RUN_CANDIDATE_EVIDENCE_PATH is missing");
+  }
   const policyId = environmentPolicyId({
     environment,
+    cloudRunCandidate: readJson(cloudRunCandidatePath),
+    cloudRunRuntimeMode: process.env[`${prefix}_CLOUD_RUN_RUNTIME_MODE`],
     cors: readJson(`.wrangler/deploy/r2-cors-${environment}.json`),
     lifecycle: readJson(`.wrangler/deploy/r2-lifecycle-${environment}.json`),
     retention: {
@@ -31,6 +37,8 @@ try {
       sourceRetentionDays: process.env["SOURCE_RETENTION_DAYS"],
     },
     runpodPlan: readJson(`.runpod/deploy/${environment}-plan.json`),
+    gpuExecutionPolicy: process.env[`${prefix}_GPU_EXECUTION_POLICY`],
+    gpuExecutionAdmission: process.env[`${prefix}_GPU_EXECUTION_ADMISSION`],
     webOrigin,
   });
   appendFileSync(

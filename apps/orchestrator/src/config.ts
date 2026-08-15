@@ -41,6 +41,7 @@ const retentionIntegerSchema = z
   .pipe(z.number().int().positive().max(3_650));
 
 const gpuExecutionPolicySchema = z.enum(["runpod_serverless_v1", "cloud_run_jobs_l4_v1"]);
+const gpuExecutionAdmissionSchema = z.enum(["active", "paused"]);
 
 function isAllowedInternalBaseUrl(value: string): boolean {
   let url: URL;
@@ -130,12 +131,20 @@ const retentionConfigSchema = z
     },
   );
 
-const cloudRunRuntimeShadowConfigSchema = z
-  .object({
-    appEnvironment: z.literal("staging"),
-    mode: z.literal("synthetic-shadow"),
-  })
-  .strict();
+const cloudRunRuntimeModeSchema = z.discriminatedUnion("appEnvironment", [
+  z
+    .object({
+      appEnvironment: z.literal("staging"),
+      mode: z.literal("synthetic-shadow"),
+    })
+    .strict(),
+  z
+    .object({
+      appEnvironment: z.literal("production"),
+      mode: z.literal("active"),
+    })
+    .strict(),
+]);
 
 function isExactHttpsRoot(value: string): boolean {
   try {
@@ -186,7 +195,7 @@ const cloudRunSecretSchema = z
 
 const cloudRunRuntimeServiceConfigSchema = z
   .object({
-    appEnvironment: z.literal("staging"),
+    appEnvironment: z.enum(["staging", "production"]),
     cloudflareAccountId: z.string().regex(/^[a-f0-9]{32}$/u),
     controllerHmacPrimary: cloudRunSecretSchema,
     controllerOrigin: z
@@ -194,12 +203,12 @@ const cloudRunRuntimeServiceConfigSchema = z
       .refine(isExactHttpsRoot)
       .refine((value) => {
         const hostname = new URL(value).hostname;
-        return /^scribe-drop-staging-gpu-controller-[0-9]+\.asia-southeast1\.run\.app$/u.test(
+        return /^scribe-drop-(?:staging|production)-gpu-controller-[0-9]+\.asia-southeast1\.run\.app$/u.test(
           hostname,
         );
       })
       .transform((value) => new URL(value).toString()),
-    mode: z.literal("synthetic-shadow"),
+    mode: z.enum(["synthetic-shadow", "active"]),
     orchestratorOrigin: z
       .string()
       .refine(isExactHttpsRoot)
@@ -210,9 +219,27 @@ const cloudRunRuntimeServiceConfigSchema = z
     runtimeDerivationSecret: cloudRunSecretSchema,
     runtimeServiceAccount: z
       .string()
-      .regex(/^gpu-runtime@scribe-drop\.iam\.gserviceaccount\.com$/u),
+      .regex(/^gpu-runtime(?:-production)?@scribe-drop\.iam\.gserviceaccount\.com$/u),
   })
   .strict()
+  .refine(
+    ({ appEnvironment, controllerOrigin, mode, runtimeServiceAccount }) => {
+      const hostname = new URL(controllerOrigin).hostname;
+      if (appEnvironment === "staging") {
+        return (
+          mode === "synthetic-shadow" &&
+          hostname.startsWith("scribe-drop-staging-gpu-controller-") &&
+          runtimeServiceAccount === "gpu-runtime@scribe-drop.iam.gserviceaccount.com"
+        );
+      }
+      return (
+        mode === "active" &&
+        hostname.startsWith("scribe-drop-production-gpu-controller-") &&
+        runtimeServiceAccount === "gpu-runtime-production@scribe-drop.iam.gserviceaccount.com"
+      );
+    },
+    { message: "Cloud Run runtime settings do not match the deployment environment" },
+  )
   .refine(
     ({ controllerHmacPrimary, runtimeDerivationSecret }) =>
       controllerHmacPrimary !== runtimeDerivationSecret,
@@ -249,6 +276,10 @@ export interface OrchestratorConfigEnvironment {
 export interface GpuExecutionSelectionEnvironment {
   readonly APP_ENV: string;
   readonly GPU_EXECUTION_POLICY: string;
+}
+
+export interface GpuExecutionAdmissionEnvironment {
+  readonly GPU_EXECUTION_ADMISSION?: string;
 }
 
 export interface RunpodConfigEnvironment extends OrchestratorConfigEnvironment {
@@ -310,6 +341,8 @@ export type GpuExecutionSelection =
       readonly policy: "cloud_run_jobs_l4_v1";
     };
 
+export type GpuExecutionAdmission = "active" | "paused";
+
 export interface RunpodConfig extends OrchestratorConfig {
   readonly r2AccessKeyId: string;
   readonly r2SecretAccessKey: string;
@@ -332,17 +365,16 @@ export interface RetentionConfig {
   readonly sourceRetentionDays: number;
 }
 
-export interface CloudRunRuntimeShadowConfig {
-  readonly appEnvironment: "staging";
-  readonly mode: "synthetic-shadow";
-}
+export type CloudRunRuntimeShadowConfig =
+  | { readonly appEnvironment: "staging"; readonly mode: "synthetic-shadow" }
+  | { readonly appEnvironment: "production"; readonly mode: "active" };
 
 export interface CloudRunRuntimeServiceConfig {
-  readonly appEnvironment: "staging";
+  readonly appEnvironment: "staging" | "production";
   readonly cloudflareAccountId: string;
   readonly controllerHmacPrimary: string;
   readonly controllerOrigin: string;
-  readonly mode: "synthetic-shadow";
+  readonly mode: "active" | "synthetic-shadow";
   readonly orchestratorOrigin: string;
   readonly r2AccessKeyId: string;
   readonly r2BucketName: string;
@@ -362,7 +394,6 @@ export function parseOrchestratorConfig(
   return result.success ? result.data : undefined;
 }
 
-/** Cloud Run is a staging-only admission choice until the production adoption ADR is accepted. */
 export function parseGpuExecutionSelection(
   environment: GpuExecutionSelectionEnvironment,
 ): GpuExecutionSelection | undefined {
@@ -370,11 +401,20 @@ export function parseGpuExecutionSelection(
   const policy = gpuExecutionPolicySchema.safeParse(environment.GPU_EXECUTION_POLICY);
   if (!appEnvironment.success || !policy.success) return undefined;
   if (policy.data === "cloud_run_jobs_l4_v1") {
-    return appEnvironment.data === "staging"
+    return appEnvironment.data === "staging" || appEnvironment.data === "production"
       ? { contractVersion: 2, kind: "cloud_run_jobs", policy: policy.data }
       : undefined;
   }
   return { contractVersion: 1, kind: "runpod_serverless", policy: policy.data };
+}
+
+export function parseGpuExecutionAdmission(
+  environment: GpuExecutionAdmissionEnvironment,
+): GpuExecutionAdmission | undefined {
+  const result = gpuExecutionAdmissionSchema.safeParse(
+    environment.GPU_EXECUTION_ADMISSION ?? "active",
+  );
+  return result.success ? result.data : undefined;
 }
 
 export function parseRunpodConfig(environment: RunpodConfigEnvironment): RunpodConfig | undefined {
@@ -423,7 +463,7 @@ export function parseRetentionConfig(
 export function parseCloudRunRuntimeShadowConfig(
   environment: CloudRunRuntimeShadowConfigEnvironment,
 ): CloudRunRuntimeShadowConfig | undefined {
-  const result = cloudRunRuntimeShadowConfigSchema.safeParse({
+  const result = cloudRunRuntimeModeSchema.safeParse({
     appEnvironment: environment.APP_ENV,
     mode: environment.CLOUD_RUN_RUNTIME_MODE,
   });

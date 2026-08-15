@@ -3,12 +3,44 @@ name: Promote staging-accepted candidate to production
 on:
   workflow_dispatch:
     inputs:
+      operation:
+        description: cutover opens one approved smoke slot; finalize verifies it and opens the reviewed operational window
+        required: true
+        type: choice
+        options:
+          - cutover
+          - finalize
       staging_run_id:
         description: Successful staging acceptance workflow run ID
         required: true
         type: string
+      cutover_run_id:
+        description: Cutover workflow run ID for finalize; use 0 for cutover
+        required: true
+        default: "0"
+        type: string
+      production_smoke_job_id:
+        description: User-confirmed production smoke ULID for finalize; use none for cutover
+        required: true
+        default: none
+        type: string
+      operational_max_executions:
+        description: Reviewed operational execution cap for finalize; use 0 for cutover
+        required: true
+        default: "0"
+        type: string
+      operational_max_worst_case_jpy:
+        description: Exact 250 JPY per execution budget for finalize; use 0 for cutover
+        required: true
+        default: "0"
+        type: string
+      operational_valid_until:
+        description: ISO expiry within 24 hours for finalize; use epoch for cutover
+        required: true
+        default: "1970-01-01T00:00:00.000Z"
+        type: string
 
-run-name: Promote staging run ${{ inputs.staging_run_id }} to production
+run-name: Production ${{ inputs.operation }} from staging run ${{ inputs.staging_run_id }}
 
 permissions:
   actions: read
@@ -24,9 +56,9 @@ env:
 
 jobs:
   verify-promotion:
-    name: Verify candidate and staging evidence
+    name: Verify immutable candidate, acceptance, and operation inputs
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     env:
       EXPECTED_COMMIT_SHA: ${{ github.sha }}
       EXPECTED_RELEASE_BRANCH: ${{ github.ref_name }}
@@ -43,6 +75,17 @@ jobs:
       - name: Install JavaScript dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Validate bounded production operation inputs
+        env:
+          CUTOVER_RUN_ID: ${{ inputs.cutover_run_id }}
+          OPERATIONAL_MAX_EXECUTIONS: ${{ inputs.operational_max_executions }}
+          OPERATIONAL_MAX_WORST_CASE_JPY: ${{ inputs.operational_max_worst_case_jpy }}
+          OPERATIONAL_VALID_UNTIL: ${{ inputs.operational_valid_until }}
+          PRODUCTION_OPERATION: ${{ inputs.operation }}
+          PRODUCTION_SMOKE_JOB_ID: ${{ inputs.production_smoke_job_id }}
+          STAGING_RUN_ID: ${{ inputs.staging_run_id }}
+        run: pnpm run production:promotion:inputs:verify
+
       - name: Validate release and staging run identities
         env:
           GH_TOKEN: ${{ github.token }}
@@ -57,17 +100,9 @@ jobs:
               exit 1
               ;;
           esac
-          if ! printf '%s' "${STAGING_RUN_ID}" | grep -Eq '^[1-9][0-9]*$'; then
-            echo "Staging run ID is invalid" >&2
-            exit 1
-          fi
-          if [ "${release_version}" != "$(node -p "require('./package.json').version")" ]; then
-            echo "Release branch and package version must match" >&2
-            exit 1
-          fi
+          test "${release_version}" = "$(node -p "require('./package.json').version")"
           printf 'EXPECTED_RELEASE_VERSION=%s\n' "${release_version}" >>"${GITHUB_ENV}"
-          gh api \
-            "repos/${GITHUB_REPOSITORY}/actions/runs/${STAGING_RUN_ID}" \
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${STAGING_RUN_ID}" \
             >"${RUNNER_TEMP}/staging-run.json"
           node scripts/verify-workflow-run.mjs \
             "${RUNNER_TEMP}/staging-run.json" \
@@ -84,12 +119,12 @@ jobs:
             --dir staging-acceptance
           node scripts/export-staging-acceptance-identity.mjs staging-acceptance
 
-      - name: Validate and download the referenced candidate run
+      - name: Download and verify both exact candidates
         env:
           GH_TOKEN: ${{ github.token }}
+          STAGING_RUN_ID: ${{ inputs.staging_run_id }}
         run: |
-          gh api \
-            "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}" \
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}" \
             >"${RUNNER_TEMP}/candidate-run.json"
           node scripts/verify-workflow-run.mjs \
             "${RUNNER_TEMP}/candidate-run.json" \
@@ -98,23 +133,57 @@ jobs:
           gh run download "${CANDIDATE_RUN_ID}" \
             --name "scribe-drop-release-candidate-${GITHUB_SHA}" \
             --dir "${RELEASE_CANDIDATE_DIRECTORY}"
-
-      - name: Verify exact candidate and unexpired acceptance
-        env:
-          EXPECTED_STAGING_RUN_ID: ${{ inputs.staging_run_id }}
-        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CLOUD_RUN_CANDIDATE_RUN_ID}" \
+            >"${RUNNER_TEMP}/cloud-run-candidate-run.json"
+          node scripts/verify-workflow-run.mjs \
+            "${RUNNER_TEMP}/cloud-run-candidate-run.json" \
+            .github/workflows/publish-cloud-run-candidate.yml \
+            "${CLOUD_RUN_CANDIDATE_RUN_ID}"
+          cloud_run_attempt="$(node -p "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')).run_attempt" "${RUNNER_TEMP}/cloud-run-candidate-run.json")"
+          gh run download "${CLOUD_RUN_CANDIDATE_RUN_ID}" \
+            --name "scribe-drop-cloud-run-candidate-${GITHUB_SHA}-${CLOUD_RUN_CANDIDATE_RUN_ID}-${cloud_run_attempt}" \
+            --dir cloud-run-candidate
           pnpm run candidate:verify "${RELEASE_CANDIDATE_DIRECTORY}"
+          pnpm run cloud-run:candidate:evidence verify cloud-run-candidate/cloud-run-candidate.json
           EXPECTED_CANDIDATE_RUN_ID="${CANDIDATE_RUN_ID}" \
+            EXPECTED_CLOUD_RUN_CANDIDATE_RUN_ID="${CLOUD_RUN_CANDIDATE_RUN_ID}" \
+            EXPECTED_STAGING_RUN_ID="${STAGING_RUN_ID}" \
+            MINIMUM_ACCEPTANCE_REMAINING_SECONDS="3600" \
             pnpm run staging:acceptance:verify \
               "${RELEASE_CANDIDATE_DIRECTORY}" \
               staging-acceptance
 
-  deploy:
-    name: Approved exact-artifact production promotion
+      - name: Verify immutable cutover evidence for finalize
+        if: inputs.operation == 'finalize'
+        env:
+          CUTOVER_RUN_ID: ${{ inputs.cutover_run_id }}
+          GH_TOKEN: ${{ github.token }}
+          STAGING_RUN_ID: ${{ inputs.staging_run_id }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CUTOVER_RUN_ID}" \
+            >"${RUNNER_TEMP}/cutover-run.json"
+          node scripts/verify-workflow-run.mjs \
+            "${RUNNER_TEMP}/cutover-run.json" \
+            .github/workflows/deploy-production-candidate.yml \
+            "${CUTOVER_RUN_ID}"
+          gh run download "${CUTOVER_RUN_ID}" \
+            --name "scribe-drop-production-cutover-${GITHUB_SHA}-${CUTOVER_RUN_ID}" \
+            --dir production-cutover
+          EXPECTED_CUTOVER_RUN_ID="${CUTOVER_RUN_ID}" \
+            EXPECTED_STAGING_RUN_ID="${STAGING_RUN_ID}" \
+            pnpm run production:cutover:evidence verify production-cutover
+
+  cutover:
+    name: Cut over safely and open exactly one production smoke slot
+    if: inputs.operation == 'cutover'
     needs: verify-promotion
     environment: production
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     env:
       AUDIT_RETENTION_DAYS: ${{ vars.AUDIT_RETENTION_DAYS }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -126,6 +195,9 @@ jobs:
       SCRIBE_DROP_CANDIDATE_MIGRATIONS_DIR: ../../release-candidate/migrations
       SCRIBE_DROP_PRODUCTION_ACCESS_AUDIENCE: ${{ vars.SCRIBE_DROP_PRODUCTION_ACCESS_AUDIENCE }}
       SCRIBE_DROP_PRODUCTION_ACCESS_TEAM_DOMAIN: ${{ vars.SCRIBE_DROP_PRODUCTION_ACCESS_TEAM_DOMAIN }}
+      SCRIBE_DROP_PRODUCTION_CLOUD_RUN_CONTROLLER_HMAC_SECRET_VERSION: ${{ vars.SCRIBE_DROP_PRODUCTION_CLOUD_RUN_CONTROLLER_HMAC_SECRET_VERSION }}
+      SCRIBE_DROP_PRODUCTION_CLOUD_RUN_RUNTIME_MODE: active
+      SCRIBE_DROP_PRODUCTION_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT: gpu-runtime-production@scribe-drop.iam.gserviceaccount.com
       SCRIBE_DROP_PRODUCTION_D1_DATABASE_ID: ${{ vars.SCRIBE_DROP_PRODUCTION_D1_DATABASE_ID }}
       SCRIBE_DROP_PRODUCTION_ORCHESTRATOR_ORIGIN: ${{ vars.SCRIBE_DROP_PRODUCTION_ORCHESTRATOR_ORIGIN }}
       SCRIBE_DROP_PRODUCTION_PAGES_PROJECT: ${{ vars.SCRIBE_DROP_PRODUCTION_PAGES_PROJECT }}
@@ -146,117 +218,91 @@ jobs:
       - name: Install JavaScript dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Authenticate isolated production deployer
+        id: google-auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: projects/601035271372/locations/global/workloadIdentityPools/scribe-drop-release/providers/github-production-deployment
+          service_account: sd-production-deployer@scribe-drop.iam.gserviceaccount.com
+          project_id: scribe-drop
+          token_format: access_token
+          access_token_lifetime: 3600s
+
+      - name: Set up pinned Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          version: 579.0.0
+          project_id: scribe-drop
+
       - name: Install checksummed RunPod CLI
         run: pnpm run runpodctl:install
 
-      - name: Re-validate release and staging run identities
+      - name: Download and re-verify exact accepted inputs
         env:
           GH_TOKEN: ${{ github.token }}
           STAGING_RUN_ID: ${{ inputs.staging_run_id }}
         run: |
-          case "${GITHUB_REF}" in
-            refs/heads/release/*)
-              release_version="${GITHUB_REF#refs/heads/release/}"
-              ;;
-            *)
-              echo "Production accepts candidates only from release branches" >&2
-              exit 1
-              ;;
-          esac
-          if ! printf '%s' "${STAGING_RUN_ID}" | grep -Eq '^[1-9][0-9]*$'; then
-            echo "Staging run ID is invalid" >&2
-            exit 1
-          fi
-          if [ "${release_version}" != "$(node -p "require('./package.json').version")" ]; then
-            echo "Release branch and package version must match" >&2
-            exit 1
-          fi
-          printf 'EXPECTED_RELEASE_VERSION=%s\n' "${release_version}" >>"${GITHUB_ENV}"
-          gh api \
-            "repos/${GITHUB_REPOSITORY}/actions/runs/${STAGING_RUN_ID}" \
-            >"${RUNNER_TEMP}/staging-run.json"
-          node scripts/verify-workflow-run.mjs \
-            "${RUNNER_TEMP}/staging-run.json" \
-            .github/workflows/deploy-staging-candidate.yml \
-            "${STAGING_RUN_ID}"
-
-      - name: Re-download immutable staging evidence
-        env:
-          GH_TOKEN: ${{ github.token }}
-          STAGING_RUN_ID: ${{ inputs.staging_run_id }}
-        run: |
+          printf 'EXPECTED_RELEASE_VERSION=%s\n' "$(node -p "require('./package.json').version")" >>"${GITHUB_ENV}"
+          printf 'SCRIBE_DROP_PRODUCTION_R2_HOST=%s.r2.cloudflarestorage.com\n' "${CLOUDFLARE_ACCOUNT_ID}" >>"${GITHUB_ENV}"
+          workflow_created_at="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" --jq .created_at)"
+          authorization_expiry="$(node -p 'new Date(Date.parse(process.argv[1]) + 2 * 60 * 60 * 1000).toISOString()' "${workflow_created_at}")"
+          printf 'SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_EPOCH=phase16-smoke-%s-%s\n' \
+            "${GITHUB_SHA}" "${GITHUB_RUN_ID}" >>"${GITHUB_ENV}"
+          printf 'SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_VALID_UNTIL=%s\n' \
+            "${authorization_expiry}" >>"${GITHUB_ENV}"
           gh run download "${STAGING_RUN_ID}" \
             --name "scribe-drop-staging-acceptance-${GITHUB_SHA}" \
             --dir staging-acceptance
           node scripts/export-staging-acceptance-identity.mjs staging-acceptance
-
-      - name: Re-validate and download the referenced candidate
-        env:
-          GH_TOKEN: ${{ github.token }}
-          STAGING_RUN_ID: ${{ inputs.staging_run_id }}
-        run: |
-          gh api \
-            "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}" \
-            >"${RUNNER_TEMP}/candidate-run.json"
-          node scripts/verify-workflow-run.mjs \
-            "${RUNNER_TEMP}/candidate-run.json" \
-            .github/workflows/publish-runpod-worker.yml \
-            "${CANDIDATE_RUN_ID}"
           gh run download "${CANDIDATE_RUN_ID}" \
             --name "scribe-drop-release-candidate-${GITHUB_SHA}" \
             --dir "${RELEASE_CANDIDATE_DIRECTORY}"
-          EXPECTED_CANDIDATE_RUN_ID="${CANDIDATE_RUN_ID}" \
-            EXPECTED_STAGING_RUN_ID="${STAGING_RUN_ID}" \
-            pnpm run staging:acceptance:verify \
-              "${RELEASE_CANDIDATE_DIRECTORY}" \
-              staging-acceptance
-
-      - name: Assemble and re-verify exact candidate outputs
-        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CLOUD_RUN_CANDIDATE_RUN_ID}" \
+            >"${RUNNER_TEMP}/cloud-run-candidate-run.json"
+          cloud_run_attempt="$(node -p "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')).run_attempt" "${RUNNER_TEMP}/cloud-run-candidate-run.json")"
+          gh run download "${CLOUD_RUN_CANDIDATE_RUN_ID}" \
+            --name "scribe-drop-cloud-run-candidate-${GITHUB_SHA}-${CLOUD_RUN_CANDIDATE_RUN_ID}-${cloud_run_attempt}" \
+            --dir cloud-run-candidate
+          printf 'CLOUD_RUN_CANDIDATE_EVIDENCE_PATH=%s\n' \
+            "${GITHUB_WORKSPACE}/cloud-run-candidate/cloud-run-candidate.json" >>"${GITHUB_ENV}"
           pnpm run candidate:verify "${RELEASE_CANDIDATE_DIRECTORY}"
-          pnpm run candidate:pages "${RELEASE_CANDIDATE_DIRECTORY}" pages-candidate
+          pnpm run cloud-run:candidate:evidence verify cloud-run-candidate/cloud-run-candidate.json
+          EXPECTED_CANDIDATE_RUN_ID="${CANDIDATE_RUN_ID}" \
+            EXPECTED_CLOUD_RUN_CANDIDATE_RUN_ID="${CLOUD_RUN_CANDIDATE_RUN_ID}" \
+            EXPECTED_STAGING_RUN_ID="${STAGING_RUN_ID}" \
+            MINIMUM_ACCEPTANCE_REMAINING_SECONDS="2700" \
+            pnpm run staging:acceptance:verify "${RELEASE_CANDIDATE_DIRECTORY}" staging-acceptance
 
-      - name: Render environment-only production configuration
+      - name: Build verifier and strictly read production foundation
+        env:
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
         run: |
+          pnpm --filter @scribe-drop/gpu-controller build
+          pnpm run cloud-run:foundation:read production
+
+      - name: Render disabled preflight configuration
+        env:
+          SCRIBE_DROP_PRODUCTION_CLOUD_RUN_RUNTIME_MODE: disabled
+          SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION: paused
+          SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_POLICY: runpod_serverless_v1
+        run: |
+          pnpm run candidate:pages "${RELEASE_CANDIDATE_DIRECTORY}" pages-candidate
           pnpm run cloudflare:config:production
           pnpm run runpod:config:production
 
-      - name: Verify Worker route capability before any mutation
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: pnpm run cloudflare:worker-route:verify:production
-
-      - name: Export normalized production environment policy
-        run: pnpm run environment:policy:export production
-
-      - name: Reject staging and production policy drift
-        env:
-          EXPECTED_STAGING_RUN_ID: ${{ inputs.staging_run_id }}
-          MINIMUM_ACCEPTANCE_REMAINING_SECONDS: "1800"
-        run: |
-          EXPECTED_CANDIDATE_RUN_ID="${CANDIDATE_RUN_ID}" \
-            pnpm run staging:acceptance:verify \
-              "${RELEASE_CANDIDATE_DIRECTORY}" \
-              staging-acceptance
-
-      - name: Verify production encrypted secrets and Access boundary
+      - name: Verify every external control plane before production mutation
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
           SCRIBE_DROP_PRODUCTION_PAGES_PROJECT: ${{ vars.SCRIBE_DROP_PRODUCTION_PAGES_PROJECT }}
+          SCRIBE_DROP_PRODUCTION_RUNPOD_ENDPOINT_ID: ${{ secrets.SCRIBE_DROP_PRODUCTION_RUNPOD_ENDPOINT_ID }}
         run: |
-          pnpm run cloudflare:secrets:verify:production
+          pnpm run cloudflare:worker-route:verify:production
+          pnpm run cloudflare:pages:upload-permission:verify:production
+          pnpm run cloudflare:secrets:verify:production:pages
           pnpm run cloudflare:access:verify:production
-
-      - name: Verify Pages upload permission before any mutation
-        env:
-          CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
-        run: pnpm run cloudflare:pages:upload-permission:verify:production
-
-      - name: Verify Pages deploy configuration and target
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
-        run: |
+          pnpm run runpod:preflight:production
           pnpm exec wrangler pages deployment list \
             --cwd apps/web \
             --project-name "${SCRIBE_DROP_PRODUCTION_PAGES_PROJECT}" \
@@ -264,13 +310,7 @@ jobs:
             --json >"${RUNNER_TEMP}/pages-deployment-preflight.json"
           test -s "${RUNNER_TEMP}/pages-deployment-preflight.json"
 
-      - name: Verify RunPod control plane before any mutation
-        env:
-          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-          SCRIBE_DROP_PRODUCTION_RUNPOD_ENDPOINT_ID: ${{ secrets.SCRIBE_DROP_PRODUCTION_RUNPOD_ENDPOINT_ID }}
-        run: pnpm run runpod:preflight:production
-
-      - name: Apply candidate D1 migrations
+      - name: Apply candidate migrations and reviewed R2 policies
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
@@ -278,11 +318,6 @@ jobs:
             --remote \
             --config .wrangler/deploy/orchestrator-production.toml \
             --env production
-
-      - name: Apply reviewed production R2 policies
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: |
           pnpm exec wrangler r2 bucket cors set recording-transcriber-production \
             --file .wrangler/deploy/r2-cors-production.json \
             --config .wrangler/deploy/orchestrator-production.toml \
@@ -294,21 +329,33 @@ jobs:
             --env production \
             --force
 
-      - name: Promote the exact candidate RunPod image
+      - name: Promote exact rollback-compatible RunPod image without execution
         env:
           EXPECTED_STAGING_RUN_ID: ${{ inputs.staging_run_id }}
-          RELEASE_CANDIDATE_DIRECTORY: ${{ github.workspace }}/release-candidate
           RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
           SCRIBE_DROP_PRODUCTION_RUNPOD_ENDPOINT_ID: ${{ secrets.SCRIBE_DROP_PRODUCTION_RUNPOD_ENDPOINT_ID }}
           STAGING_ACCEPTANCE_PATH: staging-acceptance/staging-acceptance.json
-        run: |
-          EXPECTED_CANDIDATE_RUN_ID="${CANDIDATE_RUN_ID}" \
-            pnpm run runpod:promote:production
+        run: pnpm run runpod:promote:production
 
-      - name: Deploy exact candidate Orchestrator bundle
+      - name: Deploy bounded controller behind the existing RunPod selection
+        env:
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+        run: |
+          pnpm run cloud-run:controller:deploy apply production smoke \
+            "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
+          pnpm run cloud-run:production:origin:export
+
+      - name: Deploy exact application candidate with admission paused
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
+          SCRIBE_DROP_PRODUCTION_CLOUD_RUN_CONTROLLER_HMAC_PRIMARY: ${{ secrets.SCRIBE_DROP_PRODUCTION_CLOUD_RUN_CONTROLLER_HMAC_PRIMARY }}
+          SCRIBE_DROP_PRODUCTION_CLOUD_RUN_RUNTIME_DERIVATION_SECRET: ${{ secrets.SCRIBE_DROP_PRODUCTION_CLOUD_RUN_RUNTIME_DERIVATION_SECRET }}
+          SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION: paused
+          SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_POLICY: runpod_serverless_v1
         run: |
+          pnpm run cloudflare:config:production
+          pnpm run cloud-run:production:worker-secrets:put
           pnpm exec wrangler deploy "${RELEASE_CANDIDATE_DIRECTORY}/orchestrator/index.js" \
             --no-bundle \
             --strict \
@@ -316,11 +363,6 @@ jobs:
             --message "release candidate ${GITHUB_SHA}" \
             --config .wrangler/deploy/orchestrator-production.toml \
             --env production
-
-      - name: Deploy exact candidate Pages output
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
-        run: |
           pnpm exec wrangler pages deploy "${GITHUB_WORKSPACE}/pages-candidate" \
             --cwd apps/web \
             --project-name "${SCRIBE_DROP_PRODUCTION_PAGES_PROJECT}" \
@@ -329,22 +371,259 @@ jobs:
             --commit-message "release candidate ${GITHUB_SHA}" \
             --commit-dirty=false \
             --no-bundle
+          pnpm run cloudflare:secrets:verify:production
+          pnpm run cloudflare:readback:production
 
-      - name: Verify exact candidate and production resource read-back
+      - name: Drain old provider before changing new-attempt selection
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: pnpm run production:provider:drain:verify
+
+      - name: Select Cloud Run while keeping admission paused
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
-          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-          SCRIBE_DROP_PRODUCTION_PAGES_PROJECT: ${{ vars.SCRIBE_DROP_PRODUCTION_PAGES_PROJECT }}
-          SCRIBE_DROP_PRODUCTION_RUNPOD_ENDPOINT_ID: ${{ secrets.SCRIBE_DROP_PRODUCTION_RUNPOD_ENDPOINT_ID }}
+          SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION: paused
+          SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_POLICY: cloud_run_jobs_l4_v1
+        run: |
+          pnpm run cloudflare:config:production:orchestrator
+          pnpm exec wrangler deploy "${RELEASE_CANDIDATE_DIRECTORY}/orchestrator/index.js" \
+            --no-bundle \
+            --strict \
+            --tag "candidate-${GITHUB_SHA}" \
+            --message "release candidate ${GITHUB_SHA}" \
+            --config .wrangler/deploy/orchestrator-production.toml \
+            --env production
+          pnpm run cloudflare:readback:production
+
+      - name: Verify exact-one L4 authorization and activate admission
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+          SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION: active
+          SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_POLICY: cloud_run_jobs_l4_v1
+        run: |
+          pnpm run cloud-run:controller:deploy read production smoke \
+            "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
+          pnpm run cloudflare:config:production:orchestrator
+          pnpm exec wrangler deploy "${RELEASE_CANDIDATE_DIRECTORY}/orchestrator/index.js" \
+            --no-bundle \
+            --strict \
+            --tag "candidate-${GITHUB_SHA}" \
+            --message "release candidate ${GITHUB_SHA}" \
+            --config .wrangler/deploy/orchestrator-production.toml \
+            --env production
+          pnpm run cloudflare:readback:production
+
+      - name: Record immutable cutover evidence
+        env:
+          PRODUCTION_OPERATION: cutover
           STAGING_RUN_ID: ${{ inputs.staging_run_id }}
         run: |
-          EXPECTED_CANDIDATE_RUN_ID="${CANDIDATE_RUN_ID}" \
+          pnpm run production:cutover:evidence create production-cutover
+          EXPECTED_CUTOVER_RUN_ID="${GITHUB_RUN_ID}" \
             EXPECTED_STAGING_RUN_ID="${STAGING_RUN_ID}" \
-            pnpm run staging:acceptance:verify \
-              "${RELEASE_CANDIDATE_DIRECTORY}" \
-              staging-acceptance
+            pnpm run production:cutover:evidence verify production-cutover
+
+      - name: Upload immutable cutover evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scribe-drop-production-cutover-${{ github.sha }}-${{ github.run_id }}
+          path: production-cutover
+          if-no-files-found: error
+          retention-days: 7
+
+  finalize:
+    name: Verify production smoke and open the reviewed operating window
+    if: inputs.operation == 'finalize'
+    needs: verify-promotion
+    environment: production
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      AUDIT_RETENTION_DAYS: ${{ vars.AUDIT_RETENTION_DAYS }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      EXPECTED_COMMIT_SHA: ${{ github.sha }}
+      EXPECTED_RELEASE_BRANCH: ${{ github.ref_name }}
+      MULTIPART_RETENTION_HOURS: ${{ vars.MULTIPART_RETENTION_HOURS }}
+      RELEASE_CANDIDATE_DIRECTORY: ${{ github.workspace }}/release-candidate
+      RESULT_RETENTION_DAYS: ${{ vars.RESULT_RETENTION_DAYS }}
+      SCRIBE_DROP_CANDIDATE_MIGRATIONS_DIR: ../../release-candidate/migrations
+      SCRIBE_DROP_PRODUCTION_ACCESS_AUDIENCE: ${{ vars.SCRIBE_DROP_PRODUCTION_ACCESS_AUDIENCE }}
+      SCRIBE_DROP_PRODUCTION_ACCESS_TEAM_DOMAIN: ${{ vars.SCRIBE_DROP_PRODUCTION_ACCESS_TEAM_DOMAIN }}
+      SCRIBE_DROP_PRODUCTION_CLOUD_RUN_CONTROLLER_HMAC_SECRET_VERSION: ${{ vars.SCRIBE_DROP_PRODUCTION_CLOUD_RUN_CONTROLLER_HMAC_SECRET_VERSION }}
+      SCRIBE_DROP_PRODUCTION_CLOUD_RUN_RUNTIME_MODE: active
+      SCRIBE_DROP_PRODUCTION_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT: gpu-runtime-production@scribe-drop.iam.gserviceaccount.com
+      SCRIBE_DROP_PRODUCTION_D1_DATABASE_ID: ${{ vars.SCRIBE_DROP_PRODUCTION_D1_DATABASE_ID }}
+      SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_POLICY: cloud_run_jobs_l4_v1
+      SCRIBE_DROP_PRODUCTION_ORCHESTRATOR_ORIGIN: ${{ vars.SCRIBE_DROP_PRODUCTION_ORCHESTRATOR_ORIGIN }}
+      SCRIBE_DROP_PRODUCTION_PAGES_PROJECT: ${{ vars.SCRIBE_DROP_PRODUCTION_PAGES_PROJECT }}
+      SCRIBE_DROP_PRODUCTION_RUNPOD_GPU_IDS: ${{ vars.SCRIBE_DROP_PRODUCTION_RUNPOD_GPU_IDS }}
+      SCRIBE_DROP_PRODUCTION_RUNPOD_IMAGE_VISIBILITY: ${{ vars.SCRIBE_DROP_PRODUCTION_RUNPOD_IMAGE_VISIBILITY }}
+      SCRIBE_DROP_PRODUCTION_RUNPOD_REGISTRY_AUTH_ID: ${{ vars.SCRIBE_DROP_PRODUCTION_RUNPOD_REGISTRY_AUTH_ID }}
+      SCRIBE_DROP_PRODUCTION_WEB_ORIGIN: ${{ vars.SCRIBE_DROP_PRODUCTION_WEB_ORIGIN }}
+      SOURCE_RETENTION_DAYS: ${{ vars.SOURCE_RETENTION_DAYS }}
+    steps:
+      - name: Check out release commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Volta
+        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
+        with:
+          volta-version: 2.0.2
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Authenticate isolated production deployer
+        id: google-auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: projects/601035271372/locations/global/workloadIdentityPools/scribe-drop-release/providers/github-production-deployment
+          service_account: sd-production-deployer@scribe-drop.iam.gserviceaccount.com
+          project_id: scribe-drop
+          token_format: access_token
+          access_token_lifetime: 3600s
+
+      - name: Set up pinned Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          version: 579.0.0
+          project_id: scribe-drop
+
+      - name: Download immutable acceptance, candidates, and cutover evidence
+        env:
+          CUTOVER_RUN_ID: ${{ inputs.cutover_run_id }}
+          GH_TOKEN: ${{ github.token }}
+          STAGING_RUN_ID: ${{ inputs.staging_run_id }}
+        run: |
+          printf 'EXPECTED_RELEASE_VERSION=%s\n' "$(node -p "require('./package.json').version")" >>"${GITHUB_ENV}"
+          printf 'SCRIBE_DROP_PRODUCTION_R2_HOST=%s.r2.cloudflarestorage.com\n' "${CLOUDFLARE_ACCOUNT_ID}" >>"${GITHUB_ENV}"
+          gh run download "${STAGING_RUN_ID}" \
+            --name "scribe-drop-staging-acceptance-${GITHUB_SHA}" \
+            --dir staging-acceptance
+          node scripts/export-staging-acceptance-identity.mjs staging-acceptance
+          gh run download "${CANDIDATE_RUN_ID}" \
+            --name "scribe-drop-release-candidate-${GITHUB_SHA}" \
+            --dir "${RELEASE_CANDIDATE_DIRECTORY}"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CLOUD_RUN_CANDIDATE_RUN_ID}" \
+            >"${RUNNER_TEMP}/cloud-run-candidate-run.json"
+          cloud_run_attempt="$(node -p "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')).run_attempt" "${RUNNER_TEMP}/cloud-run-candidate-run.json")"
+          gh run download "${CLOUD_RUN_CANDIDATE_RUN_ID}" \
+            --name "scribe-drop-cloud-run-candidate-${GITHUB_SHA}-${CLOUD_RUN_CANDIDATE_RUN_ID}-${cloud_run_attempt}" \
+            --dir cloud-run-candidate
+          printf 'CLOUD_RUN_CANDIDATE_EVIDENCE_PATH=%s\n' \
+            "${GITHUB_WORKSPACE}/cloud-run-candidate/cloud-run-candidate.json" >>"${GITHUB_ENV}"
+          gh run download "${CUTOVER_RUN_ID}" \
+            --name "scribe-drop-production-cutover-${GITHUB_SHA}-${CUTOVER_RUN_ID}" \
+            --dir production-cutover
+          EXPECTED_CUTOVER_RUN_ID="${CUTOVER_RUN_ID}" \
+            EXPECTED_STAGING_RUN_ID="${STAGING_RUN_ID}" \
+            pnpm run production:cutover:evidence verify production-cutover
           pnpm run candidate:verify "${RELEASE_CANDIDATE_DIRECTORY}"
+          pnpm run cloud-run:candidate:evidence verify cloud-run-candidate/cloud-run-candidate.json
+
+      - name: Build verifier and reconstruct exact active production configuration
+        run: |
+          pnpm --filter @scribe-drop/gpu-controller build
+          pnpm run runpod:config:production
+          pnpm run candidate:pages "${RELEASE_CANDIDATE_DIRECTORY}" pages-candidate
+          SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION=active \
+            pnpm run cloud-run:production:origin:export
+        env:
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+
+      - name: Verify production smoke and exact provider cleanup before mutation
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+          SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION: active
+        run: |
+          pnpm run cloudflare:config:production
           pnpm run cloudflare:readback:production
+          pnpm run cloud-run:production:smoke:verify "${{ inputs.production_smoke_job_id }}"
+          pnpm run cloud-run:acceptance:clean production
+
+      - name: Pause admission and disable the consumed smoke authorization
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+          SCRIBE_DROP_CLOUD_RUN_EXPECTED_RESERVED_EXECUTIONS: "1"
+          SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION: paused
+        run: |
+          pnpm run cloudflare:config:production:orchestrator
+          pnpm exec wrangler deploy "${RELEASE_CANDIDATE_DIRECTORY}/orchestrator/index.js" \
+            --no-bundle \
+            --strict \
+            --tag "candidate-${GITHUB_SHA}" \
+            --message "release candidate ${GITHUB_SHA}" \
+            --config .wrangler/deploy/orchestrator-production.toml \
+            --env production
+          pnpm run cloudflare:readback:production
+          pnpm run cloud-run:controller:deploy apply production disabled \
+            "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
+
+      - name: Apply reviewed finite operating authorization and reactivate admission
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+          SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_EPOCH: phase16-operational-${{ github.sha }}-${{ github.run_id }}
+          SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_VALID_UNTIL: ${{ inputs.operational_valid_until }}
+          SCRIBE_DROP_CLOUD_RUN_MAX_EXECUTIONS: ${{ inputs.operational_max_executions }}
+          SCRIBE_DROP_CLOUD_RUN_MAX_WORST_CASE_JPY: ${{ inputs.operational_max_worst_case_jpy }}
+          SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION: active
+        run: |
+          pnpm run cloud-run:controller:deploy apply production operational \
+            "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
+          pnpm run cloudflare:config:production
+          pnpm exec wrangler deploy "${RELEASE_CANDIDATE_DIRECTORY}/orchestrator/index.js" \
+            --no-bundle \
+            --strict \
+            --tag "candidate-${GITHUB_SHA}" \
+            --message "release candidate ${GITHUB_SHA}" \
+            --config .wrangler/deploy/orchestrator-production.toml \
+            --env production
+          pnpm run cloudflare:readback:production
+          pnpm run cloud-run:controller:deploy read production operational \
+            "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
+
+      - name: Verify final parity, Access, and accepted artifact identity
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
+          EXPECTED_STAGING_RUN_ID: ${{ inputs.staging_run_id }}
+          MINIMUM_ACCEPTANCE_REMAINING_SECONDS: "1800"
+          SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION: active
+        run: |
+          pnpm run environment:policy:export production
+          EXPECTED_CANDIDATE_RUN_ID="${CANDIDATE_RUN_ID}" \
+            EXPECTED_CLOUD_RUN_CANDIDATE_RUN_ID="${CLOUD_RUN_CANDIDATE_RUN_ID}" \
+            pnpm run staging:acceptance:verify "${RELEASE_CANDIDATE_DIRECTORY}" staging-acceptance
           pnpm run cloudflare:access:verify:production
-          pnpm run runpod:preflight:production
+          pnpm run cloudflare:secrets:verify:production
+
+      - name: Record immutable production release evidence
+        env:
+          CUTOVER_RUN_ID: ${{ inputs.cutover_run_id }}
+          OPERATIONAL_MAX_EXECUTIONS: ${{ inputs.operational_max_executions }}
+          OPERATIONAL_MAX_WORST_CASE_JPY: ${{ inputs.operational_max_worst_case_jpy }}
+          OPERATIONAL_VALID_UNTIL: ${{ inputs.operational_valid_until }}
+          PRODUCTION_SMOKE_JOB_ID: ${{ inputs.production_smoke_job_id }}
+          STAGING_RUN_ID: ${{ inputs.staging_run_id }}
+        run: pnpm run production:release:evidence create production-release
+
+      - name: Upload immutable production release evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scribe-drop-production-release-${{ github.sha }}-${{ github.run_id }}
+          path: production-release
+          if-no-files-found: error
+          retention-days: 90

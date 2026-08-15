@@ -61,6 +61,7 @@ CLOUD_RUN_CONTROLLER_ORIGIN = "https://replace-with-staging-gpu-controller.examp
 CLOUD_RUN_ORCHESTRATOR_ORIGIN = "https://replace-with-staging-cloud-run-orchestrator.example.invalid"
 CLOUD_RUN_RUNTIME_MODE = "disabled"
 CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT = "replace-with-staging-runtime@replace-with-project.iam.gserviceaccount.com"
+GPU_EXECUTION_ADMISSION = "active"
 GPU_EXECUTION_POLICY = "runpod_serverless_v1"
 MULTIPART_RETENTION_HOURS = "24"
 RESULT_RETENTION_DAYS = "90"
@@ -98,6 +99,7 @@ database_id = "00000000-0000-0000-0000-000000000101"
     /CLOUD_RUN_ORCHESTRATOR_ORIGIN = "https:\/\/orchestrator-staging\.example\.invalid"/u,
   );
   assert.match(rendered, /CLOUD_RUN_RUNTIME_MODE = "synthetic-shadow"/u);
+  assert.match(rendered, /GPU_EXECUTION_ADMISSION = "active"/u);
   assert.match(rendered, /GPU_EXECUTION_POLICY = "cloud_run_jobs_l4_v1"/u);
   assert.match(
     rendered,
@@ -337,6 +339,11 @@ routes = [
 [env.production.vars]
 AUDIT_RETENTION_DAYS = "180"
 CLOUDFLARE_ACCOUNT_ID = "${"0".repeat(32)}"
+CLOUD_RUN_CONTROLLER_ORIGIN = "https://replace-with-production-gpu-controller.example.invalid"
+CLOUD_RUN_ORCHESTRATOR_ORIGIN = "https://replace-with-production-cloud-run-orchestrator.example.invalid"
+CLOUD_RUN_RUNTIME_MODE = "disabled"
+CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT = "replace-with-production-runtime@replace-with-project.iam.gserviceaccount.com"
+GPU_EXECUTION_ADMISSION = "active"
 GPU_EXECUTION_POLICY = "runpod_serverless_v1"
 MULTIPART_RETENTION_HOURS = "24"
 RESULT_RETENTION_DAYS = "90"
@@ -358,6 +365,8 @@ database_id = "00000000-0000-0000-0000-000000000201"
   );
   assert.match(rendered, /database_id = "abcdef12-1234-4abc-8def-1234567890ab"/u);
   assert.match(rendered, /GPU_EXECUTION_POLICY = "runpod_serverless_v1"/u);
+  assert.match(rendered, /GPU_EXECUTION_ADMISSION = "active"/u);
+  assert.doesNotMatch(rendered, /CLOUD_RUN_/u);
   assert.match(
     rendered,
     /pattern = "orchestrator-production\.example\.invalid", custom_domain = true/u,
@@ -404,7 +413,24 @@ database_id = "00000000-0000-0000-0000-000000000201"
         ...productionIdentifiers,
         gpuExecutionPolicy: "cloud_run_jobs_l4_v1",
       }),
-    /Production GPU execution policy is not adopted/u,
+    /requires the production runtime service/u,
+  );
+
+  const cloudRun = renderOrchestratorProductionConfig(template, {
+    ...productionIdentifiers,
+    cloudRunControllerOrigin:
+      "https://scribe-drop-production-gpu-controller-123456789012.asia-southeast1.run.app",
+    cloudRunRuntimeMode: "active",
+    cloudRunRuntimeServiceAccount: "gpu-runtime-production@scribe-drop.iam.gserviceaccount.com",
+    gpuExecutionAdmission: "paused",
+    gpuExecutionPolicy: "cloud_run_jobs_l4_v1",
+  });
+  assert.match(cloudRun, /CLOUD_RUN_RUNTIME_MODE = "active"/u);
+  assert.match(cloudRun, /GPU_EXECUTION_POLICY = "cloud_run_jobs_l4_v1"/u);
+  assert.match(cloudRun, /GPU_EXECUTION_ADMISSION = "paused"/u);
+  assert.match(
+    cloudRun,
+    /CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT = "gpu-runtime-production@scribe-drop\.iam\.gserviceaccount\.com"/u,
   );
 });
 

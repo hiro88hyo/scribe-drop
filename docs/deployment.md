@@ -244,6 +244,8 @@ Phase 7のmigration、retention、PWA rolloutは
 - `SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT`（`synthetic-shadow`時だけ必須）
 - `SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY`（省略時`runpod_serverless_v1`。Phase 15 acceptance時だけ
   `cloud_run_jobs_l4_v1`）
+- `SCRIBE_DROP_STAGING_GPU_EXECUTION_ADMISSION`（省略時`active`。finite controller authorizationの
+  遷移中だけ`paused`）
 - `MULTIPART_RETENTION_HOURS`（省略時24）
 - `SOURCE_RETENTION_DAYS`（省略時7）
 - `RESULT_RETENTION_DAYS`（省略時90）
@@ -561,7 +563,38 @@ controller authorization、D1/R2 fixture、課金上限、cleanup期限をstrict
 `synthetic-shadow`へ切り替える。Phase 15ではそのread-back後にだけ
 `SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY=cloud_run_jobs_l4_v1`を生成設定へ入れる。rollbackは最初にpolicyを
 `runpod_serverless_v1`へ戻して新規投入を止め、既存Cloud Run attemptのcleanupを継続してからmodeをdisabledへ戻す。
-production設定にはCloud Run runtime bindingとrouteを追加せず、GPU policyもRunPod固定とする。
+Phase 16 productionでは[ADR 0086](./adr/0086-adopt-cloud-run-jobs-for-production.md)の専用resourceをread-backした後、
+`CLOUD_RUN_RUNTIME_MODE=active`でruntime/reaperを先にdeployする。最初は
+`GPU_EXECUTION_ADMISSION=paused`かつGPU policyをRunPodに固定し、既存attemptのdrain後もpausedのまま
+新attemptのpolicyだけをCloud Runへ切り替える。別途承認されたexact-one controller authorizationを適用してから
+admissionをactiveにする。rollbackでは最初にadmissionをpauseし、policyをRunPodへ戻す。runtime/reaperは
+Cloud Run resource不存在まで維持する。
+
+production foundationはdashboardで手作業せず、project/account/environmentと下記planをread-onlyで確認し、
+明示承認後に一度だけ適用する。
+
+```bash
+pnpm cloud-run:foundation:apply
+SCRIBE_DROP_PRODUCTION_CLOUD_RUN_CONTROLLER_HMAC_SECRET_VERSION=<version> \
+  pnpm cloud-run:foundation:read production
+pnpm cloud-run:foundation:read staging
+```
+
+bootstrapは`github-staging-deployment`/`sd-staging-deployer`、
+`github-production-deployment`/`sd-production-deployer`、production専用controller/runtime service account、
+`scribe-production-controller` databaseと2件のTTL、Singapore regional HMAC secret、review済みcustom roleと
+resource別bindingを作る。secret値は標準出力へ出さず、GitHub production Environmentへ直接登録する。
+`scribe-drop-production-gpu-controller` Serviceは作らず、staging acceptance済みcandidateの`cutover`が
+exact-one smoke authorizationで初めて作る。この時点のproduction OrchestratorはまだRunPodを選択しており、
+controller HMAC secretも未注入なのでCloud Run execution経路は開かない。同じworkflow runのretryはworkflow
+create timeから導いた同一expiry/epochだけを受け入れ、別runや消費済みauthorizationから2件目を開かない。
+
+production workflowは`cutover`と`finalize`を同じworkflow concurrencyで直列化する。`cutover` dispatch直前に
+L4 exact 1件・上限250円を別途承認し、finalize専用inputは既定のinert値を使う。workflow成功後、利用者は
+productionの通常UIで固定smoke mediaを1件uploadし、artifactと通知を確認してjob ULIDを控える。
+`finalize`には同じstaging run、cutover run、smoke job ULID、1〜20の運用execution上限、正確な
+`execution数 * 250`円、24時間以内のISO expiryを渡す。finalizeはD1/R2、Cloud Run resource 0、controller
+storage CLEANEDを検証するまで運用枠を開かない。productionにstaging Access service principalを作成しない。
 
 rollbackはmodeを`disabled`へ戻してshadow endpointを閉じ、実行中Executionのcleanupとcontroller
 authorizationの無効化を確認してから直前のWorker deploymentへ戻す。forward-only migrationは

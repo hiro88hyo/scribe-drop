@@ -227,6 +227,67 @@ const RECORD_UNKNOWN_ATTEMPT_SQL = `
   RETURNING id
 `;
 
+const DEFER_REJECTED_EXECUTION_SQL = `
+  UPDATE provider_executions
+  SET
+    status = 'PENDING',
+    create_outcome = NULL,
+    provider_handle = NULL,
+    provider_version = NULL,
+    version = version + 1,
+    updated_at = ?4
+  WHERE attempt_id = ?1
+    AND provider_handle = ?3
+    AND provider_kind = 'cloud_run_jobs'
+    AND provider_policy = 'cloud_run_jobs_l4_v1'
+    AND status = 'CREATING'
+    AND EXISTS (
+      SELECT 1 FROM job_attempts
+      WHERE id = ?1 AND job_id = ?2 AND status = 'SUBMITTING'
+    )
+  RETURNING id
+`;
+
+const DEFER_REJECTED_ATTEMPT_SQL = `
+  UPDATE job_attempts
+  SET
+    status = 'SUBMISSION_PENDING',
+    submission_started_at = NULL,
+    submission_outcome = NULL,
+    submission_finished_at = NULL,
+    updated_at = ?3
+  WHERE id = ?1
+    AND job_id = ?2
+    AND status = 'SUBMITTING'
+    AND provider_kind = 'cloud_run_jobs'
+    AND provider_policy = 'cloud_run_jobs_l4_v1'
+    AND EXISTS (
+      SELECT 1 FROM provider_executions
+      WHERE attempt_id = ?1
+        AND status = 'PENDING'
+        AND provider_handle IS NULL
+        AND updated_at = ?3
+    )
+  RETURNING id
+`;
+
+const DEFER_REJECTED_JOB_SQL = `
+  UPDATE jobs
+  SET status = 'SUBMISSION_PENDING', updated_at = ?3, version = version + 1
+  WHERE id = ?1
+    AND active_attempt_id = ?2
+    AND status = 'SUBMITTING'
+    AND deleted_at IS NULL
+    AND EXISTS (
+      SELECT 1 FROM job_attempts
+      WHERE id = ?2
+        AND job_id = ?1
+        AND status = 'SUBMISSION_PENDING'
+        AND updated_at = ?3
+    )
+  RETURNING id
+`;
+
 const RECORD_REJECTED_EXECUTION_SQL = `
   UPDATE provider_executions
   SET
@@ -538,6 +599,13 @@ export interface CloudRunControlRepository {
     readonly executionHandle: string;
     readonly timestamp: string;
   }): Promise<PreparedCloudRunSubmission | undefined>;
+  recordCreateDeferred(input: {
+    readonly attemptId: string;
+    readonly executionHandle: string;
+    readonly jobId: string;
+    readonly response: CloudRunControllerResponse;
+    readonly timestamp: string;
+  }): Promise<boolean>;
   recordCreateResponse(input: {
     readonly attemptId: string;
     readonly executionHandle: string;
@@ -700,6 +768,31 @@ export function createD1CloudRunControlRepository(database: D1Database): CloudRu
       return mutationSucceeded(results)
         ? { attemptId, executionHandle, jobId, submissionStartedAt: timestamp }
         : undefined;
+    },
+
+    async recordCreateDeferred(input) {
+      const response = input.response;
+      if (
+        response.outcome !== "rejected" ||
+        response.errorCode === null ||
+        !new Set(["BUDGET_EXHAUSTED", "ENVIRONMENT_MISMATCH", "RATE_LIMITED"]).has(
+          response.errorCode,
+        )
+      ) {
+        return false;
+      }
+      const attemptId = ulidSchema.parse(input.attemptId);
+      const jobId = ulidSchema.parse(input.jobId);
+      const executionHandle = cloudRunOpaqueHandleSchema.parse(input.executionHandle);
+      const timestamp = utcDateTimeSchema.parse(input.timestamp);
+      const results = await database.batch([
+        database
+          .prepare(DEFER_REJECTED_EXECUTION_SQL)
+          .bind(attemptId, jobId, executionHandle, timestamp),
+        database.prepare(DEFER_REJECTED_ATTEMPT_SQL).bind(attemptId, jobId, timestamp),
+        database.prepare(DEFER_REJECTED_JOB_SQL).bind(jobId, attemptId, timestamp),
+      ]);
+      return mutationSucceeded(results);
     },
 
     async recordCreateResponse(input) {

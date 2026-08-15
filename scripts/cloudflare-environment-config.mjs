@@ -40,6 +40,12 @@ const productionOrchestratorHostnamePlaceholder =
   "replace-with-production-orchestrator.example.invalid";
 const productionOrchestratorOriginPlaceholder =
   "https://replace-with-production-orchestrator.example.invalid";
+const productionCloudRunControllerOriginPlaceholder =
+  "https://replace-with-production-gpu-controller.example.invalid";
+const productionCloudRunOrchestratorOriginPlaceholder =
+  "https://replace-with-production-cloud-run-orchestrator.example.invalid";
+const productionCloudRunRuntimeServiceAccountPlaceholder =
+  "replace-with-production-runtime@replace-with-project.iam.gserviceaccount.com";
 const productionWebOriginPlaceholder = "https://replace-with-production-web.example.invalid";
 const retentionDefaults = {
   auditRetentionDays: 180,
@@ -132,6 +138,50 @@ function validatedStagingGpuExecutionPolicy(identifiers, cloudRun) {
   }
   if (policy === "cloud_run_jobs_l4_v1" && cloudRun.mode !== "synthetic-shadow") {
     throw new Error("Cloud Run execution requires the staging runtime service");
+  }
+  return policy;
+}
+
+function validatedGpuExecutionAdmission(identifiers, environment) {
+  const admission = identifiers.gpuExecutionAdmission ?? "active";
+  if (admission !== "active" && admission !== "paused") {
+    throw new Error(`SCRIBE_DROP_${environment.toUpperCase()}_GPU_EXECUTION_ADMISSION is invalid`);
+  }
+  return admission;
+}
+
+function validatedProductionCloudRunConfiguration(identifiers, orchestratorOrigin) {
+  const mode = identifiers.cloudRunRuntimeMode ?? "disabled";
+  if (mode !== "disabled" && mode !== "active") {
+    throw new Error("SCRIBE_DROP_PRODUCTION_CLOUD_RUN_RUNTIME_MODE is invalid");
+  }
+  if (mode === "disabled") return { mode };
+  const controllerOrigin = requireExactHttpsOrigin(
+    identifiers.cloudRunControllerOrigin,
+    "SCRIBE_DROP_PRODUCTION_CLOUD_RUN_CONTROLLER_ORIGIN",
+  );
+  if (
+    !/^scribe-drop-production-gpu-controller-[0-9]+\.asia-southeast1\.run\.app$/u.test(
+      new URL(controllerOrigin).hostname,
+    )
+  ) {
+    throw new Error("SCRIBE_DROP_PRODUCTION_CLOUD_RUN_CONTROLLER_ORIGIN is invalid");
+  }
+  const runtimeServiceAccount = requireIdentifier(
+    identifiers.cloudRunRuntimeServiceAccount,
+    /^gpu-runtime-production@scribe-drop\.iam\.gserviceaccount\.com$/u,
+    "SCRIBE_DROP_PRODUCTION_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT",
+  );
+  return { controllerOrigin, mode, orchestratorOrigin, runtimeServiceAccount };
+}
+
+function validatedProductionGpuExecutionPolicy(identifiers, cloudRun) {
+  const policy = identifiers.gpuExecutionPolicy ?? "runpod_serverless_v1";
+  if (!new Set(["runpod_serverless_v1", "cloud_run_jobs_l4_v1"]).has(policy)) {
+    throw new Error("SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_POLICY is invalid");
+  }
+  if (policy === "cloud_run_jobs_l4_v1" && cloudRun.mode !== "active") {
+    throw new Error("Cloud Run execution requires the production runtime service");
   }
   return policy;
 }
@@ -290,6 +340,7 @@ export function renderOrchestratorStagingConfig(template, identifiers) {
   const orchestratorHostname = new URL(orchestratorOrigin).hostname;
   const cloudRun = validatedStagingCloudRunConfiguration(identifiers, orchestratorOrigin);
   const gpuExecutionPolicy = validatedStagingGpuExecutionPolicy(identifiers, cloudRun);
+  const gpuExecutionAdmission = validatedGpuExecutionAdmission(identifiers, "staging");
   const acceptanceFault = validateStagingAcceptanceFaultIdentifiers(identifiers, cloudRun.mode);
   const webOrigin = requireExactHttpsOrigin(
     identifiers.webOrigin,
@@ -336,6 +387,12 @@ export function renderOrchestratorStagingConfig(template, identifiers) {
     'GPU_EXECUTION_POLICY = "runpod_serverless_v1"',
     `GPU_EXECUTION_POLICY = "${gpuExecutionPolicy}"`,
     "orchestrator staging GPU execution policy",
+  );
+  stagingConfig = replaceOnce(
+    stagingConfig,
+    'GPU_EXECUTION_ADMISSION = "active"',
+    `GPU_EXECUTION_ADMISSION = "${gpuExecutionAdmission}"`,
+    "orchestrator staging GPU execution admission",
   );
   const cloudRunBindings = [
     [
@@ -580,12 +637,6 @@ export function renderOrchestratorProductionConfig(template, identifiers) {
   const { accountId, d1DatabaseId } = validatedProductionResourceIdentifiers(identifiers);
   const retention = validatedRetentionIdentifiers(identifiers);
   const runpodPlacement = validatedRunpodPlacementPolicy(identifiers, "production");
-  if (
-    identifiers.gpuExecutionPolicy !== undefined &&
-    identifiers.gpuExecutionPolicy !== "runpod_serverless_v1"
-  ) {
-    throw new Error("Production GPU execution policy is not adopted");
-  }
   if (stagingAcceptanceFaultIdentifierKeys.some((key) => identifiers[key] !== undefined)) {
     throw new Error("Staging acceptance fault configuration is forbidden in production");
   }
@@ -599,6 +650,9 @@ export function renderOrchestratorProductionConfig(template, identifiers) {
     "SCRIBE_DROP_PRODUCTION_ORCHESTRATOR_ORIGIN",
   );
   const orchestratorHostname = new URL(orchestratorOrigin).hostname;
+  const cloudRun = validatedProductionCloudRunConfiguration(identifiers, orchestratorOrigin);
+  const gpuExecutionPolicy = validatedProductionGpuExecutionPolicy(identifiers, cloudRun);
+  const gpuExecutionAdmission = validatedGpuExecutionAdmission(identifiers, "production");
   const webOrigin = requireExactHttpsOrigin(
     identifiers.webOrigin,
     "SCRIBE_DROP_PRODUCTION_WEB_ORIGIN",
@@ -641,6 +695,48 @@ export function renderOrchestratorProductionConfig(template, identifiers) {
     `RUNPOD_INTERNAL_BASE_URL = "${orchestratorOrigin}"`,
     "orchestrator production internal origin",
   );
+  productionConfig = replaceOnce(
+    productionConfig,
+    'GPU_EXECUTION_POLICY = "runpod_serverless_v1"',
+    `GPU_EXECUTION_POLICY = "${gpuExecutionPolicy}"`,
+    "orchestrator production GPU execution policy",
+  );
+  productionConfig = replaceOnce(
+    productionConfig,
+    'GPU_EXECUTION_ADMISSION = "active"',
+    `GPU_EXECUTION_ADMISSION = "${gpuExecutionAdmission}"`,
+    "orchestrator production GPU execution admission",
+  );
+  const cloudRunBindings = [
+    [
+      `CLOUD_RUN_CONTROLLER_ORIGIN = "${productionCloudRunControllerOriginPlaceholder}"`,
+      `CLOUD_RUN_CONTROLLER_ORIGIN = "${cloudRun.controllerOrigin}"`,
+      "orchestrator production Cloud Run controller origin",
+    ],
+    [
+      `CLOUD_RUN_ORCHESTRATOR_ORIGIN = "${productionCloudRunOrchestratorOriginPlaceholder}"`,
+      `CLOUD_RUN_ORCHESTRATOR_ORIGIN = "${cloudRun.orchestratorOrigin}"`,
+      "orchestrator production Cloud Run orchestrator origin",
+    ],
+    [
+      'CLOUD_RUN_RUNTIME_MODE = "disabled"',
+      `CLOUD_RUN_RUNTIME_MODE = "${cloudRun.mode}"`,
+      "orchestrator production Cloud Run runtime mode",
+    ],
+    [
+      `CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT = "${productionCloudRunRuntimeServiceAccountPlaceholder}"`,
+      `CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT = "${cloudRun.runtimeServiceAccount}"`,
+      "orchestrator production Cloud Run runtime service account",
+    ],
+  ];
+  for (const [source, activeValue, label] of cloudRunBindings) {
+    productionConfig = replaceOnce(
+      productionConfig,
+      `${source}\n`,
+      cloudRun.mode === "disabled" ? "" : `${activeValue}\n`,
+      label,
+    );
+  }
   productionConfig = replaceOnce(
     productionConfig,
     `RUNPOD_ALLOWED_GPU_IDS = "${runpodGpuIdsPlaceholder}"`,

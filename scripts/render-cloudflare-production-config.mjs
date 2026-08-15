@@ -55,8 +55,13 @@ const identifiers = {
   accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
   auditRetentionDays: process.env.AUDIT_RETENTION_DAYS,
   candidateMigrationsDirectory: process.env.SCRIBE_DROP_CANDIDATE_MIGRATIONS_DIR,
+  cloudRunControllerOrigin: process.env.SCRIBE_DROP_PRODUCTION_CLOUD_RUN_CONTROLLER_ORIGIN,
+  cloudRunRuntimeMode: process.env.SCRIBE_DROP_PRODUCTION_CLOUD_RUN_RUNTIME_MODE,
+  cloudRunRuntimeServiceAccount:
+    process.env.SCRIBE_DROP_PRODUCTION_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT,
   d1DatabaseId: process.env.SCRIBE_DROP_PRODUCTION_D1_DATABASE_ID,
   gpuExecutionPolicy: process.env.SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_POLICY,
+  gpuExecutionAdmission: process.env.SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION,
   multipartRetentionHours: process.env.MULTIPART_RETENTION_HOURS,
   orchestratorOrigin: process.env.SCRIBE_DROP_PRODUCTION_ORCHESTRATOR_ORIGIN,
   resultRetentionDays: process.env.RESULT_RETENTION_DAYS,

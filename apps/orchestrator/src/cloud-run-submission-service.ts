@@ -5,7 +5,6 @@ import {
   type CloudRunControllerRequest,
   type CloudRunControllerResponse,
 } from "@scribe-drop/contracts";
-import { createUlid } from "@scribe-drop/domain";
 import type { StructuredLogger } from "@scribe-drop/observability";
 
 import {
@@ -40,7 +39,6 @@ export interface CloudRunSubmissionController {
 }
 
 export interface CloudRunSubmissionDependencies {
-  readonly createEventId?: (timestampMilliseconds: number) => string;
   readonly createController?: (
     environment: CloudRunSubmissionEnvironment,
   ) => CloudRunSubmissionController;
@@ -99,6 +97,12 @@ export async function submitPendingCloudRunJob(
   dependencies: CloudRunSubmissionDependencies,
 ): Promise<SubmissionDispatchResult> {
   const now = dependencies.now ?? (() => new Date());
+  const config = parseCloudRunRuntimeServiceConfig(environment);
+  const selectedController =
+    dependencies.createController?.(environment) ?? controller(environment, now);
+  if (config === undefined || selectedController === undefined) {
+    throw new Error("Cloud Run submission configuration is invalid");
+  }
   const repositoryFactory = dependencies.createRepository ?? createD1CloudRunControlRepository;
   const repository = repositoryFactory(environment.SCRIBE_DROP_DB);
   const candidate = await repository.findSubmissionCandidate(jobId);
@@ -111,12 +115,6 @@ export async function submitPendingCloudRunJob(
     timestamp: startedAt.toISOString(),
   });
   if (prepared === undefined) return "deferred";
-  const config = parseCloudRunRuntimeServiceConfig(environment);
-  const selectedController =
-    dependencies.createController?.(environment) ?? controller(environment, now);
-  if (config === undefined || selectedController === undefined) {
-    throw new Error("Cloud Run submission configuration is invalid");
-  }
   const request = cloudRunControllerRequestSchema.parse({
     action: "create",
     environment: config.appEnvironment,
@@ -171,31 +169,23 @@ export async function submitPendingCloudRunJob(
     response.errorCode !== null &&
     SAFE_PRE_ADMISSION_REJECTIONS.has(response.errorCode)
   ) {
-    const createEventId =
-      dependencies.createEventId ??
-      ((timestampMilliseconds: number) =>
-        createUlid(timestampMilliseconds, (length) =>
-          crypto.getRandomValues(new Uint8Array(length)),
-        ));
     if (
-      !(await repository.recordCreateRejected({
+      !(await repository.recordCreateDeferred({
         attemptId: prepared.attemptId,
-        eventId: createEventId(new Date(finishedAt).getTime()),
         executionHandle: prepared.executionHandle,
         jobId: prepared.jobId,
         response,
         timestamp: finishedAt,
       }))
     ) {
-      throw new Error("Cloud Run rejected outcome could not be persisted");
+      throw new Error("Cloud Run deferred outcome could not be persisted");
     }
-    dependencies.logger.warn("job.submission_rejected", {
+    dependencies.logger.warn("job.submission_deferred", {
       attemptId: prepared.attemptId,
-      errorCode: "PROCESSING_FAILED",
       jobId: prepared.jobId,
-      status: "FAILED",
+      status: "SUBMISSION_PENDING",
     });
-    return "rejected";
+    return "deferred";
   }
   if (response.outcome === "rejected" && response.errorCode !== null) {
     if (

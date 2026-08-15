@@ -231,6 +231,34 @@ describe("R2 upload Queue consumer", () => {
     );
   });
 
+  it("ingests and acknowledges while execution admission is paused without dispatching", async () => {
+    const message = new FakeMessage(EVENT);
+    const submitPendingJob = vi.fn();
+    const ingestSource = vi.fn<UploadIngestionRepository["ingestSource"]>(() =>
+      Promise.resolve("ingested"),
+    );
+
+    await handleUploadQueueBatch(
+      { messages: [message] },
+      { ...environment(), GPU_EXECUTION_ADMISSION: "paused" },
+      {
+        createAttemptId: () => ATTEMPT_ID,
+        createEventId: () => EVENT_ID,
+        createRepository: () => fakeRepository({ ingestSource }),
+        headSourceObject: () =>
+          Promise.resolve({ etag: EVENT.object.eTag, size: EVENT.object.size }),
+        logger: logger([]),
+        now: () => NOW,
+        submitPendingJob,
+      },
+    );
+
+    expect(ingestSource).toHaveBeenCalledOnce();
+    expect(submitPendingJob).not.toHaveBeenCalled();
+    expect(message.acknowledgements).toBe(1);
+    expect(message.retryDelays).toEqual([]);
+  });
+
   it("uses the immutable attempt selection when the staging switch changes", async () => {
     const message = new FakeMessage(EVENT);
     const submitPendingJob = vi.fn().mockResolvedValue("accepted");

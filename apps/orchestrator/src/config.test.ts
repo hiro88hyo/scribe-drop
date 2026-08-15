@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   decodeCloudRunRuntimeSecret,
+  parseGpuExecutionAdmission,
   parseGpuExecutionSelection,
   parseCloudRunRuntimeShadowConfig,
   parseCloudRunRuntimeServiceConfig,
@@ -15,7 +16,7 @@ const CLOUD_RUN_CONTROLLER_SECRET = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
 const CLOUD_RUN_DERIVATION_SECRET = "CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg";
 
 describe("GPU execution selection", () => {
-  it("selects RunPod in every environment and Cloud Run only in staging", () => {
+  it("selects RunPod in every environment and the adopted Cloud Run policy remotely", () => {
     expect(
       parseGpuExecutionSelection({
         APP_ENV: "production",
@@ -28,25 +29,47 @@ describe("GPU execution selection", () => {
         GPU_EXECUTION_POLICY: "cloud_run_jobs_l4_v1",
       }),
     ).toEqual({ contractVersion: 2, kind: "cloud_run_jobs", policy: "cloud_run_jobs_l4_v1" });
+    expect(
+      parseGpuExecutionSelection({
+        APP_ENV: "production",
+        GPU_EXECUTION_POLICY: "cloud_run_jobs_l4_v1",
+      }),
+    ).toEqual({ contractVersion: 2, kind: "cloud_run_jobs", policy: "cloud_run_jobs_l4_v1" });
   });
 
   it.each([
     { APP_ENV: "staging", GPU_EXECUTION_POLICY: "" },
-    { APP_ENV: "production", GPU_EXECUTION_POLICY: "cloud_run_jobs_l4_v1" },
     { APP_ENV: "local", GPU_EXECUTION_POLICY: "cloud_run_jobs_l4_v1" },
   ])("fails closed for an unavailable selection: %o", (environment) => {
     expect(parseGpuExecutionSelection(environment)).toBeUndefined();
   });
 });
 
+describe("GPU execution admission", () => {
+  it("defaults to active and accepts an explicit deployment pause", () => {
+    expect(parseGpuExecutionAdmission({})).toBe("active");
+    expect(parseGpuExecutionAdmission({ GPU_EXECUTION_ADMISSION: "paused" })).toBe("paused");
+  });
+
+  it("fails closed for an unknown admission value", () => {
+    expect(parseGpuExecutionAdmission({ GPU_EXECUTION_ADMISSION: "draining" })).toBeUndefined();
+  });
+});
+
 describe("Cloud Run runtime shadow configuration", () => {
-  it("accepts only the exact staging synthetic mode", () => {
+  it("accepts only the environment-specific active runtime mode", () => {
     expect(
       parseCloudRunRuntimeShadowConfig({
         APP_ENV: "staging",
         CLOUD_RUN_RUNTIME_MODE: "synthetic-shadow",
       }),
     ).toEqual({ appEnvironment: "staging", mode: "synthetic-shadow" });
+    expect(
+      parseCloudRunRuntimeShadowConfig({
+        APP_ENV: "production",
+        CLOUD_RUN_RUNTIME_MODE: "active",
+      }),
+    ).toEqual({ appEnvironment: "production", mode: "active" });
   });
 
   it.each([
@@ -54,6 +77,7 @@ describe("Cloud Run runtime shadow configuration", () => {
     { APP_ENV: "staging" },
     { APP_ENV: "production", CLOUD_RUN_RUNTIME_MODE: "synthetic-shadow" },
     { APP_ENV: "staging", CLOUD_RUN_RUNTIME_MODE: "enabled" },
+    { APP_ENV: "production", CLOUD_RUN_RUNTIME_MODE: "enabled" },
   ])("fails closed for an unavailable shadow route: %o", (environment) => {
     expect(parseCloudRunRuntimeShadowConfig(environment)).toBeUndefined();
   });
@@ -86,6 +110,22 @@ describe("Cloud Run runtime service configuration", () => {
     expect(decodeCloudRunRuntimeSecret(CLOUD_RUN_CONTROLLER_SECRET)?.byteLength).toBe(32);
   });
 
+  it("accepts isolated production runtime settings", () => {
+    expect(
+      parseCloudRunRuntimeServiceConfig({
+        ...valid,
+        APP_ENV: "production",
+        CLOUD_RUN_CONTROLLER_ORIGIN:
+          "https://scribe-drop-production-gpu-controller-123456789012.asia-southeast1.run.app",
+        CLOUD_RUN_ORCHESTRATOR_ORIGIN: "https://orchestrator-production.example.invalid",
+        CLOUD_RUN_RUNTIME_MODE: "active",
+        CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT:
+          "gpu-runtime-production@scribe-drop.iam.gserviceaccount.com",
+        R2_BUCKET_NAME: "recording-transcriber-production",
+      }),
+    ).toMatchObject({ appEnvironment: "production", mode: "active" });
+  });
+
   it.each([
     { APP_ENV: "production" },
     { CLOUD_RUN_RUNTIME_MODE: "disabled" },
@@ -95,6 +135,7 @@ describe("Cloud Run runtime service configuration", () => {
     { CLOUD_RUN_CONTROLLER_ORIGIN: "https://example.invalid" },
     { CLOUD_RUN_ORCHESTRATOR_ORIGIN: "https://orchestrator-staging.example.invalid/path" },
     { CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT: "default@scribe-drop.iam.gserviceaccount.com" },
+    { APP_ENV: "production", CLOUD_RUN_RUNTIME_MODE: "active" },
   ])("fails closed before service composition for config drift: %o", (override) => {
     expect(parseCloudRunRuntimeServiceConfig({ ...valid, ...override })).toBeUndefined();
   });

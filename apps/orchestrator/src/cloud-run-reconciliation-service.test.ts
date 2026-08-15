@@ -38,10 +38,24 @@ function environment(): CloudRunReconciliationEnvironment {
     CLOUD_RUN_RUNTIME_DERIVATION_SECRET: "CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg",
     CLOUD_RUN_RUNTIME_MODE: "synthetic-shadow",
     CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT: "gpu-runtime@scribe-drop.iam.gserviceaccount.com",
+    GPU_EXECUTION_POLICY: "cloud_run_jobs_l4_v1",
     R2_ACCESS_KEY_ID: "r2-access-key-placeholder",
     R2_BUCKET_NAME: "recording-transcriber-staging",
     R2_SECRET_ACCESS_KEY: "0000000000000000",
     SCRIBE_DROP_DB: {} as D1Database,
+  };
+}
+
+function productionEnvironment(): CloudRunReconciliationEnvironment {
+  return {
+    ...environment(),
+    APP_ENV: "production",
+    CLOUD_RUN_CONTROLLER_ORIGIN:
+      "https://scribe-drop-production-gpu-controller-123456789012.asia-southeast1.run.app",
+    CLOUD_RUN_ORCHESTRATOR_ORIGIN: "https://orchestrator-production.example.invalid",
+    CLOUD_RUN_RUNTIME_MODE: "active",
+    CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT: "gpu-runtime-production@scribe-drop.iam.gserviceaccount.com",
+    R2_BUCKET_NAME: "recording-transcriber-production",
   };
 }
 
@@ -55,6 +69,7 @@ function repository(selected: CloudRunReconciliationCandidate): CloudRunControlR
     findReconciliationCandidates: () => Promise.resolve([selected]),
     findSubmissionCandidate: () => Promise.resolve(undefined),
     prepareSubmission: () => Promise.resolve(undefined),
+    recordCreateDeferred: () => Promise.resolve(false),
     recordCreateResponse: () => Promise.resolve(false),
     recordCreateRejected: () => Promise.resolve(false),
     recordCreateUnknown: () => Promise.resolve(false),
@@ -71,6 +86,80 @@ function logger(): StructuredLogger {
 }
 
 describe("Cloud Run reconciliation", () => {
+  it("keeps the production reaper active independently of new-attempt selection", async () => {
+    const selectedRepository = repository({
+      ...candidate,
+      cleanupStatus: "PENDING",
+      executionStatus: "TERMINAL",
+      terminalStatus: "COMPLETED",
+    });
+    const findDispatchablePendingJobId = vi.spyOn(
+      selectedRepository,
+      "findDispatchablePendingJobId",
+    );
+    const mutate = vi
+      .fn<(request: CloudRunControllerRequest) => Promise<CloudRunControllerResponse>>()
+      .mockImplementation((request) =>
+        Promise.resolve({
+          errorCode: null,
+          executionHandle: request.executionHandle,
+          outcome: "cleaned",
+          requestId: request.requestId,
+          schemaVersion: 1,
+          version: 4,
+        }),
+      );
+
+    await expect(
+      reconcileCloudRunJobs(
+        { ...productionEnvironment(), GPU_EXECUTION_ADMISSION: "paused" },
+        logger(),
+        {
+          createController: () => ({ mutate }),
+          createRepository: () => selectedRepository,
+          now: () => NOW,
+        },
+      ),
+    ).resolves.toMatchObject({ appliedCount: 1, deferredCount: 0 });
+    expect(mutate.mock.calls[0]?.[0]).toMatchObject({
+      action: "cleanup",
+      environment: "production",
+    });
+    expect(findDispatchablePendingJobId).not.toHaveBeenCalled();
+  });
+
+  it("keeps Cloud Run pending attempts paused when RunPod is selected", async () => {
+    const selectedRepository = repository(candidate);
+    const findDispatchablePendingJobId = vi
+      .spyOn(selectedRepository, "findDispatchablePendingJobId")
+      .mockResolvedValue(candidate.jobId);
+    const submitPendingJob = vi.fn();
+
+    await reconcileCloudRunJobs(
+      { ...environment(), GPU_EXECUTION_POLICY: "runpod_serverless_v1" },
+      logger(),
+      {
+        createController: () => ({
+          mutate: (request) =>
+            Promise.resolve({
+              errorCode: null,
+              executionHandle: request.executionHandle,
+              outcome: "pending",
+              requestId: request.requestId,
+              schemaVersion: 1,
+              version: request.expectedVersion,
+            }),
+        }),
+        createRepository: () => selectedRepository,
+        now: () => NOW,
+        submitPendingJob,
+      },
+    );
+
+    expect(findDispatchablePendingJobId).not.toHaveBeenCalled();
+    expect(submitPendingJob).not.toHaveBeenCalled();
+  });
+
   it("dispatches an exact user cancellation without waiting for the scheduled sweep", async () => {
     const selected = {
       ...candidate,
