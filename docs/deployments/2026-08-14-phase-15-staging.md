@@ -195,6 +195,27 @@ gpu-controller全106 testとstrict typecheckは成功した。
 Phase 14 gateとPhase 15 acceptanceをやり直すまでproduction promotionはblockedであり、別の明示承認なしに追加GPU
 executionを開始しない。
 
+## Cancel-convergence candidate Phase 14 gate
+
+source `b7ae428`のapplication workflow `31864679572`とCloud Run workflow `31864679844`をbuild-once
+candidateとして固定した。controller/Worker両imageのKMS attestationとBinary Authorizationは`VERIFIED`、controller
+Service、IAM、Secret Manager、Firestore、Orchestrator bundleのstrict read-backも成功した。GPU 0 preflightは
+`EXECUTION_NOT_FOUND` marker 1で終了し、Job/Executionを0へ戻した。
+
+staging限定1 execution/250 JPY、L4 1、4 vCPU、16 GiB、task/parallelism 1、retry 0、timeout 3,300秒を
+実行直前に照合し、16分の非機密合成WAVをexact 1回実行した。runtimeはheartbeat 4段階、terminal `succeeded`、
+session revokeへ収束した。segment 20、manifest v2、Markdown/JSON/SRT 3 artifactのsize/SHA-256は一致し、
+Cloud LoggingはExecution 1、success marker 1、failure marker 0、task attempt/index 0だけだった。
+
+terminal後の自動cleanupが監視pollより先にExecutionを削除したため、一時監視scriptはExecution 0を失敗表示した。
+D1 terminal、Cloud Logging、controller `CLEANUP_PENDING`の独立read-backにより正常なcleanup開始と確定し、追加Executionや
+再試行は行わなかった。controllerは`CLEANED` version 9へ収束した。provider policyとauthorizationをRunPod、disabled/0へ
+戻し、Cloud Run Job/Execution 0、D1対象5系統0、R2対象5 object不存在、Firestore controller 3 collection空、
+exact candidate単一version 100%を確認した。production resourceとCI workflowは変更していない。
+
+Phase 15ではcancel scenarioを最初に実行する。同じ不具合の実provider解消を確認するまで残りのGPU scenarioを開始せず、
+cancel失敗時は追加試行・追加修正・candidate再作成へ進まない。
+
 ## 未完了条件
 
 過去candidateでは成功系artifact、利用者delete、費用境界、deployed Cronだけによるprovider cleanup、

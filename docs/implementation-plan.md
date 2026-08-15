@@ -1722,6 +1722,25 @@ Local cancel convergence remediation (2026-08-15):
 - このsource変更で`fe90b14`のremote evidenceはpromotionへ使用できない。全local gate、commit、build-once、Phase 14、
   Phase 15を新candidateでやり直し、別の明示承認なしに追加GPU executionを開始しない。
 
+Remote cancel-convergence candidate Phase 14 gate (2026-08-15):
+
+- source `b7ae428`のapplication workflow `31864679572`とCloud Run workflow `31864679844`は成功した。
+  RunPod Workerは検証済みdigestを再利用し、controller/Cloud Run Worker imageはbuild-once、SBOM、scan、KMS
+  attestation、Binary Authorizationを通過した。controller Service、IAM、Secret Manager、Firestore、両attestationを
+  strict read-backし、同じWorker digestのGPU 0 preflightは認証後の`EXECUTION_NOT_FOUND` marker 1で成功した。
+- staging限定1 execution/250 JPY、L4 1、4 vCPU、16 GiB、task/parallelism 1、retry 0、timeout 3,300秒を
+  実行直前に照合し、16分の非機密合成WAVをexact 1回実行した。runtimeは`bootstrap`、`download`、`transcribe`、
+  `publish` heartbeat、terminal `succeeded`、session revokeへ収束し、segment 20、manifest v2、Markdown/JSON/SRT
+  3 artifactのsizeとSHA-256が一致した。Cloud LoggingはExecution 1、success marker 1、failure marker 0、task
+  attempt/index 0だけだった。
+- terminal後の自動cleanupが監視pollより先にExecutionを削除したため、一時監視scriptはExecution 0を失敗表示した。
+  D1 terminal、Cloud Logging、controller `CLEANUP_PENDING`を独立read-backして正常なcleanup開始と確定し、追加Executionや
+  再試行は行わなかった。controllerは`CLEANED` version 9へ収束した。
+- provider policyをRunPodへ戻し、controller/Firestore authorizationをdisabled/0へ戻した。最終read-backはCloud Run
+  Job/Execution 0、D1対象5系統0、R2 fixture/artifact/manifest 5 object不存在、Firestore controller 3 collection空、
+  exact candidate単一version 100%だった。production resourceとCI workflowは変更していない。Phase 15はcancel scenarioを
+  最初に実行し、同じ不具合の解消を実providerで確定するまで残りのGPU scenarioを開始しない。
+
 実装:
 
 - Phase 14のexact candidateを再利用し、provider switchをstagingだけで有効化する。release修正が
