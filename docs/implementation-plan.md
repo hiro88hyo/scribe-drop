@@ -1757,6 +1757,34 @@ Remote cancel-convergence candidate Phase 15 cancel gate (2026-08-15):
   RunPod policy、authorization disabled/0、exact candidate単一version 100%だった。productionとCIは未変更である。
   cancel scenarioは成功した。残り4 GPU scenarioは別の明示承認まで開始せず、Phase 15 overallは未完了とする。
 
+Remote remaining bounded-failure batch (2026-08-15):
+
+- 同じsource `b7ae428`とbuild-once artifactに対し、staging限定で最大4 L4 execution、合計1,000 JPY、
+  1 executionあたり250 JPYを明示承認した。単一preflightでfault不存在、task/parallelism 1、retry 0、
+  timeout 3,300秒、Cloud Run Job/Execution 0、Firestore active/reserved 0、L4 quota 3、Worker/Pagesのexact
+  candidateを照合した。公式単価と保守的な為替・税・network allowanceによる1 executionのworst-caseは233 JPYだった。
+- 通知一時障害は通常runtime success、manifestとMarkdown/JSON/SRT 3 artifactのsize/SHA-256/contract一致を維持し、
+  対象jobだけnotification attempt 1を`DISCORD_UNAVAILABLE` / `PENDING`へ戻した。fault leaseを全削除した後、同じ
+  outbox rowが次Cronでattempt 2 / `SENT`となった。monitorの最初の7分窓が06:25 UTC Cronの約3秒前に終了した
+  operator false-negativeがあったが、同一jobの次Cron結果を読み直しており、追加GPU executionはない。
+- claim後worker停止はruntime `ack` 1、heartbeat 0、terminal event 0、artifact 0、heartbeat response lossは
+  `ack` 1、heartbeat 1、terminal event 0、artifact 0となった。どちらもD1 job/attempt `FAILED`、失敗通知`SENT`、
+  controller cleanup `SUCCEEDED`へdeployed Cronだけで収束し、scenarioごとにfault 4 bindingを除去した。
+- 実破損66 byte M4Aはfaultを使わず、runtime terminal `INVALID_MEDIA` 1、artifact 0、失敗通知`SENT`、cleanup
+  `SUCCEEDED`へ収束した。remote D1の複数table監視queryがtimeoutしたため、primary-key単表readへ軽量化して同一jobを
+  判定した。実行の再投入や追加GPU executionは行っていない。
+- 4 execution消費後の追加fixtureは有限authorization境界で`cloud_run_submission_rejected` 1、bootstrap 0、artifact 0、
+  cleanup `SUCCEEDED`となり、Cloud Run Job/ExecutionとGPUを作成しなかった。各GPU scenario後はactive 0を確認し、
+  最終予約は4 execution / 1,000 JPYだった。
+- Web UIから5 fixtureを削除し、D1 job graph 5件を0、保存済みexact keyに対するR2 source/manifest/3 artifact
+  計25 objectを404として独立確認した。controllerは4 execution document、18 request document、environment 1件を
+  update-time条件付きで削除し、3 collection空となった。最終read-backはCloud Run Job/Execution 0、controller
+  authorization disabled/0、Service generation 43、Orchestrator RunPod policy、fault不存在、exact candidate単一version
+  100%、Pages exact candidateだった。production resourceとCI workflowは変更していない。
+- candidate `b7ae428`のcancel、通知障害、worker停止、heartbeat response loss、破損media、capacity rejectionは成功した。
+  Phase 15 overallはAndroid実機file picker/upload、利用者向けartifact download、controller outageの同candidate evidenceが
+  完了するまでIn progressを維持し、Phase 16 production promotionは開始しない。
+
 実装:
 
 - Phase 14のexact candidateを再利用し、provider switchをstagingだけで有効化する。release修正が

@@ -241,13 +241,38 @@ VAD無効の非機密長時間fixtureを通常Web upload/Queue経路から投入
 100%、Pagesはexact commitへ戻した。production resourceとCI workflowは変更していない。cancel scenarioは成功したが、
 残り4 GPU scenarioは別の明示承認まで開始せず、Phase 15 overallはIn progressを維持する。
 
+## Current candidate remaining bounded-failure batch
+
+同じsource `b7ae428`とbuild-once artifactについて、staging限定の最大4 L4 execution、合計1,000 JPY、
+1 executionあたり250 JPYの明示承認を得た。単一preflightはfault不存在、L4 1、4 vCPU、16 GiB、
+task/parallelism 1、retry 0、timeout 3,300秒、Cloud Run Job/Execution 0、Firestore active/reserved 0、
+L4 quota 3、Worker/Pagesのexact candidateを確認した。worst-caseは1 executionあたり233 JPYである。
+
+- 通知一時障害はruntime成功と3 artifactを維持したまま、対象jobだけattempt 1を
+  `DISCORD_UNAVAILABLE` / `PENDING`にした。lease除去後、同じoutbox rowはattempt 2 / `SENT`となった。
+  最初のmonitorが次Cronの約3秒前に終了したoperator false-negativeは同じjobのreadbackだけで訂正し、GPUを再実行していない。
+- claim後worker停止は`ack` 1、heartbeat 0、terminal event 0、artifact 0、heartbeat response lossは`ack` 1、
+  heartbeat 1、terminal event 0、artifact 0だった。両方ともjob/attempt `FAILED`、通知`SENT`、cleanup
+  `SUCCEEDED`へdeployed Cronだけで収束した。
+- 実破損66 byte M4Aはterminal `INVALID_MEDIA` 1、artifact 0、通知`SENT`、cleanup `SUCCEEDED`となった。
+  D1 monitoring queryのtimeoutはprimary-key単表readへ軽量化して同一jobを判定し、GPU再実行を行っていない。
+- 予約4/4の後に投入したcapacity fixtureはsubmission rejection event 1、bootstrap 0、artifact 0、cleanup
+  `SUCCEEDED`となり、Cloud Run Job/ExecutionとGPUを作成しなかった。
+
+各scenario後にactive execution 0、fault 4 binding不存在を確認した。Web UIで5 fixtureの削除を受理し、D1 job graph
+5件を0、保存済みexact keyへのR2 HEADでsource、manifest、Markdown、JSON、SRTの計25 objectを404として確認した。
+controller authorizationはdisabled/0、Firestoreはcleaned execution 4件、request 18件、environment 1件を
+update-time条件付きで削除し、3 collection空となった。最終状態はCloud Run Job/Execution 0、controller Service
+generation 43、Orchestrator RunPod policy、fault不存在、active Worker 1 version / traffic 100% / binding 25、Pages
+exact candidateである。production resourceとCI workflowは変更していない。
+
 ## 未完了条件
 
-過去candidateでは成功系artifact、利用者delete、費用境界、deployed Cronだけによるprovider cleanup、
-破損media、capacity rejection、worker停止、heartbeat response loss、通知一時障害を検証した。しかしcancelは
-formal acceptance failureであり、その修正は新sourceである。新candidateのPhase 14 gate、cancel再試験、
-Android実機file picker、controller outageを含む残りを完了し、新規投入停止、provider resource 0、storage不存在を
-同じ期限付きevidenceへ結び付けるまでproduction promotionを行わない。新しいGPU executionは別の明示承認なしに開始しない。
+current candidateではPhase 14 gate、cancel、通知一時障害、worker停止、heartbeat response loss、破損media、capacity
+rejection、利用者delete、費用境界、deployed Cronだけによるprovider cleanup、resource/storage不存在を検証した。
+Android実機file picker/upload、利用者向けartifact download、controller outageを同じcandidateの期限付きevidenceへ
+結び付けるまでPhase 15 overallはIn progressであり、production promotionを行わない。新しいGPU executionは別の明示承認なしに
+開始しない。
 
 ## 次candidateのbounded fault preparation
 
