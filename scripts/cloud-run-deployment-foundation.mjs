@@ -89,6 +89,21 @@ function deploymentIdentity(environment, workflowPath) {
   };
 }
 
+export function createStandardFirestoreDatabaseArguments(database) {
+  return [
+    "firestore",
+    "databases",
+    "create",
+    `--database=${database.id}`,
+    `--location=${database.location}`,
+    "--type=firestore-native",
+    "--edition=standard",
+    "--concurrency-mode=pessimistic",
+    "--delete-protection",
+    "--enable-pitr",
+  ];
+}
+
 export function createCloudRunDeploymentFoundationPlan() {
   return {
     controller: {

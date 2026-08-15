@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   createCloudRunDeploymentFoundationPlan,
+  createStandardFirestoreDatabaseArguments,
   deploymentRolePermissions,
 } from "./cloud-run-deployment-foundation.mjs";
 
@@ -46,6 +47,31 @@ test("fixes the isolated production controller foundation", () => {
     "scribe-drop-component": "gpu-controller",
     "scribe-drop-environment": "production",
   });
+});
+
+test("uses only Standard Edition Firestore creation flags", () => {
+  const database = createCloudRunDeploymentFoundationPlan().controller.database;
+  const arguments_ = createStandardFirestoreDatabaseArguments(database);
+  assert.deepEqual(arguments_, [
+    "firestore",
+    "databases",
+    "create",
+    "--database=scribe-production-controller",
+    "--location=asia-southeast1",
+    "--type=firestore-native",
+    "--edition=standard",
+    "--concurrency-mode=pessimistic",
+    "--delete-protection",
+    "--enable-pitr",
+  ]);
+  assert.equal(
+    arguments_.some((argument) => argument.includes("data-access")),
+    false,
+  );
+  assert.equal(
+    arguments_.some((argument) => argument.includes("realtime")),
+    false,
+  );
 });
 
 test("keeps deployment role mutation and secret payload access out of scope", () => {

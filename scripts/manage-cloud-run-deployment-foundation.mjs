@@ -4,7 +4,10 @@ import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
 
-import { createCloudRunDeploymentFoundationPlan } from "./cloud-run-deployment-foundation.mjs";
+import {
+  createCloudRunDeploymentFoundationPlan,
+  createStandardFirestoreDatabaseArguments,
+} from "./cloud-run-deployment-foundation.mjs";
 
 const plan = createCloudRunDeploymentFoundationPlan();
 const localGcloud = path.resolve(".tools/bin/gcloud");
@@ -203,24 +206,9 @@ function ensureDatabase() {
   const database = plan.controller.database;
   const readArguments = ["firestore", "databases", "describe", `--database=${database.id}`];
   if (readJson(readArguments, "production controller database read") === undefined) {
-    gcloudRun(
-      [
-        "firestore",
-        "databases",
-        "create",
-        `--database=${database.id}`,
-        `--location=${database.location}`,
-        "--type=firestore-native",
-        "--edition=standard",
-        "--concurrency-mode=pessimistic",
-        "--delete-protection",
-        "--enable-pitr",
-        "--enable-firestore-data-access",
-        "--enable-realtime-updates",
-        "--no-enable-mongodb-compatible-data-access",
-      ],
-      { label: "production controller database creation" },
-    );
+    gcloudRun(createStandardFirestoreDatabaseArguments(database), {
+      label: "production controller database creation",
+    });
   }
   for (const collectionGroup of database.ttlCollectionGroups) {
     gcloudRun(
