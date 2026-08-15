@@ -1741,6 +1741,22 @@ Remote cancel-convergence candidate Phase 14 gate (2026-08-15):
   exact candidate単一version 100%だった。production resourceとCI workflowは変更していない。Phase 15はcancel scenarioを
   最初に実行し、同じ不具合の解消を実providerで確定するまで残りのGPU scenarioを開始しない。
 
+Remote cancel-convergence candidate Phase 15 cancel gate (2026-08-15):
+
+- 最初のpreflightでFirestore finite authorization文書の作成を欠落させたoperator errorがあり、controller create/reconcileは
+  `INTERNAL_ERROR`で拒否された。Cloud Run mutation、Job/Execution、Firestore execution、GPU executionはいずれも0で、
+  無効fixtureをD1/R2から削除した。cleanup用empty検査を実行前gateへ誤用したことが原因であり、ServiceとFirestoreの
+  finite authorization、active/reserved 0を含む単一fail-closed preflightへ固定した。
+- 修正後preflightでexact `b7ae428`、fault不存在、1 execution/250 JPY、Cloud Run 0、L4 quota 3、Pages/Worker bindingを
+  一括照合した。通常Web upload/Queue経路のruntime `ack`後、cancelをUIからexact 1回送った。Cloud Audit Loggingの
+  `CancelExecution`はexact 1件、Executionは`cancelledCount=1`、failed/succeeded 0へ約29.3秒で停止した。
+- controller requestは初回cancelと再観測の2件、provider cancel mutationは1件だった。再観測でdurable stateは
+  `CANCELLED` version 10、D1はjob/attempt `CANCELLED`、provider `TERMINAL/CANCELLED`へ収束し、artifact/notificationは0だった。
+  利用者delete後、delete結果不明を次Cronで再確認してcontroller `CLEANED` version 13、D1対象row 0へ収束した。
+- 最終read-backはCloud Run Job/Execution 0、R2対象5 object不存在、Firestore controller 3 collection空、Orchestrator
+  RunPod policy、authorization disabled/0、exact candidate単一version 100%だった。productionとCIは未変更である。
+  cancel scenarioは成功した。残り4 GPU scenarioは別の明示承認まで開始せず、Phase 15 overallは未完了とする。
+
 実装:
 
 - Phase 14のexact candidateを再利用し、provider switchをstagingだけで有効化する。release修正が

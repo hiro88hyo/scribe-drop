@@ -216,6 +216,31 @@ exact candidate単一version 100%を確認した。production resourceとCI work
 Phase 15ではcancel scenarioを最初に実行する。同じ不具合の実provider解消を確認するまで残りのGPU scenarioを開始せず、
 cancel失敗時は追加試行・追加修正・candidate再作成へ進まない。
 
+## Cancel-convergence candidate Phase 15 cancel gate
+
+source `b7ae428`のPhase 15開始時、controller Serviceの有限認可だけを設定し、対応するFirestore environment文書を
+作成しないoperator errorがあった。controllerはcreate/reconcileを`INTERNAL_ERROR`で拒否し、Cloud Run監査ログはmutation 0、
+Job/Execution 0、Firestore execution 0だったためGPU executionは発生していない。この無効fixtureはartifact/notification/runtime
+event 0を確認してD1/R2から削除した。cleanup用のFirestore empty検査を実行前gateへ誤用したことが原因であり、以後は
+exact candidate、fault不存在、Service有限認可、Firestore environmentの存在と1 execution/250 JPY・active/reserved 0、
+Cloud Run 0、Pages/Worker binding、L4 quotaを単一のfail-closed preflightで照合する。修正後preflightは全項目に成功した。
+
+同じcandidate、staging限定1 execution/250 JPY、L4 1、4 vCPU、16 GiB、task/parallelism 1、retry 0、timeout 3,300秒、
+VAD無効の非機密長時間fixtureを通常Web upload/Queue経路から投入した。runtime `ack`後、Web UIのcancel確定をexact 1回
+`2026-08-15T05:47:38.618Z`に送った。Cloud Audit Loggingの`CancelExecution` mutationはexact 1件
+`2026-08-15T05:47:45.723244Z`、Execution完了は`2026-08-15T05:48:07.892013Z`で、
+`cancelledCount=1`、failed/succeeded 0だった。
+
+初回controller cancel後の再送ではproviderを再観測し、providerへのcancel mutationを増やさずdurable stateを
+`CANCELLED` version 10へ進めた。Firestore requestはcreate 1、reconcile 1、cancel 2であり、D1は次のCronでjob/attempt
+`CANCELLED`、provider `TERMINAL/CANCELLED`へ収束した。artifactとnotificationは0を維持した。利用者delete後、最初のcleanupは
+実resource削除後の再確認を`CLEANUP_PENDING`として保持し、次のCronで`CLEANED` version 13へ収束した。
+
+最終read-backはCloud Run Job/Execution 0、対象D1親子row 0、R2 source/result 5 object不存在、Firestore controller
+3 collection空だった。OrchestratorはRunPod policy、controller authorizationはdisabled/0、exact candidate単一version
+100%、Pagesはexact commitへ戻した。production resourceとCI workflowは変更していない。cancel scenarioは成功したが、
+残り4 GPU scenarioは別の明示承認まで開始せず、Phase 15 overallはIn progressを維持する。
+
 ## 未完了条件
 
 過去candidateでは成功系artifact、利用者delete、費用境界、deployed Cronだけによるprovider cleanup、
