@@ -1855,6 +1855,17 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
   preflight/finalizeの同型4箇所をdependency closure付きroot scriptへ統一し、`pnpm check`ではtestとaggregate buildより前に
   clean controller buildを実行する。package scriptと全workflow stepの完全一致はYAML AST gateで強制し、target-only build、
   production側の同一regression、clean buildの後置をlocal testで拒否する。
+- dependency closure修正後のstaging acceptanceはcontroller buildを通過したが、disabled controller適用後の15 endpoint
+  一括read-backがrequest key/statusを隠して停止し、recoveryも同じread-backでRunPod再有効化前に停止した。実resourceは
+  controller authorization disabled/0、Cloud Run Job/Execution 0、Firestore request/execution 0、Orchestrator
+  `runpod_serverless_v1` / admission pausedへ収束している。`/tmp` prototypeで全15 endpoint、実Service requestの
+  `validateOnly=true` PATCH、Service非変更を確認してから、固定request key/statusだけを出す診断、同じdouble-snapshot
+  read-back、validate-only前後のService完全一致をsourceとtestへ昇格した。
+- staging workflowにmutation-free `preflight_only`を追加し、同じWIF deployerでcandidate、全remote prerequisite、controller
+  validate-only/read-backを検証した後に終了できるようにした。D1 migration以降はboolean gateとjob dependencyで開始不能とし、
+  preflight-only runは通常Deployのexact-oneを消費しない一方、偽装したrun identityを拒否する。通常staging acceptanceと
+  recovery、production cutover/finalizeも同じdependency-closed buildとcontroller preflightを使い、実identityの
+  preflight-only evidenceが成功するまで新しいstaging mutationを行わない。
 
 実装:
 

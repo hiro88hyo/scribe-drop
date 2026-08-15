@@ -278,6 +278,22 @@ describe("Google controller control-plane read-back client", () => {
     ).rejects.toThrow("control-plane read-back authentication is unavailable");
   });
 
+  it("reports only the fixed request key and HTTP status on a failed read", async () => {
+    const forbidden: typeof fetch = (input) =>
+      Promise.resolve(
+        requestUrl(input) === urls.service
+          ? Response.json(
+              { error: { message: "provider detail must stay hidden" } },
+              { status: 403 },
+            )
+          : Response.json(responses().get(requestUrl(input))),
+      );
+
+    await expect(
+      new GoogleControllerControlPlaneReadbackClient(tokens, forbidden).readAndVerify(expectation),
+    ).rejects.toThrow("control-plane read-back request failed [service; status=403]");
+  });
+
   it("aborts every bounded request at the fixed timeout", async () => {
     vi.useFakeTimers();
     try {

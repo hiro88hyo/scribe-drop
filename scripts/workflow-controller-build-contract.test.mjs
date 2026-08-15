@@ -24,10 +24,11 @@ test("requires a clean-checkout controller dependency closure before aggregate b
 test("requires dependency-closed controller builds in staging and production", async () => {
   assert.deepEqual(
     await verifyWorkflowControllerBuildContract(stagingWorkflow, {
-      expectedBuilds: 2,
+      expectedBuilds: 3,
       workflowName: "deploy-staging-candidate.yml",
     }),
     [
+      "preflight / Validate the exact controller deployment and read-back without mutation",
       "acceptance / Build the controller deployment verifier",
       "recover-acceptance / Build the controller deployment verifier",
     ],
@@ -51,10 +52,10 @@ test("reproduces the rejected clean-checkout staging build regression", async ()
   );
   await assert.rejects(
     verifyWorkflowControllerBuildContract(regressed, {
-      expectedBuilds: 2,
+      expectedBuilds: 3,
       workflowName: "deploy-staging-candidate.yml",
     }),
-    /acceptance \/ Build the controller deployment verifier must use pnpm run workflow:build:gpu-controller/u,
+    /preflight \/ Validate the exact controller deployment and read-back without mutation must use pnpm run workflow:build:gpu-controller/u,
   );
 });
 

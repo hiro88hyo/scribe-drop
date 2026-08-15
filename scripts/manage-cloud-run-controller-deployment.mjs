@@ -7,10 +7,12 @@ import {
   controllerDeployment,
   createControllerAuthorization,
   createControllerDeploymentConfiguration,
+  createControllerServicePatchUrl,
   createControllerServiceRequest,
   isAllowedControllerDisable,
   isAllowedControllerRecoveryDisable,
   isExactControllerAuthorizationRetry,
+  requireControllerServiceValidationOperation,
 } from "./cloud-run-controller-deployment.mjs";
 
 const PROJECT_ID = "scribe-drop";
@@ -244,15 +246,53 @@ async function waitForOperation(operation) {
 }
 
 async function deployService(plan) {
-  const query = new URLSearchParams({ allowMissing: "true", updateMask: "*" });
-  const response = await googleRequest(
-    `https://run.googleapis.com/v2/${plan.name}?${query.toString()}`,
-    { body: JSON.stringify(createControllerServiceRequest(plan)), method: "PATCH" },
-  );
+  const response = await googleRequest(createControllerServicePatchUrl(plan), {
+    body: JSON.stringify(createControllerServiceRequest(plan)),
+    method: "PATCH",
+  });
   if (response.status !== 200) {
     throw new Error(`Cloud Run Service update failed: ${response.status}`);
   }
   await waitForOperation(response.body);
+}
+
+function canonical(value) {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    return `{${Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+async function readServiceGuard(plan) {
+  const response = await googleRequest(`https://run.googleapis.com/v2/${plan.name}`, {
+    method: "GET",
+  });
+  if (response.status === 404) return { exists: false };
+  if (response.status !== 200) {
+    throw new Error(`Cloud Run Service preflight read failed: ${response.status}`);
+  }
+  return { exists: true, snapshot: canonical(response.body) };
+}
+
+async function preflightService(plan) {
+  const before = await readServiceGuard(plan);
+  const response = await googleRequest(createControllerServicePatchUrl(plan, true), {
+    body: JSON.stringify(createControllerServiceRequest(plan)),
+    method: "PATCH",
+  });
+  if (response.status !== 200) {
+    throw new Error(`Cloud Run Service validation failed: ${response.status}`);
+  }
+  requireControllerServiceValidationOperation(response.body);
+  const after = await readServiceGuard(plan);
+  if (canonical(before) !== canonical(after)) {
+    throw new Error("Cloud Run Service changed during validate-only preflight");
+  }
+  return before.exists;
 }
 
 async function readAndVerify(deploymentConfiguration) {
@@ -272,14 +312,14 @@ async function readAndVerify(deploymentConfiguration) {
 
 const [command, selectedEnvironment, authorizationMode, candidatePath] = process.argv.slice(2);
 if (
-  !new Set(["apply", "read", "recover"]).has(command) ||
+  !new Set(["apply", "preflight", "read", "recover"]).has(command) ||
   !new Set(["staging", "production"]).has(selectedEnvironment) ||
   !new Set(["disabled", "operational", "smoke"]).has(authorizationMode) ||
   candidatePath === undefined ||
   process.argv.length !== 6
 ) {
   throw new Error(
-    "Usage: manage-cloud-run-controller-deployment <apply|read|recover> <staging|production> <disabled|operational|smoke> <candidate-evidence>",
+    "Usage: manage-cloud-run-controller-deployment <apply|preflight|read|recover> <staging|production> <disabled|operational|smoke> <candidate-evidence>",
   );
 }
 if (
@@ -344,20 +384,47 @@ try {
   const { createControllerServiceDeploymentPlan } =
     await import("../apps/gpu-controller/dist/index.js");
   const plan = createControllerServiceDeploymentPlan(deploymentConfiguration);
-  if (command === "apply" || command === "recover") {
-    if (command === "recover") await requireRecoveryReady(recoveryEpoch);
-    await deployService(plan);
-    await writeAuthorization(selectedAuthorization, expectedDisabledReservations, recoveryEpoch);
+  if (command === "preflight") {
+    const serviceExists = await preflightService(plan);
+    const { GoogleControllerDeploymentReadbackClient } =
+      await import("../apps/gpu-controller/dist/index.js");
+    const preflight = await new GoogleControllerDeploymentReadbackClient({
+      getAccessToken: async () => accessToken,
+    }).preflight(
+      {
+        binaryAuthorization: {
+          attestors: [`projects/${PROJECT_ID}/attestors/scribe-drop-release-candidate`],
+          projectId: PROJECT_ID,
+        },
+        deployment: deploymentConfiguration,
+        projectNumber: PROJECT_NUMBER,
+      },
+      { allowMissingService: !serviceExists },
+    );
+    console.log(
+      JSON.stringify({
+        environment: selectedEnvironment,
+        readbackRequestCount: preflight.requestCount,
+        serviceMutationObserved: false,
+        serviceValidateOnly: true,
+      }),
+    );
+  } else {
+    if (command === "apply" || command === "recover") {
+      if (command === "recover") await requireRecoveryReady(recoveryEpoch);
+      await deployService(plan);
+      await writeAuthorization(selectedAuthorization, expectedDisabledReservations, recoveryEpoch);
+    }
+    const evidence = await readAndVerify(deploymentConfiguration);
+    console.log(
+      JSON.stringify({
+        authorization: authorizationMode,
+        environment: selectedEnvironment,
+        firestoreTtlFieldCount: evidence.firestore.ttlStates.length,
+        serviceReady: true,
+      }),
+    );
   }
-  const evidence = await readAndVerify(deploymentConfiguration);
-  console.log(
-    JSON.stringify({
-      authorization: authorizationMode,
-      environment: selectedEnvironment,
-      firestoreTtlFieldCount: evidence.firestore.ttlStates.length,
-      serviceReady: true,
-    }),
-  );
 } catch (error) {
   console.error(error instanceof Error ? error.message : "Cloud Run controller deployment failed");
   process.exitCode = 1;

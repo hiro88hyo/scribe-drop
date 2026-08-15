@@ -279,6 +279,8 @@ jobs:
         run: |
           pnpm run workflow:build:gpu-controller
           pnpm run cloud-run:foundation:read production
+          pnpm run cloud-run:controller:deploy preflight production disabled \
+            "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
 
       - name: Render disabled preflight configuration
         env:
@@ -531,6 +533,8 @@ jobs:
       - name: Build verifier and reconstruct exact active production configuration
         run: |
           pnpm run workflow:build:gpu-controller
+          pnpm run cloud-run:controller:deploy preflight production disabled \
+            "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
           pnpm run runpod:config:production
           pnpm run candidate:pages "${RELEASE_CANDIDATE_DIRECTORY}" pages-candidate
           SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION=active \

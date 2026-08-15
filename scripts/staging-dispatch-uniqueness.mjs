@@ -16,12 +16,32 @@ export function verifyStagingDispatchUniqueness(untrusted, input) {
   if (
     !Array.isArray(runs) ||
     !Number.isSafeInteger(untrusted.total_count) ||
-    untrusted.total_count !== runs.length ||
-    runs.length !== 1
+    untrusted.total_count !== runs.length
   ) {
     throw new Error("This commit already has another staging workflow dispatch");
   }
-  const run = runs[0];
+  const preflightTitle = /^Preflight candidate from run [1-9][0-9]* to staging$/u;
+  for (const candidate of runs.filter(
+    (run) => typeof run?.display_title === "string" && preflightTitle.test(run.display_title),
+  )) {
+    if (
+      typeof candidate !== "object" ||
+      candidate === null ||
+      Array.isArray(candidate) ||
+      candidate.head_sha !== commit ||
+      candidate.event !== "workflow_dispatch" ||
+      candidate.path !== ".github/workflows/deploy-staging-candidate.yml"
+    ) {
+      throw new Error("Mutation-free staging preflight identity does not match");
+    }
+  }
+  const deploymentRuns = runs.filter(
+    (run) => typeof run?.display_title !== "string" || !preflightTitle.test(run.display_title),
+  );
+  if (deploymentRuns.length !== 1) {
+    throw new Error("This commit already has another staging workflow dispatch");
+  }
+  const run = deploymentRuns[0];
   if (
     typeof run !== "object" ||
     run === null ||

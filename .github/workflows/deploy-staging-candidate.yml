@@ -11,8 +11,13 @@ on:
         description: Successful Cloud Run candidate workflow run ID for the same commit
         required: true
         type: string
+      preflight_only:
+        description: Stop after the mutation-free remote preflight
+        default: false
+        required: false
+        type: boolean
 
-run-name: Deploy candidate from run ${{ inputs.candidate_run_id }} to staging
+run-name: ${{ inputs.preflight_only && 'Preflight candidate from run' || 'Deploy candidate from run' }} ${{ inputs.candidate_run_id }} to staging
 
 permissions:
   actions: read
@@ -126,6 +131,7 @@ jobs:
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
           CLOUD_RUN_CANDIDATE_RUN_ID: ${{ inputs.cloud_run_candidate_run_id }}
           GH_TOKEN: ${{ github.token }}
+          PREFLIGHT_ONLY: ${{ inputs.preflight_only }}
         run: |
           case "${GITHUB_REF}" in
             refs/heads/release/*)
@@ -163,10 +169,12 @@ jobs:
             "${RUNNER_TEMP}/cloud-run-candidate-run.json" \
             .github/workflows/publish-cloud-run-candidate.yml \
             "${CLOUD_RUN_CANDIDATE_RUN_ID}"
-          gh api \
-            "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-staging-candidate.yml/runs?event=workflow_dispatch&head_sha=${GITHUB_SHA}&per_page=100" \
-            >"${RUNNER_TEMP}/staging-workflow-runs.json"
-          pnpm run staging:dispatch:verify "${RUNNER_TEMP}/staging-workflow-runs.json"
+          if [ "${PREFLIGHT_ONLY}" != "true" ]; then
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-staging-candidate.yml/runs?event=workflow_dispatch&head_sha=${GITHUB_SHA}&per_page=100" \
+              >"${RUNNER_TEMP}/staging-workflow-runs.json"
+            pnpm run staging:dispatch:verify "${RUNNER_TEMP}/staging-workflow-runs.json"
+          fi
           cloud_run_attempt="$(node -p "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')).run_attempt" "${RUNNER_TEMP}/cloud-run-candidate-run.json")"
           printf 'CLOUD_RUN_CANDIDATE_RUN_ATTEMPT=%s\n' "${cloud_run_attempt}" >>"${GITHUB_ENV}"
 
@@ -191,6 +199,14 @@ jobs:
           pnpm run cloud-run:candidate:evidence verify cloud-run-candidate/cloud-run-candidate.json
           printf 'CLOUD_RUN_CANDIDATE_EVIDENCE_PATH=%s\n' \
             "${GITHUB_WORKSPACE}/cloud-run-candidate/cloud-run-candidate.json" >>"${GITHUB_ENV}"
+
+      - name: Validate the exact controller deployment and read-back without mutation
+        env:
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+        run: |
+          pnpm run workflow:build:gpu-controller
+          pnpm run cloud-run:controller:deploy preflight staging disabled \
+            "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
 
       - name: Verify the real staging E2E fixture before any mutation
         run: pnpm run staging:e2e:fixture:verify
@@ -241,6 +257,7 @@ jobs:
   migrate:
     name: Apply candidate D1 migrations
     needs: preflight
+    if: ${{ !inputs.preflight_only }}
     environment: staging
     runs-on: ubuntu-latest
     timeout-minutes: 10

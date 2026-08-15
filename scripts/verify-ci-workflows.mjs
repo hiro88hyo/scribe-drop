@@ -276,7 +276,7 @@ try {
       workflowName: "deploy-production-candidate.yml",
     }),
     staging: await verifyWorkflowControllerBuildContract(stagingWorkflowContents, {
-      expectedBuilds: 2,
+      expectedBuilds: 3,
       workflowName: "deploy-staging-candidate.yml",
     }),
   };
@@ -954,6 +954,9 @@ for (const [description, value] of Object.entries({
   "Cloud Run candidate workflow verification": ".github/workflows/publish-cloud-run-candidate.yml",
   "Cloud Run candidate evidence verification": "cloud-run:candidate:evidence verify",
   "staging foundation preflight": "pnpm run cloud-run:foundation:read staging",
+  "mutation-free exact controller preflight":
+    "pnpm run cloud-run:controller:deploy preflight staging disabled",
+  "mutation-free preflight input": "preflight_only:",
   "staging release input read-back": "pnpm run cloud-run:staging:inputs:verify",
   "single-dispatch candidate gate": "pnpm run staging:dispatch:verify",
   "staging deployment workload identity": "providers/github-staging-deployment",
@@ -1087,6 +1090,11 @@ requireTextCount(
   "read-only Pages app-root config discovery",
 );
 for (const [job, expected, description] of [
+  [
+    stagingMigrationJob,
+    "if: ${{ !inputs.preflight_only }}",
+    "migration rejection after a mutation-free-only preflight",
+  ],
   [stagingMigrationJob, "needs: preflight", "migration dependency on preflight"],
   [stagingPagesDeploymentJob, "needs: migrate", "Pages dependency on migration"],
   [stagingBackendJob, "needs: deploy-pages", "backend dependency on exact Pages deployment"],
@@ -1809,6 +1817,8 @@ for (const [description, value] of Object.entries({
   "isolated production deployment service account":
     "sd-production-deployer@scribe-drop.iam.gserviceaccount.com",
   "strict production foundation read-back": "pnpm run cloud-run:foundation:read production",
+  "mutation-free production controller preflight":
+    "pnpm run cloud-run:controller:deploy preflight production disabled",
   "production Pages upload capability preflight":
     "pnpm run cloudflare:pages:upload-permission:verify:production",
   "production Worker route capability preflight":
@@ -1837,6 +1847,14 @@ for (const [description, value] of Object.entries({
 })) {
   requireText(productionWorkflowContents, value, "deploy-production-candidate.yml", description);
 }
+
+requireTextCount(
+  productionWorkflowContents,
+  "pnpm run cloud-run:controller:deploy preflight production disabled",
+  2,
+  "deploy-production-candidate.yml",
+  "controller preflight before both production mutations",
+);
 
 requireTextCount(
   productionWorkflowContents,

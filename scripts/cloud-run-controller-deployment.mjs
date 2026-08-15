@@ -222,3 +222,29 @@ export function createControllerServiceRequest(plan) {
     traffic: plan.traffic,
   };
 }
+
+export function createControllerServicePatchUrl(plan, validateOnly = false) {
+  if (
+    typeof plan?.name !== "string" ||
+    !/^projects\/scribe-drop\/locations\/asia-southeast1\/services\/[a-z0-9-]+$/u.test(plan.name)
+  ) {
+    throw new Error("Controller Service deployment plan name is invalid");
+  }
+  const query = new URLSearchParams({ allowMissing: "true", updateMask: "*" });
+  if (validateOnly) query.set("validateOnly", "true");
+  return `https://run.googleapis.com/v2/${plan.name}?${query.toString()}`;
+}
+
+export function requireControllerServiceValidationOperation(value) {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    value.error !== undefined ||
+    typeof value.name !== "string" ||
+    !/^projects\/scribe-drop\/locations\/asia-southeast1\/operations\/[a-z0-9-]+$/u.test(value.name)
+  ) {
+    throw new Error("Cloud Run Service validation operation is invalid");
+  }
+  return { name: value.name };
+}

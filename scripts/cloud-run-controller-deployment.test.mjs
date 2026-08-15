@@ -5,10 +5,12 @@ import {
   controllerDeployment,
   createControllerAuthorization,
   createControllerDeploymentConfiguration,
+  createControllerServicePatchUrl,
   createControllerServiceRequest,
   isAllowedControllerDisable,
   isAllowedControllerRecoveryDisable,
   isExactControllerAuthorizationRetry,
+  requireControllerServiceValidationOperation,
 } from "./cloud-run-controller-deployment.mjs";
 
 const candidate = {
@@ -74,6 +76,38 @@ test("renders only mutable reviewed Cloud Run Service fields", () => {
   assert.equal(Object.hasOwn(request, "buildConfig"), false);
   assert.equal(Object.hasOwn(request.template, "encryptionKey"), false);
   assert.equal(request.template.containers.length, 1);
+});
+
+test("uses the exact Cloud Run PATCH request with an optional validate-only guard", () => {
+  const plan = {
+    name: "projects/scribe-drop/locations/asia-southeast1/services/controller",
+  };
+  assert.equal(
+    createControllerServicePatchUrl(plan),
+    "https://run.googleapis.com/v2/projects/scribe-drop/locations/asia-southeast1/services/controller?allowMissing=true&updateMask=*",
+  );
+  assert.equal(
+    createControllerServicePatchUrl(plan, true),
+    "https://run.googleapis.com/v2/projects/scribe-drop/locations/asia-southeast1/services/controller?allowMissing=true&updateMask=*&validateOnly=true",
+  );
+  assert.throws(
+    () => createControllerServicePatchUrl({ name: "projects/other/services/controller" }, true),
+    /deployment plan name is invalid/u,
+  );
+});
+
+test("accepts only a safe successful validate-only operation identity", () => {
+  const name =
+    "projects/scribe-drop/locations/asia-southeast1/operations/123e4567-e89b-42d3-a456-426614174000";
+  assert.deepEqual(requireControllerServiceValidationOperation({ done: false, name }), { name });
+  assert.throws(
+    () => requireControllerServiceValidationOperation({ error: { code: 7 }, name }),
+    /validation operation is invalid/u,
+  );
+  assert.throws(
+    () => requireControllerServiceValidationOperation({ name: "projects/other/operations/x" }),
+    /validation operation is invalid/u,
+  );
 });
 
 test("rejects an unknown deployment environment", () => {

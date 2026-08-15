@@ -213,6 +213,49 @@ function fixtures(): Map<string, unknown> {
 }
 
 describe("Google controller deployment read-back client", () => {
+  it("preflights the exact bounded request set without requiring candidate parity", async () => {
+    const responses = fixtures();
+    const calls: string[] = [];
+    const tokens: AccessTokenProvider = {
+      getAccessToken: () => Promise.resolve("atomic-deployment-preflight-token"),
+    };
+    const fakeFetch: typeof fetch = (input) => {
+      const url = requestUrl(input);
+      calls.push(url);
+      return Promise.resolve(Response.json(responses.get(url)));
+    };
+
+    const result = await new GoogleControllerDeploymentReadbackClient(tokens, fakeFetch).preflight(
+      expectation,
+    );
+
+    expect(result).toEqual({ requestCount: 15 });
+    expect(calls).toHaveLength(30);
+    expect(new Set(calls)).toEqual(new Set(responses.keys()));
+  });
+
+  it("preflights a not-yet-created service through the remaining fixed requests", async () => {
+    const responses = fixtures();
+    const calls: string[] = [];
+    const tokens: AccessTokenProvider = {
+      getAccessToken: () => Promise.resolve("atomic-deployment-preflight-token"),
+    };
+    const fakeFetch: typeof fetch = (input) => {
+      const url = requestUrl(input);
+      calls.push(url);
+      return Promise.resolve(Response.json(responses.get(url)));
+    };
+
+    const result = await new GoogleControllerDeploymentReadbackClient(tokens, fakeFetch).preflight(
+      expectation,
+      { allowMissingService: true },
+    );
+
+    expect(result).toEqual({ requestCount: 13 });
+    expect(calls).toHaveLength(26);
+    expect(calls.some((url) => url.includes("run.googleapis.com/v2/"))).toBe(false);
+  });
+
   it("uses one token and one double-snapshot window for every deployment resource", async () => {
     const responses = fixtures();
     let tokenRequests = 0;
