@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { parsers as yamlParsers } from "prettier/plugins/yaml";
 
 import { findRunnerContextBeforeSteps } from "./github-workflow-static-analysis.mjs";
+import { verifyStagingWorkflowStateContract } from "./staging-workflow-state-contract.mjs";
 import { findYamlMappingDuplicates } from "./yaml-mapping-duplicates.mjs";
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -254,6 +255,14 @@ const publicationWorkflowContents = readFileSync(publicationWorkflowPath, "utf8"
 const stagingWorkflowContents = readFileSync(stagingWorkflowPath, "utf8");
 const productionWorkflowContents = readFileSync(productionWorkflowPath, "utf8");
 const cloudRunPublicationWorkflowContents = readFileSync(cloudRunPublicationWorkflowPath, "utf8");
+let stagingWorkflowStateContract;
+try {
+  stagingWorkflowStateContract = await verifyStagingWorkflowStateContract(stagingWorkflowContents);
+} catch (error) {
+  failures.push(
+    `deploy-staging-candidate.yml: ${error instanceof Error ? error.message : "invalid staging workflow state contract"}`,
+  );
+}
 const dockerIgnoreContents = readFileSync(dockerIgnorePath, "utf8");
 const gitIgnoreContents = readFileSync(gitIgnorePath, "utf8");
 const cloudflareReadbackScriptContents = readFileSync(cloudflareReadbackScriptPath, "utf8");
@@ -1076,6 +1085,20 @@ for (const [job, location] of [[stagingPreflightJob, "preflight job"]]) {
     forbidText(job, forbidden, `deploy-staging-candidate.yml ${location}`, description);
   }
 }
+
+requireTextCount(
+  stagingPreflightJob,
+  "SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY: cloud_run_jobs_l4_v1",
+  1,
+  "deploy-staging-candidate.yml preflight job",
+  "final accepted Cloud Run policy used for normalized parity",
+);
+forbidText(
+  stagingPreflightJob,
+  "SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY: runpod_serverless_v1",
+  "deploy-staging-candidate.yml preflight job",
+  "RunPod baseline substituted into final normalized parity",
+);
 
 for (const [description, expected] of Object.entries({
   "Access control-plane fail-fast command":
@@ -2155,4 +2178,5 @@ if (failures.length > 0) {
   console.log(
     `CI workflow verification passed (${workflowFiles.length} workflow, ${actionReferenceCount} pinned action references).`,
   );
+  console.log(`Staging workflow state contract: ${JSON.stringify(stagingWorkflowStateContract)}`);
 }

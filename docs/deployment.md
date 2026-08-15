@@ -585,6 +585,9 @@ foundation read-backを再実行する。このcommandはproduction secret、pro
 acceptance jobはbrowser installを先に完了し、candidate controllerをdisabledでdeployしてから
 `pnpm cloud-run:staging:bootstrap-preflight <candidate-evidence>`を実行する。GPU 0のexact-one
 `EXECUTION_NOT_FOUND` evidenceとJob/Execution 0が得られるまでpaid authorizationを開かない。
+read-only preflightのenvironment policy exportは合格時の最終`cloud_run_jobs_l4_v1` policyを正規化するが、
+backend promotionの実deployは引き続き`runpod_serverless_v1`を選択する。この期待policyと実deploy baselineを
+同じjob-level値で代用してはならない。
 続けて`pnpm cloud-run:staging:safety read`と
 `pnpm cloud-run:staging:paid-readiness <candidate-evidence>`を同じstepで実行し、disabled/zero、exact L4
 quota、Phase 15固定manifest、233円worst-caseが250円authorization内であることを照合する。backend
