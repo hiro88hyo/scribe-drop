@@ -1849,6 +1849,12 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
   resource zero convergenceを確認し、`verify-workflow-run.mjs`を呼ぶ全jobをYAML ASTから列挙してcommit、branch、
   workflow別dispatch input bindingの完全一致を`pnpm ci:verify`でPublish前に強制した。acceptance欠落、recovery欠落、
   untrusted run ID、新規jobの検査漏れをそれぞれlocal回帰testで拒否する。
+- 次のcandidateは両Publishとremote preflightを通り、acceptanceのcandidate identity検証も成功したが、clean checkoutで
+  `@scribe-drop/contracts`等のbuild出力がないままcontrollerだけをtarget buildして停止した。aggregate local checkは先に
+  全workspaceをbuildした生成物を残すため、このworkflow順序不整合を隠していた。staging acceptance/recoveryとproduction
+  preflight/finalizeの同型4箇所をdependency closure付きroot scriptへ統一し、`pnpm check`ではtestとaggregate buildより前に
+  clean controller buildを実行する。package scriptと全workflow stepの完全一致はYAML AST gateで強制し、target-only build、
+  production側の同一regression、clean buildの後置をlocal testで拒否する。
 
 実装:
 

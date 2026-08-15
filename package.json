@@ -20,7 +20,7 @@
     "candidate:pages": "node scripts/prepare-pages-candidate.mjs",
     "candidate:pages-functions:verify": "node scripts/verify-pages-functions-build.mjs",
     "candidate:verify": "node scripts/verify-release-candidate.mjs",
-    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm candidate:pages-functions:verify && pnpm d1:verify && pnpm ci:verify",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm workflow:build:gpu-controller && pnpm test && pnpm build && pnpm candidate:pages-functions:verify && pnpm d1:verify && pnpm ci:verify",
     "ci:verify": "pnpm cloudflare:permissions:verify && node scripts/verify-ci-workflows.mjs",
     "cloudflare": "wrangler",
     "cloudflare:permissions:verify": "node scripts/verify-cloudflare-credential-policy.mjs",
@@ -142,7 +142,8 @@
     "trivy:install": "bash scripts/install-trivy.sh",
     "typecheck": "pnpm typecheck:ts && pnpm typecheck:py",
     "typecheck:py": "uv run --directory apps/runpod-worker mypy --strict src tests",
-    "typecheck:ts": "pnpm --recursive --filter '@scribe-drop/*' run typecheck"
+    "typecheck:ts": "pnpm --recursive --filter '@scribe-drop/*' run typecheck",
+    "workflow:build:gpu-controller": "pnpm --filter '@scribe-drop/gpu-controller...' run build"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

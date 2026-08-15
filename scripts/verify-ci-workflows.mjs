@@ -7,6 +7,10 @@ import { parsers as yamlParsers } from "prettier/plugins/yaml";
 
 import { findRunnerContextBeforeSteps } from "./github-workflow-static-analysis.mjs";
 import { verifyStagingWorkflowStateContract } from "./staging-workflow-state-contract.mjs";
+import {
+  verifyControllerBuildPackageContract,
+  verifyWorkflowControllerBuildContract,
+} from "./workflow-controller-build-contract.mjs";
 import { findYamlMappingDuplicates } from "./yaml-mapping-duplicates.mjs";
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -261,6 +265,24 @@ try {
 } catch (error) {
   failures.push(
     `deploy-staging-candidate.yml: ${error instanceof Error ? error.message : "invalid staging workflow state contract"}`,
+  );
+}
+let workflowControllerBuildContract;
+try {
+  workflowControllerBuildContract = {
+    implementation: verifyControllerBuildPackageContract(packageManifestContents),
+    production: await verifyWorkflowControllerBuildContract(productionWorkflowContents, {
+      expectedBuilds: 2,
+      workflowName: "deploy-production-candidate.yml",
+    }),
+    staging: await verifyWorkflowControllerBuildContract(stagingWorkflowContents, {
+      expectedBuilds: 2,
+      workflowName: "deploy-staging-candidate.yml",
+    }),
+  };
+} catch (error) {
+  failures.push(
+    `controller workflow build: ${error instanceof Error ? error.message : "invalid dependency closure"}`,
   );
 }
 const dockerIgnoreContents = readFileSync(dockerIgnorePath, "utf8");
@@ -2179,4 +2201,7 @@ if (failures.length > 0) {
     `CI workflow verification passed (${workflowFiles.length} workflow, ${actionReferenceCount} pinned action references).`,
   );
   console.log(`Staging workflow state contract: ${JSON.stringify(stagingWorkflowStateContract)}`);
+  console.log(
+    `Workflow controller build contract: ${JSON.stringify(workflowControllerBuildContract)}`,
+  );
 }

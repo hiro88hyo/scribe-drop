@@ -277,7 +277,7 @@ jobs:
         env:
           GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
         run: |
-          pnpm --filter @scribe-drop/gpu-controller build
+          pnpm run workflow:build:gpu-controller
           pnpm run cloud-run:foundation:read production
 
       - name: Render disabled preflight configuration
@@ -530,7 +530,7 @@ jobs:
 
       - name: Build verifier and reconstruct exact active production configuration
         run: |
-          pnpm --filter @scribe-drop/gpu-controller build
+          pnpm run workflow:build:gpu-controller
           pnpm run runpod:config:production
           pnpm run candidate:pages "${RELEASE_CANDIDATE_DIRECTORY}" pages-candidate
           SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION=active \

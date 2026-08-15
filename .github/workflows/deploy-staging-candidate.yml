@@ -555,7 +555,7 @@ jobs:
         run: pnpm run runpodctl:install
 
       - name: Build the controller deployment verifier
-        run: pnpm --filter @scribe-drop/gpu-controller build
+        run: pnpm run workflow:build:gpu-controller
 
       - name: Install fixed Playwright browser before controller mutation
         run: pnpm --filter @scribe-drop/e2e exec playwright install --with-deps chromium
@@ -888,7 +888,7 @@ jobs:
         id: build-controller
         if: ${{ always() }}
         continue-on-error: true
-        run: pnpm --filter @scribe-drop/gpu-controller build
+        run: pnpm run workflow:build:gpu-controller
 
       - name: Disable only this failed run's staging controller authorization
         id: disable-controller
