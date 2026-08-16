@@ -342,6 +342,26 @@ function addDeploymentArtifactBindings() {
   }
 }
 
+function addStagingBootstrapWorkerRepositoryBinding() {
+  const stagingIdentity = plan.identities.find(({ environment }) => environment === "staging");
+  if (stagingIdentity === undefined) {
+    throw new Error("Staging deployment identity is missing from the reviewed plan");
+  }
+  gcloudRun(
+    [
+      "artifacts",
+      "repositories",
+      "add-iam-policy-binding",
+      "worker",
+      "--location=asia-southeast1",
+      `--member=serviceAccount:${stagingIdentity.account.email}`,
+      "--role=roles/artifactregistry.reader",
+      "--condition=None",
+    ],
+    { label: "staging bootstrap worker repository binding" },
+  );
+}
+
 function rotatePrimarySecret() {
   const secret = plan.controller.primarySecret;
   const value = randomBytes(32).toString("base64url");
@@ -496,6 +516,7 @@ function applyFoundation() {
   ensureDatabase();
   addControllerBindings();
   addDeploymentArtifactBindings();
+  addStagingBootstrapWorkerRepositoryBinding();
   const secretVersion = rotatePrimarySecret();
   run(process.execPath, ["scripts/verify-cloud-run-deployment-foundation.mjs", "staging"], {
     label: "staging foundation final read-back",
@@ -554,6 +575,7 @@ function applyStagingBootstrapPreflightFoundation() {
     `serviceAccount:${stagingIdentity.account.email}`,
     "roles/iam.serviceAccountUser",
   );
+  addStagingBootstrapWorkerRepositoryBinding();
   run(process.execPath, ["scripts/verify-cloud-run-deployment-foundation.mjs", "staging"], {
     label: "staging bootstrap preflight foundation final read-back",
   });

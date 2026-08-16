@@ -168,6 +168,27 @@ test("isolates GPU-free bootstrap mutation to a staging-only role", () => {
   assert.equal(deploymentRolePermissions.includes("run.jobs.create"), false);
 });
 
+test("grants the staging bootstrap deployer read-only access to the worker repository", () => {
+  const managerSource = readFileSync(
+    new URL("./manage-cloud-run-deployment-foundation.mjs", import.meta.url),
+    "utf8",
+  );
+  const binding = managerSource.match(
+    /function addStagingBootstrapWorkerRepositoryBinding\(\) \{(?<body>[\s\S]*?)\n\}/u,
+  )?.groups?.body;
+  assert.equal(typeof binding, "string");
+  assert.match(binding, /"worker"/u);
+  assert.match(binding, /--role=roles\/artifactregistry\.reader/u);
+  assert.match(binding, /stagingIdentity\.account\.email/u);
+
+  const verifierSource = readFileSync(
+    new URL("./verify-cloud-run-deployment-foundation.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.match(verifierSource, /"staging bootstrap worker repository"/u);
+  assert.match(verifierSource, /\[\{ role: "roles\/artifactregistry\.reader" \}\]/u);
+});
+
 test("reuses only the already reviewed controller roles", () => {
   const plan = createCloudRunDeploymentFoundationPlan();
   assert.deepEqual(

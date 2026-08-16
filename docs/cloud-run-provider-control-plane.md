@@ -122,6 +122,10 @@ Firestore custom role `scribeDropFirestoreController`は`datastore.databases.get
 - exact Artifact Registry repository上の`roles/artifactregistry.reader`
 - exact Secret Manager secret上の`roles/secretmanager.secretAccessor`
 
+GPU-free bootstrapでJobを作成するstaging deployerにも、image importに必要な
+`artifactregistry.repositories.downloadArtifacts`をworker repository上の
+`roles/artifactregistry.reader`だけで付与する。
+
 Cloud Run Serviceはsecretの数値versionだけを参照する。SecretVersion単位のIAM bindingがあるとは扱わない。
 
 `run.jobs.update`、`run.jobs.runWithOverrides`、service/worker pool mutation、IAM policy mutation、Artifact Registry

@@ -197,6 +197,12 @@ function requireStagingBootstrapPreflight(identity) {
     [{ role: "roles/iam.serviceAccountUser" }],
     "staging runtime service account",
   );
+  requirePrincipalBindings(
+    ["artifacts", "repositories", "get-iam-policy", "worker", "--location=asia-southeast1"],
+    `serviceAccount:${identity.account.email}`,
+    [{ role: "roles/artifactregistry.reader" }],
+    "staging bootstrap worker repository",
+  );
 }
 
 function requireProductionController(identity) {

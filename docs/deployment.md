@@ -581,7 +581,9 @@ pnpm cloud-run:foundation:read staging
 staging bootstrap preflight roleが未適用の場合だけ、project、staging deployer、runtime identityを
 read-onlyで確認して明示承認後に`pnpm cloud-run:foundation:apply:staging-preflight`を1回実行し、直後に
 foundation read-backを再実行する。このcommandはproduction secret、production IAM、controller Serviceを
-変更しない。workflowはさらにEnvironmentの4個のCloud Run/R2入力をGoogle APIへ照合する。
+変更せず、staging deployerへworker repositoryの`roles/artifactregistry.reader`を付与する。これは
+GPU-free Job作成時のimage importに必要であり、repository write権限は含まない。workflowはさらに
+Environmentの4個のCloud Run/R2入力をGoogle APIへ照合する。
 shared release deployer custom roleのpermission driftだけを収束する場合は、対象roleとstaging bindingの
 read-back後に明示承認を得て`pnpm cloud-run:foundation:apply:release-deployer-role`を実行する。このcommandは
 `scribeDropReleaseDeployer`だけを更新し、service account、binding、secret、database、Serviceを変更しない。

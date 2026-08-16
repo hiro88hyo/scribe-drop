@@ -238,8 +238,9 @@ responseでkind、Note、resource URI、payload、keyを完全照合し、Binary
 
 controller authorityは[ADR 0078](./adr/0078-split-controller-iam-by-resource-boundary.md)に従うpure IAM planで分割する。Cloud Run Jobs roleは
 実clientが呼ぶ8 permissionだけ、Firestore roleはtransactionとentity CRUDの5 permissionだけとし、database条件、runtime
-`roles/iam.serviceAccountUser`、repository `roles/artifactregistry.reader`をcontroller principalの単独bindingとして固定する。raw custom
-roleとIAM policy verifierは他principalのproject bindingを無視する一方、controllerの追加role、他principalとの混在、条件/resource driftを
+`roles/iam.serviceAccountUser`、repository `roles/artifactregistry.reader`をcontroller principal単位で固定する。GPU-free bootstrapを
+作成するstaging deployerにもworker repositoryのReaderだけを付与する。raw custom roleとIAM policy verifierは他principalのbindingを
+無視する一方、controllerの追加role、条件/resource driftを
 拒否する。IAM read-only clientはcustom role GETとproject/repository/runtime service accountの`getIamPolicy`だけを固定endpointへ送り、
 同じtoken/quota projectの2回のresponseが一致した場合だけ検証へ渡す。HTTP POSTは`:getIamPolicy`に限定し、`setIamPolicy`と不正bodyを
 request送信前に拒否する。live custom role responseで削除されていないroleの`deleted: false`が省略された場合だけfalseへ
