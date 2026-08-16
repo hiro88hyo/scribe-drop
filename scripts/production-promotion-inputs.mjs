@@ -1,4 +1,5 @@
 const runIdPattern = /^[1-9][0-9]*$/u;
+const commitShaPattern = /^[a-f0-9]{40}$/u;
 const ulidPattern = /^[0-9A-HJKMNP-TV-Z]{26}$/u;
 
 function positiveInteger(value, name) {
@@ -11,8 +12,11 @@ function positiveInteger(value, name) {
 }
 
 export function validateProductionPromotionInputs(input, now = new Date()) {
-  if (!runIdPattern.test(input.stagingRunId)) {
-    throw new Error("Staging run ID is invalid");
+  if (!runIdPattern.test(input.stagingRunId) || !commitShaPattern.test(input.candidateCommitSha)) {
+    throw new Error("Production candidate identity is invalid");
+  }
+  if (input.preflightOnly !== "true" && input.preflightOnly !== "false") {
+    throw new Error("Production preflight mode is invalid");
   }
   if (input.operation === "cutover") {
     if (
@@ -20,14 +24,29 @@ export function validateProductionPromotionInputs(input, now = new Date()) {
       input.productionSmokeJobId !== "none" ||
       input.operationalMaxExecutions !== "0" ||
       input.operationalMaxWorstCaseJpy !== "0" ||
-      input.operationalValidUntil !== "1970-01-01T00:00:00.000Z"
+      input.operationalValidUntil !== "1970-01-01T00:00:00.000Z" ||
+      (input.preflightOnly === "true"
+        ? input.preflightRunId !== "0"
+        : !runIdPattern.test(input.preflightRunId))
     ) {
       throw new Error("Cutover must not include finalize-only inputs");
     }
-    return { operation: "cutover", stagingRunId: input.stagingRunId };
+    return {
+      candidateCommitSha: input.candidateCommitSha,
+      operation: "cutover",
+      preflightOnly: input.preflightOnly === "true",
+      preflightRunId: input.preflightRunId,
+      stagingRunId: input.stagingRunId,
+    };
   }
   if (input.operation !== "finalize") {
     throw new Error("Production promotion operation is invalid");
+  }
+  if (input.preflightOnly === "true") {
+    throw new Error("Finalize cannot run in preflight-only mode");
+  }
+  if (input.preflightRunId !== "0") {
+    throw new Error("Finalize must not include a preflight run ID");
   }
   if (!runIdPattern.test(input.cutoverRunId) || !ulidPattern.test(input.productionSmokeJobId)) {
     throw new Error("Finalize evidence identity is invalid");
@@ -57,9 +76,12 @@ export function validateProductionPromotionInputs(input, now = new Date()) {
   }
   return {
     cutoverRunId: input.cutoverRunId,
+    candidateCommitSha: input.candidateCommitSha,
     maxExecutions,
     maxWorstCaseJpy,
     operation: "finalize",
+    preflightOnly: false,
+    preflightRunId: "0",
     productionSmokeJobId: input.productionSmokeJobId,
     stagingRunId: input.stagingRunId,
     validUntil: expiry.toISOString(),

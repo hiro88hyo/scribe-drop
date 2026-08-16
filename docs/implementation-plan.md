@@ -1878,6 +1878,12 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
   failure、recovery全安全stepを固定fingerprintで検証し、source時間内のexact-one `CLEANED` recordと現在の全live parityを
   再検証するGPU-free jobだけで短命acceptanceへ復旧する。通常acceptance job、migration、deploy、controller apply、GPUは
   実行せず、candidate identityにworkflow `GITHUB_SHA`を代入する既存evidence CLIの不整合もstatic gateで拒否する。
+- GPU-free staging run `31922702942`はsource lifecycle、Cloud Run/Firestoreのexact-one `CLEANED` state、RunPod baseline、
+  全Cloudflare read-back、schema version 3 evidence発行を完了し、通常acceptance/GPU/migration/deployはskipした。
+  production workflowをdispatchせず末尾までtraceした結果、workflow commitをcandidate artifact/evidenceへ代入する同型不整合を
+  RunPod promotion、cutover/release evidenceまで確認した。[ADR 0089](./adr/0089-separate-production-workflow-and-candidate-identity.md)
+  に従いcandidate commitを必須入力へ分離し、productionの全remote prerequisiteだけを実行する`preflight_only`を追加する。
+  9 mutation stepのskipをsourceと成功run APIの両方で検証し、そのpreflight run IDなしに実cutoverを開始できないようにする。
 
 実装:
 

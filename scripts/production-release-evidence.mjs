@@ -101,7 +101,7 @@ if (
           environmentParity: true,
           providerCleanup: true,
         },
-        commitSha: process.env.GITHUB_SHA,
+        commitSha: process.env.EXPECTED_COMMIT_SHA,
         cutoverRunId: process.env.CUTOVER_RUN_ID,
         environment: "production",
         finalizeRunId: process.env.GITHUB_RUN_ID,

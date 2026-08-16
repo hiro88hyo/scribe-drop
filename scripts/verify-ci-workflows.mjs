@@ -140,6 +140,16 @@ const createStagingAcceptancePath = path.join(
   "scripts",
   "create-staging-acceptance.mjs",
 );
+const productionCutoverEvidencePath = path.join(
+  repositoryRoot,
+  "scripts",
+  "production-cutover-evidence.mjs",
+);
+const productionReleaseEvidencePath = path.join(
+  repositoryRoot,
+  "scripts",
+  "production-release-evidence.mjs",
+);
 const stagingPagesSecretsScriptPath = path.join(
   repositoryRoot,
   "scripts",
@@ -337,6 +347,8 @@ const stagingBootstrapPreflightManagerContents = readFileSync(
 const stagingPaidReadinessVerifierContents = readFileSync(stagingPaidReadinessVerifierPath, "utf8");
 const stagingQuotaClientContents = readFileSync(stagingQuotaClientPath, "utf8");
 const createStagingAcceptanceContents = readFileSync(createStagingAcceptancePath, "utf8");
+const productionCutoverEvidenceContents = readFileSync(productionCutoverEvidencePath, "utf8");
+const productionReleaseEvidenceContents = readFileSync(productionReleaseEvidencePath, "utf8");
 const stagingPagesSecretsScriptContents = readFileSync(stagingPagesSecretsScriptPath, "utf8");
 const promotePagesCandidateScriptContents = readFileSync(promotePagesCandidateScriptPath, "utf8");
 const dockerfileContents = readFileSync(dockerfilePath, "utf8");
@@ -387,6 +399,16 @@ const stagingRecoveryJob = workflowJob(
   stagingWorkflowContents,
   "recover-acceptance",
   "deploy-staging-candidate.yml",
+);
+const productionCutoverJob = workflowJob(
+  productionWorkflowContents,
+  "cutover",
+  "deploy-production-candidate.yml",
+);
+const productionVerificationJob = workflowJob(
+  productionWorkflowContents,
+  "verify-promotion",
+  "deploy-production-candidate.yml",
 );
 const stagingSecretVerificationStep = workflowStep(
   stagingPreflightJob,
@@ -1203,6 +1225,14 @@ forbidText(
   "create-staging-acceptance.mjs",
   "workflow commit substituted for candidate commit",
 );
+for (const [location, contents] of [
+  ["production-cutover-evidence.mjs", productionCutoverEvidenceContents],
+  ["production-release-evidence.mjs", productionReleaseEvidenceContents],
+  ["promote-runpod-candidate.mjs", runpodPromotionScriptContents],
+]) {
+  requireText(contents, "EXPECTED_COMMIT_SHA", location, "immutable candidate commit identity");
+  forbidText(contents, "GITHUB_SHA", location, "workflow commit substituted for candidate commit");
+}
 
 requireTextCount(
   stagingPreflightJob,
@@ -1918,9 +1948,13 @@ for (const [description, value] of Object.entries({
 for (const [description, value] of Object.entries({
   "production promotion workflow name": "name: Promote staging-accepted candidate to production",
   "bounded operation input": "operation:",
+  "explicit immutable candidate input": "candidate_commit_sha:",
+  "mutation-free production preflight input": "preflight_only:",
+  "successful production preflight run input": "preflight_run_id:",
   "cutover operation": "- cutover",
   "finalize operation": "- finalize",
   "operation input validation": "pnpm run production:promotion:inputs:verify",
+  "successful production preflight verification": "pnpm run production:preflight:verify",
   "trusted staging run verification": ".github/workflows/deploy-staging-candidate.yml",
   "trusted candidate run verification": ".github/workflows/publish-runpod-worker.yml",
   "trusted Cloud Run candidate run verification":
@@ -1962,6 +1996,49 @@ for (const [description, value] of Object.entries({
 })) {
   requireText(productionWorkflowContents, value, "deploy-production-candidate.yml", description);
 }
+
+requireTextCount(
+  productionWorkflowContents,
+  "EXPECTED_COMMIT_SHA: ${{ inputs.candidate_commit_sha }}",
+  3,
+  "deploy-production-candidate.yml",
+  "candidate identity in every production job",
+);
+requireTextCount(
+  productionWorkflowContents,
+  "${GITHUB_SHA}",
+  2,
+  "deploy-production-candidate.yml",
+  "workflow commit only for staging and cutover run identity",
+);
+for (const stepName of [
+  "Apply candidate migrations and reviewed R2 policies",
+  "Promote exact rollback-compatible RunPod image without execution",
+  "Deploy bounded controller behind the existing RunPod selection",
+  "Deploy exact application candidate with admission paused",
+  "Drain old provider before changing new-attempt selection",
+  "Select Cloud Run while keeping admission paused",
+  "Verify exact-one L4 authorization and activate admission",
+  "Record immutable cutover evidence",
+  "Upload immutable cutover evidence",
+]) {
+  requireText(
+    workflowStep(productionCutoverJob, stepName, "deploy-production-candidate.yml cutover job"),
+    "if: ${{ !inputs.preflight_only }}",
+    "deploy-production-candidate.yml cutover job",
+    `${stepName} preflight exclusion`,
+  );
+}
+requireText(
+  workflowStep(
+    productionVerificationJob,
+    "Verify successful mutation-free production preflight before cutover",
+    "deploy-production-candidate.yml verification job",
+  ),
+  "if: inputs.operation == 'cutover' && !inputs.preflight_only",
+  "deploy-production-candidate.yml verification job",
+  "preflight evidence required before mutating cutover",
+);
 
 requireTextCount(
   productionWorkflowContents,

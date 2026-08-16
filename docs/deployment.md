@@ -652,6 +652,15 @@ productionの通常UIで固定smoke mediaを1件uploadし、artifactと通知を
 `execution数 * 250`円、24時間以内のISO expiryを渡す。finalizeはD1/R2、Cloud Run resource 0、controller
 storage CLEANEDを検証するまで運用枠を開かない。productionにstaging Access service principalを作成しない。
 
+[ADR 0089](./adr/0089-separate-production-workflow-and-candidate-identity.md)に従い、production workflowには
+staging acceptanceと一致する`candidate_commit_sha`を必ず渡す。workflowの`GITHUB_SHA`はsource runの信頼検証に
+だけ使い、artifact名、deployment label、authorization、evidenceへ流用しない。cutover前に同じ入力で
+`preflight_only=true`、`preflight_run_id=0`を実行し、staging evidence、両candidate、production foundation、
+controller validate-only、Cloudflare/Pages/Access/RunPodの全read-backを成功させる。このrunでは全migration/deploy、
+provider切替、authorization、evidence発行がskipされる。実cutoverは成功したrun IDを`preflight_run_id`へ渡し、
+同じworkflow commit/staging run、全preflight step成功、全mutation step skipをAPI read-backで検証させる。
+`finalize`では`preflight_run_id=0`を使用する。
+
 rollbackはmodeを`disabled`へ戻してshadow endpointを閉じ、実行中Executionのcleanupとcontroller
 authorizationの無効化を確認してから直前のWorker deploymentへ戻す。forward-only migrationは
 旧applicationと互換のため削除しない。
