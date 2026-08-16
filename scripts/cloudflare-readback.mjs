@@ -135,7 +135,6 @@ export function verifyCloudflareReadback(outputs, expected) {
   requireOnce(outputs.queue, `Queue Name: ${expected.queueName}`, "Queue name");
   requireOnce(outputs.queue, "Number of Producers: 2", "Queue producer count");
   requireOnce(outputs.queue, `Producers: r2_bucket:${expected.bucketName}`, "Queue producer");
-  requireOnce(outputs.queue, `worker:${expected.pagesProjectName}`, "Pages Queue producer");
   requireOnce(outputs.queue, "Number of Consumers: 1", "Queue consumer count");
   requireOnce(outputs.queue, `Consumers: worker:${expected.workerName}`, "Queue consumer");
 

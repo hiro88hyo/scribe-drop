@@ -465,6 +465,9 @@ recoveryはRunPod復元後にCloudflare全resourceをread-backするため、通
 Cloud Quotas APIのenabled状態はstaging bootstrap foundationのapply/read-back対象とし、IAM roleのpermission一致だけで
 quota capabilityを成功扱いにしない。CIのstaging deployerにはenabled状態を読む`serviceusage.services.list`だけを与え、
 APIを変更する`serviceusage.services.enable`は与えない。
+`resume_acceptance_only`では、skipするPages/Orchestrator/R2/Queueのfull live read-backをmutation-free
+`preflight`で先に完了する。Pages Queue producerはPages project APIの`queue_producers`で検証し、bindingを列挙しない
+`wrangler queues info`の人間向け表示には依存しない。Queue側ではproducer総数とR2 producerを独立検証する。
 
 RunPod Worker build inputsに差分がないapplication-only candidateでは、
 [ADR 0038](./adr/0038-reuse-unchanged-runpod-worker-image.md)の検証済みsource candidate

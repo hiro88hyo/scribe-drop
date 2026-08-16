@@ -249,6 +249,13 @@ jobs:
       - name: Export normalized staging environment policy
         run: pnpm run environment:policy:export staging
 
+      - name: Verify resumed live staging parity before any mutation
+        if: ${{ inputs.resume_acceptance_only }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
+        run: pnpm run cloudflare:readback:staging
+
       - name: Verify existing encrypted secrets
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

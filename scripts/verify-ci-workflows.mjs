@@ -1088,6 +1088,26 @@ requireTextOrder(
   "deploy-staging-candidate.yml preflight job",
   "Worker route capability verification before RunPod preflight",
 );
+requireTextOrder(
+  stagingPreflightJob,
+  "pnpm run environment:policy:export staging",
+  "Verify resumed live staging parity before any mutation",
+  "deploy-staging-candidate.yml preflight job",
+  "rendered policy before resumed live parity",
+);
+for (const [description, expected] of Object.entries({
+  "resume-only live parity condition": "if: ${{ inputs.resume_acceptance_only }}",
+  "full resumed Cloudflare read-back": "pnpm run cloudflare:readback:staging",
+  "Pages credential for resumed parity":
+    "CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}",
+})) {
+  requireText(
+    stagingPreflightJob,
+    expected,
+    "deploy-staging-candidate.yml preflight job",
+    description,
+  );
+}
 
 requireTextCount(
   stagingWorkflowContents,
