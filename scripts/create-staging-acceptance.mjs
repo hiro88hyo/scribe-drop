@@ -15,7 +15,7 @@ try {
   }
   const candidateRunId = process.env["CANDIDATE_RUN_ID"];
   const stagingRunId = process.env["GITHUB_RUN_ID"];
-  const commitSha = process.env["GITHUB_SHA"];
+  const commitSha = process.env["EXPECTED_COMMIT_SHA"];
   const environmentPolicyId = process.env["ENVIRONMENT_POLICY_ID"];
   const cloudRunCandidateEvidencePath = process.env["CLOUD_RUN_CANDIDATE_EVIDENCE_PATH"];
   if (

@@ -454,6 +454,14 @@ recoveryだけでRunPod policy、controller authorization、Cloud Run resource�
 収束し、acceptanceは失敗のまま維持する。原因をsource/testへ還元した新commitと新candidateを作り、同じ
 commitのstaging dispatchまたはjob re-runで追加GPU executionを開かない。
 
+例外は[ADR 0088](./adr/0088-recover-successful-staging-lifecycle-evidence.md)のGPU-free evidence復旧だけとする。
+これは実M4A lifecycleが成功し、cleanup convergence verifierだけが失敗し、recoveryの全安全処理が完了した
+source runに限定する。`completed_acceptance_run_id`は`resume_acceptance_only=true`かつexact candidate commitと
+組み合わせ、source run/step fingerprintと祖先関係、Cloud Run Job/Execution 0、authorization disabled/zero、
+source run時間内のexact-one `CLEANED` record、RunPod baseline、全Cloudflare resourceをread-onlyで再検証する。
+同jobではmigration、deploy、controller apply、実E2Eを禁止し、通常acceptanceがskipされた場合だけ短命evidenceを
+発行する。任意のE2E失敗、cleanup未完了、複数record、candidate不一致をこの経路で成功へ読み替えない。
+
 candidate、staging、production workflowを起動する前に、変更対象のlocal testと標準local
 gateを完了する。remote workflowをlocal検証の代替に使用しない。
 
@@ -610,6 +618,9 @@ backend promotionの実deployは引き続き`runpod_serverless_v1`を選択す�
 同じjob-level値で代用してはならない。`resume_acceptance_only`のmutation前read-backも、前回のrecoveryまたは
 backend promotionが残した安全な`runpod_serverless_v1` baselineを照合し、acceptance内でCloud Run policyを
 有効化した後にだけ最終policyとの一致を要求する。
+実M4A後のcleanup verifierは同じepoch、reserved execution 1、250円authorization、exact-one execution
+recordを各readで検証しながら、Job/Execution 0、`activeExecutions=0`、record `CLEANED`まで最大20分pollする。
+一時的なreaper収束待ちはpendingとし、identity、cost、reserved countの不一致は直ちに失敗とする。
 続けて`pnpm cloud-run:staging:safety read`と
 `pnpm cloud-run:staging:paid-readiness <candidate-evidence>`を同じstepで実行し、disabled/zero、exact L4
 quota、Phase 15固定manifest、233円worst-caseが250円authorization内であることを照合する。backend

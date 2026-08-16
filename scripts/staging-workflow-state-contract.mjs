@@ -218,10 +218,14 @@ export async function verifyStagingWorkflowStateContract(source) {
   const workflow = await parsers.yaml.parse(source, { filepath: "deploy-staging-candidate.yml" });
   const allJobs = jobEntries(workflow);
   const jobs = Object.fromEntries(
-    ["preflight", "migrate", "deploy-backend", "acceptance", "recover-acceptance"].map((name) => [
-      name,
-      job(workflow, name),
-    ]),
+    [
+      "preflight",
+      "migrate",
+      "deploy-backend",
+      "acceptance",
+      "resume-acceptance-evidence",
+      "recover-acceptance",
+    ].map((name) => [name, job(workflow, name)]),
   );
 
   requireProfile(profile(jobEnvironment(jobs.preflight)), finalPolicy, "preflight job");
@@ -262,6 +266,19 @@ export async function verifyStagingWorkflowStateContract(source) {
     "acceptance restore",
   );
   requireProfile(
+    profile(jobEnvironment(jobs["resume-acceptance-evidence"])),
+    finalPolicy,
+    "recovered acceptance evidence job",
+  );
+  requireProfile(
+    stepProfile(
+      jobs["resume-acceptance-evidence"],
+      "Verify recovered provider evidence and current live staging",
+    ),
+    runpodBaseline,
+    "recovered acceptance live parity",
+  );
+  requireProfile(
     stepProfile(
       jobs["recover-acceptance"],
       "Pause all new GPU admission on the RunPod recovery policy",
@@ -297,6 +314,7 @@ export async function verifyStagingWorkflowStateContract(source) {
     acceptedParity: finalPolicy,
     paidExecutions: 1,
     preAcceptanceDeployment: runpodBaseline,
+    recoveredAcceptance: { liveParity: runpodBaseline, paidExecutions: 0 },
     recovery: runpodBaseline,
     workflowIdentity,
   };

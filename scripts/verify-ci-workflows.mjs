@@ -135,6 +135,11 @@ const stagingQuotaClientPath = path.join(
   "scripts",
   "staging-cloud-run-quota-client.mjs",
 );
+const createStagingAcceptancePath = path.join(
+  repositoryRoot,
+  "scripts",
+  "create-staging-acceptance.mjs",
+);
 const stagingPagesSecretsScriptPath = path.join(
   repositoryRoot,
   "scripts",
@@ -331,6 +336,7 @@ const stagingBootstrapPreflightManagerContents = readFileSync(
 );
 const stagingPaidReadinessVerifierContents = readFileSync(stagingPaidReadinessVerifierPath, "utf8");
 const stagingQuotaClientContents = readFileSync(stagingQuotaClientPath, "utf8");
+const createStagingAcceptanceContents = readFileSync(createStagingAcceptancePath, "utf8");
 const stagingPagesSecretsScriptContents = readFileSync(stagingPagesSecretsScriptPath, "utf8");
 const promotePagesCandidateScriptContents = readFileSync(promotePagesCandidateScriptPath, "utf8");
 const dockerfileContents = readFileSync(dockerfilePath, "utf8");
@@ -370,6 +376,11 @@ const stagingBackendJob = workflowJob(
 const stagingAcceptanceJob = workflowJob(
   stagingWorkflowContents,
   "acceptance",
+  "deploy-staging-candidate.yml",
+);
+const stagingResumeEvidenceJob = workflowJob(
+  stagingWorkflowContents,
+  "resume-acceptance-evidence",
   "deploy-staging-candidate.yml",
 );
 const stagingRecoveryJob = workflowJob(
@@ -999,7 +1010,7 @@ const absoluteCandidateDirectory =
 requireTextCount(
   stagingWorkflowContents,
   absoluteCandidateDirectory,
-  6,
+  7,
   "deploy-staging-candidate.yml",
   "workspace-absolute candidate directory",
 );
@@ -1147,6 +1158,52 @@ for (const [job, location] of [[stagingPreflightJob, "preflight job"]]) {
   }
 }
 
+for (const [description, forbidden] of Object.entries({
+  "Cloud Run controller mutation": "cloud-run:controller:deploy apply",
+  "D1 mutation": "d1 migrations apply",
+  "Orchestrator mutation": "wrangler deploy",
+  "Pages mutation": "cloudflare:pages:promote:staging",
+  "paid lifecycle": "pnpm run test:e2e:staging",
+  "RunPod mutation": "runpod:promote:staging",
+})) {
+  forbidText(
+    stagingResumeEvidenceJob,
+    forbidden,
+    "deploy-staging-candidate.yml recovered acceptance evidence job",
+    description,
+  );
+}
+for (const [description, expected] of Object.entries({
+  "explicit recovered run input": "completed_acceptance_run_id:",
+  "resume input validation": "pnpm run staging:resume:inputs:verify",
+  "source run verification": "pnpm run staging:acceptance:resume:verify",
+  "source commit ancestry": "git merge-base --is-ancestor",
+  "recovered provider evidence": "pnpm run cloud-run:acceptance:recovered",
+  "current full staging read-back": "pnpm run cloudflare:readback:staging",
+  "recovered acceptance creation": "Issue short-lived recovered staging acceptance",
+  "recovered acceptance artifact": "Upload immutable recovered staging acceptance",
+})) {
+  requireText(stagingWorkflowContents, expected, "deploy-staging-candidate.yml", description);
+}
+requireText(
+  stagingResumeEvidenceJob,
+  "needs.acceptance.result == 'skipped'",
+  "deploy-staging-candidate.yml recovered acceptance evidence job",
+  "paid acceptance exclusion",
+);
+requireText(
+  createStagingAcceptanceContents,
+  'process.env["EXPECTED_COMMIT_SHA"]',
+  "create-staging-acceptance.mjs",
+  "immutable candidate commit identity",
+);
+forbidText(
+  createStagingAcceptanceContents,
+  'process.env["GITHUB_SHA"]',
+  "create-staging-acceptance.mjs",
+  "workflow commit substituted for candidate commit",
+);
+
 requireTextCount(
   stagingPreflightJob,
   "SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY: cloud_run_jobs_l4_v1",
@@ -1219,7 +1276,7 @@ requireTextOrder(
 requireTextCount(
   stagingWorkflowContents,
   "SCRIBE_DROP_STAGING_PAGES_ACCESS_AUDIENCE: ${{ vars.SCRIBE_DROP_STAGING_PAGES_ACCESS_AUDIENCE }}",
-  5,
+  6,
   "deploy-staging-candidate.yml",
   "Pages Access audience in every staging job that renders or verifies Web configuration",
 );
@@ -1446,6 +1503,7 @@ for (const [description, expected] of Object.entries({
   "no acceptance on recovery": "Verify recovered staging safety without issuing acceptance",
   "Pages credential for full Cloudflare recovery read-back":
     "CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}",
+  "RunPod plan reconstruction before full recovery read-back": "pnpm run runpod:config:staging",
   "recovery convergence continues after earlier failure":
     "id: wait-convergence\n        if: ${{ always() }}\n        continue-on-error: true",
   "controller recovery requires convergence":
@@ -1461,6 +1519,13 @@ for (const [description, expected] of Object.entries({
     description,
   );
 }
+requireTextOrder(
+  stagingRecoveryJob,
+  "pnpm run runpod:config:staging",
+  "pnpm run cloudflare:readback:staging",
+  "deploy-staging-candidate.yml recovery job",
+  "RunPod plan reconstruction before full recovery read-back",
+);
 forbidText(
   stagingAcceptanceJob,
   "arm-recovery",

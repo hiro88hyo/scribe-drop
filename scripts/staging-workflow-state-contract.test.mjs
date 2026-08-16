@@ -19,6 +19,14 @@ test("accepts the reviewed staging state transition contract", async () => {
       mode: "synthetic-shadow",
       policy: "runpod_serverless_v1",
     },
+    recoveredAcceptance: {
+      liveParity: {
+        admission: "active",
+        mode: "synthetic-shadow",
+        policy: "runpod_serverless_v1",
+      },
+      paidExecutions: 0,
+    },
     recovery: {
       admission: "active",
       mode: "synthetic-shadow",
@@ -28,6 +36,7 @@ test("accepts the reviewed staging state transition contract", async () => {
       acceptance: 1,
       preflight: 2,
       "recover-acceptance": 1,
+      "resume-acceptance-evidence": 1,
     },
   });
 });

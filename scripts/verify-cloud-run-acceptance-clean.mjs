@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import process from "node:process";
 
+import { verifyAuthorizedAcceptanceSnapshot } from "./cloud-run-acceptance-state.mjs";
+
 const PROJECT_ID = "scribe-drop";
 const REGION = "asia-southeast1";
 const tokenPattern = /^[\x21-\x7e]{20,8192}$/u;
@@ -8,20 +10,6 @@ const databases = Object.freeze({
   production: "scribe-production-controller",
   staging: "scribe-staging-controller",
 });
-
-function requireIntegerField(document, name) {
-  const value = document?.fields?.[name]?.integerValue;
-  if (typeof value !== "string" || !/^(?:0|[1-9][0-9]*)$/u.test(value)) {
-    throw new Error("Controller authorization document is invalid");
-  }
-  return Number(value);
-}
-
-function requireStringField(document, name) {
-  const value = document?.fields?.[name]?.stringValue;
-  if (typeof value !== "string") throw new Error("Controller document is invalid");
-  return value;
-}
 
 async function runGcloud(arguments_) {
   const child = spawn("gcloud", arguments_, {
@@ -97,52 +85,34 @@ try {
     "--limit=100",
     "--format=json",
   ];
-  const [jobs, executions, environmentDocument, executionDocuments] = await Promise.all([
-    runGcloud(["run", "jobs", "list", ...common]),
-    runGcloud(["run", "jobs", "executions", "list", ...common]),
-    firestore(`scribe_drop_controller_environments/${selectedEnvironment}`),
-    firestore("scribe_drop_controller_executions?pageSize=2"),
-  ]);
-  if (jobs.length !== 0 || executions.length !== 0) {
-    throw new Error("Cloud Run acceptance resources have not converged to zero");
+  const expectedEpoch = process.env.SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_EPOCH;
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const [jobs, executions, environmentDocument, executionDocuments] = await Promise.all([
+      runGcloud(["run", "jobs", "list", ...common]),
+      runGcloud(["run", "jobs", "executions", "list", ...common]),
+      firestore(`scribe_drop_controller_environments/${selectedEnvironment}`),
+      firestore("scribe_drop_controller_executions?pageSize=2"),
+    ]);
+    const result = verifyAuthorizedAcceptanceSnapshot(
+      { environmentDocument, executionDocuments, executions, jobs },
+      expectedEpoch,
+    );
+    if (result.complete) {
+      console.log(
+        JSON.stringify({
+          activeExecutions: 0,
+          environment: selectedEnvironment,
+          executionCount: 0,
+          jobCount: 0,
+          providerRecord: "CLEANED",
+          reservedExecutions: 1,
+        }),
+      );
+      process.exit(0);
+    }
+    if (attempt < 59) await new Promise((resolve) => setTimeout(resolve, 20_000));
   }
-  if (
-    requireIntegerField(environmentDocument, "activeExecutions") !== 0 ||
-    requireIntegerField(environmentDocument, "maxExecutions") !== 1 ||
-    requireIntegerField(environmentDocument, "maxWorstCaseJpy") !== 250 ||
-    requireIntegerField(environmentDocument, "reservedExecutions") !== 1 ||
-    requireIntegerField(environmentDocument, "reservedWorstCaseJpy") !== 250 ||
-    requireIntegerField(environmentDocument, "worstCaseJpyPerExecution") !== 250 ||
-    !requireStringField(environmentDocument, "epoch").startsWith("phase16-")
-  ) {
-    throw new Error("Cloud Run acceptance authorization did not consume exact one execution");
-  }
-  if (
-    !Array.isArray(executionDocuments.documents) ||
-    executionDocuments.documents.length !== 1 ||
-    executionDocuments.nextPageToken !== undefined
-  ) {
-    throw new Error("Cloud Run acceptance execution identity is not exact one");
-  }
-  const record = executionDocuments.documents[0]?.fields?.record?.mapValue?.fields;
-  if (
-    record?.state?.stringValue !== "CLEANED" ||
-    record?.cleanupIntent?.booleanValue !== true ||
-    record?.execution?.nullValue !== null ||
-    record?.job?.nullValue !== null
-  ) {
-    throw new Error("Cloud Run acceptance execution did not converge to CLEANED");
-  }
-  console.log(
-    JSON.stringify({
-      activeExecutions: 0,
-      environment: selectedEnvironment,
-      executionCount: 0,
-      jobCount: 0,
-      providerRecord: "CLEANED",
-      reservedExecutions: 1,
-    }),
-  );
+  throw new Error("Cloud Run acceptance cleanup did not converge within 20 minutes");
 } catch (error) {
   console.error(error instanceof Error ? error.message : "Cloud Run acceptance cleanup failed");
   process.exitCode = 1;

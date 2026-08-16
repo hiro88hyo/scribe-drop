@@ -1871,6 +1871,13 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
   読取に必要な`datastore.databases.getMetadata`を欠いていた。公式IAM契約に合わせてread-only permissionを追加し、既存shared
   custom roleだけをupdate/read-backする専用commandを追加した。full foundation apply、secret rotation、database/Service/IAM binding
   mutationをこの修復経路から排除し、permission集合とcommand mutation scopeをlocal回帰testで固定する。
+- bounded acceptanceの実M4A lifecycleはexact-one L4 authorizationで成功したが、cleanup verifierがreaperの
+  Firestore収束を単発readして`activeExecutions=1`を失敗判定した。実resourceはその後Job/Execution 0、record
+  `CLEANED`へ収束し、recoveryもauthorization disabled/zeroとRunPod baselineを復元した。[ADR 0088](./adr/0088-recover-successful-staging-lifecycle-evidence.md)
+  に従い、通常verifierを最大20分のbounded pollへ変更する。今回のsource runは実M4A成功step、cleanup verifierだけの
+  failure、recovery全安全stepを固定fingerprintで検証し、source時間内のexact-one `CLEANED` recordと現在の全live parityを
+  再検証するGPU-free jobだけで短命acceptanceへ復旧する。通常acceptance job、migration、deploy、controller apply、GPUは
+  実行せず、candidate identityにworkflow `GITHUB_SHA`を代入する既存evidence CLIの不整合もstatic gateで拒否する。
 
 実装:
 
