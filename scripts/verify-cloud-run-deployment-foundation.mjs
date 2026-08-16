@@ -94,6 +94,21 @@ function requireRole(role) {
   }
 }
 
+function requireServiceEnabled(service) {
+  const observed = gcloudJson(
+    ["services", "list", "--enabled", `--filter=config.name=${service}`],
+    `${service} enablement read`,
+  );
+  if (
+    !Array.isArray(observed) ||
+    observed.length !== 1 ||
+    observed[0]?.config?.name !== service ||
+    observed[0]?.state !== "ENABLED"
+  ) {
+    throw new Error(`${service} is not enabled`);
+  }
+}
+
 function requireProvider(identity) {
   const observed = requireRecord(
     gcloudJson(
@@ -340,7 +355,10 @@ try {
   const identity = plan.identities.find((candidate) => candidate.environment === environment);
   if (identity === undefined) throw new Error("Deployment identity is missing from the plan");
   requireIdentity(identity);
-  if (environment === "staging") requireStagingBootstrapPreflight(identity);
+  if (environment === "staging") {
+    requireServiceEnabled(plan.stagingBootstrapPreflightService);
+    requireStagingBootstrapPreflight(identity);
+  }
   if (environment === "production") requireProductionController(identity);
   console.log(
     JSON.stringify({

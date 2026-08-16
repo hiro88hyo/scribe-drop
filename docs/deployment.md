@@ -462,6 +462,8 @@ stagingのmutation-free `preflight`はcontroller verifier build後に、disabled
 credentialやactive projectが選ぶquota projectに依存するgcloud subprocessを使用しない。`preflight_only`が成功する前に
 Orchestrator pause、controller deploy、Playwright install、GPU authorizationへ進んではならない。failed acceptanceの
 recoveryはRunPod復元後にCloudflare全resourceをread-backするため、通常API tokenと専用Pages API tokenの両方を渡す。
+Cloud Quotas APIのenabled状態はstaging bootstrap foundationのapply/read-back対象とし、IAM roleのpermission一致だけで
+quota capabilityを成功扱いにしない。
 
 RunPod Worker build inputsに差分がないapplication-only candidateでは、
 [ADR 0038](./adr/0038-reuse-unchanged-runpod-worker-image.md)の検証済みsource candidate

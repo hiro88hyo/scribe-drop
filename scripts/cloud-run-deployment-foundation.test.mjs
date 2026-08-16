@@ -139,6 +139,7 @@ test("converges only the shared release deployer role through its targeted comma
 
 test("isolates GPU-free bootstrap mutation to a staging-only role", () => {
   const plan = createCloudRunDeploymentFoundationPlan();
+  assert.equal(plan.stagingBootstrapPreflightService, "cloudquotas.googleapis.com");
   assert.equal(
     plan.stagingBootstrapPreflightRole.name,
     "projects/scribe-drop/roles/scribeDropStagingBootstrapPreflight",
@@ -166,6 +167,21 @@ test("isolates GPU-free bootstrap mutation to a staging-only role", () => {
     false,
   );
   assert.equal(deploymentRolePermissions.includes("run.jobs.create"), false);
+});
+
+test("enables and verifies the exact Cloud Quotas API before staging preflight", () => {
+  const managerSource = readFileSync(
+    new URL("./manage-cloud-run-deployment-foundation.mjs", import.meta.url),
+    "utf8",
+  );
+  const verifierSource = readFileSync(
+    new URL("./verify-cloud-run-deployment-foundation.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.match(managerSource, /ensureServiceEnabled\(plan\.stagingBootstrapPreflightService\)/u);
+  assert.match(managerSource, /\["services", "enable", service\]/u);
+  assert.match(verifierSource, /requireServiceEnabled\(plan\.stagingBootstrapPreflightService\)/u);
+  assert.match(verifierSource, /observed\[0\]\?\.state !== "ENABLED"/u);
 });
 
 test("grants the staging bootstrap deployer read-only access to the worker repository", () => {

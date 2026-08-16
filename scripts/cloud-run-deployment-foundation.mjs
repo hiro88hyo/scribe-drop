@@ -187,6 +187,7 @@ export function createCloudRunDeploymentFoundationPlan() {
       stage: "GA",
       title: "ScribeDrop staging bootstrap preflight",
     },
+    stagingBootstrapPreflightService: "cloudquotas.googleapis.com",
     existingControllerRoles: [
       {
         description: "Minimum Cloud Run Jobs permissions for the ScribeDrop GPU controller.",

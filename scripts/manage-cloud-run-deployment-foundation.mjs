@@ -240,6 +240,28 @@ function addProjectBinding(member, role, condition) {
   );
 }
 
+function ensureServiceEnabled(service) {
+  const read = () =>
+    gcloudRun(
+      [
+        "services",
+        "list",
+        "--enabled",
+        `--filter=config.name=${service}`,
+        "--format=value(config.name)",
+      ],
+      { label: `${service} enablement read` },
+    ).stdout.trim();
+  let observed = read();
+  if (observed === "") {
+    gcloudRun(["services", "enable", service], { label: `${service} enablement` });
+    observed = read();
+  }
+  if (observed !== service) {
+    throw new Error(`${service} is not the exact enabled service`);
+  }
+}
+
 function ensureDatabase() {
   const database = plan.controller.database;
   const readArguments = ["firestore", "databases", "describe", `--database=${database.id}`];
@@ -476,6 +498,7 @@ function rotatePrimarySecret() {
 }
 
 function applyFoundation() {
+  ensureServiceEnabled(plan.stagingBootstrapPreflightService);
   ensureCustomRole(plan.deploymentRole, "deployment", { updateExisting: true });
   ensureCustomRole(plan.stagingBootstrapPreflightRole, "staging bootstrap preflight", {
     updateExisting: true,
@@ -557,6 +580,7 @@ function applyStagingBootstrapPreflightFoundation() {
   if (stagingIdentity === undefined) {
     throw new Error("Staging deployment identity is missing from the reviewed plan");
   }
+  ensureServiceEnabled(plan.stagingBootstrapPreflightService);
   ensureServiceAccount(stagingIdentity.account);
   ensureCustomRole(plan.stagingBootstrapPreflightRole, "staging bootstrap preflight", {
     updateExisting: true,
