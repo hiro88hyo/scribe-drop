@@ -160,7 +160,7 @@ function requireWorkflowRunIdentity(jobName, jobMapping) {
 
   const environment = jobEnvironment(jobMapping);
   for (const [name, expected] of [
-    ["EXPECTED_COMMIT_SHA", "${{ github.sha }}"],
+    ["EXPECTED_COMMIT_SHA", "${{ inputs.candidate_commit_sha || github.sha }}"],
     ["EXPECTED_RELEASE_BRANCH", "${{ github.ref_name }}"],
   ]) {
     if (environment[name] !== expected) {

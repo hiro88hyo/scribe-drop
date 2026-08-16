@@ -45,7 +45,7 @@ test("reproduces the rejected preflight RunPod parity regression", async () => {
 
 test("rejects a missing acceptance workflow branch identity before publish", async () => {
   const regressed = workflow.replace(
-    /( {2}acceptance:\n[\s\S]*? {6}EXPECTED_COMMIT_SHA: \$\{\{ github\.sha \}\}\n) {6}EXPECTED_RELEASE_BRANCH: \$\{\{ github\.ref_name \}\}\n/u,
+    /( {2}acceptance:\n[\s\S]*? {6}EXPECTED_COMMIT_SHA: \$\{\{ inputs\.candidate_commit_sha \|\| github\.sha \}\}\n) {6}EXPECTED_RELEASE_BRANCH: \$\{\{ github\.ref_name \}\}\n/u,
     "$1",
   );
   assert.notEqual(regressed, workflow);
@@ -57,7 +57,7 @@ test("rejects a missing acceptance workflow branch identity before publish", asy
 
 test("rejects a missing recovery workflow branch identity before publish", async () => {
   const regressed = workflow.replace(
-    /( {2}recover-acceptance:\n[\s\S]*? {6}EXPECTED_COMMIT_SHA: \$\{\{ github\.sha \}\}\n) {6}EXPECTED_RELEASE_BRANCH: \$\{\{ github\.ref_name \}\}\n/u,
+    /( {2}recover-acceptance:\n[\s\S]*? {6}EXPECTED_COMMIT_SHA: \$\{\{ inputs\.candidate_commit_sha \|\| github\.sha \}\}\n) {6}EXPECTED_RELEASE_BRANCH: \$\{\{ github\.ref_name \}\}\n/u,
     "$1",
   );
   assert.notEqual(regressed, workflow);
@@ -84,7 +84,7 @@ test("checks workflow identity in every newly added verifier job", async () => {
     `jobs:
   auxiliary-verifier:
     env:
-      EXPECTED_COMMIT_SHA: \${{ github.sha }}
+      EXPECTED_COMMIT_SHA: \${{ inputs.candidate_commit_sha || github.sha }}
     steps:
       - name: Verify an additional candidate
         env:

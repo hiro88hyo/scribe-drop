@@ -173,12 +173,9 @@ export function verifyIamPrincipalBindingsReadback(
   ) {
     throw new Error("IAM read-back contains a public principal");
   }
-  const principalBindings = observedBindings.filter(({ members }) =>
-    members.includes(expectedPrincipal),
-  );
-  if (principalBindings.some(({ members }) => members.length !== 1)) {
-    throw new Error("controller principal must not share an IAM binding with another principal");
-  }
+  const principalBindings = observedBindings
+    .filter(({ members }) => members.includes(expectedPrincipal))
+    .map((binding) => ({ ...binding, members: [expectedPrincipal] }));
   if (
     canonicalize(normalizeBindings(expected)) !== canonicalize(normalizeBindings(principalBindings))
   ) {

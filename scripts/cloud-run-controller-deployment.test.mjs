@@ -84,11 +84,11 @@ test("uses the exact Cloud Run PATCH request with an optional validate-only guar
   };
   assert.equal(
     createControllerServicePatchUrl(plan),
-    "https://run.googleapis.com/v2/projects/scribe-drop/locations/asia-southeast1/services/controller?allowMissing=true&updateMask=*",
+    "https://run.googleapis.com/v2/projects/scribe-drop/locations/asia-southeast1/services/controller?allowMissing=true&forceNewRevision=true&updateMask=binaryAuthorization%2Cingress%2CinvokerIamDisabled%2Clabels%2Cscaling%2Ctemplate%2Ctraffic",
   );
   assert.equal(
     createControllerServicePatchUrl(plan, true),
-    "https://run.googleapis.com/v2/projects/scribe-drop/locations/asia-southeast1/services/controller?allowMissing=true&updateMask=*&validateOnly=true",
+    "https://run.googleapis.com/v2/projects/scribe-drop/locations/asia-southeast1/services/controller?allowMissing=true&forceNewRevision=true&updateMask=binaryAuthorization%2Cingress%2CinvokerIamDisabled%2Clabels%2Cscaling%2Ctemplate%2Ctraffic&validateOnly=true",
   );
   assert.throws(
     () => createControllerServicePatchUrl({ name: "projects/other/services/controller" }, true),

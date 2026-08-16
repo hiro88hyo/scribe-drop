@@ -4,6 +4,7 @@ import {
   verifyBinaryAuthorizationPolicyReadback,
   verifyControllerSecretReadback,
   verifyControllerServiceIamReadback,
+  verifyIamPrincipalBindingsReadback,
   verifyIamPolicyBindingsReadback,
 } from "./control-plane-readback.js";
 
@@ -59,6 +60,36 @@ describe("controller control-plane read-back", () => {
       role: "roles/owner",
     });
     expect(() => verifyIamPolicyBindingsReadback(expected, excess)).toThrow();
+  });
+
+  it("compares only the controller principal within a shared IAM role binding", () => {
+    const principal = "serviceAccount:gpu-controller@scribe-phase14.iam.gserviceaccount.com";
+    const expected = [{ members: [principal], role: "roles/artifactregistry.reader" }];
+    expect(() =>
+      verifyIamPrincipalBindingsReadback(principal, expected, {
+        bindings: [
+          {
+            members: [
+              principal,
+              "serviceAccount:gpu-controller-production@scribe-phase14.iam.gserviceaccount.com",
+            ],
+            role: "roles/artifactregistry.reader",
+          },
+        ],
+        etag: "BwY=",
+        version: 1,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      verifyIamPrincipalBindingsReadback(principal, expected, {
+        bindings: [
+          { members: [principal], role: "roles/artifactregistry.reader" },
+          { members: [principal], role: "roles/owner" },
+        ],
+        etag: "BwY=",
+        version: 1,
+      }),
+    ).toThrow("controller principal IAM bindings exceed the expected policy");
   });
 
   it("requires a fixed enabled Singapore secret version and exact accessor policy", () => {

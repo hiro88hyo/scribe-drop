@@ -230,7 +230,20 @@ export function createControllerServicePatchUrl(plan, validateOnly = false) {
   ) {
     throw new Error("Controller Service deployment plan name is invalid");
   }
-  const query = new URLSearchParams({ allowMissing: "true", updateMask: "*" });
+  const updateMask = [
+    "binaryAuthorization",
+    "ingress",
+    "invokerIamDisabled",
+    "labels",
+    "scaling",
+    "template",
+    "traffic",
+  ].join(",");
+  const query = new URLSearchParams({
+    allowMissing: "true",
+    forceNewRevision: "true",
+    updateMask,
+  });
   if (validateOnly) query.set("validateOnly", "true");
   return `https://run.googleapis.com/v2/${plan.name}?${query.toString()}`;
 }
