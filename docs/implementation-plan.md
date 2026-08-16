@@ -1866,6 +1866,11 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
   preflight-only runは通常Deployのexact-oneを消費しない一方、偽装したrun identityを拒否する。通常staging acceptanceと
   recovery、production cutover/finalizeも同じdependency-closed buildとcontroller preflightを使い、実identityの
   preflight-only evidenceが成功するまで新しいstaging mutationを行わない。
+- 最初のmutation-free preflightは同一commitの両candidate照合とCloud Run Service `validateOnly`を通過後、Firestore database
+  metadata GETで403停止した。release deployer roleはtransaction用`datastore.databases.get`を持っていたが、database object
+  読取に必要な`datastore.databases.getMetadata`を欠いていた。公式IAM契約に合わせてread-only permissionを追加し、既存shared
+  custom roleだけをupdate/read-backする専用commandを追加した。full foundation apply、secret rotation、database/Service/IAM binding
+  mutationをこの修復経路から排除し、permission集合とcommand mutation scopeをlocal回帰testで固定する。
 
 実装:
 

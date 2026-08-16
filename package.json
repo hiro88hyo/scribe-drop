@@ -59,6 +59,7 @@
     "cloud-run:candidate:evidence": "node scripts/cloud-run-candidate-evidence.mjs",
     "cloud-run:controller:deploy": "node scripts/manage-cloud-run-controller-deployment.mjs",
     "cloud-run:foundation:apply": "node scripts/manage-cloud-run-deployment-foundation.mjs apply --confirm-production-foundation",
+    "cloud-run:foundation:apply:release-deployer-role": "node scripts/manage-cloud-run-deployment-foundation.mjs apply-release-deployer-role --confirm-release-deployer-role",
     "cloud-run:foundation:apply:staging-preflight": "node scripts/manage-cloud-run-deployment-foundation.mjs apply-staging-preflight --confirm-staging-preflight-foundation",
     "cloud-run:foundation:read": "node scripts/verify-cloud-run-deployment-foundation.mjs",
     "cloud-run:staging:inputs:verify": "node scripts/verify-staging-release-inputs.mjs",

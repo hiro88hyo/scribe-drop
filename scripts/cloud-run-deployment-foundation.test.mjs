@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -107,6 +108,33 @@ test("keeps deployment role mutation and secret payload access out of scope", ()
   assert.equal(deploymentRolePermissions.includes("run.jobs.create"), false);
   assert.equal(deploymentRolePermissions.includes("run.jobs.run"), false);
   assert.equal(deploymentRolePermissions.includes("iam.workloadIdentityPoolProviders.get"), true);
+  assert.equal(deploymentRolePermissions.includes("datastore.databases.get"), true);
+  assert.equal(deploymentRolePermissions.includes("datastore.databases.getMetadata"), true);
+});
+
+test("converges only the shared release deployer role through its targeted command", () => {
+  const managerSource = readFileSync(
+    new URL("./manage-cloud-run-deployment-foundation.mjs", import.meta.url),
+    "utf8",
+  );
+  const body = managerSource.match(/function applyReleaseDeployerRole\(\) \{(?<body>[\s\S]*?)\n\}/u)
+    ?.groups?.body;
+  assert.equal(typeof body, "string");
+  assert.match(
+    body,
+    /ensureCustomRole\(plan\.deploymentRole, "deployment", \{ updateExisting: true \}\)/u,
+  );
+  assert.match(body, /verify-cloud-run-deployment-foundation\.mjs", "staging"/u);
+  assert.doesNotMatch(
+    body,
+    /rotatePrimarySecret|ensureDatabase|addProjectBinding|addServiceAccountBinding/u,
+  );
+
+  const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  assert.equal(
+    packageJson.scripts["cloud-run:foundation:apply:release-deployer-role"],
+    "node scripts/manage-cloud-run-deployment-foundation.mjs apply-release-deployer-role --confirm-release-deployer-role",
+  );
 });
 
 test("isolates GPU-free bootstrap mutation to a staging-only role", () => {

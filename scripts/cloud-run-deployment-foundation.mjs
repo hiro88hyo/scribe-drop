@@ -11,6 +11,7 @@ export const deploymentRolePermissions = Object.freeze([
   "artifactregistry.repositories.getIamPolicy",
   "binaryauthorization.policy.get",
   "datastore.databases.get",
+  "datastore.databases.getMetadata",
   "datastore.entities.create",
   "datastore.entities.delete",
   "datastore.entities.get",

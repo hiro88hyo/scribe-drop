@@ -582,6 +582,12 @@ staging bootstrap preflight roleが未適用の場合だけ、project、staging 
 read-onlyで確認して明示承認後に`pnpm cloud-run:foundation:apply:staging-preflight`を1回実行し、直後に
 foundation read-backを再実行する。このcommandはproduction secret、production IAM、controller Serviceを
 変更しない。workflowはさらにEnvironmentの4個のCloud Run/R2入力をGoogle APIへ照合する。
+shared release deployer custom roleのpermission driftだけを収束する場合は、対象roleとstaging bindingの
+read-back後に明示承認を得て`pnpm cloud-run:foundation:apply:release-deployer-role`を実行する。このcommandは
+`scribeDropReleaseDeployer`だけを更新し、service account、binding、secret、database、Serviceを変更しない。
+Firestore database objectのread-backには`datastore.databases.getMetadata`が必要であり、transaction用の
+`datastore.databases.get`で代用しない。shared roleのため、このread-only permissionはstagingとproductionの
+既存deployer bindingの両方へ適用される。
 acceptance jobはbrowser installを先に完了し、candidate controllerをdisabledでdeployしてから
 `pnpm cloud-run:staging:bootstrap-preflight <candidate-evidence>`を実行する。GPU 0のexact-one
 `EXECUTION_NOT_FOUND` evidenceとJob/Execution 0が得られるまでpaid authorizationを開かない。

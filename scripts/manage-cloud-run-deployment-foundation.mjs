@@ -456,7 +456,7 @@ function rotatePrimarySecret() {
 }
 
 function applyFoundation() {
-  ensureCustomRole(plan.deploymentRole, "deployment");
+  ensureCustomRole(plan.deploymentRole, "deployment", { updateExisting: true });
   ensureCustomRole(plan.stagingBootstrapPreflightRole, "staging bootstrap preflight", {
     updateExisting: true,
   });
@@ -517,6 +517,20 @@ function applyFoundation() {
   );
 }
 
+function applyReleaseDeployerRole() {
+  ensureCustomRole(plan.deploymentRole, "deployment", { updateExisting: true });
+  run(process.execPath, ["scripts/verify-cloud-run-deployment-foundation.mjs", "staging"], {
+    label: "release deployer role final read-back",
+  });
+  console.log(
+    JSON.stringify({
+      deploymentRole: "verified",
+      environmentBindings: ["staging", "production"],
+      mutationScope: "shared-release-deployer-custom-role-only",
+    }),
+  );
+}
+
 function applyStagingBootstrapPreflightFoundation() {
   const stagingIdentity = plan.identities.find(({ environment }) => environment === "staging");
   if (stagingIdentity === undefined) {
@@ -563,15 +577,20 @@ const stagingPreflightApply =
   command === "apply-staging-preflight" &&
   confirmation === "--confirm-staging-preflight-foundation" &&
   process.argv.length === 4;
-if (!productionApply && !stagingPreflightApply) {
+const releaseDeployerRoleApply =
+  command === "apply-release-deployer-role" &&
+  confirmation === "--confirm-release-deployer-role" &&
+  process.argv.length === 4;
+if (!productionApply && !stagingPreflightApply && !releaseDeployerRoleApply) {
   throw new Error(
-    "Usage: manage-cloud-run-deployment-foundation <apply --confirm-production-foundation|apply-staging-preflight --confirm-staging-preflight-foundation>",
+    "Usage: manage-cloud-run-deployment-foundation <apply --confirm-production-foundation|apply-staging-preflight --confirm-staging-preflight-foundation|apply-release-deployer-role --confirm-release-deployer-role>",
   );
 }
 
 try {
   if (productionApply) applyFoundation();
-  else applyStagingBootstrapPreflightFoundation();
+  else if (stagingPreflightApply) applyStagingBootstrapPreflightFoundation();
+  else applyReleaseDeployerRole();
 } catch (error) {
   console.error(error instanceof Error ? error.message : "Cloud Run deployment foundation failed");
   process.exitCode = 1;
