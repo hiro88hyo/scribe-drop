@@ -261,3 +261,14 @@ export function requireControllerServiceValidationOperation(value) {
   }
   return { name: value.name };
 }
+
+export async function preflightExistingControllerService({ readSnapshot, sameSnapshot, validate }) {
+  const before = await readSnapshot();
+  if (before.exists !== true) return false;
+  await validate();
+  const after = await readSnapshot();
+  if (!sameSnapshot(before, after)) {
+    throw new Error("Cloud Run Service changed during validate-only preflight");
+  }
+  return true;
+}

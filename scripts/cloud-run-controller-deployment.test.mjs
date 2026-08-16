@@ -10,6 +10,7 @@ import {
   isAllowedControllerDisable,
   isAllowedControllerRecoveryDisable,
   isExactControllerAuthorizationRetry,
+  preflightExistingControllerService,
   requireControllerServiceValidationOperation,
 } from "./cloud-run-controller-deployment.mjs";
 
@@ -107,6 +108,55 @@ test("accepts only a safe successful validate-only operation identity", () => {
   assert.throws(
     () => requireControllerServiceValidationOperation({ name: "projects/other/operations/x" }),
     /validation operation is invalid/u,
+  );
+});
+
+test("skips validate-only PATCH when the production controller Service is absent", async () => {
+  let validationCalls = 0;
+  const serviceExists = await preflightExistingControllerService({
+    readSnapshot: async () => ({ exists: false }),
+    sameSnapshot: () => {
+      throw new Error("missing Service snapshots must not be compared");
+    },
+    validate: async () => {
+      validationCalls += 1;
+    },
+  });
+  assert.equal(serviceExists, false);
+  assert.equal(validationCalls, 0);
+});
+
+test("requires a stable snapshot around validate-only PATCH for an existing Service", async () => {
+  const stable = { exists: true, snapshot: "stable" };
+  let reads = 0;
+  let validations = 0;
+  const serviceExists = await preflightExistingControllerService({
+    readSnapshot: async () => {
+      reads += 1;
+      return stable;
+    },
+    sameSnapshot: (before, after) => before.snapshot === after.snapshot,
+    validate: async () => {
+      validations += 1;
+    },
+  });
+  assert.equal(serviceExists, true);
+  assert.equal(reads, 2);
+  assert.equal(validations, 1);
+});
+
+test("rejects a Service changed during validate-only preflight", async () => {
+  let reads = 0;
+  await assert.rejects(
+    preflightExistingControllerService({
+      readSnapshot: async () => {
+        reads += 1;
+        return { exists: true, snapshot: reads === 1 ? "before" : "after" };
+      },
+      sameSnapshot: (before, after) => before.snapshot === after.snapshot,
+      validate: async () => undefined,
+    }),
+    /Cloud Run Service changed during validate-only preflight/u,
   );
 });
 

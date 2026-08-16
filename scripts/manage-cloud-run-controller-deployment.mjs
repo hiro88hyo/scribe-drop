@@ -12,6 +12,7 @@ import {
   isAllowedControllerDisable,
   isAllowedControllerRecoveryDisable,
   isExactControllerAuthorizationRetry,
+  preflightExistingControllerService,
   requireControllerServiceValidationOperation,
 } from "./cloud-run-controller-deployment.mjs";
 
@@ -279,20 +280,20 @@ async function readServiceGuard(plan) {
 }
 
 async function preflightService(plan) {
-  const before = await readServiceGuard(plan);
-  const response = await googleRequest(createControllerServicePatchUrl(plan, true), {
-    body: JSON.stringify(createControllerServiceRequest(plan)),
-    method: "PATCH",
+  return preflightExistingControllerService({
+    readSnapshot: () => readServiceGuard(plan),
+    sameSnapshot: (before, after) => canonical(before) === canonical(after),
+    validate: async () => {
+      const response = await googleRequest(createControllerServicePatchUrl(plan, true), {
+        body: JSON.stringify(createControllerServiceRequest(plan)),
+        method: "PATCH",
+      });
+      if (response.status !== 200) {
+        throw new Error(`Cloud Run Service validation failed: ${response.status}`);
+      }
+      requireControllerServiceValidationOperation(response.body);
+    },
   });
-  if (response.status !== 200) {
-    throw new Error(`Cloud Run Service validation failed: ${response.status}`);
-  }
-  requireControllerServiceValidationOperation(response.body);
-  const after = await readServiceGuard(plan);
-  if (canonical(before) !== canonical(after)) {
-    throw new Error("Cloud Run Service changed during validate-only preflight");
-  }
-  return before.exists;
 }
 
 async function readAndVerify(deploymentConfiguration) {

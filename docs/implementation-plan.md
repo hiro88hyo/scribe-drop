@@ -1888,6 +1888,11 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
   `GITHUB_ENV`へexportしたcandidate run IDを同じstepで参照して空IDのartifact downloadが404となった。staging evidenceと
   candidate自体の事前照合は成功し、production resourceは未変更である。cutover/finalizeの両方でacceptance exportとcandidate
   downloadを別stepへ分離し、同じstepでの`${CANDIDATE_RUN_ID}`参照をstatic gateで拒否する。
+- 次のproduction preflight run `31923669728`はfoundation read-backを通過したが、初回productionではcontroller Serviceが
+  未作成であるにもかかわらずvalidate-only PATCHを先行させ、Cloud Runが404を返した。未作成Serviceは既存のread-only
+  control-plane preflightで許容する一方、PATCHを送らない。既存Serviceだけは従来どおりvalidate-only PATCHと前後snapshot
+  完全一致を必須にし、未作成時のPATCH 0回、既存時の二重snapshot、変更検知をlocal testで固定する。このrunもGPU、migration、
+  deploy、provider切替、authorizationを含む全production mutation stepはskipした。
 
 実装:
 
