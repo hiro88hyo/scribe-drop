@@ -410,6 +410,11 @@ const productionVerificationJob = workflowJob(
   "verify-promotion",
   "deploy-production-candidate.yml",
 );
+const productionFinalizeJob = workflowJob(
+  productionWorkflowContents,
+  "finalize",
+  "deploy-production-candidate.yml",
+);
 const stagingSecretVerificationStep = workflowStep(
   stagingPreflightJob,
   "Verify existing encrypted secrets",
@@ -2039,6 +2044,41 @@ requireText(
   "deploy-production-candidate.yml verification job",
   "preflight evidence required before mutating cutover",
 );
+for (const [jobContents, acceptanceStep, candidateStep, location] of [
+  [
+    productionCutoverJob,
+    "Download acceptance and export exact candidate identity",
+    "Download and re-verify exact candidates",
+    "deploy-production-candidate.yml cutover job",
+  ],
+  [
+    productionFinalizeJob,
+    "Download acceptance and export finalized candidate identity",
+    "Download immutable candidates and cutover evidence",
+    "deploy-production-candidate.yml finalize job",
+  ],
+]) {
+  const exportStep = workflowStep(jobContents, acceptanceStep, location);
+  const downloadStep = workflowStep(jobContents, candidateStep, location);
+  requireText(
+    exportStep,
+    "node scripts/export-staging-acceptance-identity.mjs staging-acceptance",
+    location,
+    "acceptance identity export",
+  );
+  forbidText(
+    exportStep,
+    "${CANDIDATE_RUN_ID}",
+    location,
+    "same-step use of a GITHUB_ENV candidate identity",
+  );
+  requireText(
+    downloadStep,
+    'gh run download "${CANDIDATE_RUN_ID}"',
+    location,
+    "next-step candidate identity consumption",
+  );
+}
 
 requireTextCount(
   productionWorkflowContents,

@@ -271,7 +271,7 @@ jobs:
       - name: Install checksummed RunPod CLI
         run: pnpm run runpodctl:install
 
-      - name: Download and re-verify exact accepted inputs
+      - name: Download acceptance and export exact candidate identity
         env:
           GH_TOKEN: ${{ github.token }}
           STAGING_RUN_ID: ${{ inputs.staging_run_id }}
@@ -288,6 +288,12 @@ jobs:
             --name "scribe-drop-staging-acceptance-${CANDIDATE_COMMIT_SHA}" \
             --dir staging-acceptance
           node scripts/export-staging-acceptance-identity.mjs staging-acceptance
+
+      - name: Download and re-verify exact candidates
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STAGING_RUN_ID: ${{ inputs.staging_run_id }}
+        run: |
           gh run download "${CANDIDATE_RUN_ID}" \
             --name "scribe-drop-release-candidate-${CANDIDATE_COMMIT_SHA}" \
             --dir "${RELEASE_CANDIDATE_DIRECTORY}"
@@ -542,9 +548,8 @@ jobs:
           version: 579.0.0
           project_id: scribe-drop
 
-      - name: Download immutable acceptance, candidates, and cutover evidence
+      - name: Download acceptance and export finalized candidate identity
         env:
-          CUTOVER_RUN_ID: ${{ inputs.cutover_run_id }}
           GH_TOKEN: ${{ github.token }}
           STAGING_RUN_ID: ${{ inputs.staging_run_id }}
         run: |
@@ -554,6 +559,13 @@ jobs:
             --name "scribe-drop-staging-acceptance-${CANDIDATE_COMMIT_SHA}" \
             --dir staging-acceptance
           node scripts/export-staging-acceptance-identity.mjs staging-acceptance
+
+      - name: Download immutable candidates and cutover evidence
+        env:
+          CUTOVER_RUN_ID: ${{ inputs.cutover_run_id }}
+          GH_TOKEN: ${{ github.token }}
+          STAGING_RUN_ID: ${{ inputs.staging_run_id }}
+        run: |
           gh run download "${CANDIDATE_RUN_ID}" \
             --name "scribe-drop-release-candidate-${CANDIDATE_COMMIT_SHA}" \
             --dir "${RELEASE_CANDIDATE_DIRECTORY}"

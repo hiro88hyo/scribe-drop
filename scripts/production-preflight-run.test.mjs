@@ -30,7 +30,8 @@ function fixture() {
       step("Verify successful mutation-free production preflight before cutover", "skipped"),
     ]),
     job("Cut over safely and open exactly one production smoke slot", "success", [
-      step("Download and re-verify exact accepted inputs"),
+      step("Download acceptance and export exact candidate identity"),
+      step("Download and re-verify exact candidates"),
       step("Build verifier and strictly read production foundation"),
       step("Render disabled preflight configuration"),
       step("Verify every external control plane before production mutation"),
@@ -73,7 +74,7 @@ test("accepts only a successful mutation-free production preflight", () => {
 
 test("rejects a preflight that ran a production mutation", () => {
   const value = fixture();
-  value.jobs.jobs[1].steps[4].conclusion = "success";
+  value.jobs.jobs[1].steps[5].conclusion = "success";
   assert.throws(
     () => verifyProductionPreflightRun(value.run, value.jobs, expected),
     /migrations.*skipped/u,

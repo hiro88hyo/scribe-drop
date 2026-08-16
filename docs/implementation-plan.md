@@ -1884,6 +1884,10 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
   RunPod promotion、cutover/release evidenceまで確認した。[ADR 0089](./adr/0089-separate-production-workflow-and-candidate-identity.md)
   に従いcandidate commitを必須入力へ分離し、productionの全remote prerequisiteだけを実行する`preflight_only`を追加する。
   9 mutation stepのskipをsourceと成功run APIの両方で検証し、そのpreflight run IDなしに実cutoverを開始できないようにする。
+- 最初のproduction preflight run `31923304805`はproduction Environment承認後も全mutationをskipしたが、acceptanceから
+  `GITHUB_ENV`へexportしたcandidate run IDを同じstepで参照して空IDのartifact downloadが404となった。staging evidenceと
+  candidate自体の事前照合は成功し、production resourceは未変更である。cutover/finalizeの両方でacceptance exportとcandidate
+  downloadを別stepへ分離し、同じstepでの`${CANDIDATE_RUN_ID}`参照をstatic gateで拒否する。
 
 実装:
 

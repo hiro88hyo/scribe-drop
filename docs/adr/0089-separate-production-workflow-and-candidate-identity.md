@@ -25,6 +25,8 @@ evidenceへ使用していた。そのため有効なstaging acceptanceがあっ
   だけ使う。candidate commitへ代用せず、用途の出現数をstatic gateで固定する。
 - RunPod production promotionと3種のacceptance/evidence CLIは`EXPECTED_COMMIT_SHA`だけをcandidate identityとして
   使用する。workflow commitを読む実装をstatic gateで拒否する。
+- staging acceptanceからexportするcandidate run IDは`GITHUB_ENV`のstep間契約として扱う。exportした同じstepでは
+  candidate downloadに使用せず、次の独立stepだけで参照する。この境界をcutover/finalizeの両方でstatic検査する。
 - `preflight_only=true`のproduction cutover modeを追加する。このmodeはstaging evidence、両candidate、production
   foundation、controller validate-only、Cloudflare credential/resource、Pages、Access、RunPodを実環境で検証する。
 - preflight modeではmigration、R2 policy、RunPod promotion、controller apply、Worker/Pages deploy、drain、provider

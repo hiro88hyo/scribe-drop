@@ -660,6 +660,8 @@ controller validate-only、Cloudflare/Pages/Access/RunPodの全read-backを成�
 provider切替、authorization、evidence発行がskipされる。実cutoverは成功したrun IDを`preflight_run_id`へ渡し、
 同じworkflow commit/staging run、全preflight step成功、全mutation step skipをAPI read-backで検証させる。
 `finalize`では`preflight_run_id=0`を使用する。
+acceptance artifactからexportしたcandidate run IDは`GITHUB_ENV`へ書いた次stepで初めて使用する。同じstep内で
+参照すると未反映の空IDになるため、cutover/finalizeともacceptance exportとcandidate downloadを分離する。
 
 rollbackはmodeを`disabled`へ戻してshadow endpointを閉じ、実行中Executionのcleanupとcontroller
 authorizationの無効化を確認してから直前のWorker deploymentへ戻す。forward-only migrationは

@@ -65,7 +65,8 @@ export function verifyProductionPreflightRun(run, jobsEnvelope, expected) {
     "success",
   );
   for (const name of [
-    "Download and re-verify exact accepted inputs",
+    "Download acceptance and export exact candidate identity",
+    "Download and re-verify exact candidates",
     "Build verifier and strictly read production foundation",
     "Render disabled preflight configuration",
     "Verify every external control plane before production mutation",
