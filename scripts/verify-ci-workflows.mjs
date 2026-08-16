@@ -1154,11 +1154,12 @@ requireTextCount(
   "deploy-staging-candidate.yml preflight job",
   "final accepted Cloud Run policy used for normalized parity",
 );
-forbidText(
+requireTextCount(
   stagingPreflightJob,
   "SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY: runpod_serverless_v1",
+  1,
   "deploy-staging-candidate.yml preflight job",
-  "RunPod baseline substituted into final normalized parity",
+  "recovered RunPod baseline used only for resumed live parity",
 );
 
 for (const [description, expected] of Object.entries({

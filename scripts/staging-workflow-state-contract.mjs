@@ -230,6 +230,11 @@ export async function verifyStagingWorkflowStateContract(source) {
     finalPolicy,
     "preflight parity export",
   );
+  requireProfile(
+    stepProfile(jobs.preflight, "Verify resumed live staging parity before any mutation"),
+    runpodBaseline,
+    "resumed preflight live parity",
+  );
   requireProfile(profile(jobEnvironment(jobs.migrate)), runpodBaseline, "migration job");
   requireProfile(profile(jobEnvironment(jobs["deploy-backend"])), runpodBaseline, "backend job");
   requireProfile(

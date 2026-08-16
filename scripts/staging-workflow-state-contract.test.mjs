@@ -43,6 +43,18 @@ test("reproduces the rejected preflight RunPod parity regression", async () => {
   );
 });
 
+test("rejects final Cloud Run policy as the recovered live resume baseline", async () => {
+  const regressed = workflow.replace(
+    /(name: Verify resumed live staging parity before any mutation[\s\S]*?SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY:) runpod_serverless_v1/u,
+    "$1 cloud_run_jobs_l4_v1",
+  );
+  assert.notEqual(regressed, workflow);
+  await assert.rejects(
+    verifyStagingWorkflowStateContract(regressed),
+    /resumed preflight live parity policy must be runpod_serverless_v1, received cloud_run_jobs_l4_v1/u,
+  );
+});
+
 test("rejects a missing acceptance workflow branch identity before publish", async () => {
   const regressed = workflow.replace(
     /( {2}acceptance:\n[\s\S]*? {6}EXPECTED_COMMIT_SHA: \$\{\{ inputs\.candidate_commit_sha \|\| github\.sha \}\}\n) {6}EXPECTED_RELEASE_BRANCH: \$\{\{ github\.ref_name \}\}\n/u,
