@@ -130,6 +130,11 @@ const stagingPaidReadinessVerifierPath = path.join(
   "scripts",
   "verify-staging-cloud-run-paid-readiness.mjs",
 );
+const stagingQuotaClientPath = path.join(
+  repositoryRoot,
+  "scripts",
+  "staging-cloud-run-quota-client.mjs",
+);
 const stagingPagesSecretsScriptPath = path.join(
   repositoryRoot,
   "scripts",
@@ -325,6 +330,7 @@ const stagingBootstrapPreflightManagerContents = readFileSync(
   "utf8",
 );
 const stagingPaidReadinessVerifierContents = readFileSync(stagingPaidReadinessVerifierPath, "utf8");
+const stagingQuotaClientContents = readFileSync(stagingQuotaClientPath, "utf8");
 const stagingPagesSecretsScriptContents = readFileSync(stagingPagesSecretsScriptPath, "utf8");
 const promotePagesCandidateScriptContents = readFileSync(promotePagesCandidateScriptPath, "utf8");
 const dockerfileContents = readFileSync(dockerfilePath, "utf8");
@@ -965,7 +971,7 @@ for (const [description, value] of Object.entries({
   "disabled candidate controller before boundary proof":
     "Deploy the candidate controller with authorization disabled",
   "GPU-free candidate boundary proof": "Prove the exact candidate runtime boundary without a GPU",
-  "known paid preflight": "Verify the complete known paid preflight before authorization",
+  "mutation-free paid readiness": "Verify paid readiness without mutation",
   "exact-one controller authorization":
     "Authorize exact one bounded staging execution and deploy the candidate controller",
   "staging admission activation after authorization":
@@ -979,7 +985,8 @@ for (const [description, value] of Object.entries({
   "staging-only Access client secret":
     "CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}",
   "staging acceptance creation": "pnpm run staging:acceptance:create",
-  "staging acceptance artifact": "scribe-drop-staging-acceptance-${{ github.sha }}",
+  "staging acceptance artifact":
+    "scribe-drop-staging-acceptance-${{ inputs.candidate_commit_sha || github.sha }}",
   "automatic failed acceptance recovery": "Converge a failed staging acceptance to the safe state",
   "RunPod baseline before acceptance":
     "SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY: runpod_serverless_v1",
@@ -1092,13 +1099,17 @@ requireTextCount(
 for (const [job, expected, description] of [
   [
     stagingMigrationJob,
-    "if: ${{ !inputs.preflight_only }}",
+    "if: ${{ !inputs.preflight_only && !inputs.resume_acceptance_only }}",
     "migration rejection after a mutation-free-only preflight",
   ],
   [stagingMigrationJob, "needs: preflight", "migration dependency on preflight"],
   [stagingPagesDeploymentJob, "needs: migrate", "Pages dependency on migration"],
   [stagingBackendJob, "needs: deploy-pages", "backend dependency on exact Pages deployment"],
-  [stagingAcceptanceJob, "needs: deploy-backend", "acceptance dependency on backend promotion"],
+  [
+    stagingAcceptanceJob,
+    "needs: [preflight, deploy-backend]",
+    "acceptance dependency on preflight and backend promotion",
+  ],
   [stagingRecoveryJob, "needs: acceptance", "recovery dependency on acceptance"],
 ]) {
   requireText(job, expected, "deploy-staging-candidate.yml", description);
@@ -1280,36 +1291,52 @@ requireTextOrder(
   "disabled candidate controller before GPU-free boundary proof",
 );
 requireTextOrder(
-  stagingAcceptanceJob,
-  "Prove the exact candidate runtime boundary without a GPU",
-  "Verify the complete known paid preflight before authorization",
-  "deploy-staging-candidate.yml acceptance job",
-  "GPU-free boundary proof before complete paid preflight",
+  stagingPreflightJob,
+  "Validate the exact controller deployment and read-back without mutation",
+  "Verify paid readiness without mutation",
+  "deploy-staging-candidate.yml preflight job",
+  "controller build before mutation-free paid readiness",
+);
+requireTextOrder(
+  stagingPreflightJob,
+  "Verify paid readiness without mutation",
+  "Verify the real staging E2E fixture before any mutation",
+  "deploy-staging-candidate.yml preflight job",
+  "complete paid readiness before remaining remote preflight",
 );
 requireTextOrder(
   stagingAcceptanceJob,
-  "Verify the complete known paid preflight before authorization",
+  "Prove the exact candidate runtime boundary without a GPU",
+  "Verify post-bootstrap safety before authorization",
+  "deploy-staging-candidate.yml acceptance job",
+  "GPU-free boundary proof before final safety read-back",
+);
+requireTextOrder(
+  stagingAcceptanceJob,
+  "Verify post-bootstrap safety before authorization",
   "Authorize exact one bounded staging execution and deploy the candidate controller",
   "deploy-staging-candidate.yml acceptance job",
-  "complete known paid preflight before authorization",
+  "post-bootstrap safety before authorization",
 );
 requireTextCount(
-  stagingAcceptanceJob,
+  stagingPreflightJob,
   "pnpm run cloud-run:staging:paid-readiness",
   1,
-  "deploy-staging-candidate.yml acceptance job",
-  "single paid-readiness gate",
+  "deploy-staging-candidate.yml preflight job",
+  "single mutation-free paid-readiness gate",
 );
 for (const [description, expected] of Object.entries({
   "disabled-zero read before paid readiness": "pnpm run cloud-run:staging:safety read",
   "exact L4 quota ID": "NvidiaL4GpuAllocNoZonalRedundancyPerProjectRegion",
-  "exact quota describe": '"quotas",\n      "info",\n      "describe"',
+  "exact Cloud Quotas API": "https://cloudquotas.googleapis.com/v1/projects/${PROJECT_NUMBER}",
   "fixed manifest construction": "createFixedJobManifest",
 })) {
   requireText(
     description === "disabled-zero read before paid readiness"
-      ? stagingAcceptanceJob
-      : stagingPaidReadinessVerifierContents,
+      ? stagingPreflightJob
+      : description === "fixed manifest construction"
+        ? stagingPaidReadinessVerifierContents
+        : stagingQuotaClientContents,
     expected,
     "deploy-staging-candidate.yml paid-readiness gate",
     description,
@@ -1317,9 +1344,9 @@ for (const [description, expected] of Object.entries({
 }
 forbidText(
   stagingPaidReadinessVerifierContents,
-  '"run", "jobs", "run"',
+  "node:child_process",
   "verify-staging-cloud-run-paid-readiness.mjs",
-  "provider execution from read-only paid readiness",
+  "gcloud subprocess from read-only paid readiness",
 );
 requireTextCount(
   stagingWorkflowContents,
@@ -1396,6 +1423,8 @@ for (const [description, expected] of Object.entries({
   "RunPod reactivation after disable":
     "Reactivate RunPod only after Cloud Run is disabled and empty",
   "no acceptance on recovery": "Verify recovered staging safety without issuing acceptance",
+  "Pages credential for full Cloudflare recovery read-back":
+    "CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}",
   "recovery convergence continues after earlier failure":
     "id: wait-convergence\n        if: ${{ always() }}\n        continue-on-error: true",
   "controller recovery requires convergence":

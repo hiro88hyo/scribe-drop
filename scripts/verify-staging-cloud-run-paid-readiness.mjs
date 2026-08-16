@@ -1,9 +1,9 @@
-import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
 import { parseCloudRunCandidateEvidence } from "./cloud-run-candidate-evidence.mjs";
+import { readStagingL4Quota } from "./staging-cloud-run-quota-client.mjs";
 import { verifyStagingPaidReadiness } from "./staging-cloud-run-paid-readiness.mjs";
 
 const [candidatePath] = process.argv.slice(2);
@@ -14,44 +14,6 @@ if (candidatePath === undefined || process.argv.length !== 3) {
 function requireValue(value, pattern, label) {
   if (typeof value !== "string" || !pattern.test(value)) throw new Error(`${label} is invalid`);
   return value;
-}
-
-async function readQuota() {
-  const child = spawn(
-    "gcloud",
-    [
-      "quotas",
-      "info",
-      "describe",
-      "NvidiaL4GpuAllocNoZonalRedundancyPerProjectRegion",
-      "--service=run.googleapis.com",
-      "--project=scribe-drop",
-      "--format=json",
-    ],
-    { env: process.env, shell: false, stdio: ["ignore", "pipe", "pipe"] },
-  );
-  let stdout = "";
-  let stderrBytes = 0;
-  child.stdout.setEncoding("utf8").on("data", (chunk) => {
-    stdout += chunk;
-    if (stdout.length > 512 * 1024) child.kill("SIGTERM");
-  });
-  child.stderr.on("data", (chunk) => {
-    stderrBytes += chunk.length;
-    if (stderrBytes > 64 * 1024) child.kill("SIGTERM");
-  });
-  const timeout = setTimeout(() => child.kill("SIGTERM"), 60_000);
-  const exitCode = await new Promise((resolve, reject) => {
-    child.on("error", reject);
-    child.on("close", resolve);
-  });
-  clearTimeout(timeout);
-  if (exitCode !== 0) throw new Error("Staging L4 quota read failed");
-  try {
-    return JSON.parse(stdout);
-  } catch {
-    throw new Error("Staging L4 quota response was invalid");
-  }
 }
 
 const candidate = parseCloudRunCandidateEvidence(
@@ -95,7 +57,7 @@ try {
     JSON.stringify(
       verifyStagingPaidReadiness({
         manifest,
-        quota: await readQuota(),
+        quota: await readStagingL4Quota(process.env.GOOGLE_OAUTH_ACCESS_TOKEN),
         workerImage: candidate.workerImage,
       }),
     ),

@@ -457,6 +457,12 @@ commitのstaging dispatchまたはjob re-runで追加GPU executionを開かな�
 candidate、staging、production workflowを起動する前に、変更対象のlocal testと標準local
 gateを完了する。remote workflowをlocal検証の代替に使用しない。
 
+stagingのmutation-free `preflight`はcontroller verifier build後に、disabled/zero safetyとpaid readinessを
+同じworkflow identityで完了する。L4 quotaは短期OAuth tokenでCloud Quotas v1のexact `QuotaInfo`を直接GETし、
+credentialやactive projectが選ぶquota projectに依存するgcloud subprocessを使用しない。`preflight_only`が成功する前に
+Orchestrator pause、controller deploy、Playwright install、GPU authorizationへ進んではならない。failed acceptanceの
+recoveryはRunPod復元後にCloudflare全resourceをread-backするため、通常API tokenと専用Pages API tokenの両方を渡す。
+
 RunPod Worker build inputsに差分がないapplication-only candidateでは、
 [ADR 0038](./adr/0038-reuse-unchanged-runpod-worker-image.md)の検証済みsource candidate
 run IDをcandidate workflowへ指定できる。workflowはsource run、artifact、祖先関係、

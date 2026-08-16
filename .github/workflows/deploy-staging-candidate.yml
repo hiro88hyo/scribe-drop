@@ -222,6 +222,14 @@ jobs:
           pnpm run cloud-run:controller:deploy preflight staging disabled \
             "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
 
+      - name: Verify paid readiness without mutation
+        env:
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+        run: |
+          pnpm run cloud-run:staging:safety read
+          pnpm run cloud-run:staging:paid-readiness \
+            "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
+
       - name: Verify the real staging E2E fixture before any mutation
         run: pnpm run staging:e2e:fixture:verify
 
@@ -619,13 +627,10 @@ jobs:
           pnpm run cloud-run:staging:bootstrap-preflight \
             "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
 
-      - name: Verify the complete known paid preflight before authorization
+      - name: Verify post-bootstrap safety before authorization
         env:
           GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
-        run: |
-          pnpm run cloud-run:staging:safety read
-          pnpm run cloud-run:staging:paid-readiness \
-            "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
+        run: pnpm run cloud-run:staging:safety read
 
       - name: Authorize exact one bounded staging execution and deploy the candidate controller
         env:
@@ -956,6 +961,7 @@ jobs:
         continue-on-error: true
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
           GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
           SCRIBE_DROP_STAGING_GPU_EXECUTION_ADMISSION: active
           SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY: runpod_serverless_v1
