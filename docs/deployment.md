@@ -463,7 +463,8 @@ credentialやactive projectが選ぶquota projectに依存するgcloud subproces
 Orchestrator pause、controller deploy、Playwright install、GPU authorizationへ進んではならない。failed acceptanceの
 recoveryはRunPod復元後にCloudflare全resourceをread-backするため、通常API tokenと専用Pages API tokenの両方を渡す。
 Cloud Quotas APIのenabled状態はstaging bootstrap foundationのapply/read-back対象とし、IAM roleのpermission一致だけで
-quota capabilityを成功扱いにしない。
+quota capabilityを成功扱いにしない。CIのstaging deployerにはenabled状態を読む`serviceusage.services.list`だけを与え、
+APIを変更する`serviceusage.services.enable`は与えない。
 
 RunPod Worker build inputsに差分がないapplication-only candidateでは、
 [ADR 0038](./adr/0038-reuse-unchanged-runpod-worker-image.md)の検証済みsource candidate

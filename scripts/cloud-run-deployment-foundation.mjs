@@ -50,6 +50,7 @@ export const stagingBootstrapPreflightRolePermissions = Object.freeze([
   "run.jobs.list",
   "run.jobs.run",
   "run.operations.get",
+  "serviceusage.services.list",
 ]);
 
 function githubCondition(environment, workflowPath) {

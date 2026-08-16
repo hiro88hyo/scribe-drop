@@ -155,8 +155,9 @@ test("isolates GPU-free bootstrap mutation to a staging-only role", () => {
     "run.jobs.list",
     "run.jobs.run",
     "run.operations.get",
+    "serviceusage.services.list",
   ]);
-  assert.equal(new Set(stagingBootstrapPreflightRolePermissions).size, 10);
+  assert.equal(new Set(stagingBootstrapPreflightRolePermissions).size, 11);
   assert.equal(
     stagingBootstrapPreflightRolePermissions.includes("run.jobs.runWithOverrides"),
     false,
@@ -164,6 +165,10 @@ test("isolates GPU-free bootstrap mutation to a staging-only role", () => {
   assert.equal(stagingBootstrapPreflightRolePermissions.includes("run.services.update"), false);
   assert.equal(
     stagingBootstrapPreflightRolePermissions.includes("cloudquotas.quotas.update"),
+    false,
+  );
+  assert.equal(
+    stagingBootstrapPreflightRolePermissions.includes("serviceusage.services.enable"),
     false,
   );
   assert.equal(deploymentRolePermissions.includes("run.jobs.create"), false);
