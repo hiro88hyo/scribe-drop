@@ -1,24 +1,8 @@
 import { verifyBranchProtections } from "./github-branch-protection.mjs";
+export { requiredProductionVariableNames } from "./production-environment-contract.mjs";
+import { requiredProductionVariableNames } from "./production-environment-contract.mjs";
 
 const workflowPath = ".github/workflows/deploy-production-candidate.yml";
-
-export const requiredProductionVariableNames = [
-  "AUDIT_RETENTION_DAYS",
-  "CLOUDFLARE_ACCOUNT_ID",
-  "MULTIPART_RETENTION_HOURS",
-  "RESULT_RETENTION_DAYS",
-  "SCRIBE_DROP_PRODUCTION_ACCESS_AUDIENCE",
-  "SCRIBE_DROP_PRODUCTION_ACCESS_TEAM_DOMAIN",
-  "SCRIBE_DROP_PRODUCTION_CLOUD_RUN_CONTROLLER_HMAC_SECRET_VERSION",
-  "SCRIBE_DROP_PRODUCTION_D1_DATABASE_ID",
-  "SCRIBE_DROP_PRODUCTION_ORCHESTRATOR_ORIGIN",
-  "SCRIBE_DROP_PRODUCTION_PAGES_PROJECT",
-  "SCRIBE_DROP_PRODUCTION_RUNPOD_GPU_IDS",
-  "SCRIBE_DROP_PRODUCTION_RUNPOD_IMAGE_VISIBILITY",
-  "SCRIBE_DROP_PRODUCTION_RUNPOD_REGISTRY_AUTH_ID",
-  "SCRIBE_DROP_PRODUCTION_WEB_ORIGIN",
-  "SOURCE_RETENTION_DAYS",
-];
 
 export const requiredProductionSecretNames = [
   "CLOUDFLARE_API_TOKEN",

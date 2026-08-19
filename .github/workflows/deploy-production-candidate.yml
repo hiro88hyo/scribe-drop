@@ -332,6 +332,19 @@ jobs:
           pnpm run cloudflare:config:production
           pnpm run runpod:config:production
 
+      - name: Verify accepted production environment policy before external access
+        env:
+          MINIMUM_ACCEPTANCE_REMAINING_SECONDS: "2700"
+          SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION: active
+          SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_POLICY: cloud_run_jobs_l4_v1
+          STAGING_RUN_ID: ${{ inputs.staging_run_id }}
+        run: |
+          pnpm run environment:policy:export production
+          EXPECTED_CANDIDATE_RUN_ID="${CANDIDATE_RUN_ID}" \
+            EXPECTED_CLOUD_RUN_CANDIDATE_RUN_ID="${CLOUD_RUN_CANDIDATE_RUN_ID}" \
+            EXPECTED_STAGING_RUN_ID="${STAGING_RUN_ID}" \
+            pnpm run staging:acceptance:verify "${RELEASE_CANDIDATE_DIRECTORY}" staging-acceptance
+
       - name: Verify every external control plane before production mutation
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

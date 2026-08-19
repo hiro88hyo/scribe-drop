@@ -29,6 +29,14 @@ evidenceへ使用していた。そのため有効なstaging acceptanceがあっ
   candidate downloadに使用せず、次の独立stepだけで参照する。この境界をcutover/finalizeの両方でstatic検査する。
 - `preflight_only=true`のproduction cutover modeを追加する。このmodeはstaging evidence、両candidate、production
   foundation、controller validate-only、Cloudflare credential/resource、Pages、Access、RunPodを実環境で検証する。
+- production workflowが参照するGitHub Environmentの15 variableと6 secret名をsource-controlled contractとして列挙する。
+  dispatch前のlocal verifierは15 variableの完全一致、production config render、固定RunPod GPU集合、candidate identity、
+  staging evidenceとのnormalized environment policy parityを一度に検証する。失効済みevidenceは構造比較にだけ使用でき、
+  promotion authorityにはしない。実値の変更が必要な場合はread-back差分を提示し、承認後にだけ更新する。
+- cutover jobはdisabled production configをrenderした直後、外部control planeへ接続する前にproduction environment policyを
+  exportし、同じpolicy IDでstaging acceptanceを検証する。このstepをactual cutoverでも`preflight_only`でも実行し、後続の
+  RunPod promotionが必要とする`EXPECTED_ENVIRONMENT_POLICY_ID`を`GITHUB_ENV`経由で供給する。producer、consumer、順序、
+  workflowの全variable/secret参照集合をstatic gateで固定する。
 - preflight modeではmigration、R2 policy、RunPod promotion、controller apply、Worker/Pages deploy、drain、provider
   selection、GPU authorization、evidence発行の9 stepをworkflow conditionでskipする。各stepのconditionをstatic
   verifierで固定する。
@@ -42,5 +50,7 @@ evidenceへ使用していた。そのため有効なstaging acceptanceがあっ
 - workflow gateを修正してもimmutable application candidateを再buildせず、candidateとworkflowの両identityを監査できる。
 - production mutationの前に、同じsourceとcredentialで全remote prerequisiteを独立runとして完了できる。mutating cutoverを
   preflightなしで直接dispatchしても最初のverification jobで停止する。
+- Environment値のdriftやworkflow内のstep間契約欠落はdispatch前のlocal gateで停止する。remote preflightはsecret値と
+  provider側read-backの検証に限定され、source-known inputのデバッグには使用しない。
 - production workflow変更後のstaging evidenceはADR 0088のGPU-free full live read-backで更新し、変更後workflow commitへ
   結び直す。実M4AやGPU executionは繰り返さない。

@@ -1893,6 +1893,14 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
   control-plane preflightで許容する一方、PATCHを送らない。既存Serviceだけは従来どおりvalidate-only PATCHと前後snapshot
   完全一致を必須にし、未作成時のPATCH 0回、既存時の二重snapshot、変更検知をlocal testで固定する。このrunもGPU、migration、
   deploy、provider切替、authorizationを含む全production mutation stepはskipした。
+- production preflight run `31924206961`はcandidate、staging identity、foundation、controller absent-Service read-backを通過後、
+  disabled config renderでproduction EnvironmentのRunPod GPU集合が固定3種ではなく2種だったため停止した。全production mutationは
+  skipされた。このdispatch前に外形検査可能だったdriftと、actual cutoverのRunPod promotionが要求するenvironment policy IDを
+  cutover job内で生成していないstep間契約欠落を同時に修正する。source-controlled local contractはworkflowが参照する15 variable、
+  6 secret名、production render、candidate/staging policy parity、policy producer/consumer順序を完全一致検査する。実Environmentの
+  read-only検査ではGPU集合だけが不一致で、固定3種への単一補正をmemory上で適用すると15値とstaging parityがすべて成功することを
+  確認した。production GitHub controlsとCloud Run foundationの実read-backも成功した。外部値は承認前に変更せず、workflowも
+  dispatchしない。source/workflow/config変更後はGPUを再実行せずGPU-free staging evidenceを更新する。
 
 実装:
 

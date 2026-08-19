@@ -662,6 +662,24 @@ provider切替、authorization、evidence発行がskipされる。実cutoverは�
 `finalize`では`preflight_run_id=0`を使用する。
 acceptance artifactからexportしたcandidate run IDは`GITHUB_ENV`へ書いた次stepで初めて使用する。同じstep内で
 参照すると未反映の空IDになるため、cutover/finalizeともacceptance exportとcandidate downloadを分離する。
+dispatch前に`pnpm production:workflow:verify`を実行し、production workflowが参照する15 variable、6 secret、
+environment policy producer、外部preflight、RunPod promotionの順序をsourceから完全一致検査する。candidate artifactと
+staging acceptance artifactをdownloadした作業directoryに対して、次のread-only verifierを実行する。
+
+```text
+pnpm production:environment:verify \
+  <application-candidate-directory> \
+  <cloud-run-candidate-evidence.json> \
+  <staging-acceptance-directory> \
+  <candidate-commit-sha>
+```
+
+このverifierはGitHub production Environmentの15 variableをAPI read-backし、exact Pages project、HMAC version、
+Cloudflare production render、固定3種RunPod GPU、immutable candidate、Cloud Run evidence、normalized staging policy parityを
+一度に検査する。secretは値を取得せず、`pnpm github:controls:verify:production`で6 secret名の完全一致だけを検査する。
+失効済みstaging evidenceはpolicy構造の比較には使えるが、production promotion authorityにはならない。Environmentの修正が
+必要ならobserved/required差分を先に提示し、承認なしに更新しない。source、workflow、Environment値の変更後は新しいGPU-free
+staging acceptanceを発行してから、productionのmutation-free remote preflightを1回だけ実行する。
 
 rollbackはmodeを`disabled`へ戻してshadow endpointを閉じ、実行中Executionのcleanupとcontroller
 authorizationの無効化を確認してから直前のWorker deploymentへ戻す。forward-only migrationは

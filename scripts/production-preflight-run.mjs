@@ -69,6 +69,7 @@ export function verifyProductionPreflightRun(run, jobsEnvelope, expected) {
     "Download and re-verify exact candidates",
     "Build verifier and strictly read production foundation",
     "Render disabled preflight configuration",
+    "Verify accepted production environment policy before external access",
     "Verify every external control plane before production mutation",
   ]) {
     requireStep(cutover, name, "success");
