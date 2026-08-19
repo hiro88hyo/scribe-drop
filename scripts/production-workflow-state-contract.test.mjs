@@ -31,6 +31,18 @@ test("rejects an unbound staging run policy input", () => {
   assert.throws(() => verifyProductionWorkflowStateContract(regressed), /producer is incomplete/u);
 });
 
+test("requires the dedicated Pages token for the final Wrangler read-back", () => {
+  const regressed = workflow.replace(
+    'CLOUDFLARE_API_TOKEN="${CLOUDFLARE_PAGES_API_TOKEN}" \\\n            pnpm exec wrangler pages deployment list',
+    "pnpm exec wrangler pages deployment list",
+  );
+  assert.notEqual(regressed, workflow);
+  assert.throws(
+    () => verifyProductionWorkflowStateContract(regressed),
+    /external preflight is incomplete or out of order/u,
+  );
+});
+
 test("rejects an unreviewed Environment variable or secret reference", () => {
   assert.throws(
     () =>

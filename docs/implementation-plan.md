@@ -1901,6 +1901,13 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
   read-only検査ではGPU集合だけが不一致で、固定3種への単一補正をmemory上で適用すると15値とstaging parityがすべて成功することを
   確認した。production GitHub controlsとCloud Run foundationの実read-backも成功した。外部値は承認前に変更せず、workflowも
   dispatchしない。source/workflow/config変更後はGPUを再実行せずGPU-free staging evidenceを更新する。
+- GPU-free staging run `32312021835`は変更後source、両candidate、source lifecycle、全live parityを再検証して成功した。
+  production preflight `32312333527`は全mutationをskipし、sourceで要求済みのproduction RunPod capacityに実endpointが未移行の
+  ため停止した。明示承認後、local-only managerがjob/worker全0を確認し、data centerをAny Region、GPUを固定3種へ各1回更新して
+  完全read-backした。replacement preflight `32313523493`ではRunPod capacity readyまで成功したが、最後のWrangler Pages
+  deployment read-backが同stepのbackend tokenをPages専用tokenより優先して認証失敗した。Pages commandだけprocess-localに専用
+  tokenをbindし、Cloudflare/RunPod個別commandの完全順序とtoken overrideをstatic contractで固定する。両runともmigration、deploy、
+  provider切替、authorization、GPU、evidence発行はskipされた。
 
 実装:
 

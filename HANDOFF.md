@@ -203,6 +203,23 @@ After the full local gate and commit, obtain explicit approval before correcting
 the one GitHub Environment value, then issue one new GPU-free staging recovery
 acceptance before the single production remote preflight.
 
+Later continuation results:
+
+- production Environment GPU IDs were corrected and all 15 values plus policy
+  parity passed.
+- GPU-free staging recovery run `32312021835` succeeded with every deployment,
+  migration, real acceptance, recovery, and GPU job skipped.
+- production preflight `32312333527` safely stopped on the documented RunPod
+  capacity gate. The approved local-only manager changed the idle/zero endpoint
+  from two fixed European data centers and two GPUs to Any Region and the fixed
+  three-GPU set; strict capacity and health read-back passed.
+- replacement preflight `32313523493` passed RunPod with `capacity ready`, then
+  stopped because the final Wrangler Pages deployment list inherited the
+  backend Cloudflare token instead of the already-present dedicated Pages
+  token. All mutation steps were skipped. The current source change binds only
+  that Wrangler process to `CLOUDFLARE_PAGES_API_TOKEN` and adds a static
+  regression gate. A new GPU-free acceptance is required after committing it.
+
 ## Toolchain
 
 Use Volta and pnpm:

@@ -34,6 +34,12 @@ function requireOrdered(source, names) {
   }
 }
 
+function stepBlock(source, name) {
+  const start = source.indexOf(`- name: ${name}`);
+  const end = source.indexOf("\n      - name:", start + 1);
+  return source.slice(start, end === -1 ? source.length : end);
+}
+
 export function verifyProductionWorkflowStateContract(source) {
   const producerName = "Verify accepted production environment policy before external access";
   requireOrdered(source, [
@@ -42,9 +48,7 @@ export function verifyProductionWorkflowStateContract(source) {
     "Verify every external control plane before production mutation",
     "Promote exact rollback-compatible RunPod image without execution",
   ]);
-  const producerStart = source.indexOf(`- name: ${producerName}`);
-  const producerEnd = source.indexOf("\n      - name:", producerStart + 1);
-  const producer = source.slice(producerStart, producerEnd === -1 ? source.length : producerEnd);
+  const producer = stepBlock(source, producerName);
   for (const required of [
     "          STAGING_RUN_ID: ${{ inputs.staging_run_id }}",
     "SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION: active",
@@ -58,6 +62,26 @@ export function verifyProductionWorkflowStateContract(source) {
     if (!producer.includes(required)) {
       throw new Error(`Production environment policy producer is incomplete: ${required}`);
     }
+  }
+  const externalPreflight = stepBlock(
+    source,
+    "Verify every external control plane before production mutation",
+  );
+  let previousCommand = -1;
+  for (const command of [
+    "pnpm run cloudflare:worker-route:verify:production",
+    "pnpm run cloudflare:pages:upload-permission:verify:production",
+    "pnpm run cloudflare:secrets:verify:production:pages",
+    "pnpm run cloudflare:access:verify:production",
+    "pnpm run runpod:preflight:production",
+    'CLOUDFLARE_API_TOKEN="${CLOUDFLARE_PAGES_API_TOKEN}" \\\n            pnpm exec wrangler pages deployment list',
+    'test -s "${RUNNER_TEMP}/pages-deployment-preflight.json"',
+  ]) {
+    const index = externalPreflight.indexOf(command);
+    if (index === -1 || index <= previousCommand) {
+      throw new Error(`Production external preflight is incomplete or out of order: ${command}`);
+    }
+    previousCommand = index;
   }
   const promotionStart = source.indexOf(
     "- name: Promote exact rollback-compatible RunPod image without execution",

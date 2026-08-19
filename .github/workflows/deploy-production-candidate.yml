@@ -358,7 +358,8 @@ jobs:
           pnpm run cloudflare:secrets:verify:production:pages
           pnpm run cloudflare:access:verify:production
           pnpm run runpod:preflight:production
-          pnpm exec wrangler pages deployment list \
+          CLOUDFLARE_API_TOKEN="${CLOUDFLARE_PAGES_API_TOKEN}" \
+            pnpm exec wrangler pages deployment list \
             --cwd apps/web \
             --project-name "${SCRIBE_DROP_PRODUCTION_PAGES_PROJECT}" \
             --environment production \

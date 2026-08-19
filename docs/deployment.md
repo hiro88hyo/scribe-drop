@@ -393,7 +393,7 @@ capacity移行が必要な場合は、全local gateとread-only実resource確認
 生成・注入し、値をshell履歴や文書へ残さない。
 
 ```bash
-pnpm run runpod:capacity:prepare:production -- --confirm-production-capacity-migration
+pnpm run runpod:capacity:prepare:production --confirm-production-capacity-migration
 ```
 
 commandはactive jobとrunning/initializing Workerが0であることを確認してからworker上限を
@@ -662,6 +662,9 @@ provider切替、authorization、evidence発行がskipされる。実cutoverは�
 `finalize`では`preflight_run_id=0`を使用する。
 acceptance artifactからexportしたcandidate run IDは`GITHUB_ENV`へ書いた次stepで初めて使用する。同じstep内で
 参照すると未反映の空IDになるため、cutover/finalizeともacceptance exportとcandidate downloadを分離する。
+同じexternal preflight stepでbackend用`CLOUDFLARE_API_TOKEN`とPages専用tokenを併用する場合、Wrangler Pages
+deployment read-backだけはprocess-localに`CLOUDFLARE_API_TOKEN="${CLOUDFLARE_PAGES_API_TOKEN}"`を設定する。
+Wranglerがbackend tokenを優先してPages APIを呼ぶ構成をstatic workflow contractで拒否する。
 dispatch前に`pnpm production:workflow:verify`を実行し、production workflowが参照する15 variable、6 secret、
 environment policy producer、外部preflight、RunPod promotionの順序をsourceから完全一致検査する。candidate artifactと
 staging acceptance artifactをdownloadした作業directoryに対して、次のread-only verifierを実行する。
