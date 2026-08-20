@@ -25,6 +25,7 @@ export function productionSmokeQuery(jobId) {
       attempts.provider_kind,
       attempts.provider_policy,
       attempts.runpod_execution_ms,
+      executions.provider_handle,
       executions.status AS execution_status,
       executions.terminal_status,
       executions.cleanup_status,
@@ -70,6 +71,7 @@ export function parseProductionSmokeObservation(value, expectedJobId) {
   }
   const formats = new Set();
   let attemptId;
+  let executionHandle;
   let resultPrefix;
   let sourceKey;
   const objectKeys = [];
@@ -82,6 +84,8 @@ export function parseProductionSmokeObservation(value, expectedJobId) {
       row.attempt_status !== "COMPLETED" ||
       row.provider_kind !== "cloud_run_jobs" ||
       row.provider_policy !== "cloud_run_jobs_l4_v1" ||
+      typeof row.provider_handle !== "string" ||
+      !/^[A-Za-z0-9_-]{43}$/u.test(row.provider_handle) ||
       !Number.isSafeInteger(row.runpod_execution_ms) ||
       row.runpod_execution_ms <= 0 ||
       row.execution_status !== "TERMINAL" ||
@@ -107,6 +111,7 @@ export function parseProductionSmokeObservation(value, expectedJobId) {
     }
     if (
       (attemptId !== undefined && attemptId !== row.attempt_id) ||
+      (executionHandle !== undefined && executionHandle !== row.provider_handle) ||
       (resultPrefix !== undefined && resultPrefix !== row.result_prefix) ||
       (sourceKey !== undefined && sourceKey !== row.source_key) ||
       formats.has(row.format)
@@ -114,6 +119,7 @@ export function parseProductionSmokeObservation(value, expectedJobId) {
       throw new Error("Production smoke artifact identity is inconsistent");
     }
     attemptId = row.attempt_id;
+    executionHandle = row.provider_handle;
     resultPrefix = row.result_prefix;
     sourceKey = row.source_key;
     formats.add(row.format);
@@ -121,6 +127,7 @@ export function parseProductionSmokeObservation(value, expectedJobId) {
   }
   if (
     formats.size !== expectedFormats.size ||
+    executionHandle === undefined ||
     resultPrefix === undefined ||
     sourceKey === undefined
   ) {
@@ -129,6 +136,7 @@ export function parseProductionSmokeObservation(value, expectedJobId) {
   return {
     artifactKeys: objectKeys.sort(),
     attemptId,
+    executionHandle,
     manifestKey: `${resultPrefix}manifest.json`,
     processingMilliseconds: operation.results[0].runpod_execution_ms,
     sourceKey,

@@ -677,6 +677,14 @@ productionの通常UIで固定smoke mediaを1件uploadし、artifactと通知を
 `execution数 * 250`円、24時間以内のISO expiryを渡す。finalizeはD1/R2、Cloud Run resource 0、controller
 storage CLEANEDを検証するまで運用枠を開かない。productionにstaging Access service principalを作成しない。
 
+[ADR 0092](./adr/0092-make-production-finalize-resumable.md)に従い、finalizeはread-back済み入口状態を
+`smoke-active`、`smoke-paused`、`disabled-paused`、`operational-paused`、`operational-active`から明示する。
+最初のmutation前にadmission、authorization、provider 0、D1のproduction smoke `provider_handle`と同じFirestore
+`executionHandle`を持つ`CLEANED` recordを完全一致検査し、pause、disable、operational authorization、activateを独立stepとして
+残りのsuffixだけ実行する。cutover workflowの終了時刻を、その後に投入するsmokeのidentityには使わない。operational epochはcandidate commitとcutover run IDへ
+固定し、workflow retryでdesired authorizationを変えない。全入口と各mutation直後のprefix状態がstate-machine testを通り、
+全stepの必須envと順序をsource contractが検証するまでdispatchしない。
+
 [ADR 0089](./adr/0089-separate-production-workflow-and-candidate-identity.md)に従い、production workflowには
 staging acceptanceと一致する`candidate_commit_sha`を必ず渡す。workflowの`GITHUB_SHA`はsource runの信頼検証に
 だけ使い、artifact名、deployment label、authorization、evidenceへ流用しない。cutover前に同じ入力で

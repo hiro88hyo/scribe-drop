@@ -40,7 +40,7 @@ test("requires dependency-closed controller builds in staging and production", a
     }),
     [
       "cutover / Build verifier and strictly read production foundation",
-      "finalize / Build verifier and reconstruct exact active production configuration",
+      "finalize / Build verifier and reconstruct exact production entry configuration",
     ],
   );
 });

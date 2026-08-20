@@ -31,19 +31,23 @@ test("runs the source-managed contract before production input and remote verifi
   assert.ok(contract < firstRemoteRead);
 });
 
-test("binds every discovered cleanup prerequisite in the finalize step", () => {
-  const cleanupStep = workflowStep(
-    workflow,
-    "Verify production smoke and exact provider cleanup before mutation",
-  );
+test("binds every finalize entry prerequisite before mutation", () => {
+  const entryStep = workflowStep(workflow, "Verify exact finalize entry state before mutation");
 
-  assert.match(cleanupStep, /GOOGLE_OAUTH_ACCESS_TOKEN:/u);
+  assert.match(entryStep, /GOOGLE_OAUTH_ACCESS_TOKEN:/u);
   assert.match(
-    cleanupStep,
-    /SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_EPOCH: phase16-smoke-\$\{\{ inputs\.candidate_commit_sha \}\}-\$\{\{ inputs\.cutover_run_id \}\}/u,
+    entryStep,
+    /SCRIBE_DROP_CLOUD_RUN_SMOKE_EPOCH: phase16-smoke-\$\{\{ inputs\.candidate_commit_sha \}\}-\$\{\{ inputs\.cutover_run_id \}\}/u,
   );
+  assert.match(entryStep, /pnpm run production:finalize:entry:verify/u);
+});
+
+test("binds the smoke source epoch to the disable command", () => {
+  const disableStep = workflowStep(workflow, "Disable the consumed smoke authorization");
+  assert.match(disableStep, /GOOGLE_OAUTH_ACCESS_TOKEN:/u);
+  assert.match(disableStep, /SCRIBE_DROP_CLOUD_RUN_EXPECTED_RESERVED_EXECUTIONS: "1"/u);
   assert.match(
-    cleanupStep,
-    /pnpm run cloud-run:acceptance:clean production "\$\{CUTOVER_RUN_PATH\}"/u,
+    disableStep,
+    /SCRIBE_DROP_CLOUD_RUN_EXPECTED_AUTHORIZATION_EPOCH: phase16-smoke-\$\{\{ inputs\.candidate_commit_sha \}\}-\$\{\{ inputs\.cutover_run_id \}\}/u,
   );
 });

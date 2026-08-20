@@ -2001,6 +2001,17 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
   `SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_EPOCH`がstepに未設定で、production smoke成功後、mutation前に停止した。ローカル実run
   cleanup検証ではepochを手動設定したためworkflowの欠落を再現できていなかった。cleanup stepはcandidate commitとcutover run ID
   からexact smoke epochを明示し、path、Google token、epochの全required inputをstatic verifierで固定する。
+- source-managed gate追加後のGPU-free staging evidence `32345694386`は成功した。finalize `32346058051`はsmoke、notification、
+  provider cleanupを成功した後、Orchestrator admissionを`paused`へdeploy・read-backしたが、同じstepのcontroller disableに
+  `SCRIBE_DROP_CLOUD_RUN_EXPECTED_AUTHORIZATION_EPOCH`がなく入力検証で停止した。controller/Firestore mutationと追加GPU executionは
+  発生せず、live stateは`smoke-paused`である。既知envだけを検査したgateはworkflow全体の証明になっていなかった。
+- [ADR 0092](./adr/0092-make-production-finalize-resumable.md)に従い、finalizeを5つの外形状態と4つの独立mutationへ分割する。
+  cutover epochとproduction smoke handleへ結び付くread-only entry verifier、candidate+cutover固定operational epoch、全prefix failure injection test、全stepの
+  env/引数/条件/順序contractが成功するまでproductionを再dispatchしない。現在状態からは`smoke-paused`を明示して前方収束する。
+- entry verifierの初版はproduction smokeをcutover workflowの時刻窓で識別したため、実resource read-backでmutation前に拒否された。
+  smokeはcutover完了後に投入されるため、D1でE2E成功を検証したjobの`provider_handle`とFirestore recordの`executionHandle`を
+  完全一致させる方式へ修正した。別handle拒否の回帰テスト後、live `smoke-paused`、Cloud Run Job/Execution 0、active 0、
+  `CLEANED`をread-onlyで確認した。
 
 実装:
 

@@ -6,6 +6,7 @@ import { validateProductionPromotionInputs } from "./production-promotion-inputs
 const defaults = {
   candidateCommitSha: "a".repeat(40),
   cutoverRunId: "0",
+  finalizeEntryStage: "smoke-active",
   operation: "cutover",
   operationalMaxExecutions: "0",
   operationalMaxWorstCaseJpy: "0",
@@ -62,6 +63,7 @@ test("accepts an explicit bounded finalize budget", () => {
     {
       candidateCommitSha: "a".repeat(40),
       cutoverRunId: "456",
+      finalizeEntryStage: "smoke-active",
       maxExecutions: 5,
       maxWorstCaseJpy: 1250,
       operation: "finalize",
@@ -113,5 +115,37 @@ test("rejects a mismatched, excessive, or expired budget", () => {
   assert.throws(
     () => validateProductionPromotionInputs({ ...defaults, candidateCommitSha: "main" }),
     /candidate identity/u,
+  );
+});
+
+test("accepts every explicit resumable finalize entry stage and rejects it for cutover", () => {
+  for (const finalizeEntryStage of [
+    "smoke-active",
+    "smoke-paused",
+    "disabled-paused",
+    "operational-paused",
+    "operational-active",
+  ]) {
+    assert.equal(
+      validateProductionPromotionInputs(
+        {
+          ...defaults,
+          cutoverRunId: "456",
+          finalizeEntryStage,
+          operation: "finalize",
+          operationalMaxExecutions: "5",
+          operationalMaxWorstCaseJpy: "1250",
+          operationalValidUntil: "2026-08-15T23:00:00.000Z",
+          productionSmokeJobId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          preflightRunId: "0",
+        },
+        new Date("2026-08-15T00:00:00.000Z"),
+      ).finalizeEntryStage,
+      finalizeEntryStage,
+    );
+  }
+  assert.throws(
+    () => validateProductionPromotionInputs({ ...defaults, finalizeEntryStage: "smoke-paused" }),
+    /finalize-only/u,
   );
 });

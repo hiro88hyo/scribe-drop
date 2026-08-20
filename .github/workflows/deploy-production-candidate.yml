@@ -33,6 +33,17 @@ on:
         required: true
         default: "0"
         type: string
+      finalize_entry_stage:
+        description: Exact read-backed finalize state; cutover must use smoke-active
+        required: true
+        default: smoke-active
+        type: choice
+        options:
+          - smoke-active
+          - smoke-paused
+          - disabled-paused
+          - operational-paused
+          - operational-active
       production_smoke_job_id:
         description: User-confirmed production smoke ULID for finalize; use none for cutover
         required: true
@@ -97,6 +108,7 @@ jobs:
         env:
           CUTOVER_RUN_ID: ${{ inputs.cutover_run_id }}
           CANDIDATE_COMMIT_SHA: ${{ inputs.candidate_commit_sha }}
+          PRODUCTION_FINALIZE_ENTRY_STAGE: ${{ inputs.finalize_entry_stage }}
           OPERATIONAL_MAX_EXECUTIONS: ${{ inputs.operational_max_executions }}
           OPERATIONAL_MAX_WORST_CASE_JPY: ${{ inputs.operational_max_worst_case_jpy }}
           OPERATIONAL_VALID_UNTIL: ${{ inputs.operational_valid_until }}
@@ -611,39 +623,63 @@ jobs:
           pnpm run candidate:verify "${RELEASE_CANDIDATE_DIRECTORY}"
           pnpm run cloud-run:candidate:evidence verify cloud-run-candidate/cloud-run-candidate.json
 
-      - name: Build verifier and reconstruct exact active production configuration
+      - name: Build verifier and reconstruct exact production entry configuration
         env:
           GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+          PRODUCTION_FINALIZE_ENTRY_STAGE: ${{ inputs.finalize_entry_stage }}
+          SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_EPOCH: phase16-operational-${{ inputs.candidate_commit_sha }}-${{ inputs.cutover_run_id }}
+          SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_VALID_UNTIL: ${{ inputs.operational_valid_until }}
+          SCRIBE_DROP_CLOUD_RUN_MAX_EXECUTIONS: ${{ inputs.operational_max_executions }}
+          SCRIBE_DROP_CLOUD_RUN_MAX_WORST_CASE_JPY: ${{ inputs.operational_max_worst_case_jpy }}
           SCRIBE_DROP_CLOUD_RUN_EXPECTED_AUTHORIZATION_EPOCH: phase16-smoke-${{ inputs.candidate_commit_sha }}-${{ inputs.cutover_run_id }}
           SCRIBE_DROP_CLOUD_RUN_EXPECTED_RESERVED_EXECUTIONS: "1"
+          SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION: ${{ (inputs.finalize_entry_stage == 'smoke-active' || inputs.finalize_entry_stage == 'operational-active') && 'active' || 'paused' }}
         run: |
           pnpm run workflow:build:gpu-controller
-          pnpm run cloud-run:controller:deploy preflight production disabled \
-            "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
+          case "${PRODUCTION_FINALIZE_ENTRY_STAGE}" in
+            smoke-*)
+              pnpm run cloud-run:controller:deploy preflight production disabled \
+                "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
+              ;;
+            disabled-paused)
+              SCRIBE_DROP_CLOUD_RUN_EXPECTED_AUTHORIZATION_EPOCH=disabled \
+                SCRIBE_DROP_CLOUD_RUN_EXPECTED_RESERVED_EXECUTIONS=0 \
+                pnpm run cloud-run:controller:deploy preflight production disabled \
+                  "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
+              ;;
+            operational-*)
+              pnpm run cloud-run:controller:deploy read production operational \
+                "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
+              ;;
+          esac
           pnpm run runpod:config:production
           pnpm run candidate:pages "${RELEASE_CANDIDATE_DIRECTORY}" pages-candidate
-          SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION=active \
-            pnpm run cloud-run:production:origin:export
+          pnpm run cloud-run:production:origin:export
 
-      - name: Verify production smoke and exact provider cleanup before mutation
+      - name: Verify exact finalize entry state before mutation
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
           GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
-          SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_EPOCH: phase16-smoke-${{ inputs.candidate_commit_sha }}-${{ inputs.cutover_run_id }}
-          SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION: active
+          SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_VALID_UNTIL: ${{ inputs.operational_valid_until }}
+          SCRIBE_DROP_CLOUD_RUN_MAX_EXECUTIONS: ${{ inputs.operational_max_executions }}
+          SCRIBE_DROP_CLOUD_RUN_MAX_WORST_CASE_JPY: ${{ inputs.operational_max_worst_case_jpy }}
+          SCRIBE_DROP_CLOUD_RUN_OPERATIONAL_EPOCH: phase16-operational-${{ inputs.candidate_commit_sha }}-${{ inputs.cutover_run_id }}
+          SCRIBE_DROP_CLOUD_RUN_SMOKE_EPOCH: phase16-smoke-${{ inputs.candidate_commit_sha }}-${{ inputs.cutover_run_id }}
+          SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION: ${{ (inputs.finalize_entry_stage == 'smoke-active' || inputs.finalize_entry_stage == 'operational-active') && 'active' || 'paused' }}
+          PRODUCTION_SMOKE_JOB_ID: ${{ inputs.production_smoke_job_id }}
         run: |
           pnpm run cloudflare:config:production
           pnpm run cloudflare:readback:production
           pnpm run cloud-run:production:smoke:verify "${{ inputs.production_smoke_job_id }}"
-          pnpm run cloud-run:acceptance:clean production "${CUTOVER_RUN_PATH}"
+          pnpm run production:finalize:entry:verify \
+            "${{ inputs.finalize_entry_stage }}" "${CUTOVER_RUN_PATH}"
 
-      - name: Pause admission and disable the consumed smoke authorization
+      - name: Pause admission before changing authorization
+        if: inputs.finalize_entry_stage == 'smoke-active'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
-          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
-          SCRIBE_DROP_CLOUD_RUN_EXPECTED_RESERVED_EXECUTIONS: "1"
           SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION: paused
         run: |
           pnpm run cloudflare:config:production:orchestrator
@@ -655,22 +691,36 @@ jobs:
             --config .wrangler/deploy/orchestrator-production.toml \
             --env production
           pnpm run cloudflare:readback:production
+
+      - name: Disable the consumed smoke authorization
+        if: inputs.finalize_entry_stage == 'smoke-active' || inputs.finalize_entry_stage == 'smoke-paused'
+        env:
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+          SCRIBE_DROP_CLOUD_RUN_EXPECTED_AUTHORIZATION_EPOCH: phase16-smoke-${{ inputs.candidate_commit_sha }}-${{ inputs.cutover_run_id }}
+          SCRIBE_DROP_CLOUD_RUN_EXPECTED_RESERVED_EXECUTIONS: "1"
+        run: |
           pnpm run cloud-run:controller:deploy apply production disabled \
             "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
 
-      - name: Apply reviewed finite operating authorization and reactivate admission
+      - name: Apply reviewed finite operating authorization
+        if: inputs.finalize_entry_stage != 'operational-paused' && inputs.finalize_entry_stage != 'operational-active'
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
           GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
-          SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_EPOCH: phase16-operational-${{ inputs.candidate_commit_sha }}-${{ github.run_id }}
+          SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_EPOCH: phase16-operational-${{ inputs.candidate_commit_sha }}-${{ inputs.cutover_run_id }}
           SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_VALID_UNTIL: ${{ inputs.operational_valid_until }}
           SCRIBE_DROP_CLOUD_RUN_MAX_EXECUTIONS: ${{ inputs.operational_max_executions }}
           SCRIBE_DROP_CLOUD_RUN_MAX_WORST_CASE_JPY: ${{ inputs.operational_max_worst_case_jpy }}
-          SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION: active
         run: |
           pnpm run cloud-run:controller:deploy apply production operational \
             "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
+
+      - name: Activate admission after exact operational authorization
+        if: inputs.finalize_entry_stage != 'operational-active'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
+          SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION: active
+        run: |
           pnpm run cloudflare:config:production
           pnpm exec wrangler deploy "${RELEASE_CANDIDATE_DIRECTORY}/orchestrator/index.js" \
             --no-bundle \
@@ -680,17 +730,22 @@ jobs:
             --config .wrangler/deploy/orchestrator-production.toml \
             --env production
           pnpm run cloudflare:readback:production
-          pnpm run cloud-run:controller:deploy read production operational \
-            "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
 
       - name: Verify final parity, Access, and accepted artifact identity
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
           EXPECTED_STAGING_RUN_ID: ${{ inputs.staging_run_id }}
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
           MINIMUM_ACCEPTANCE_REMAINING_SECONDS: "1800"
+          SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_EPOCH: phase16-operational-${{ inputs.candidate_commit_sha }}-${{ inputs.cutover_run_id }}
+          SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_VALID_UNTIL: ${{ inputs.operational_valid_until }}
+          SCRIBE_DROP_CLOUD_RUN_MAX_EXECUTIONS: ${{ inputs.operational_max_executions }}
+          SCRIBE_DROP_CLOUD_RUN_MAX_WORST_CASE_JPY: ${{ inputs.operational_max_worst_case_jpy }}
           SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION: active
         run: |
+          pnpm run cloud-run:controller:deploy read production operational \
+            "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
           pnpm run environment:policy:export production
           EXPECTED_CANDIDATE_RUN_ID="${CANDIDATE_RUN_ID}" \
             EXPECTED_CLOUD_RUN_CANDIDATE_RUN_ID="${CLOUD_RUN_CANDIDATE_RUN_ID}" \
@@ -701,6 +756,7 @@ jobs:
       - name: Record immutable production release evidence
         env:
           CUTOVER_RUN_ID: ${{ inputs.cutover_run_id }}
+          FINALIZE_ENTRY_STAGE: ${{ inputs.finalize_entry_stage }}
           OPERATIONAL_MAX_EXECUTIONS: ${{ inputs.operational_max_executions }}
           OPERATIONAL_MAX_WORST_CASE_JPY: ${{ inputs.operational_max_worst_case_jpy }}
           OPERATIONAL_VALID_UNTIL: ${{ inputs.operational_valid_until }}

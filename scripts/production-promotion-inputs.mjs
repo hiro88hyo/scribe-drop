@@ -1,3 +1,5 @@
+import { requireProductionFinalizeStage } from "./production-finalize-state.mjs";
+
 const runIdPattern = /^[1-9][0-9]*$/u;
 const commitShaPattern = /^[a-f0-9]{40}$/u;
 const ulidPattern = /^[0-9A-HJKMNP-TV-Z]{26}$/u;
@@ -18,6 +20,7 @@ export function validateProductionPromotionInputs(input, now = new Date()) {
   if (input.preflightOnly !== "true" && input.preflightOnly !== "false") {
     throw new Error("Production preflight mode is invalid");
   }
+  const finalizeEntryStage = requireProductionFinalizeStage(input.finalizeEntryStage);
   if (input.operation === "cutover") {
     if (
       input.cutoverRunId !== "0" ||
@@ -25,6 +28,7 @@ export function validateProductionPromotionInputs(input, now = new Date()) {
       input.operationalMaxExecutions !== "0" ||
       input.operationalMaxWorstCaseJpy !== "0" ||
       input.operationalValidUntil !== "1970-01-01T00:00:00.000Z" ||
+      finalizeEntryStage !== "smoke-active" ||
       (input.preflightOnly === "true"
         ? input.preflightRunId !== "0"
         : !runIdPattern.test(input.preflightRunId))
@@ -77,6 +81,7 @@ export function validateProductionPromotionInputs(input, now = new Date()) {
   return {
     cutoverRunId: input.cutoverRunId,
     candidateCommitSha: input.candidateCommitSha,
+    finalizeEntryStage,
     maxExecutions,
     maxWorstCaseJpy,
     operation: "finalize",

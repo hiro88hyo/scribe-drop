@@ -8,10 +8,41 @@ const workflow = readFileSync(".github/workflows/deploy-production-candidate.yml
 
 test("binds every production input and policy producer before external access", () => {
   assert.deepEqual(verifyProductionWorkflowStateContract(workflow), {
+    finalizeMutationCount: 4,
+    finalizePrefixStateCount: 5,
     policyProducer: "Verify accepted production environment policy before external access",
     secretReferences: 6,
     variableReferences: 15,
   });
+});
+
+test("rejects each missing finalize state-machine prerequisite", () => {
+  for (const required of [
+    "PRODUCTION_FINALIZE_ENTRY_STAGE: ${{ inputs.finalize_entry_stage }}",
+    "SCRIBE_DROP_CLOUD_RUN_SMOKE_EPOCH: phase16-smoke-${{ inputs.candidate_commit_sha }}-${{ inputs.cutover_run_id }}",
+    "SCRIBE_DROP_CLOUD_RUN_OPERATIONAL_EPOCH: phase16-operational-${{ inputs.candidate_commit_sha }}-${{ inputs.cutover_run_id }}",
+    "PRODUCTION_SMOKE_JOB_ID: ${{ inputs.production_smoke_job_id }}",
+    "SCRIBE_DROP_CLOUD_RUN_EXPECTED_AUTHORIZATION_EPOCH: phase16-smoke-${{ inputs.candidate_commit_sha }}-${{ inputs.cutover_run_id }}",
+    'SCRIBE_DROP_CLOUD_RUN_EXPECTED_RESERVED_EXECUTIONS: "1"',
+    "SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_EPOCH: phase16-operational-${{ inputs.candidate_commit_sha }}-${{ inputs.cutover_run_id }}",
+    "FINALIZE_ENTRY_STAGE: ${{ inputs.finalize_entry_stage }}",
+  ]) {
+    const regressed = workflow.replaceAll(required, "REMOVED_FINALIZE_CONTRACT_VALUE");
+    assert.notEqual(regressed, workflow);
+    assert.throws(() => verifyProductionWorkflowStateContract(regressed), /incomplete/u, required);
+  }
+});
+
+test("rejects a retry-unstable operational epoch", () => {
+  const regressed = workflow.replaceAll(
+    "phase16-operational-${{ inputs.candidate_commit_sha }}-${{ inputs.cutover_run_id }}",
+    "phase16-operational-${{ inputs.candidate_commit_sha }}-${{ github.run_id }}",
+  );
+  assert.notEqual(regressed, workflow);
+  assert.throws(
+    () => verifyProductionWorkflowStateContract(regressed),
+    /incomplete|stable across finalize retries/u,
+  );
 });
 
 test("rejects the previous cutover policy producer omission", () => {

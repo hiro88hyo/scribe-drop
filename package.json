@@ -73,6 +73,7 @@
     "production:dispatch:verify": "node scripts/verify-ci-workflows.mjs && node scripts/verify-production-workflow-state-contract.mjs",
     "production:preflight:verify": "node scripts/verify-production-preflight-run.mjs",
     "production:environment:verify": "node scripts/verify-production-environment-contract.mjs",
+    "production:finalize:entry:verify": "node scripts/verify-production-finalize-entry.mjs",
     "production:workflow:verify": "node scripts/verify-production-workflow-state-contract.mjs",
     "production:provider:drain:verify": "node scripts/verify-production-provider-drain.mjs",
     "production:cutover:evidence": "node scripts/production-cutover-evidence.mjs",

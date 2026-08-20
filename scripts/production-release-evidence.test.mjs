@@ -15,6 +15,7 @@ function evidence() {
     commitSha: "a".repeat(40),
     cutoverRunId: "123",
     environment: "production",
+    finalizeEntryStage: "smoke-active",
     finalizeRunId: "456",
     operationalAuthorization: {
       maxExecutions: 5,
@@ -23,7 +24,7 @@ function evidence() {
       worstCaseJpyPerExecution: 250,
     },
     provider: "cloud_run_jobs_l4_v1",
-    schemaVersion: 1,
+    schemaVersion: 2,
     smokeJobId: "01J00000000000000000000000",
     stagingRunId: "100",
   };
@@ -37,4 +38,10 @@ test("rejects an inconsistent operational budget", () => {
   const value = evidence();
   value.operationalAuthorization.maxWorstCaseJpy = 1_249;
   assert.throws(() => validateProductionReleaseEvidence(value), /authorization evidence/u);
+});
+
+test("rejects an unknown finalize entry stage", () => {
+  const value = evidence();
+  value.finalizeEntryStage = "unknown";
+  assert.throws(() => validateProductionReleaseEvidence(value), /entry stage/u);
 });

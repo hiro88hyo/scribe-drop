@@ -4,11 +4,13 @@ import test from "node:test";
 
 import {
   verifyAuthorizedAcceptanceSnapshot,
+  verifyProductionFinalizeSnapshot,
   verifyRecoveredAcceptanceSnapshot,
 } from "./cloud-run-acceptance-state.mjs";
 
 const commit = "a".repeat(40);
 const epoch = `phase16-smoke-${commit}-123`;
+const productionSmokeExecutionHandle = "h".repeat(43);
 const sourceRun = {
   created_at: "2026-08-16T02:12:00Z",
   head_sha: commit,
@@ -51,6 +53,7 @@ function authorization(overrides = {}) {
 function executionRecord({
   createdAt = "2026-08-16T02:18:00.000Z",
   environment = "staging",
+  executionHandle = productionSmokeExecutionHandle,
   state = "CLEANED",
   updatedAt = "2026-08-16T02:22:00.000Z",
 } = {}) {
@@ -63,6 +66,7 @@ function executionRecord({
             createdAt: { stringValue: createdAt },
             environment: { stringValue: environment },
             execution: { nullValue: null },
+            executionHandle: { stringValue: executionHandle },
             job: { nullValue: null },
             reservedWorstCaseJpy: integerValue(250),
             state: { stringValue: state },
@@ -256,4 +260,133 @@ test("live cleanup verifiers read bounded history instead of two collection-wide
     assert.match(source, /scribe_drop_controller_executions\?pageSize=100/u);
     assert.doesNotMatch(source, /scribe_drop_controller_executions\?pageSize=2/u);
   }
+});
+
+function productionFinalizeInput(authorizationOverrides = {}) {
+  return authorizedInput({
+    environmentDocument: authorization({
+      environment: "production",
+      ...authorizationOverrides,
+    }),
+    executionDocuments: executionDocuments(
+      executionRecord({
+        createdAt: "2026-08-16T03:18:00.000Z",
+        environment: "production",
+        updatedAt: "2026-08-16T03:22:00.000Z",
+      }),
+    ),
+  });
+}
+
+test("accepts every exact production finalize authorization prefix", () => {
+  assert.equal(
+    verifyProductionFinalizeSnapshot(
+      productionFinalizeInput(),
+      {
+        smokeEpoch: epoch,
+        smokeExecutionHandle: productionSmokeExecutionHandle,
+        stage: "smoke-paused",
+      },
+      sourceRun,
+    ).stage,
+    "smoke-paused",
+  );
+  assert.equal(
+    verifyProductionFinalizeSnapshot(
+      productionFinalizeInput({
+        epoch: "disabled",
+        maxExecutions: 0,
+        maxWorstCaseJpy: 0,
+        reservedExecutions: 0,
+        reservedWorstCaseJpy: 0,
+        worstCaseJpyPerExecution: 0,
+      }),
+      { smokeExecutionHandle: productionSmokeExecutionHandle, stage: "disabled-paused" },
+      sourceRun,
+    ).authorization,
+    "disabled",
+  );
+  assert.equal(
+    verifyProductionFinalizeSnapshot(
+      productionFinalizeInput({
+        epoch: `phase16-operational-${commit}-123`,
+        maxExecutions: 5,
+        maxWorstCaseJpy: 1_250,
+        reservedExecutions: 0,
+        reservedWorstCaseJpy: 0,
+        validUntil: "2026-08-16T04:12:00.000Z",
+      }),
+      {
+        maxExecutions: 5,
+        maxWorstCaseJpy: 1_250,
+        operationalEpoch: `phase16-operational-${commit}-123`,
+        smokeExecutionHandle: productionSmokeExecutionHandle,
+        stage: "operational-active",
+        validUntil: "2026-08-16T04:12:00.000Z",
+      },
+      sourceRun,
+    ).authorization,
+    "operational",
+  );
+});
+
+test("rejects finalize stage drift and unclean provider state", () => {
+  assert.throws(
+    () =>
+      verifyProductionFinalizeSnapshot(
+        productionFinalizeInput({ reservedExecutions: 0 }),
+        {
+          smokeEpoch: epoch,
+          smokeExecutionHandle: productionSmokeExecutionHandle,
+          stage: "smoke-active",
+        },
+        sourceRun,
+      ),
+    /did not consume exact one/u,
+  );
+  assert.throws(
+    () =>
+      verifyProductionFinalizeSnapshot(
+        productionFinalizeInput({
+          epoch: "disabled",
+          maxExecutions: 0,
+          maxWorstCaseJpy: 0,
+          reservedExecutions: 0,
+          reservedWorstCaseJpy: 0,
+          worstCaseJpyPerExecution: 0,
+        }),
+        { smokeExecutionHandle: productionSmokeExecutionHandle, stage: "operational-paused" },
+        sourceRun,
+      ),
+    /operational finalize state/u,
+  );
+  assert.throws(
+    () =>
+      verifyProductionFinalizeSnapshot(
+        { ...productionFinalizeInput(), jobs: [{}] },
+        {
+          smokeEpoch: epoch,
+          smokeExecutionHandle: productionSmokeExecutionHandle,
+          stage: "smoke-active",
+        },
+        sourceRun,
+      ),
+    /have not converged/u,
+  );
+});
+
+test("binds every production finalize prefix to the verified smoke execution", () => {
+  assert.throws(
+    () =>
+      verifyProductionFinalizeSnapshot(
+        productionFinalizeInput(),
+        {
+          smokeEpoch: epoch,
+          smokeExecutionHandle: "i".repeat(43),
+          stage: "smoke-paused",
+        },
+        sourceRun,
+      ),
+    /smoke execution/u,
+  );
 });

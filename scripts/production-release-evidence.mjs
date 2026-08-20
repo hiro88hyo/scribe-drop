@@ -3,6 +3,8 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+import { requireProductionFinalizeStage } from "./production-finalize-state.mjs";
+
 const commitPattern = /^[0-9a-f]{40}$/u;
 const runPattern = /^[1-9][0-9]*$/u;
 const ulidPattern = /^[0-9A-HJKMNP-TV-Z]{26}$/u;
@@ -22,8 +24,8 @@ export function validateProductionReleaseEvidence(value) {
     value === null ||
     Array.isArray(value) ||
     Object.keys(value).sort().join(",") !==
-      "checks,commitSha,cutoverRunId,environment,finalizeRunId,operationalAuthorization,provider,schemaVersion,smokeJobId,stagingRunId" ||
-    value.schemaVersion !== 1 ||
+      "checks,commitSha,cutoverRunId,environment,finalizeEntryStage,finalizeRunId,operationalAuthorization,provider,schemaVersion,smokeJobId,stagingRunId" ||
+    value.schemaVersion !== 2 ||
     value.environment !== "production" ||
     value.provider !== "cloud_run_jobs_l4_v1" ||
     !commitPattern.test(value.commitSha) ||
@@ -34,6 +36,7 @@ export function validateProductionReleaseEvidence(value) {
   ) {
     throw new Error("Production release evidence is invalid");
   }
+  requireProductionFinalizeStage(value.finalizeEntryStage);
   const authorization = value.operationalAuthorization;
   if (
     typeof authorization !== "object" ||
@@ -104,6 +107,7 @@ if (
         commitSha: process.env.EXPECTED_COMMIT_SHA,
         cutoverRunId: process.env.CUTOVER_RUN_ID,
         environment: "production",
+        finalizeEntryStage: process.env.FINALIZE_ENTRY_STAGE,
         finalizeRunId: process.env.GITHUB_RUN_ID,
         operationalAuthorization: {
           maxExecutions,
@@ -115,7 +119,7 @@ if (
           worstCaseJpyPerExecution: 250,
         },
         provider: "cloud_run_jobs_l4_v1",
-        schemaVersion: 1,
+        schemaVersion: 2,
         smokeJobId: process.env.PRODUCTION_SMOKE_JOB_ID,
         stagingRunId: process.env.STAGING_RUN_ID,
       });

@@ -2026,8 +2026,8 @@ for (const [description, value] of Object.entries({
     "SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_POLICY: cloud_run_jobs_l4_v1",
   "exact-one production authorization": "Verify exact-one L4 authorization and activate admission",
   "production smoke lifecycle verification": "pnpm run cloud-run:production:smoke:verify",
-  "exact provider cleanup verification": "pnpm run cloud-run:acceptance:clean production",
-  "production cleanup source-run binding": 'production "${CUTOVER_RUN_PATH}"',
+  "exact resumable finalize entry verification": "pnpm run production:finalize:entry:verify",
+  "production finalize source-run binding": '"${CUTOVER_RUN_PATH}"',
   "finite operational authorization": "cloud-run:controller:deploy apply production operational",
   "cutover evidence": "pnpm run production:cutover:evidence",
   "release evidence": "pnpm run production:release:evidence",
@@ -2138,42 +2138,77 @@ requireText(
   "deploy-production-candidate.yml finalize job",
   "same-job cutover run path export",
 );
-const productionFinalizeCleanupStep = workflowStep(
+const productionFinalizeEntryStep = workflowStep(
   productionFinalizeJob,
-  "Verify production smoke and exact provider cleanup before mutation",
+  "Verify exact finalize entry state before mutation",
   "deploy-production-candidate.yml finalize job",
 );
 requireText(
-  productionFinalizeCleanupStep,
-  'pnpm run cloud-run:acceptance:clean production "${CUTOVER_RUN_PATH}"',
+  productionFinalizeEntryStep,
+  '"${{ inputs.finalize_entry_stage }}" "${CUTOVER_RUN_PATH}"',
   "deploy-production-candidate.yml finalize job",
   "same-job cutover run path consumption",
 );
-requireText(
-  productionFinalizeCleanupStep,
-  "SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_EPOCH: phase16-smoke-${{ inputs.candidate_commit_sha }}-${{ inputs.cutover_run_id }}",
-  "deploy-production-candidate.yml finalize job",
-  "source cutover authorization epoch binding",
-);
 for (const [requiredEnvironment, description] of [
   ["GOOGLE_OAUTH_ACCESS_TOKEN:", "Google read-back token"],
-  ["SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_EPOCH:", "source cutover epoch"],
+  ["SCRIBE_DROP_CLOUD_RUN_SMOKE_EPOCH:", "source cutover epoch"],
+  ["SCRIBE_DROP_CLOUD_RUN_OPERATIONAL_EPOCH:", "stable operational epoch"],
+  ["SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_VALID_UNTIL:", "operational expiry"],
+  ["SCRIBE_DROP_CLOUD_RUN_MAX_EXECUTIONS:", "operational execution bound"],
+  ["SCRIBE_DROP_CLOUD_RUN_MAX_WORST_CASE_JPY:", "operational cost bound"],
+  ["SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION:", "entry admission"],
 ]) {
   requireText(
-    productionFinalizeCleanupStep,
+    productionFinalizeEntryStep,
     requiredEnvironment,
     "deploy-production-candidate.yml finalize job",
-    `cleanup verifier ${description}`,
+    `finalize entry verifier ${description}`,
   );
 }
 if (
   productionFinalizeJob.indexOf("printf 'CUTOVER_RUN_PATH=%s\\n'") >=
-  productionFinalizeJob.indexOf(
-    'pnpm run cloud-run:acceptance:clean production "${CUTOVER_RUN_PATH}"',
-  )
+  productionFinalizeJob.indexOf("pnpm run production:finalize:entry:verify")
 ) {
   throw new Error(
-    "deploy-production-candidate.yml finalize job: cutover run path must be produced before cleanup",
+    "deploy-production-candidate.yml finalize job: cutover run path must be produced before entry verification",
+  );
+}
+const productionFinalizeDisableStep = workflowStep(
+  productionFinalizeJob,
+  "Disable the consumed smoke authorization",
+  "deploy-production-candidate.yml finalize job",
+);
+for (const required of [
+  "GOOGLE_OAUTH_ACCESS_TOKEN:",
+  'SCRIBE_DROP_CLOUD_RUN_EXPECTED_RESERVED_EXECUTIONS: "1"',
+  "SCRIBE_DROP_CLOUD_RUN_EXPECTED_AUTHORIZATION_EPOCH: phase16-smoke-${{ inputs.candidate_commit_sha }}-${{ inputs.cutover_run_id }}",
+  "pnpm run cloud-run:controller:deploy apply production disabled",
+]) {
+  requireText(
+    productionFinalizeDisableStep,
+    required,
+    "deploy-production-candidate.yml finalize job",
+    "complete smoke disable command contract",
+  );
+}
+const productionFinalizeOperationalStep = workflowStep(
+  productionFinalizeJob,
+  "Apply reviewed finite operating authorization",
+  "deploy-production-candidate.yml finalize job",
+);
+for (const required of [
+  "GOOGLE_OAUTH_ACCESS_TOKEN:",
+  "SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_EPOCH: phase16-operational-${{ inputs.candidate_commit_sha }}-${{ inputs.cutover_run_id }}",
+  "SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_VALID_UNTIL:",
+  "SCRIBE_DROP_CLOUD_RUN_MAX_EXECUTIONS:",
+  "SCRIBE_DROP_CLOUD_RUN_MAX_WORST_CASE_JPY:",
+  "pnpm run cloud-run:controller:deploy apply production operational",
+]) {
+  requireText(
+    productionFinalizeOperationalStep,
+    required,
+    "deploy-production-candidate.yml finalize job",
+    "complete operational authorization command contract",
   );
 }
 for (const stepName of [
@@ -2243,7 +2278,7 @@ for (const [jobContents, acceptanceStep, candidateStep, location] of [
 requireTextCount(
   productionWorkflowContents,
   "pnpm run cloud-run:controller:deploy preflight production disabled",
-  2,
+  3,
   "deploy-production-candidate.yml",
   "controller preflight before both production mutations",
 );
@@ -2270,7 +2305,7 @@ requireText(
 requireText(
   workflowStep(
     productionFinalizeJob,
-    "Build verifier and reconstruct exact active production configuration",
+    "Build verifier and reconstruct exact production entry configuration",
     "deploy-production-candidate.yml finalize job",
   ),
   'SCRIBE_DROP_CLOUD_RUN_EXPECTED_RESERVED_EXECUTIONS: "1"',
@@ -2280,7 +2315,7 @@ requireText(
 requireText(
   workflowStep(
     productionFinalizeJob,
-    "Build verifier and reconstruct exact active production configuration",
+    "Build verifier and reconstruct exact production entry configuration",
     "deploy-production-candidate.yml finalize job",
   ),
   "SCRIBE_DROP_CLOUD_RUN_EXPECTED_AUTHORIZATION_EPOCH: phase16-smoke-${{ inputs.candidate_commit_sha }}-${{ inputs.cutover_run_id }}",
@@ -2325,17 +2360,31 @@ requireTextOrder(
 );
 requireTextOrder(
   productionWorkflowContents,
-  "Verify production smoke and exact provider cleanup before mutation",
-  "Pause admission and disable the consumed smoke authorization",
+  "Verify exact finalize entry state before mutation",
+  "Pause admission before changing authorization",
   "deploy-production-candidate.yml",
-  "smoke proof before disabling its authorization",
+  "entry proof before pausing admission",
 );
 requireTextOrder(
   productionWorkflowContents,
-  "Pause admission and disable the consumed smoke authorization",
-  "Apply reviewed finite operating authorization and reactivate admission",
+  "Pause admission before changing authorization",
+  "Disable the consumed smoke authorization",
   "deploy-production-candidate.yml",
-  "paused zero state before operating authorization",
+  "paused admission before disabling smoke authorization",
+);
+requireTextOrder(
+  productionWorkflowContents,
+  "Disable the consumed smoke authorization",
+  "Apply reviewed finite operating authorization",
+  "deploy-production-candidate.yml",
+  "disabled smoke authorization before operating authorization",
+);
+requireTextOrder(
+  productionWorkflowContents,
+  "Apply reviewed finite operating authorization",
+  "Activate admission after exact operational authorization",
+  "deploy-production-candidate.yml",
+  "operational authorization before active admission",
 );
 requireTextOrder(
   productionWorkflowContents,

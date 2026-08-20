@@ -6,6 +6,7 @@ try {
   const result = validateProductionPromotionInputs({
     candidateCommitSha: process.env.CANDIDATE_COMMIT_SHA,
     cutoverRunId: process.env.CUTOVER_RUN_ID,
+    finalizeEntryStage: process.env.PRODUCTION_FINALIZE_ENTRY_STAGE,
     operation: process.env.PRODUCTION_OPERATION,
     operationalMaxExecutions: process.env.OPERATIONAL_MAX_EXECUTIONS,
     operationalMaxWorstCaseJpy: process.env.OPERATIONAL_MAX_WORST_CASE_JPY,
