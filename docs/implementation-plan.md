@@ -1938,7 +1938,8 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
   継承して認証code 10000で停止した。provider切替、active admission、GPU execution、cutover evidenceは未実行である。実Pages
   deployはpreflightと同じ専用Pages tokenへ明示的に束縛し、production workflow内の全Pages deploy件数と束縛件数の一致をCI
   static verifierで強制する。未消費smoke authorizationは次のpromotion sequence前にexact failed-run epochのsource-managed
-  recoveryでdisabled/zeroへ戻す。
+  recoveryでdisabled/zeroへ戻した。独立read-backはcontroller Service Ready、authorization disabled/zero、Firestore TTL 2、
+  Cloud Run Job/Execution 0/0を確認した。
 
 実装:
 

@@ -20,10 +20,11 @@ candidate with admission paused`. Migrations/R2, RunPod image promotion,
   verifier now requires exactly one production Pages deploy and requires every
   such deploy to have that binding. Full `pnpm check` and Git/worktree gitleaks
   scans passed.
-- Production recovery for the unconsumed `32320261017` smoke authorization has
-  not run yet. Before any new staging/preflight/cutover sequence, use the
-  source-managed exact-epoch recovery and verify controller disabled/zero plus
-  Cloud Run Job/Execution zero. No GPU execution occurred in `32320261017`.
+- Source-managed production recovery for the unconsumed `32320261017` smoke
+  authorization succeeded after exact-epoch and active/reserved 0/0 guards.
+  Independent read-back confirmed the controller Service Ready,
+  authorization disabled/zero, two Firestore TTL fields, and Cloud Run
+  Job/Execution 0/0. No GPU execution occurred in `32320261017`.
 
 ## Repository state
 
