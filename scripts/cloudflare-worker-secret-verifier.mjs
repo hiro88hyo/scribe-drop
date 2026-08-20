@@ -1,3 +1,8 @@
+const cloudRunOrchestratorSecrets = Object.freeze([
+  "CLOUD_RUN_CONTROLLER_HMAC_PRIMARY",
+  "CLOUD_RUN_RUNTIME_DERIVATION_SECRET",
+]);
+
 export const requiredOrchestratorSecrets = Object.freeze([
   "DISCORD_WEBHOOK_URL",
   "R2_ACCESS_KEY_ID",
@@ -38,14 +43,25 @@ export function parseWorkerSecretNames(output) {
   return names;
 }
 
-export function verifyRequiredOrchestratorSecrets(output) {
+export function verifyRequiredOrchestratorSecrets(output, environment, cloudRunMode = "disabled") {
+  if (environment !== "staging" && environment !== "production") {
+    throw new Error("Worker secret environment is invalid");
+  }
+  const activeMode = environment === "staging" ? "synthetic-shadow" : "active";
+  if (cloudRunMode !== "disabled" && cloudRunMode !== activeMode) {
+    throw new Error("Cloud Run runtime mode is invalid");
+  }
   const names = parseWorkerSecretNames(output);
-  const missing = requiredOrchestratorSecrets.filter((name) => !names.has(name));
+  const required =
+    cloudRunMode === activeMode
+      ? [...requiredOrchestratorSecrets, ...cloudRunOrchestratorSecrets]
+      : requiredOrchestratorSecrets;
+  const missing = required.filter((name) => !names.has(name));
   if (missing.length > 0) {
     throw new Error(`Missing required Orchestrator secrets: ${missing.join(", ")}`);
   }
   return {
     listedCount: names.size,
-    requiredCount: requiredOrchestratorSecrets.length,
+    requiredCount: required.length,
   };
 }

@@ -27,6 +27,7 @@ const workflows =
 const cloudflareApiFiles = [
   "scripts/cloudflare-readback.mjs",
   "scripts/cloudflare-worker-route-permission.mjs",
+  "scripts/manage-staging-cloud-run-waf.mjs",
   "scripts/pages-promotion.mjs",
   "scripts/pages-upload-permission.mjs",
   "scripts/staging-access-control-plane.mjs",
@@ -39,9 +40,9 @@ function clonePolicy() {
 
 test("accepts the reviewed Cloudflare credential policy", () => {
   assert.deepEqual(verifyCloudflareCredentialPolicy(policy, evidence), {
-    apiTokenRoles: 2,
-    cloudflareApiFiles: 5,
-    credentialRoles: 4,
+    apiTokenRoles: 3,
+    cloudflareApiFiles: 6,
+    credentialRoles: 5,
     wranglerCommands: 6,
   });
 });
@@ -74,6 +75,18 @@ test("rejects an incomplete Worker route permission set", () => {
   assert.throws(
     () => verifyCloudflareCredentialPolicy(changed, evidence),
     /least-privilege policy/u,
+  );
+});
+
+test("keeps the staging WAF token local, production-disabled, and exact-zone only", () => {
+  const changed = clonePolicy();
+  changed.roles[2].placement = ["github-environment:staging"];
+  changed.roles[2].productionAllowed = true;
+  changed.roles[2].zonePermissions.push("Zone Edit");
+
+  assert.throws(
+    () => verifyCloudflareCredentialPolicy(changed, evidence),
+    /least-privilege policy|placement|scope/u,
   );
 });
 

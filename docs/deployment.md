@@ -49,11 +49,13 @@ volumeなし、FlashBoot無効のendpoint invariantと、期限切れclaimを拒
 
 これは初期checkpointの単一GPU構成である。現行releaseでは
 [ADR 0053](./adr/0053-use-mixed-availability-gpus-with-runtime-attestation.md)に従い、
-stagingとproductionで`RTX 5090`、`RTX 4090`の固定順を使用する。固定CLIがGPUを省略しても
+stagingとproductionで`RTX 5090`、`RTX 4090`、`RTX PRO 6000 Blackwell Server Edition`の
+固定順を使用する。
+固定CLIがGPUを省略しても
 一致とみなさず、公式REST APIのexact GPU read-backと実staging GPU E2Eを必須とする。
 各claimでは実WorkerのSecure Cloud配置をR2 capability発行前に検証する。
-[ADR 0054](./adr/0054-use-explicit-datacenters-for-staging-recovery.md)の2 data centerを
-追跡対象planへ固定し、Compliance filterは`Any`を維持する。GPUは公式REST API、
+[ADR 0064](./adr/0064-expand-runpod-placement-capacity.md)の`Any Region`を追跡対象planへ
+明示し、Compliance filterも`Any`を維持する。GPUは公式REST API、
 data centerとcomplianceはConsole-equivalent GraphQLでread-backし、結合したcapacityを
 完全一致で検証する。Compliance filterはSecure Cloud切替ではないため、claim時attestationを
 省略しない。
@@ -115,6 +117,11 @@ pnpm exec wrangler login
 pnpm exec wrangler whoami
 ```
 
+固定Wrangler 4.114.0のOAuth redirect URIは`http://localhost:8976/oauth/callback`である。
+`wrangler login --callback-port`は待受portだけを変更しredirect URIを変更しないため、このversionでは
+別portを指定しない。8976が使用中なら既存processを停止して同じPCでloginをやり直し、`whoami`を確認する。
+SSH先でbrowserだけをlocalへ開く運用はcallback不在になるため使わない。
+
 対話ログインできないCIでは、
 [cloudflare-permissions.md](./cloudflare-permissions.md)で全操作を先に棚卸しした役割別
 Cloudflare API tokenをCI secretから渡す。Backend/Access用`CLOUDFLARE_API_TOKEN`は完成形
@@ -162,8 +169,10 @@ end-to-end smokeを実施する。
 8. [ADR 0012](./adr/0012-runpodctl-staging-verification-boundary.md)に従い、
    `runpodctl`で取得できるactive workers 0、max workers 1、GPU 1、Network Volumeなし、
    FlashBoot無効、timeoutを確認する。固定GPU候補は公式REST APIで順序まで完全一致を
-   read-backし、inventoryで両候補のSecure Cloud提供とavailableを確認する。stock tierは
-   release invariantにしない。candidate imageのGPU実行と実Workerの
+   read-backし、inventoryで全候補のSecure Cloud提供と2候補以上のavailableを確認する。
+   live OpenAPIのendpoint create/update enumと、認証済みGraphQLの`serverlessGpuPools`にも
+   全候補が存在し、各候補が相異なるpoolへ一意に対応することをmutation前に検証する。
+   stock tierはrelease invariantにしない。candidate imageのGPU実行と実Workerの
    `secureCloud=true`はstaging E2Eのclaim前attestationで確認する。
    [ADR 0052](./adr/0052-attest-runpod-placement-before-claim.md)に従い、
    `RUNPOD_WORKER_IMAGE`と`RUNPOD_ALLOWED_GPU_IDS`はcandidate manifestとRunPod planから
@@ -230,6 +239,13 @@ Phase 7のmigration、retention、PWA rolloutは
 - `SCRIBE_DROP_STAGING_D1_DATABASE_ID`
 - `SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN`
 - `SCRIBE_DROP_STAGING_WEB_ORIGIN`
+- `SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_ORIGIN`（`synthetic-shadow`時だけ必須）
+- `SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_MODE`（省略時`disabled`）
+- `SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT`（`synthetic-shadow`時だけ必須）
+- `SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY`（省略時`runpod_serverless_v1`。Phase 15 acceptance時だけ
+  `cloud_run_jobs_l4_v1`）
+- `SCRIBE_DROP_STAGING_GPU_EXECUTION_ADMISSION`（省略時`active`。finite controller authorizationの
+  遷移中だけ`paused`）
 - `MULTIPART_RETENTION_HOURS`（省略時24）
 - `SOURCE_RETENTION_DAYS`（省略時7）
 - `RESULT_RETENTION_DAYS`（省略時90）
@@ -377,7 +393,7 @@ capacity移行が必要な場合は、全local gateとread-only実resource確認
 生成・注入し、値をshell履歴や文書へ残さない。
 
 ```bash
-pnpm run runpod:capacity:prepare:production -- --confirm-production-capacity-migration
+pnpm run runpod:capacity:prepare:production --confirm-production-capacity-migration
 ```
 
 commandはactive jobとrunning/initializing Workerが0であることを確認してからworker上限を
@@ -409,7 +425,7 @@ imageと合成する。applicationの生成・再検証に失敗した場合はc
 
 1. production workflowの同一pathがdefault branch `develop`へ登録済みであること、
    `main`、`develop`、現行release branchのprotection、GitHub production Environmentの
-   review、`release/*` policy、15変数名、4 secret名を
+   review、`release/*` policy、15変数名、6 secret名を
    `pnpm github:controls:verify:production`で確認する。失敗中はcandidateを開始しない。
 2. release-to-main PRがclosedであることを確認し、
    `Publish RunPod release candidate`を`release/<version>`で実行する。
@@ -432,13 +448,34 @@ PRをreopenした後にcode、dependency、migration、deployment設定を変更
 staging workflowは[ADR 0036](./adr/0036-defer-custom-domain-readiness-to-acceptance.md)の
 job境界を維持する。Pages promotionはcompiled routeと公式APIのexact read-backで確定し、
 デプロイ直後の任意地域custom domain probeを成立条件にしない。認証済みreadinessは
-`acceptance`のupload前に実行する。404ではworkflow全体を再dispatchせず、原因確認後に
-同じrunのfailed `acceptance` jobだけを再実行する。成功済み`migrate`、`deploy-pages`、
-`deploy-backend`を再実行しない。Pages promotion自体を再開する場合も、公式APIのexact
-read-backが一致すればdeployを省略し、結果不明のmutationを自動再送しない。
+`acceptance`のupload前に実行する。404ではworkflow全体を再dispatchせず、同じrunのfailed
+`acceptance` jobも再実行しない。[ADR 0087](./adr/0087-fail-before-paid-staging-acceptance-and-recover.md)の
+recoveryだけでRunPod policy、controller authorization、Cloud Run resource、未解決fixtureを安全状態へ
+収束し、acceptanceは失敗のまま維持する。原因をsource/testへ還元した新commitと新candidateを作り、同じ
+commitのstaging dispatchまたはjob re-runで追加GPU executionを開かない。
+
+例外は[ADR 0088](./adr/0088-recover-successful-staging-lifecycle-evidence.md)のGPU-free evidence復旧だけとする。
+これは実M4A lifecycleが成功し、cleanup convergence verifierだけが失敗し、recoveryの全安全処理が完了した
+source runに限定する。`completed_acceptance_run_id`は`resume_acceptance_only=true`かつexact candidate commitと
+組み合わせ、source run/step fingerprintと祖先関係、Cloud Run Job/Execution 0、authorization disabled/zero、
+source run時間内のexact-one `CLEANED` record、RunPod baseline、全Cloudflare resourceをread-onlyで再検証する。
+同jobではmigration、deploy、controller apply、実E2Eを禁止し、通常acceptanceがskipされた場合だけ短命evidenceを
+発行する。任意のE2E失敗、cleanup未完了、複数record、candidate不一致をこの経路で成功へ読み替えない。
 
 candidate、staging、production workflowを起動する前に、変更対象のlocal testと標準local
 gateを完了する。remote workflowをlocal検証の代替に使用しない。
+
+stagingのmutation-free `preflight`はcontroller verifier build後に、disabled/zero safetyとpaid readinessを
+同じworkflow identityで完了する。L4 quotaは短期OAuth tokenでCloud Quotas v1のexact `QuotaInfo`を直接GETし、
+credentialやactive projectが選ぶquota projectに依存するgcloud subprocessを使用しない。`preflight_only`が成功する前に
+Orchestrator pause、controller deploy、Playwright install、GPU authorizationへ進んではならない。failed acceptanceの
+recoveryはRunPod復元後にCloudflare全resourceをread-backするため、通常API tokenと専用Pages API tokenの両方を渡す。
+Cloud Quotas APIのenabled状態はstaging bootstrap foundationのapply/read-back対象とし、IAM roleのpermission一致だけで
+quota capabilityを成功扱いにしない。CIのstaging deployerにはenabled状態を読む`serviceusage.services.list`だけを与え、
+APIを変更する`serviceusage.services.enable`は与えない。
+`resume_acceptance_only`では、skipするPages/Orchestrator/R2/Queueのfull live read-backをmutation-free
+`preflight`で先に完了する。Pages Queue producerはPages project APIの`queue_producers`で検証し、bindingを列挙しない
+`wrangler queues info`の人間向け表示には依存しない。Queue側ではproducer総数とR2 producerを独立検証する。
 
 RunPod Worker build inputsに差分がないapplication-only candidateでは、
 [ADR 0038](./adr/0038-reuse-unchanged-runpod-worker-image.md)の検証済みsource candidate
@@ -536,6 +573,153 @@ RunPodから到達するOrchestratorは専用Custom Domainを使う。追跡外s
 `RUNPOD_INTERNAL_BASE_URL`を同時生成する。対話loginを要求するAccess policyは付けず、
 未知path、query付きrequest、POST以外、JSON以外、4 KiB超過、schema不一致を拒否する。
 実origin、claim/heartbeat token、署名URLをdeployment記録やCLI出力へ残さない。
+
+Phase 14のCloud Run runtimeはstaging shadow namespaceに限定する。D1 migration
+`0010_provider_execution_compatibility.sql`と`0011_cloud_run_runtime_protocol.sql`を先に適用し、
+`CLOUD_RUN_CONTROLLER_HMAC_PRIMARY`と`CLOUD_RUN_RUNTIME_DERIVATION_SECRET`を相異なる
+32〜64 byteのcanonical base64url encrypted secretとして登録する。追跡外設定は
+controllerのexact `run.app` origin、上記Custom Domainと同じOrchestrator origin、固定runtime
+service accountを同時に生成する。まず`CLOUD_RUN_RUNTIME_MODE=disabled`でdeploy/read-backし、
+controller authorization、D1/R2 fixture、課金上限、cleanup期限をstrict preflightした後だけ
+`synthetic-shadow`へ切り替える。Phase 15ではそのread-back後にだけ
+`SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY=cloud_run_jobs_l4_v1`を生成設定へ入れる。rollbackは最初にpolicyを
+`runpod_serverless_v1`へ戻して新規投入を止め、既存Cloud Run attemptのcleanupを継続してからmodeをdisabledへ戻す。
+Phase 16 productionでは[ADR 0086](./adr/0086-adopt-cloud-run-jobs-for-production.md)の専用resourceをread-backした後、
+`CLOUD_RUN_RUNTIME_MODE=active`でruntime/reaperを先にdeployする。最初は
+`GPU_EXECUTION_ADMISSION=paused`かつGPU policyをRunPodに固定し、既存attemptのdrain後もpausedのまま
+新attemptのpolicyだけをCloud Runへ切り替える。別途承認されたexact-one controller authorizationを適用してから
+admissionをactiveにする。rollbackでは最初にadmissionをpauseし、policyをRunPodへ戻す。runtime/reaperは
+Cloud Run resource不存在まで維持する。
+
+Phase 16のbounded staging acceptance前に次を順に確認する。値やtokenを標準出力へ出さない。
+
+```bash
+pnpm github:controls:verify:staging
+pnpm cloud-run:foundation:read staging
+```
+
+staging bootstrap preflight roleが未適用の場合だけ、project、staging deployer、runtime identityを
+read-onlyで確認して明示承認後に`pnpm cloud-run:foundation:apply:staging-preflight`を1回実行し、直後に
+foundation read-backを再実行する。このcommandはproduction secret、production IAM、controller Serviceを
+変更せず、staging deployerへworker repositoryの`roles/artifactregistry.reader`を付与する。これは
+GPU-free Job作成時のimage importに必要であり、repository write権限は含まない。workflowはさらに
+Environmentの4個のCloud Run/R2入力をGoogle APIへ照合する。
+shared release deployer custom roleのpermission driftだけを収束する場合は、対象roleとstaging bindingの
+read-back後に明示承認を得て`pnpm cloud-run:foundation:apply:release-deployer-role`を実行する。このcommandは
+`scribeDropReleaseDeployer`だけを更新し、service account、binding、secret、database、Serviceを変更しない。
+Firestore database objectのread-backには`datastore.databases.getMetadata`が必要であり、transaction用の
+`datastore.databases.get`で代用しない。shared roleのため、このread-only permissionはstagingとproductionの
+既存deployer bindingの両方へ適用される。
+production controller Serviceを初回作成する場合、preflightはCreateService POSTを`validateOnly=true`で実行し、直後も
+Serviceが404であることを確認する。実cutoverは同じnameなしbodyをCreateService POSTへ渡す。field mask付きPATCHの
+`allowMissing=true`は実APIで不存在Serviceを作成できないため使用せず、PATCHは作成済みServiceの更新だけに限定する。
+Service requestで`invokerIamDisabled`を設定するため、shared release deployer roleは`run.services.setIamPolicy`を必須とする。
+production preflightはactual roleの完全一致を確認してからCreateService validate-onlyへ進む。
+acceptance jobはbrowser installを先に完了し、candidate controllerをdisabledでdeployしてから
+`pnpm cloud-run:staging:bootstrap-preflight <candidate-evidence>`を実行する。GPU 0のexact-one
+`EXECUTION_NOT_FOUND` evidenceとJob/Execution 0が得られるまでpaid authorizationを開かない。
+read-only preflightのenvironment policy exportは合格時の最終`cloud_run_jobs_l4_v1` policyを正規化するが、
+backend promotionの実deployは引き続き`runpod_serverless_v1`を選択する。この期待policyと実deploy baselineを
+同じjob-level値で代用してはならない。`resume_acceptance_only`のmutation前read-backも、前回のrecoveryまたは
+backend promotionが残した安全な`runpod_serverless_v1` baselineを照合し、acceptance内でCloud Run policyを
+有効化した後にだけ最終policyとの一致を要求する。
+実M4A後のcleanup verifierはworkflow source run JSONを入力に取り、同じepoch、reserved execution 1、
+250円authorization、source run時間内のexact-one execution recordを各readで検証しながら、Job/Execution 0、
+`activeExecutions=0`、record `CLEANED`まで最大20分pollする。controller executionは最大100件のbounded historyを読み、
+source run外の全recordも`CLEANED`を必須とする。collection全体の件数をexact oneとはせず、pagination、未cleanup履歴、
+source run内の0件または複数件は直ちに失敗とする。一時的なreaper収束待ちはpendingとし、identity、cost、reserved countの
+不一致も直ちに失敗とする。
+cleanup read-backへ進む前に、実M4Aのjobを削除せず
+`pnpm staging:completion-notification:verify <absolute-job-evidence-path>`を実行する。このgateはactive attemptが
+`cloud_run_jobs` / `cloud_run_jobs_l4_v1`で完了し、検証済み音声時間とclaimからterminalまでの処理時間がともに正、
+notification outboxがcurrent job versionを`SENT`、jobがnotifiedであることをremote D1で確認する。処理時間がnullまたは0の
+candidateはDiscord配送済みでも不合格とする。成功後にだけAccess認証済みowner pathでfixtureを削除する。
+続けて`pnpm cloud-run:staging:safety read`と
+`pnpm cloud-run:staging:paid-readiness <candidate-evidence>`を同じstepで実行し、disabled/zero、exact L4
+quota、Phase 15固定manifest、233円worst-caseが250円authorization内であることを照合する。backend
+promotion時点ではRunPod選択を維持し、Cloud Run選択はこのstep成功後だけに行う。
+
+production foundationはdashboardで手作業せず、project/account/environmentと下記planをread-onlyで確認し、
+明示承認後に一度だけ適用する。
+
+production controller preflightはServiceのvalidate-onlyだけでなく、Firestore authorizationを必ず先に読む。
+cutoverではenvironment `production`、epoch `disabled`、epoch expiry、active/max/request-rate/reserved/costの全値0を要求し、
+finalizeではsource cutoverのexact epochを持つexact-one smokeがactive 0、reserved 1、reserved cost 250であることを要求する。
+期待epochとreservationはworkflowの各stepへ明示し、暗黙defaultを共有しない。preflight runと実cutoverの双方で同じ検査を行い、
+旧smoke、operational authorization、別environment、document欠落を最初のproduction mutation前に拒否する。
+
+処理時間修正前のproduction smokeをfinalizeせず保留した場合は、通常cutoverを重ねない。source cutover runに限定した
+`cloud-run:acceptance:clean production <cutover-run-json>`でJob/Execution 0、`CLEANED` record、active 0、reserved 1を
+確認後、[ADR 0091](./adr/0091-require-controller-authorization-precondition.md)の明示承認を得る。exact recovery epochと
+`SCRIBE_DROP_CLOUD_RUN_ALLOW_CONSUMED_PRODUCTION_RECOVERY=1`を指定したcontroller `recover production disabled`だけで
+旧枠を閉じ、disabled/zeroをread-backする。この操作は旧smokeのacceptanceやrelease evidenceを発行せず、GPUを実行しない。
+
+```bash
+pnpm cloud-run:foundation:apply
+SCRIBE_DROP_PRODUCTION_CLOUD_RUN_CONTROLLER_HMAC_SECRET_VERSION=<version> \
+  pnpm cloud-run:foundation:read production
+pnpm cloud-run:foundation:read staging
+```
+
+bootstrapは`github-staging-deployment`/`sd-staging-deployer`、
+`github-production-deployment`/`sd-production-deployer`、production専用controller/runtime service account、
+`scribe-production-controller` databaseと2件のTTL、Singapore regional HMAC secret、review済みcustom roleと
+resource別bindingを作る。secret値は標準出力へ出さず、GitHub production Environmentへ直接登録する。
+`scribe-drop-production-gpu-controller` Serviceは作らず、staging acceptance済みcandidateの`cutover`が
+exact-one smoke authorizationで初めて作る。この時点のproduction OrchestratorはまだRunPodを選択しており、
+controller HMAC secretも未注入なのでCloud Run execution経路は開かない。同じworkflow runのretryはworkflow
+create timeから導いた同一expiry/epochだけを受け入れ、別runや消費済みauthorizationから2件目を開かない。
+
+production workflowは`cutover`と`finalize`を同じworkflow concurrencyで直列化する。`cutover` dispatch直前に
+L4 exact 1件・上限250円を別途承認し、finalize専用inputは既定のinert値を使う。workflow成功後、利用者は
+productionの通常UIで固定smoke mediaを1件uploadし、artifactと通知を確認してjob ULIDを控える。
+`finalize`には同じstaging run、cutover run、smoke job ULID、1〜20の運用execution上限、正確な
+`execution数 * 250`円、24時間以内のISO expiryを渡す。finalizeはD1/R2、Cloud Run resource 0、controller
+storage CLEANEDを検証するまで運用枠を開かない。productionにstaging Access service principalを作成しない。
+
+[ADR 0092](./adr/0092-make-production-finalize-resumable.md)に従い、finalizeはread-back済み入口状態を
+`smoke-active`、`smoke-paused`、`disabled-paused`、`operational-paused`、`operational-active`から明示する。
+最初のmutation前にadmission、authorization、provider 0、D1のproduction smoke `provider_handle`と同じFirestore
+`executionHandle`を持つ`CLEANED` recordを完全一致検査し、pause、disable、operational authorization、activateを独立stepとして
+残りのsuffixだけ実行する。cutover workflowの終了時刻を、その後に投入するsmokeのidentityには使わない。operational epochはcandidate commitとcutover run IDへ
+固定し、workflow retryでdesired authorizationを変えない。全入口と各mutation直後のprefix状態がstate-machine testを通り、
+全stepの必須envと順序をsource contractが検証するまでdispatchしない。
+
+[ADR 0089](./adr/0089-separate-production-workflow-and-candidate-identity.md)に従い、production workflowには
+staging acceptanceと一致する`candidate_commit_sha`を必ず渡す。workflowの`GITHUB_SHA`はsource runの信頼検証に
+だけ使い、artifact名、deployment label、authorization、evidenceへ流用しない。cutover前に同じ入力で
+`preflight_only=true`、`preflight_run_id=0`を実行し、staging evidence、両candidate、production foundation、
+controller validate-only、Cloudflare/Pages/Access/RunPodの全read-backを成功させる。このrunでは全migration/deploy、
+provider切替、authorization、evidence発行がskipされる。実cutoverは成功したrun IDを`preflight_run_id`へ渡し、
+同じworkflow commit/staging run、全preflight step成功、全mutation step skipをAPI read-backで検証させる。
+`finalize`では`preflight_run_id=0`を使用する。
+acceptance artifactからexportしたcandidate run IDは`GITHUB_ENV`へ書いた次stepで初めて使用する。同じstep内で
+参照すると未反映の空IDになるため、cutover/finalizeともacceptance exportとcandidate downloadを分離する。
+同じexternal preflight stepでbackend用`CLOUDFLARE_API_TOKEN`とPages専用tokenを併用する場合、Wrangler Pages
+deployment read-backだけはprocess-localに`CLOUDFLARE_API_TOKEN="${CLOUDFLARE_PAGES_API_TOKEN}"`を設定する。
+Wranglerがbackend tokenを優先してPages APIを呼ぶ構成をstatic workflow contractで拒否する。
+dispatch前に`pnpm production:workflow:verify`を実行し、production workflowが参照する15 variable、6 secret、
+environment policy producer、外部preflight、RunPod promotionの順序をsourceから完全一致検査する。candidate artifactと
+staging acceptance artifactをdownloadした作業directoryに対して、次のread-only verifierを実行する。
+
+```text
+pnpm production:environment:verify \
+  <application-candidate-directory> \
+  <cloud-run-candidate-evidence.json> \
+  <staging-acceptance-directory> \
+  <candidate-commit-sha>
+```
+
+このverifierはGitHub production Environmentの15 variableをAPI read-backし、exact Pages project、HMAC version、
+Cloudflare production render、固定3種RunPod GPU、immutable candidate、Cloud Run evidence、normalized staging policy parityを
+一度に検査する。secretは値を取得せず、`pnpm github:controls:verify:production`で6 secret名の完全一致だけを検査する。
+失効済みstaging evidenceはpolicy構造の比較には使えるが、production promotion authorityにはならない。Environmentの修正が
+必要ならobserved/required差分を先に提示し、承認なしに更新しない。source、workflow、Environment値の変更後は新しいGPU-free
+staging acceptanceを発行してから、productionのmutation-free remote preflightを1回だけ実行する。
+
+rollbackはmodeを`disabled`へ戻してshadow endpointを閉じ、実行中Executionのcleanupとcontroller
+authorizationの無効化を確認してから直前のWorker deploymentへ戻す。forward-only migrationは
+旧applicationと互換のため削除しない。
 
 Phase 5の追跡外Orchestrator設定では、同じ生成処理が
 `SCRIBE_DROP_STAGING_WEB_ORIGIN`から`WEB_BASE_URL`も設定する。D1 migration

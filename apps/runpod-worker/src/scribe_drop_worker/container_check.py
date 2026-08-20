@@ -23,6 +23,7 @@ EXPECTED_PACKAGES: Final[dict[str, str]] = {
     "faster-whisper": "1.2.1",
     "huggingface-hub": "1.24.0",
     "httpx": "0.28.1",
+    "numpy": "2.5.1",
     "pydantic": "2.13.4",
     "runpod": "1.11.0",
 }
@@ -30,8 +31,11 @@ EXPECTED_MODULES: Final = (
     "ctranslate2",
     "faster_whisper",
     "httpx",
+    "numpy",
     "pydantic",
     "runpod",
+    "scribe_drop_worker.bounded_container_check",
+    "scribe_drop_worker.cloud_run_bounded_gpu_benchmark",
 )
 OFFLINE_FLAGS: Final = (
     "HF_DATASETS_OFFLINE",
@@ -122,6 +126,7 @@ def check_container_runtime(
     media = ports.probe_media()
     if (
         media.audio_codec != "pcm_s16le"
+        or media.audio_stream_index != 0
         or media.format_name != "wav"
         or media.stream_count != 1
         or not SYNTHETIC_DURATION_MIN_SECONDS

@@ -3,9 +3,13 @@ export const LOG_SERVICES = ["web", "orchestrator", "runpod-worker"] as const;
 export const DEPLOYMENT_ENVIRONMENTS = ["local", "staging", "production"] as const;
 export const LOG_EVENTS = [
   "api_request_failed",
+  "cloud_run_identity_rejected",
   "invalid_log_event",
   "job.failed",
   "job.cancelled",
+  "job.cancel_dispatch_applied",
+  "job.cancel_dispatch_deferred",
+  "job.cancel_dispatch_ignored",
   "job.completed",
   "job.completion_deferred",
   "job.deletion_completed",

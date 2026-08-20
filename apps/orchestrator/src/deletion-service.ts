@@ -128,6 +128,7 @@ async function cancelKnownRunpodJobs(
   client: RunpodControlClient,
   candidate: DeletionCandidate,
 ): Promise<boolean> {
+  await repository.assertProviderCompatibility(candidate.jobId);
   const jobIds = await findAllRunpodJobIds(repository, candidate.jobId);
   let allConfirmed = true;
   for (const runpodJobId of jobIds) {

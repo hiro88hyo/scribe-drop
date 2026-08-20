@@ -47,7 +47,9 @@ export async function waitForStagingJobFailure(
 export async function deleteStagingFixtureJob(page: Page, jobId: string): Promise<void> {
   await page.goto(`/jobs/${encodeURIComponent(jobId)}`);
   const deleteTrigger = page.getByRole("button", { name: "ジョブを削除" });
-  await expect(deleteTrigger).toBeVisible({ timeout: 30_000 });
+  const alreadyDeleted = page.getByText("指定されたジョブは見つかりません。");
+  await expect(deleteTrigger.or(alreadyDeleted)).toBeVisible({ timeout: 30_000 });
+  if (await alreadyDeleted.isVisible()) return;
   await deleteTrigger.click();
   await page.getByRole("button", { name: "完全削除を受け付ける" }).click();
   await expect(page).toHaveURL(/\/history$/u, { timeout: 30_000 });

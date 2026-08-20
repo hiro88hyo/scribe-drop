@@ -57,6 +57,16 @@
 
 ### Staging promotion gate
 
+- 手動で補った環境変数、引数、credential、resource状態、実行順序によって検証が成功した場合、その成功をremote workflowの
+  実行根拠にしない。発見した前提を同じ変更でsource-managed verifierと回帰検査へ昇格し、対象workflow自身が外部readや
+  mutationより前にそのverifierを実行するまでdispatchしない。`/tmp` script、shell履歴、会話、引き継ぎ文書だけに残さない。
+- workflowが失敗した場合、到達済みstepの直接原因だけを修正してredispatchしない。未到達stepを含む全commandについて、必須env、
+  引数、credential、artifact、生成元、job境界、外部状態、実行順序をsourceから列挙し、workflowとの対応を機械検査する。既知の
+  欠落文字列だけを確認するstatic checkや、workflowの成功そのものを完全性の証明として扱わない。
+- 複数のremote mutationを含むworkflowは、各mutation直後に失敗を注入した全prefix状態から安全に再開または収束できることを、
+  state-machine testとsource-managed recovery gateで証明する。部分適用状態に対する再開経路が未実装・未検証ならdispatchしない。
+- 「今回の失敗箇所は直した」「残りは目視した」「前回そこまでは成功した」という説明を次回dispatchの根拠にしない。利用者から
+  指摘される前に上記の完全性検査を実施し、検査結果をcommitへ固定する。
 - runtime、依存、deployment設定、migration、外部service連携へ影響する変更は、同じrelease candidateがstaging acceptanceを通過するまでproductionへdeployしない。
 - release candidateは`release/<version>`の単一commitから一度だけbuildし、production用に再buildしない。
 - stagingとproductionはresourceとsecretを分離するが、application artifact、RunPod image digest、migration集合は同一candidateを使用する。
@@ -90,7 +100,9 @@
 - Conventional Commits を使う。例: `feat(orchestrator): enforce atomic RunPod claims`。
 - 1コミットは1つの論理変更に限定し、生成物や無関係な整形を混在させない。
 - `docs/implementation-plan.md` の Phase をまたぐ差分を同じ feature branch に入れない。
-- feature branch は CI と review 後に `--no-ff` merge し、Phase の境界を履歴に残す。
+- feature branch は CI と review policy を満たした後に `--no-ff` merge し、Phase の境界を履歴に残す。
+  独立maintainer不在時は[ADR 0063](docs/adr/0063-use-solo-maintainer-pr-policy.md)に従い、承認を
+  偽装せず、PR、strict required checks、conversation解決、merge commitを必須とする。
 - release は SemVer を使い、`main` の release commit に `vX.Y.Z` tag を付ける。
 - `main` と `develop` への force-push、共有済み commit の書き換えは禁止する。
 - secret や大容量生成物を誤ってコミットした場合は、通常の revert だけで済ませず漏えい対応を行う。
@@ -100,6 +112,9 @@
 - PR は目的、設計上の判断、変更範囲、検証コマンド、残課題、関連 Phase/ADR を記載する。
 - DB migration、API contract、状態遷移、権限、ログ項目の変更は明示する。
 - CI が成功し、未解決の security/authorization 指摘がないことを merge 条件とする。
+- 独立したqualified maintainerが参加するまではapproving review countを0とし、参加後は別PRで
+  承認1名とlast push approvalを再有効化する。production Environmentのrequired reviewerは
+  この例外の対象外とする。
 - review 中の追加修正でも、無関係な変更を同じ PR に含めない。
 
 ## 4. アーキテクチャと依存方向

@@ -13,13 +13,13 @@ acceptanceが成功するまでclosedに保ち、成功後に同じPRをreopen�
 
 ## Job
 
-| Job                | 検査内容                                                                                                                                                                  |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `quality`          | lockfile固定install、toolchain、format、lint、型検査、Vitest、pytest、build、local D1 migration、Web/OrchestratorのWorkers/D1/R2 integration                              |
-| `secrets`          | Gitleaks による完全な Git 履歴と現在の checkout の検査                                                                                                                    |
-| `dependency-audit` | `pnpm audit` と `uv audit` による直接・推移依存の既知脆弱性検査                                                                                                           |
-| `browser-e2e`      | 固定Playwright/Chromiumとmock API/R2によるupload、poll、download、delete、mobile、PWA cache検査                                                                           |
-| `runpod-container` | 固定digest/snapshotからの実image buildまたは検証済み不変digestの再利用、非root・networkなし・read-only起動、model全hash、SPDX JSON SBOM、High/Critical vulnerability scan |
+| Job                | 検査内容                                                                                                                                                                                     |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `quality`          | lockfile固定install、toolchain、format、lint、型検査、Vitest、pytest、build、local D1 migration、Web/OrchestratorのWorkers/D1/R2 integration                                                 |
+| `secrets`          | Gitleaks による完全な Git 履歴と現在の checkout の検査                                                                                                                                       |
+| `dependency-audit` | `pnpm audit` と `uv audit` による直接・推移依存の既知脆弱性検査                                                                                                                              |
+| `browser-e2e`      | 固定Playwright/Chromiumとmock API/R2によるupload、poll、download、delete、mobile、PWA cache検査                                                                                              |
+| `runpod-container` | 固定digest/snapshotからの実image buildまたは検証済み不変digestの再利用、非root・networkなし・read-only起動、model全hash、8時間bounded core、SPDX JSON SBOM、High/Critical vulnerability scan |
 
 `pnpm audit` と `uv audit` は脆弱性データサービスへ接続するため、通常の `pnpm check` とは分離する。ローカルで CI 相当を確認するときは次を実行する。
 
@@ -31,8 +31,11 @@ pnpm ci:verify
 pnpm secrets:check
 pnpm audit --audit-level high
 uv audit --preview-features audit-command --project apps/runpod-worker --frozen
+pnpm trivy:install
 pnpm container:build:runpod
 pnpm container:check:runpod
+pnpm container:check:bounded:runpod
+pnpm container:scan:runpod
 ```
 
 release candidateまたはstaging promotionをdispatchする前に、
@@ -84,7 +87,7 @@ submission、event、outboxの件数が一致しない場合はtestを失敗さ�
 - third-party Action は release tag だけでなく full commit SHA に固定し、隣のコメントに対応する tag を残す。
 - `pnpm ci:verify` は workflow 内の `uses:` を検査し、floating reference の混入を拒否する。
 - Action の更新時は公式 release と tag の commit を確認し、workflow 内の全参照を同じ PR で更新する。
-- Gitleaks と runpodctl は `tools/versions.json` の version と公式 SHA-256 に固定し、検証後の binary だけを `.tools/bin` へ導入する。
+- Gitleaks、runpodctl、Trivy は `tools/versions.json` の version と公式 SHA-256 に固定し、検証後の binary だけを `.tools/bin` へ導入する。
 - JavaScript と Python の install はそれぞれ `pnpm-lock.yaml` と `uv.lock` を frozen mode で使用する。
 - RunPod WorkerはDockerfile frontend、uv image、CUDA/cuDNN baseをamd64 manifest digestで固定し、Ubuntu package sourceを固定snapshotだけへ切り替える。PythonとFFmpegの直接package version、Syft/Trivyと各Action commitも`tools/versions.json`とworkflowへ固定する。
 - SBOMはSyft 1.49.0でSPDX JSONを生成し、Trivy 0.72.0はOSとlibraryのHigh/Critical findingで失敗する。unfixed findingも無視しない。例外が必要な場合は期限と除去条件を持つADRを先に追加する。
@@ -100,7 +103,7 @@ submission、event、outboxの件数が一致しない場合はtestを失敗さ�
 `release/<version>` commitではimageを一度だけbuildする。変更されていない場合に限り、
 [ADR 0038](./adr/0038-reuse-unchanged-runpod-worker-image.md)の検証を通った過去の固定digestを
 再利用できる。environment選択とproduction用再buildは持たない。RunPod imageはどちらの
-経路でも現在runのoffline check、SBOM、High/Critical scanを通す。新規buildはGitHubの
+経路でも現在runの通常offline checkと8時間bounded core check、SBOM、High/Critical scanを通す。新規buildはGitHubの
 短期`GITHUB_TOKEN`でGHCRへpushする。mutable tagをpromotion入力にせずregistry digestを
 candidate evidenceへ保存する。push用tagはcommit、workflow run、attempt固有とし、
 失敗attemptのtagを再実行で上書きしない。package visibilityを暗黙に変更しない。
@@ -163,7 +166,8 @@ candidate directoryは全promotion jobで`${{ github.workspace }}/release-candid
 release branch、commit、成功statusをGitHub APIで照合する。applicationを再buildせず、
 compiled bundleを`--no-bundle`でdeployする。R2 notification、Queue producer/consumer、
 DLQ/retry、CORS、lifecycle、D1 migration、PagesのGit provider無効、active Worker versionと
-binding、RunPod endpointをread-backする。Pagesはdeploy済みproduction
+binding、RunPod endpointをread-backする。main QueueはR2 notificationとWeb `CONTROL_EVENTS`の
+producer 2件、Orchestrator consumer 1件を必須とする。Pagesはdeploy済みproduction
 `wrangler_config_hash`と生成した追跡外configのSHA-256も照合する。Access service tokenの
 claimと認証済み`GET /api/me`をupload前に検証し、実M4A、manifest-last、3成果物download、
 削除受付を確認する。続いて音声を含まない合成破損M4Aを同じ経路へ投入し、exact
@@ -332,8 +336,11 @@ Cloudflare mutationより前にstaging evidenceとの一致を要求する。evi
 
 `main`と`develop`への直接pushを禁止し、`Quality gate`、`Secret scan`、
 `Dependency audit`、`Browser E2E`、`RunPod container supply chain`の5件をstrictな
-required status checkに設定する。承認1名、stale review破棄、最新push以外の承認拒否、
+required status checkに設定する。[ADR 0063](./adr/0063-use-solo-maintainer-pr-policy.md)に従い、
+独立maintainerが不在の間は承認0名、last push approvalなしとするが、PR、stale review破棄、
 conversation解決を要求し、管理者にも適用する。force-pushとbranch削除は禁止する。
+承認を偽装する別accountやbotは使わず、qualified maintainerが参加したら承認1名とlast push
+approvalを別PRで再有効化する。production Environmentのrequired reviewerは変更しない。
 
 現行`release/<version>`はrelease修正を直接積めるGit-flowを維持するためPRとstatus checkを
 必須にしない。一方で管理者を含むforce-pushとbranch削除は禁止する。production deployは

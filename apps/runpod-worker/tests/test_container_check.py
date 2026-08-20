@@ -42,6 +42,7 @@ def _bundle_verifier(_path: Path) -> ModelBundleMetadata:
 def _media_info() -> MediaInfo:
     return MediaInfo(
         audio_codec="pcm_s16le",
+        audio_stream_index=0,
         duration_seconds=1.0,
         format_name="wav",
         stream_count=1,
@@ -139,6 +140,7 @@ def test_container_check_rejects_media_probe_drift() -> None:
                 probe_version=lambda: "ffprobe version 6.1.1-3ubuntu5",
                 probe_media=lambda: MediaInfo(
                     audio_codec="mp3",
+                    audio_stream_index=0,
                     duration_seconds=1.0,
                     format_name="mp3",
                     stream_count=1,

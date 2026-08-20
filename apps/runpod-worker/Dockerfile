@@ -41,11 +41,17 @@ WORKDIR /app
 COPY apps/runpod-worker/pyproject.toml apps/runpod-worker/uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project --python /usr/bin/python3.12
 
-COPY apps/runpod-worker/src ./src
+# Keep the 1.6 GiB immutable model layer independent from ordinary worker source changes.
+COPY apps/runpod-worker/src/scribe_drop_worker/__init__.py \
+    apps/runpod-worker/src/scribe_drop_worker/constants.py \
+    apps/runpod-worker/src/scribe_drop_worker/model_bundle.py \
+    ./src/scribe_drop_worker/
 ENV HF_HUB_DISABLE_PROGRESS_BARS=1 \
     PYTHONPATH=/app/src
 RUN /app/.venv/bin/python -m scribe_drop_worker.model_bundle /opt/models/large-v3-turbo \
     && chmod -R a-w /opt/models/large-v3-turbo
+
+COPY apps/runpod-worker/src ./src
 
 # nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04, linux/amd64 manifest
 FROM --platform=linux/amd64 nvidia/cuda@sha256:9175fa92f96de35a8cfb9493f0dfcf9435c7a597e9d95ad41d2cae382a95e3f9 AS runtime

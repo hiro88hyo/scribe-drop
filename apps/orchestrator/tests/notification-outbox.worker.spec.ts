@@ -9,6 +9,13 @@ const JOB_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const ATTEMPT_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAW";
 const OUTBOX_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAX";
 const NEXT_OUTBOX_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAY";
+const EXECUTION_OPTIONS = JSON.stringify({
+  contractVersion: 1,
+  language: "auto",
+  model: "large-v3-turbo",
+  outputFormats: ["markdown", "json", "srt"],
+  vad: true,
+});
 
 beforeAll(async () => {
   await applyD1Migrations(env.SCRIBE_DROP_DB, env.TEST_MIGRATIONS);
@@ -68,15 +75,23 @@ beforeEach(async () => {
           result_prefix,
           runpod_execution_ms,
           completed_at,
+          provider_kind,
+          provider_policy,
+          execution_contract_version,
+          execution_options_json,
           created_at,
           updated_at
-        ) VALUES (?1, ?2, 1, 'COMPLETED', ?3, 120000, ?4, ?4, ?4)
+        ) VALUES (
+          ?1, ?2, 1, 'COMPLETED', ?3, 120000, ?4, 'runpod_serverless',
+          'runpod_serverless_v1', 1, ?5, ?4, ?4
+        )
       `,
     ).bind(
       ATTEMPT_ID,
       JOB_ID,
       `results/0123456789abcdef0123456789abcdef/${JOB_ID}/${ATTEMPT_ID}/`,
       NOW,
+      EXECUTION_OPTIONS,
     ),
     env.SCRIBE_DROP_DB.prepare("UPDATE jobs SET active_attempt_id = ?2 WHERE id = ?1").bind(
       JOB_ID,
@@ -247,5 +262,20 @@ describe("notification outbox repository", () => {
       .bind(JOB_ID)
       .first();
     expect(rows).toEqual({ count: 1 });
+  });
+
+  it("does not lease a notification when the provider aggregate drifts", async () => {
+    await env.SCRIBE_DROP_DB.prepare(
+      "UPDATE provider_executions SET status = 'RUNNING' WHERE attempt_id = ?1",
+    )
+      .bind(ATTEMPT_ID)
+      .run();
+
+    await expect(
+      createD1NotificationOutboxRepository(env.SCRIBE_DROP_DB).claimNext(
+        NOW,
+        "2026-07-25T01:02:00.000Z",
+      ),
+    ).resolves.toBeUndefined();
   });
 });

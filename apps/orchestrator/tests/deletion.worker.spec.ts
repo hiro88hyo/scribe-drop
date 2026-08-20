@@ -4,11 +4,13 @@ import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { processPendingDeletions } from "../src/deletion-service.js";
+import { createD1DeletionRepository } from "../src/deletion-repository.js";
 
 const NOW = new Date("2026-07-26T04:00:00.000Z");
 const JOB_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const FIRST_ATTEMPT_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAW";
 const SECOND_ATTEMPT_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAX";
+const CLOUD_ATTEMPT_ID = "01ARZ3NDEKTSV4RRFFQ69G5FB0";
 const EVENT_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAY";
 const OUTBOX_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAZ";
 const OWNER_HASH = "0123456789abcdef0123456789abcdef";
@@ -190,6 +192,54 @@ async function seedDeletion(): Promise<void> {
 }
 
 describe("asynchronous user deletion", () => {
+  it("blocks record deletion until Cloud Run cleanup is confirmed", async () => {
+    await seedDeletion();
+    await env.SCRIBE_DROP_DB.prepare(
+      `
+        INSERT INTO job_attempts (
+          id, job_id, generation, status, result_prefix, submission_outcome,
+          provider_kind, provider_policy, execution_contract_version,
+          execution_options_json, created_at, updated_at
+        ) VALUES (
+          ?1, ?2, 3, 'COMPLETED', ?3, 'accepted', 'cloud_run_jobs',
+          'cloud_run_jobs_l4_v1', 2, ?4, ?5, ?5
+        )
+      `,
+    )
+      .bind(
+        CLOUD_ATTEMPT_ID,
+        JOB_ID,
+        `results/${OWNER_HASH}/${JOB_ID}/${CLOUD_ATTEMPT_ID}/`,
+        '{"contractVersion":2,"language":"auto","model":"large-v3-turbo","outputFormats":["markdown"],"vad":true}',
+        NOW.toISOString(),
+      )
+      .run();
+    await env.SCRIBE_DROP_DB.batch([
+      env.SCRIBE_DROP_DB.prepare("UPDATE jobs SET active_attempt_id = ?2 WHERE id = ?1").bind(
+        JOB_ID,
+        CLOUD_ATTEMPT_ID,
+      ),
+      env.SCRIBE_DROP_DB.prepare(
+        `
+          UPDATE provider_executions
+          SET provider_handle = ?2, provider_version = 7, cleanup_status = 'PENDING'
+          WHERE attempt_id = ?1
+        `,
+      ).bind(CLOUD_ATTEMPT_ID, "h".repeat(43)),
+    ]);
+
+    const repository = createD1DeletionRepository(env.SCRIBE_DROP_DB);
+    await expect(repository.assertProviderCompatibility(JOB_ID)).rejects.toThrow(
+      "Provider execution compatibility check failed",
+    );
+    await env.SCRIBE_DROP_DB.prepare(
+      "UPDATE provider_executions SET cleanup_status = 'SUCCEEDED' WHERE attempt_id = ?1",
+    )
+      .bind(CLOUD_ATTEMPT_ID)
+      .run();
+    await expect(repository.assertProviderCompatibility(JOB_ID)).resolves.toBeUndefined();
+  });
+
   it("deletes exact R2 ownership and cascades all D1 child records", async () => {
     await seedDeletion();
 

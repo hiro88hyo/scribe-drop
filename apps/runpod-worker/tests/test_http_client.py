@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import TYPE_CHECKING, Final
 
 import httpx
@@ -154,6 +155,32 @@ def test_claim_pins_validated_ip_and_preserves_host_and_sni() -> None:
     assert isinstance(result, RunpodClaimDeduplicated)
     assert len(transport.requests) == 1
     assert transport.closed is True
+
+
+def test_bounded_file_upload_verifies_regular_file_integrity_and_streams(
+    tmp_path: Path,
+) -> None:
+    """The one-shot publisher path sends a fixed-length prehashed regular file."""
+    observed: list[bytes] = []
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        observed.append(request.read())
+        return httpx.Response(200, request=request)
+
+    client, _transport = build_client(responder)
+    payload = b"bounded-artifact"
+    artifact = tmp_path / "artifact.tmp"
+    artifact.write_bytes(payload)
+    with artifact.open("rb") as content:
+        client.put_file(
+            "https://storage.example.invalid/result?signature=redacted",
+            content,
+            content_type="application/json",
+            size_bytes=len(payload),
+            sha256=hashlib.sha256(payload).hexdigest(),
+        )
+
+    assert observed == [payload]
 
 
 def test_all_claim_capability_paths_are_validated_before_use() -> None:

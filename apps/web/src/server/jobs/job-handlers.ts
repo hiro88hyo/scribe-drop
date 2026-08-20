@@ -8,6 +8,7 @@ import {
   deleteJobRequestSchema,
   deleteJobResponseSchema,
   jobActionResponseSchema,
+  jobControlEventSchema,
   listJobsQuerySchema,
   listJobsResponseSchema,
   outputFormatSchema,
@@ -19,6 +20,7 @@ import {
   type DeleteJobResponse,
   type ArtifactDownloadResponse,
   type JobActionResponse,
+  type JobControlEvent,
   type ListJobsResponse,
   type TemporaryUploadCredentials,
 } from "@scribe-drop/contracts";
@@ -117,6 +119,12 @@ interface RetryJobHandlerContext {
   readonly request: Request;
 }
 
+interface JobCancellationHandlerContext extends RetryJobHandlerContext {
+  readonly env: RetryJobHandlerContext["env"] & {
+    readonly CONTROL_EVENTS: Queue<JobControlEvent>;
+  };
+}
+
 interface ArtifactHandlerContext {
   readonly data: WebRequestData;
   readonly env: JobEnvironment & {
@@ -152,6 +160,10 @@ export interface JobHandlerDependencies {
     readonly parentSecretAccessKey: string;
   }) => Promise<TemporaryUploadCredentials>;
   readonly headSourceObject?: (bucket: R2Bucket, key: string) => Promise<unknown>;
+  readonly enqueueJobControlEvent?: (
+    queue: Queue<JobControlEvent>,
+    event: JobControlEvent,
+  ) => Promise<void>;
   readonly now?: () => Date;
   readonly randomBytes?: RandomBytes;
   readonly requestJobCancellation?: (
@@ -645,7 +657,7 @@ export async function handleRetryJob(
 }
 
 export async function handleCancelJob(
-  context: RetryJobHandlerContext,
+  context: JobCancellationHandlerContext,
   dependencies: JobHandlerDependencies = {},
 ): Promise<Response> {
   const id = Array.isArray(context.params.id) ? undefined : context.params.id;
@@ -669,9 +681,10 @@ export async function handleCancelJob(
     dependencies.createEventId ??
     ((timestampMilliseconds: number) =>
       createUlid(timestampMilliseconds, dependencies.randomBytes));
+  const eventId = createEventId(now.getTime());
   const requestCancellation = dependencies.requestJobCancellation ?? requestJobCancellation;
   const result = await requestCancellation(context.env.SCRIBE_DROP_DB, {
-    eventId: createEventId(now.getTime()),
+    eventId,
     jobId: idResult.data,
     ownerSub: auth.sub,
     timestamp: now.toISOString(),
@@ -691,6 +704,23 @@ export async function handleCancelJob(
       requestId: getRequestId(context.data),
       status: 409,
     });
+  }
+
+  if (result.job.status === "CANCEL_REQUESTED") {
+    const controlEvent = jobControlEventSchema.parse({
+      action: "cancel",
+      eventId,
+      jobId: idResult.data,
+      requestedAt: now.toISOString(),
+      schemaVersion: 1,
+      type: "job-control",
+    });
+    const enqueue =
+      dependencies.enqueueJobControlEvent ??
+      (async (queue: Queue<JobControlEvent>, event: JobControlEvent) => {
+        await queue.send(event);
+      });
+    await enqueue(context.env.CONTROL_EVENTS, controlEvent);
   }
 
   const responseBody = jobActionResponseSchema.parse({

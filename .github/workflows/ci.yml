@@ -52,6 +52,7 @@ jobs:
         run: |
           pnpm run gitleaks:install
           pnpm run runpodctl:install
+          pnpm run trivy:install
 
       - name: Verify toolchain
         run: pnpm run toolchain:check
@@ -186,6 +187,17 @@ jobs:
             --entrypoint python \
             scribe-drop-runpod-worker:ci \
             -m scribe_drop_worker.container_check
+
+      - name: Verify maximum-duration bounded core offline
+        run: |
+          docker run \
+            --rm \
+            --network none \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --entrypoint python \
+            scribe-drop-runpod-worker:ci \
+            -m scribe_drop_worker.bounded_container_check
 
       - name: Generate SPDX JSON SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0

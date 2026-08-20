@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { validateRunpodPlan } from "./runpod-environment-config.mjs";
+import { parseCloudRunCandidateEvidence } from "./cloud-run-candidate-evidence.mjs";
 
 const digestPattern = /^[0-9a-f]{64}$/u;
 
@@ -120,6 +121,35 @@ function normalizedRunpodPlan(untrustedPlan, environment) {
   };
 }
 
+function normalizedCloudRunPolicy(
+  untrustedCandidate,
+  environment,
+  runtimeMode,
+  gpuPolicy,
+  gpuAdmission,
+) {
+  const candidate = parseCloudRunCandidateEvidence(untrustedCandidate);
+  const expectedMode = environment === "staging" ? "synthetic-shadow" : "active";
+  if (
+    runtimeMode !== expectedMode ||
+    gpuPolicy !== "cloud_run_jobs_l4_v1" ||
+    gpuAdmission !== "active"
+  ) {
+    throw new Error("Cloud Run environment policy is not active");
+  }
+  return {
+    accelerator: "nvidia-l4",
+    controllerImage: candidate.controllerImage,
+    executionTimeoutSeconds: 3_300,
+    gpuCount: 1,
+    maxRetries: 0,
+    parallelism: 1,
+    region: "asia-southeast1",
+    taskCount: 1,
+    workerImage: candidate.workerImage,
+  };
+}
+
 export function createEnvironmentPolicy(input) {
   if (input.environment !== "staging" && input.environment !== "production") {
     throw new Error("Environment parity policy requires staging or production");
@@ -149,7 +179,14 @@ export function createEnvironmentPolicy(input) {
     throw new Error("Environment retention policy order is invalid");
   }
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    cloudRun: normalizedCloudRunPolicy(
+      input.cloudRunCandidate,
+      input.environment,
+      input.cloudRunRuntimeMode,
+      input.gpuExecutionPolicy,
+      input.gpuExecutionAdmission,
+    ),
     cloudflare: {
       cors: normalizedCors(input.cors, input.webOrigin, input.environment),
       lifecycle: normalizedLifecycle(input.lifecycle, input.environment),

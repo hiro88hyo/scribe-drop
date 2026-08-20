@@ -13,15 +13,17 @@ Cloudflare dashboardのtoken作成画面ではwrite権限が`Edit`と表示さ�
 
 ## API tokenの全役割
 
-すべてのAPI tokenでAccount Resourcesは対象account 1件だけをIncludeする。Backend/Access
-tokenのZone Resourcesはapplicationを公開するexact zone 1件だけをIncludeし、Pages tokenに
-Zone Resourcesを追加しない。All accounts、All zones、IP address filteringを使わない。
+Account permissionを持つAPI tokenはAccount Resourcesを対象account 1件だけIncludeする。
+Backend/Accessとstaging Cloud Run WAF tokenのZone Resourcesはapplicationを公開するexact
+zone 1件だけをIncludeし、Pages tokenにZone Resourcesを追加しない。All accounts、All zones、
+IP address filteringを使わない。
 GitHub-hosted runnerの送信元IPは固定されないため、CI tokenをIPで制限しない。
 
 | 役割                         | 保存先                                                                                                                                    | Account permissions                                                                                                                          | Zone permissions                                               |
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
 | Backend/Access control plane | GitHubの`staging`/`production` Environmentに別々の`CLOUDFLARE_API_TOKEN`。手動保守時だけ同じ環境のtokenをlocal credential storeへ一時注入 | `Access: Apps and Policies Edit`、`Access: Service Tokens Edit`、`D1 Edit`、`Queues Edit`、`Workers R2 Storage Edit`、`Workers Scripts Edit` | `Workers Routes Read`、`Zone Read`をexact application zoneだけ |
 | Pages CI                     | GitHubの`staging`/`production` Environmentに別々の`CLOUDFLARE_PAGES_API_TOKEN`                                                            | `Cloudflare Pages Edit`だけ                                                                                                                  | なし                                                           |
+| Staging Cloud Run WAF        | 手動staging gate中だけlocal credential storeへ`CLOUDFLARE_WAF_API_TOKEN`として一時注入                                                    | なし                                                                                                                                         | `Zone WAF Edit`、`Zone Read`をexact staging zoneだけ           |
 
 `CLOUDFLARE_API_TOKEN`は、Access application/policy、Access service token、D1、Queues、
 R2、Workersに必要な権限を最初からすべて持つ完成形とする。同じ環境・同じ用途のために
@@ -33,6 +35,10 @@ Pagesは[ADR 0042](./adr/0042-preflight-pages-upload-permission.md)のupload cap
 Workersを操作せず、Backend/Access tokenはPagesを操作しない。この統合判断と影響範囲は
 [ADR 0044](./adr/0044-consolidate-cloudflare-control-plane-token.md)と、そのZone権限訂正である
 [ADR 0045](./adr/0045-preflight-wrangler-worker-route-capability.md)を正とする。
+
+staging Cloud Run WAF tokenは[ADR 0082](./adr/0082-skip-browser-integrity-check-for-cloud-run-runtime.md)の
+exact BIC exceptionだけをread/create/update/removeする一時資格情報である。GitHub Environment、
+production、Worker secretへ保存せず、Backend/Access tokenへ`Zone WAF Edit`を追加しない。
 
 ## 1回で設定するBackend/Access token
 
@@ -64,6 +70,7 @@ Account Resourcesは対象account 1件だけ、Zone Resourcesはapplicationを�
 | Orchestrator deploy、secret、binding、Cron、Queue consumer、custom domain    | Backend/Access | `Workers Scripts Edit`とbinding先の上記permission |
 | Wranglerがcustom domain deploy前に行うzone解決と既存route競合検査            | Backend/Access | exact zoneの`Zone Read`と`Workers Routes Read`    |
 | Pages project/deployment/config/secretのread-back、upload capability、deploy | Pages CI       | `Cloudflare Pages Edit`                           |
+| staging Cloud Run runtimeのexact 5 POST pathだけのBIC skip/read-back         | Cloud Run WAF  | exact zoneの`Zone WAF Edit`と`Zone Read`          |
 
 固定Wrangler 4.114.0は、`custom_domain = true`でもupload後のtrigger処理で`GET /zones`と
 `GET /zones/{zone_id}/workers/routes`を呼び、既存routeとの競合を検査してからaccount-level
@@ -103,6 +110,8 @@ service tokenを指定した`Service Auth` policyを1件ずつ置く。GitHub `s
 - exact application zone以外の`Zone Read`と`Workers Routes Read`
 - `Zero Trust Read/Edit`
 - Pages以外のtokenに`Cloudflare Pages Read/Edit`
+- Backend/Access、Pages、production tokenの`Zone WAF Read/Edit`
+- staging Cloud Run WAF tokenのAccount permission、`Zone WAF Edit`以外のZone Edit権限
 - R2 parent signerの`Admin Read & Write`またはAll buckets
 
 新しいCloudflare API endpoint、Wrangler command、binding、domain方式を追加する場合は、

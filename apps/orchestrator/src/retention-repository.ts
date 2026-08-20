@@ -36,14 +36,123 @@ const mutationRowSchema = z
   })
   .strict();
 
+const JOB_PROVIDER_COMPATIBILITY_PREDICATE = `
+  (
+    jobs.active_attempt_id IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM job_attempts AS compatibility_attempts
+      LEFT JOIN provider_executions AS compatibility_executions
+        ON compatibility_executions.attempt_id = compatibility_attempts.id
+      WHERE compatibility_attempts.id = jobs.active_attempt_id
+        AND (
+          (
+            compatibility_attempts.provider_kind IS NULL
+            AND compatibility_executions.id IS NULL
+          )
+          OR (
+            compatibility_attempts.provider_kind = 'runpod_serverless'
+            AND compatibility_executions.id = compatibility_attempts.id
+            AND compatibility_executions.provider_kind = compatibility_attempts.provider_kind
+            AND compatibility_executions.provider_policy = compatibility_attempts.provider_policy
+            AND compatibility_executions.status = CASE compatibility_attempts.status
+              WHEN 'SUBMISSION_PENDING' THEN 'PENDING'
+              WHEN 'SUBMITTING' THEN 'CREATING'
+              WHEN 'RUNNING' THEN 'RUNNING'
+              WHEN 'CANCEL_REQUESTED' THEN 'CANCEL_REQUESTED'
+              ELSE 'TERMINAL'
+            END
+            AND compatibility_executions.create_outcome IS compatibility_attempts.submission_outcome
+            AND compatibility_executions.provider_handle IS compatibility_attempts.winning_runpod_job_id
+            AND compatibility_executions.terminal_status IS compatibility_attempts.runpod_terminal_status
+          )
+          OR (
+            compatibility_attempts.provider_kind = 'cloud_run_jobs'
+            AND compatibility_executions.id = compatibility_attempts.id
+            AND compatibility_executions.provider_kind = compatibility_attempts.provider_kind
+            AND compatibility_executions.provider_policy = compatibility_attempts.provider_policy
+            AND compatibility_executions.status = 'TERMINAL'
+            AND compatibility_executions.create_outcome IS compatibility_attempts.submission_outcome
+            AND compatibility_executions.cleanup_status = 'SUCCEEDED'
+          )
+        )
+    )
+  )
+`;
+
+const ATTEMPT_PROVIDER_COMPATIBILITY_PREDICATE = `
+  (
+    (
+      attempts.provider_kind IS NULL
+      AND executions.id IS NULL
+    )
+    OR (
+      attempts.provider_kind = 'runpod_serverless'
+      AND executions.id = attempts.id
+      AND executions.provider_kind = attempts.provider_kind
+      AND executions.provider_policy = attempts.provider_policy
+      AND executions.status = 'TERMINAL'
+      AND executions.create_outcome IS attempts.submission_outcome
+      AND executions.provider_handle IS attempts.winning_runpod_job_id
+      AND executions.terminal_status IS attempts.runpod_terminal_status
+    )
+    OR (
+      attempts.provider_kind = 'cloud_run_jobs'
+      AND executions.id = attempts.id
+      AND executions.provider_kind = attempts.provider_kind
+      AND executions.provider_policy = attempts.provider_policy
+      AND executions.status = 'TERMINAL'
+      AND executions.create_outcome IS attempts.submission_outcome
+      AND executions.cleanup_status = 'SUCCEEDED'
+    )
+  )
+`;
+
+const UPDATE_ATTEMPT_PROVIDER_COMPATIBILITY_PREDICATE = `
+  (
+    (
+      provider_kind IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM provider_executions WHERE attempt_id = job_attempts.id
+      )
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM provider_executions AS executions
+      WHERE executions.attempt_id = job_attempts.id
+        AND job_attempts.provider_kind = 'runpod_serverless'
+        AND executions.id = job_attempts.id
+        AND executions.provider_kind = job_attempts.provider_kind
+        AND executions.provider_policy = job_attempts.provider_policy
+        AND executions.status = 'TERMINAL'
+        AND executions.create_outcome IS job_attempts.submission_outcome
+        AND executions.provider_handle IS job_attempts.winning_runpod_job_id
+        AND executions.terminal_status IS job_attempts.runpod_terminal_status
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM provider_executions AS executions
+      WHERE executions.attempt_id = job_attempts.id
+        AND job_attempts.provider_kind = 'cloud_run_jobs'
+        AND executions.id = job_attempts.id
+        AND executions.provider_kind = job_attempts.provider_kind
+        AND executions.provider_policy = job_attempts.provider_policy
+        AND executions.status = 'TERMINAL'
+        AND executions.create_outcome IS job_attempts.submission_outcome
+        AND executions.cleanup_status = 'SUCCEEDED'
+    )
+  )
+`;
+
 const FIND_SOURCE_RETENTION_CANDIDATES_SQL = `
-  SELECT id, source_key, version
+  SELECT jobs.id, jobs.source_key, jobs.version
   FROM jobs
-  WHERE deleted_at IS NULL
-    AND source_deleted_at IS NULL
-    AND status IN ('COMPLETED', 'FAILED', 'CANCELLED', 'EXPIRED', 'SOURCE_MUTATED')
-    AND COALESCE(uploaded_at, created_at) <= ?1
-  ORDER BY COALESCE(uploaded_at, created_at), id
+  WHERE jobs.deleted_at IS NULL
+    AND jobs.source_deleted_at IS NULL
+    AND jobs.status IN ('COMPLETED', 'FAILED', 'CANCELLED', 'EXPIRED', 'SOURCE_MUTATED')
+    AND COALESCE(jobs.uploaded_at, jobs.created_at) <= ?1
+    AND ${JOB_PROVIDER_COMPATIBILITY_PREDICATE}
+  ORDER BY COALESCE(jobs.uploaded_at, jobs.created_at), jobs.id
   LIMIT ?2
 `;
 
@@ -59,6 +168,7 @@ const MARK_SOURCE_DELETED_SQL = `
     AND deleted_at IS NULL
     AND source_deleted_at IS NULL
     AND status IN ('COMPLETED', 'FAILED', 'CANCELLED', 'EXPIRED', 'SOURCE_MUTATED')
+    AND ${JOB_PROVIDER_COMPATIBILITY_PREDICATE}
   RETURNING id
 `;
 
@@ -71,10 +181,12 @@ const FIND_RESULT_RETENTION_CANDIDATES_SQL = `
     attempts.updated_at
   FROM job_attempts AS attempts
   INNER JOIN jobs ON jobs.id = attempts.job_id
+  LEFT JOIN provider_executions AS executions ON executions.attempt_id = attempts.id
   WHERE jobs.deleted_at IS NULL
     AND attempts.results_deleted_at IS NULL
     AND attempts.status IN ('COMPLETED', 'FAILED', 'CANCELLED')
     AND COALESCE(attempts.completed_at, attempts.failed_at, attempts.updated_at) <= ?1
+    AND ${ATTEMPT_PROVIDER_COMPATIBILITY_PREDICATE}
   ORDER BY
     COALESCE(attempts.completed_at, attempts.failed_at, attempts.updated_at),
     attempts.id
@@ -93,6 +205,7 @@ const MARK_RESULTS_DELETED_SQL = `
     AND updated_at = ?6
     AND results_deleted_at IS NULL
     AND status IN ('COMPLETED', 'FAILED', 'CANCELLED')
+    AND ${UPDATE_ATTEMPT_PROVIDER_COMPATIBILITY_PREDICATE}
     AND EXISTS (
       SELECT 1
       FROM jobs
@@ -125,6 +238,7 @@ const FIND_AUDIT_RETENTION_CANDIDATES_SQL = `
   WHERE jobs.deleted_at IS NULL
     AND jobs.status IN ('COMPLETED', 'FAILED', 'CANCELLED', 'EXPIRED', 'SOURCE_MUTATED')
     AND jobs.created_at <= ?1
+    AND ${JOB_PROVIDER_COMPATIBILITY_PREDICATE}
   GROUP BY jobs.id, jobs.version
   ORDER BY jobs.created_at, jobs.id
   LIMIT ?2
@@ -145,6 +259,7 @@ const MARK_AUDIT_RETENTION_EXPIRED_SQL = `
     AND deleted_at IS NULL
     AND status IN ('COMPLETED', 'FAILED', 'CANCELLED', 'EXPIRED', 'SOURCE_MUTATED')
     AND created_at <= ?3
+    AND ${JOB_PROVIDER_COMPATIBILITY_PREDICATE}
   RETURNING id
 `;
 

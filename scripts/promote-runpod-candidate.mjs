@@ -21,6 +21,8 @@ import {
   setRunpodEndpointDataCenters,
   setRunpodEndpointGpuTypes,
   setRunpodEndpointWorkersMax,
+  verifyRunpodServerlessGpuPools,
+  verifyRunpodServerlessGpuTypes,
 } from "./runpod-template-api.mjs";
 
 const [environment, planPath, ...flags] = process.argv.slice(2);
@@ -108,7 +110,7 @@ try {
       candidateDirectory,
       evidencePath,
       expectedCandidateRunId: process.env["EXPECTED_CANDIDATE_RUN_ID"],
-      expectedCommitSha: process.env["GITHUB_SHA"],
+      expectedCommitSha: process.env["EXPECTED_COMMIT_SHA"],
       expectedEnvironmentPolicyId,
       expectedReleaseVersion: process.env["EXPECTED_RELEASE_VERSION"],
       expectedStagingRunId: process.env["EXPECTED_STAGING_RUN_ID"],
@@ -127,6 +129,11 @@ try {
     JSON.parse(readFileSync(path.resolve(planPath), "utf8")),
     environment,
   );
+  await verifyRunpodServerlessGpuTypes({ gpuTypeIds: plan.endpoint.gpuTypeIds });
+  await verifyRunpodServerlessGpuPools({
+    apiKey: process.env["RUNPOD_API_KEY"],
+    gpuTypeIds: plan.endpoint.gpuTypeIds,
+  });
   if (preflightOnly) {
     const preflightInput = {
       endpointId,

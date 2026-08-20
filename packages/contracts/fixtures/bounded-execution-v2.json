@@ -1,0 +1,44 @@
+{
+  "capabilities": {
+    "artifacts": [
+      {
+        "format": "markdown",
+        "putUrl": "https://storage.example.invalid/transcript.md?signature=dummy"
+      },
+      {
+        "format": "json",
+        "putUrl": "https://storage.example.invalid/transcript.json?signature=dummy"
+      }
+    ],
+    "manifestPutUrl": "https://storage.example.invalid/manifest.json?signature=dummy"
+  },
+  "manifest": {
+    "artifacts": [
+      {
+        "format": "markdown",
+        "key": "results/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/01ARZ3NDEKTSV4RRFFQ69G5FAV/01ARZ3NDEKTSV4RRFFQ69G5FAW/transcript.md",
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "sizeBytes": 100
+      },
+      {
+        "format": "json",
+        "key": "results/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/01ARZ3NDEKTSV4RRFFQ69G5FAV/01ARZ3NDEKTSV4RRFFQ69G5FAW/transcript.json",
+        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "sizeBytes": 200
+      }
+    ],
+    "attemptId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+    "complete": true,
+    "executionContractVersion": 2,
+    "jobId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    "requestedFormats": ["markdown", "json"],
+    "schemaVersion": 2
+  },
+  "options": {
+    "contractVersion": 2,
+    "language": "ja",
+    "model": "large-v3-turbo",
+    "outputFormats": ["markdown", "json"],
+    "vad": false
+  }
+}

@@ -84,6 +84,7 @@ class MediaInfo(BaseModel):
 
     duration_seconds: float = Field(gt=0)
     stream_count: int = Field(gt=0, le=MAX_STREAMS)
+    audio_stream_index: int = Field(ge=0)
     format_name: str
     audio_codec: str
 
@@ -144,14 +145,18 @@ def _validate_probe_output(output: ProbeOutput, *, max_duration_seconds: float) 
     accepted_formats = formats.intersection(ALLOWED_FORMATS)
     if not accepted_formats:
         raise WorkerError(INVALID_MEDIA)
-    audio_codecs = tuple(
-        stream.codec_name
+    audio_streams = tuple(
+        stream
         for stream in output.streams
         if stream.codec_type == "audio"
         and stream.codec_name is not None
         and stream.codec_name in ALLOWED_AUDIO_CODECS
     )
-    if not audio_codecs:
+    if not audio_streams:
+        raise WorkerError(INVALID_MEDIA)
+    selected_audio = audio_streams[0]
+    selected_codec = selected_audio.codec_name
+    if selected_codec is None:  # pragma: no cover - selection requires a known codec.
         raise WorkerError(INVALID_MEDIA)
     try:
         duration = float(output.format.duration)
@@ -164,6 +169,7 @@ def _validate_probe_output(output: ProbeOutput, *, max_duration_seconds: float) 
     return MediaInfo(
         duration_seconds=duration,
         stream_count=len(output.streams),
+        audio_stream_index=selected_audio.index,
         format_name=sorted(accepted_formats)[0],
-        audio_codec=audio_codecs[0],
+        audio_codec=selected_codec,
     )

@@ -21,12 +21,14 @@ function environment(
     APP_ENV: "local",
     AUDIT_RETENTION_DAYS: "180",
     CLOUDFLARE_ACCOUNT_ID: "0".repeat(32),
+    GPU_EXECUTION_POLICY: "runpod_serverless_v1",
     MULTIPART_RETENTION_HOURS: "24",
     R2_ACCESS_KEY_ID: "r2-access-key-placeholder",
     R2_BUCKET_NAME: "scribe-drop-local",
     R2_SECRET_ACCESS_KEY: "0000000000000000",
     RESULT_RETENTION_DAYS: "90",
-    RUNPOD_ALLOWED_GPU_IDS: "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090",
+    RUNPOD_ALLOWED_GPU_IDS:
+      "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090,NVIDIA RTX PRO 6000 Blackwell Server Edition",
     RUNPOD_API_KEY: "runpod-api-key-placeholder",
     RUNPOD_ENDPOINT_ID: "endpoint-placeholder",
     RUNPOD_INTERNAL_BASE_URL: "https://orchestrator.example.invalid",
@@ -190,6 +192,66 @@ describe("reconciliation service", () => {
     });
     expect(records.join("\n")).toContain('"event":"job.submission_expired"');
     expect(records.join("\n")).toContain('"event":"reconciliation.completed"');
+  });
+
+  it("keeps maintenance active but does not dispatch while admission is paused", async () => {
+    const findDispatchablePendingJobId = vi.fn(() => Promise.resolve(PENDING_JOB_ID));
+    const submitPendingJob = vi.fn();
+
+    await expect(
+      reconcileJobs(environment({ GPU_EXECUTION_ADMISSION: "paused" }), {
+        createMaintenanceRepository: () => fakeMaintenanceRepository(),
+        createRepository: () => fakeRepository({ findDispatchablePendingJobId }),
+        dispatchNotification: () => Promise.resolve("none"),
+        logger: testLogger([]),
+        now: () => NOW,
+        processDeletions: emptyDeletionSweep,
+        processRetention: emptyRetentionSweep,
+        reconcileCompletions: () =>
+          Promise.resolve({
+            cancelledCount: 0,
+            completedCount: 0,
+            failedCount: 0,
+            terminalObservedCount: 0,
+          }),
+        submitPendingJob,
+      }),
+    ).resolves.toMatchObject({ dispatch: "none" });
+    expect(findDispatchablePendingJobId).not.toHaveBeenCalled();
+    expect(submitPendingJob).not.toHaveBeenCalled();
+  });
+
+  it("keeps RunPod pending attempts paused when Cloud Run is selected", async () => {
+    const findDispatchablePendingJobId = vi.fn(() => Promise.resolve(PENDING_JOB_ID));
+    const submitPendingJob = vi.fn();
+
+    await expect(
+      reconcileJobs(
+        environment({
+          APP_ENV: "production",
+          GPU_EXECUTION_POLICY: "cloud_run_jobs_l4_v1",
+        }),
+        {
+          createMaintenanceRepository: () => fakeMaintenanceRepository(),
+          createRepository: () => fakeRepository({ findDispatchablePendingJobId }),
+          dispatchNotification: () => Promise.resolve("none"),
+          logger: testLogger([]),
+          now: () => NOW,
+          processDeletions: emptyDeletionSweep,
+          processRetention: emptyRetentionSweep,
+          reconcileCompletions: () =>
+            Promise.resolve({
+              cancelledCount: 0,
+              completedCount: 0,
+              failedCount: 0,
+              terminalObservedCount: 0,
+            }),
+          submitPendingJob,
+        },
+      ),
+    ).resolves.toMatchObject({ dispatch: "none" });
+    expect(findDispatchablePendingJobId).not.toHaveBeenCalled();
+    expect(submitPendingJob).not.toHaveBeenCalled();
   });
 
   it("fails and cancels an accepted submission that misses the ten-minute start SLO", async () => {

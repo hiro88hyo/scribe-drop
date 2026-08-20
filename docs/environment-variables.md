@@ -16,6 +16,7 @@ bindingは環境変数ではなくWranglerが実行時に注入する。
 | ---------------- | ----------------- | -------------------------------------- |
 | `SCRIBE_DROP_DB` | Web, Orchestrator | 環境別D1 database                      |
 | `RECORDINGS`     | Web, Orchestrator | 非公開R2 bucket                        |
+| `CONTROL_EVENTS` | Web               | `recording-uploaded-<environment>`     |
 | Queue consumer   | Orchestrator      | `recording-uploaded-<environment>`     |
 | DLQ              | Orchestrator      | `recording-uploaded-dlq-<environment>` |
 
@@ -36,6 +37,22 @@ R2 CORSは`pnpm cloudflare:config:staging:r2-cors`、R2 lifecycleは
 - `SCRIBE_DROP_STAGING_WEB_ORIGIN`: Accessで保護するstaging Webの単一exact HTTPS origin
 - `SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN`:
   RunPodからclaim/heartbeatを受けるOrchestratorの単一exact HTTPS origin
+- `CLOUDFLARE_ZONE_NAME`:
+  Phase 14のstaging BIC exceptionを管理するexact Cloudflare zone名。Gitへ固定しない
+- `SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_ORIGIN`:
+  Phase 14の`synthetic-shadow`時だけ必須となるstaging GPU controller専用Cloud Run `run.app` exact HTTPS origin
+- `SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_MODE`:
+  通常は`disabled`、Phase 14の有限synthetic gateだけ`synthetic-shadow`
+- `SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT`:
+  `synthetic-shadow`時だけ必須となる`gpu-runtime@scribe-drop.iam.gserviceaccount.com`の固定staging runtime identity
+- `SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_HMAC_SECRET_VERSION`:
+  staging controllerが参照するSecret Managerのenabled数値version。secret payloadはvariableへ保存しない
+- `SCRIBE_DROP_STAGING_R2_HOST`:
+  `CLOUDFLARE_ACCOUNT_ID`から導くstaging source/result用R2 S3 API host。署名URLやcredentialを含めない
+- `SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY`:
+  既定は`runpod_serverless_v1`。Phase 15の期限付きstaging acceptanceだけ`cloud_run_jobs_l4_v1`
+- `SCRIBE_DROP_STAGING_GPU_EXECUTION_ADMISSION`:
+  既定は`active`。controller authorizationを安全に遷移する短時間だけ`paused`
 - `SCRIBE_DROP_STAGING_ACCESS_TEAM_DOMAIN`:
   `https://<team>.cloudflareaccess.com`のexact origin
 - `SCRIBE_DROP_STAGING_ACCESS_AUDIENCE`:
@@ -48,19 +65,23 @@ R2 CORSは`pnpm cloudflare:config:staging:r2-cors`、R2 lifecycleは
 - `SCRIBE_DROP_STAGING_RUNPOD_IMAGE_VISIBILITY`: `private`または`public`
 - `SCRIBE_DROP_STAGING_RUNPOD_REGISTRY_AUTH_ID`: private image用のRunPod registry auth ID
 - `SCRIBE_DROP_STAGING_RUNPOD_GPU_IDS`:
-  `NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090`の固定順
+  `NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090,NVIDIA RTX PRO 6000 Blackwell Server Edition`の固定順
 
-GPU候補は
-[ADR 0053](./adr/0053-use-mixed-availability-gpus-with-runtime-attestation.md)で固定した
-2件を順序も含めて指定する。stagingとproductionで同じ候補を使用し、candidate
-publicationは両候補のSecure Cloud提供、promotion preflightはさらに両候補の利用可能性を
-確認する。Community Cloudにも提供されるGPU種別であるため、各claimでは実Workerの
+GPU候補は[ADR 0065](./adr/0065-validate-runpod-serverless-gpu-pools.md)で固定した3件を
+順序も含めて指定する。stagingとproductionで同じ候補を使用し、candidate publicationは
+全候補のSecure Cloud提供、promotion preflightはさらに2候補以上の利用可能性を
+確認する。さらに全候補が認証済みGraphQLで相異なるServerless GPU poolへ一意に対応する
+ことをmutation前に検証する。Community Cloudにも提供されるGPU種別であるため、各claimでは実Workerの
 `secureCloud=true`をwinner CASとR2 capability発行より前に検証する。promotionは公式REST
 APIの`gpuTypeIds`を完全一致でread-backする。data center selectionは環境変数にせず、
-追跡対象planで`EUR-IS-1`、`EU-RO-1`へ固定し、Compliance filterも空配列（`Any`）へ固定する。
+追跡対象planでは空配列を`Any Region`の明示値とし、Compliance filterも空配列（`Any`）へ
+固定する。
 GPUは公式REST API、data centerとcomplianceはConsole-equivalent GraphQLから取得して
 結合検証する。GitHub staging Environmentのendpoint設定を同期し、local gateを通すまで
-release workflowを実行しない。
+release workflowを実行しない。staging Environmentは上記を含む20 variable名と6 secret名を完全一致で管理し、
+`pnpm github:controls:verify:staging`で名前とbranch policy、workflow登録を確認する。Phase 16 workflowは
+4個のCloud Run/R2入力を`pnpm cloud-run:staging:inputs:verify`で実resourceへ照合し、不足または値driftを
+candidate downloadより前に拒否する。
 
 実originはCloudflareとgit ignoredの生成設定だけに保持し、追跡対象ファイルやdeployment
 記録へ保存しない。
@@ -156,24 +177,32 @@ production project以外を対象にできない。PagesとOrchestratorの両方
 
 localでは`apps/orchestrator/.dev.vars.example`を`apps/orchestrator/.dev.vars`へコピーする。
 
-| Variable                    | Secret | Purpose                           |
-| --------------------------- | :----: | --------------------------------- |
-| `APP_ENV`                   |   no   | 実行環境                          |
-| `WEB_BASE_URL`              |   no   | Access保護済みジョブ詳細URLのbase |
-| `RUNPOD_INTERNAL_BASE_URL`  |   no   | claim、heartbeat内部APIの固定base |
-| `RUNPOD_WORKER_IMAGE`       |   no   | claim前に照合するimmutable image  |
-| `RUNPOD_ALLOWED_GPU_IDS`    |   no   | claim前に照合するGPU候補          |
-| `RUNPOD_ENDPOINT_ID`        |  yes   | 環境別RunPod Serverless endpoint  |
-| `RUNPOD_API_KEY`            |  yes   | RunPod API認証                    |
-| `CLOUDFLARE_ACCOUNT_ID`     |   no   | R2 S3 endpointのaccount           |
-| `R2_BUCKET_NAME`            |   no   | eventとR2 bindingの環境別bucket名 |
-| `R2_ACCESS_KEY_ID`          |  yes   | presigned URL発行専用key          |
-| `R2_SECRET_ACCESS_KEY`      |  yes   | presigned URL発行専用secret       |
-| `DISCORD_WEBHOOK_URL`       |  yes   | 完了通知先                        |
-| `MULTIPART_RETENTION_HOURS` |   no   | 未完了multipart保持時間、初期値24 |
-| `SOURCE_RETENTION_DAYS`     |   no   | 元録音保持日数、初期値7           |
-| `RESULT_RETENTION_DAYS`     |   no   | 結果保持日数、初期値90            |
-| `AUDIT_RETENTION_DAYS`      |   no   | 監査情報保持日数、初期値180       |
+| Variable                              | Secret | Purpose                                       |
+| ------------------------------------- | :----: | --------------------------------------------- |
+| `APP_ENV`                             |   no   | 実行環境                                      |
+| `WEB_BASE_URL`                        |   no   | Access保護済みジョブ詳細URLのbase             |
+| `RUNPOD_INTERNAL_BASE_URL`            |   no   | claim、heartbeat内部APIの固定base             |
+| `RUNPOD_WORKER_IMAGE`                 |   no   | claim前に照合するimmutable image              |
+| `RUNPOD_ALLOWED_GPU_IDS`              |   no   | claim前に照合するGPU候補                      |
+| `RUNPOD_ENDPOINT_ID`                  |  yes   | 環境別RunPod Serverless endpoint              |
+| `RUNPOD_API_KEY`                      |  yes   | RunPod API認証                                |
+| `CLOUDFLARE_ACCOUNT_ID`               |   no   | R2 S3 endpointのaccount                       |
+| `R2_BUCKET_NAME`                      |   no   | eventとR2 bindingの環境別bucket名             |
+| `R2_ACCESS_KEY_ID`                    |  yes   | presigned URL発行専用key                      |
+| `R2_SECRET_ACCESS_KEY`                |  yes   | presigned URL発行専用secret                   |
+| `DISCORD_WEBHOOK_URL`                 |  yes   | 完了通知先                                    |
+| `MULTIPART_RETENTION_HOURS`           |   no   | 未完了multipart保持時間、初期値24             |
+| `SOURCE_RETENTION_DAYS`               |   no   | 元録音保持日数、初期値7                       |
+| `RESULT_RETENTION_DAYS`               |   no   | 結果保持日数、初期値90                        |
+| `AUDIT_RETENTION_DAYS`                |   no   | 監査情報保持日数、初期値180                   |
+| `CLOUD_RUN_CONTROLLER_HMAC_PRIMARY`   |  yes   | Phase 14 controller request HMAC              |
+| `CLOUD_RUN_CONTROLLER_ORIGIN`         |   no   | environment別controllerのexact root origin    |
+| `CLOUD_RUN_ORCHESTRATOR_ORIGIN`       |   no   | OIDC audience用environment別origin            |
+| `CLOUD_RUN_RUNTIME_DERIVATION_SECRET` |  yes   | runtime session secret導出用HMAC              |
+| `CLOUD_RUN_RUNTIME_MODE`              |   no   | `disabled`、staging shadow、production active |
+| `CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT`   |   no   | environment別runtime service account          |
+| `GPU_EXECUTION_POLICY`                |   no   | 新規attemptの固定provider policy              |
+| `GPU_EXECUTION_ADMISSION`             |   no   | 新規GPU投入の`active`/`paused` gate           |
 
 Phase 3のQueue consumerは`APP_ENV`、`CLOUDFLARE_ACCOUNT_ID`、
 `R2_BUCKET_NAME`を起動境界で検証し、raw eventのaccount/bucketと一致しないmessageを
@@ -197,6 +226,38 @@ manifestとRunPod planから追跡外Wrangler設定へ生成し、deploy後のbi
 productionでは`DISCORD_WEBHOOK_URL`を含む必須5件を
 `pnpm cloudflare:secrets:verify:production:orchestrator`で名前だけ検証する。CLIのJSON
 応答にvalue fieldが含まれる場合はfail closedとし、値をlogへ出さない。
+
+Phase 14のCloud Run runtimeはstaging限定で開始した。Phase 16では[ADR 0086](./adr/0086-adopt-cloud-run-jobs-for-production.md)に
+従い、production専用controller、runtime identity、secretを使う`CLOUD_RUN_RUNTIME_MODE=active`を追加する。
+追跡対象設定はstaging/productionとも`disabled`を既定とし、environment固有設定を完全に揃えた場合だけ
+runtime bindingを生成する。staging gateではcontroller origin、Orchestrator origin、固定runtime identity、
+`synthetic-shadow`を追跡外設定へ生成し、既存5件に加えて次の相異なるcanonical base64url
+secretをencrypted secretとして登録する。
+
+- `CLOUD_RUN_CONTROLLER_HMAC_PRIMARY`
+- `CLOUD_RUN_RUNTIME_DERIVATION_SECRET`
+
+両secretは32〜64 byte、paddingなしとし、値をread-back、log、deployment記録へ出さない。
+`GPU_EXECUTION_POLICY=cloud_run_jobs_l4_v1`はstagingでは`synthetic-shadow`、productionでは`active`と同時の場合だけ
+有効で、既存attemptのprovider selectionは変更しない。`GPU_EXECUTION_ADMISSION=paused`でもQueueをackして
+`SUBMISSION_PENDING`へ保持し、reaper/cancel/cleanupは継続する。production cutoverはruntimeをactiveにしたまま
+最初はadmission pausedかつ`runpod_serverless_v1`を維持し、drain/read-back後もpausedのまま新attemptだけを
+Cloud Runへ切り替え、finite controller authorizationの適用後だけactiveへ戻す。
+modeまたは必須設定が欠ける場合はruntime serviceを生成せず、shadow routeを404/503へ閉じる。
+
+Phase 15の実service fault acceptance時だけ、[ADR 0084](./adr/0084-bound-staging-fault-acceptance-by-job-and-time.md)
+に従う次の非secret 4変数を、追跡外のstaging deployment configへ一時的に全件設定できる。
+
+| Variable                              | 制約                                               |
+| ------------------------------------- | -------------------------------------------------- |
+| `STAGING_ACCEPTANCE_FAULT`            | 固定allowlist 3件のいずれか                        |
+| `STAGING_ACCEPTANCE_FAULT_JOB_ID`     | upload-complete前に確定した単一jobのuppercase ULID |
+| `STAGING_ACCEPTANCE_FAULT_ISSUED_AT`  | UTC ISO 8601のlease開始                            |
+| `STAGING_ACCEPTANCE_FAULT_EXPIRES_AT` | 開始より後、かつ開始から最大30分のUTC ISO 8601     |
+
+4件がすべて未設定ならdisabledである。部分設定、staging以外、30分超過は起動境界で拒否する。
+GitHub Environment、追跡対象Wrangler設定、productionへ保存せず、各scenario後に同じcandidate bundleから4件を
+除去してactive configをread-backする。
 
 Phase 5では`WEB_BASE_URL`をuserinfo、query、fragmentのない単一originに限定する。
 stagingとproductionはHTTPSを必須とし、stagingでは`SCRIBE_DROP_STAGING_WEB_ORIGIN`から
@@ -260,7 +321,11 @@ promotion workflowのcredentialと非secret設定はrepository共通へ置かず
 
 `production` Environmentは同じ役割の`SCRIBE_DROP_PRODUCTION_*` Variablesと、
 `CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_PAGES_API_TOKEN`、`RUNPOD_API_KEY`、
-`SCRIBE_DROP_PRODUCTION_RUNPOD_ENDPOINT_ID` Secretsだけを持つ。Access E2E service tokenを
+`SCRIBE_DROP_PRODUCTION_RUNPOD_ENDPOINT_ID`、
+`SCRIBE_DROP_PRODUCTION_CLOUD_RUN_CONTROLLER_HMAC_PRIMARY`、
+`SCRIBE_DROP_PRODUCTION_CLOUD_RUN_RUNTIME_DERIVATION_SECRET` Secretsを持つ。controller HMACは
+同じ値をproduction専用Secret Manager versionにも保存し、workflowは値をread-backせずWorkerへ注入する。
+Variablesには数値の`SCRIBE_DROP_PRODUCTION_CLOUD_RUN_CONTROLLER_HMAC_SECRET_VERSION`も置く。Access E2E service tokenを
 productionへ置かない。production Environmentにはrequired reviewerと`release/*` branch
 制限を必須とする。
 
@@ -272,6 +337,12 @@ R2、Queues、固定Wranglerのzone/route read-backに必要な完成形8権限�
 Pages権限を重複させない。Zone Resourcesはexact application zone 1件だけにする。
 Access変更用の追加tokenは作らない。RunPod keyとendpoint IDはOrchestrator runtime
 secretとは別にGitHub Environmentへ登録し、stagingとproductionで共有しない。
+
+Phase 14のstaging BIC exceptionを管理するときだけ、exact staging zoneに`Zone WAF Edit`と
+`Zone Read`を持つ`CLOUDFLARE_WAF_API_TOKEN`をlocal credential storeから一時注入する。
+管理commandは非secretの`CLOUDFLARE_ZONE_NAME`と`SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN`も
+local環境から受け取り、hostnameがzone配下のstaging originであることを検証する。
+GitHub Environment、`.env`、Wrangler secret、productionへ保存せず、適用後にshellから除去する。
 
 Python依存は`uv.lock`に固定し、RunPod SDK 1.11.0、faster-whisper 1.2.1、
 CTranslate2 4.8.1、Pydantic 2.13.4、httpx 0.28.1、Hugging Face Hub 1.24.0を

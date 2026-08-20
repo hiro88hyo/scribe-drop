@@ -1,13 +1,17 @@
 import {
   MAX_FILE_SIZE_BYTES,
+  jobOptionsSchema,
   jobStatusSchema,
   publicErrorCodeSchema,
   ulidSchema,
   utcDateTimeSchema,
   type JobStatus,
+  type JobOptions,
   type PublicErrorCode,
 } from "@scribe-drop/contracts";
 import { z } from "zod";
+
+import type { GpuExecutionSelection } from "./config.js";
 
 const FIND_SOURCE_JOB_SQL = `
   SELECT
@@ -17,10 +21,14 @@ const FIND_SOURCE_JOB_SQL = `
     jobs.expected_size_bytes,
     jobs.actual_size_bytes,
     jobs.source_etag,
+    jobs.options_json,
     jobs.status,
     jobs.version,
     jobs.active_attempt_id,
-    generation_one.id AS generation_one_attempt_id
+    generation_one.id AS generation_one_attempt_id,
+    generation_one.provider_kind AS generation_one_provider_kind,
+    generation_one.provider_policy AS generation_one_provider_policy,
+    generation_one.execution_contract_version AS generation_one_contract_version
   FROM jobs
   LEFT JOIN job_attempts AS generation_one
     ON generation_one.job_id = jobs.id
@@ -37,6 +45,10 @@ const INSERT_ATTEMPT_SQL = `
     generation,
     status,
     result_prefix,
+    provider_kind,
+    provider_policy,
+    execution_contract_version,
+    execution_options_json,
     created_at,
     updated_at
   )
@@ -46,6 +58,10 @@ const INSERT_ATTEMPT_SQL = `
     1,
     'SUBMISSION_PENDING',
     ?3,
+    ?10,
+    ?11,
+    ?12,
+    ?13,
     ?4,
     ?4
   FROM jobs
@@ -262,7 +278,20 @@ const sourceJobRowSchema = z
     actual_size_bytes: z.number().int().positive().max(MAX_FILE_SIZE_BYTES).nullable(),
     expected_size_bytes: z.number().int().positive().max(MAX_FILE_SIZE_BYTES),
     generation_one_attempt_id: ulidSchema.nullable(),
+    generation_one_contract_version: z.union([z.literal(1), z.literal(2)]).nullable(),
+    generation_one_provider_kind: z.enum(["runpod_serverless", "cloud_run_jobs"]).nullable(),
+    generation_one_provider_policy: z
+      .enum(["runpod_serverless_v1", "cloud_run_jobs_l4_v1"])
+      .nullable(),
     id: ulidSchema,
+    options_json: z.string().transform((value, context) => {
+      try {
+        return jobOptionsSchema.parse(JSON.parse(value));
+      } catch {
+        context.addIssue({ code: "custom", message: "Invalid persisted job options" });
+        return z.NEVER;
+      }
+    }),
     source_bucket: z.string().min(3).max(63),
     source_etag: z.string().min(1).max(512).nullable(),
     source_key: z.string().min(1).max(1024).startsWith("incoming/"),
@@ -290,7 +319,9 @@ export interface SourceJob {
   readonly actualSizeBytes: number | null;
   readonly expectedSizeBytes: number;
   readonly generationOneAttemptId: string | null;
+  readonly generationOneSelection: GpuExecutionSelection | null;
   readonly id: string;
+  readonly options: JobOptions;
   readonly sourceBucket: string;
   readonly sourceEtag: string | null;
   readonly sourceKey: string;
@@ -303,6 +334,7 @@ export interface IngestSourceInput {
   readonly eventId: string;
   readonly job: SourceJob;
   readonly ownerHash: string;
+  readonly selection: GpuExecutionSelection;
   readonly sizeBytes: number;
   readonly sourceEtag: string;
   readonly timestamp: string;
@@ -328,18 +360,60 @@ export interface UploadIngestionRepository {
 }
 
 function mapSourceJob(row: z.infer<typeof sourceJobRowSchema>): SourceJob {
+  const selection = mapPersistedSelection(row);
   return {
     activeAttemptId: row.active_attempt_id,
     actualSizeBytes: row.actual_size_bytes,
     expectedSizeBytes: row.expected_size_bytes,
     generationOneAttemptId: row.generation_one_attempt_id,
+    generationOneSelection: selection,
     id: row.id,
+    options: row.options_json,
     sourceBucket: row.source_bucket,
     sourceEtag: row.source_etag,
     sourceKey: row.source_key,
     status: row.status,
     version: row.version,
   };
+}
+
+function mapPersistedSelection(
+  row: z.infer<typeof sourceJobRowSchema>,
+): GpuExecutionSelection | null {
+  if (row.generation_one_attempt_id === null) {
+    if (
+      row.generation_one_provider_kind !== null ||
+      row.generation_one_provider_policy !== null ||
+      row.generation_one_contract_version !== null
+    ) {
+      throw new Error("Generation-one provider selection is inconsistent");
+    }
+    return null;
+  }
+  if (
+    row.generation_one_provider_kind === "runpod_serverless" &&
+    row.generation_one_provider_policy === "runpod_serverless_v1" &&
+    row.generation_one_contract_version === 1
+  ) {
+    return { contractVersion: 1, kind: "runpod_serverless", policy: "runpod_serverless_v1" };
+  }
+  if (
+    row.generation_one_provider_kind === "cloud_run_jobs" &&
+    row.generation_one_provider_policy === "cloud_run_jobs_l4_v1" &&
+    row.generation_one_contract_version === 2
+  ) {
+    return { contractVersion: 2, kind: "cloud_run_jobs", policy: "cloud_run_jobs_l4_v1" };
+  }
+  throw new Error("Generation-one provider selection is unsupported");
+}
+
+function sameSelection(left: GpuExecutionSelection | null, right: GpuExecutionSelection): boolean {
+  return (
+    left !== null &&
+    left.kind === right.kind &&
+    left.policy === right.policy &&
+    left.contractVersion === right.contractVersion
+  );
 }
 
 export function createD1UploadIngestionRepository(database: D1Database): UploadIngestionRepository {
@@ -379,6 +453,10 @@ export function createD1UploadIngestionRepository(database: D1Database): UploadI
       const attemptId = input.job.generationOneAttemptId ?? ulidSchema.parse(input.attemptId);
       const eventId = ulidSchema.parse(input.eventId);
       const ownerHash = ownerHashSchema.parse(input.ownerHash);
+      const executionOptionsJson = JSON.stringify({
+        contractVersion: input.selection.contractVersion,
+        ...input.job.options,
+      });
       const resultPrefix = `results/${ownerHash}/${input.job.id}/${attemptId}/`;
       const statements: D1PreparedStatement[] = [];
       if (input.job.generationOneAttemptId === null) {
@@ -395,6 +473,10 @@ export function createD1UploadIngestionRepository(database: D1Database): UploadI
               input.job.sourceKey,
               sizeBytes,
               sourceEtag,
+              input.selection.kind,
+              input.selection.policy,
+              input.selection.contractVersion,
+              executionOptionsJson,
             ),
         );
       }
@@ -428,7 +510,8 @@ export function createD1UploadIngestionRepository(database: D1Database): UploadI
         current.generationOneAttemptId !== null &&
         current.activeAttemptId === current.generationOneAttemptId &&
         current.sourceEtag === sourceEtag &&
-        current.actualSizeBytes === sizeBytes
+        current.actualSizeBytes === sizeBytes &&
+        sameSelection(current.generationOneSelection, input.selection)
       ) {
         return "duplicate";
       }

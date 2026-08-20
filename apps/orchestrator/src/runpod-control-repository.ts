@@ -50,6 +50,38 @@ const PREPARE_SUBMISSION_SQL = `
     AND claim_issued_at IS NULL
     AND claim_expires_at IS NULL
     AND claim_consumed_at IS NULL
+    AND provider_kind = 'runpod_serverless'
+    AND provider_policy = 'runpod_serverless_v1'
+    AND execution_contract_version = 1
+    AND execution_options_json IS NOT NULL
+    AND json_extract(execution_options_json, '$.contractVersion') = 1
+    AND json_extract(execution_options_json, '$.language') IN ('auto', 'ja')
+    AND json_extract(execution_options_json, '$.model') = 'large-v3-turbo'
+    AND json_type(execution_options_json, '$.vad') IN ('true', 'false')
+    AND json_type(execution_options_json, '$.outputFormats') = 'array'
+    AND json_array_length(execution_options_json, '$.outputFormats') BETWEEN 1 AND 3
+    AND (SELECT COUNT(*) FROM json_each(execution_options_json)) = 5
+    AND NOT EXISTS (
+      SELECT 1
+      FROM json_each(execution_options_json, '$.outputFormats') AS formats
+      WHERE formats.value NOT IN ('markdown', 'json', 'srt')
+    )
+    AND (
+      SELECT COUNT(DISTINCT formats.value)
+      FROM json_each(execution_options_json, '$.outputFormats') AS formats
+    ) = json_array_length(execution_options_json, '$.outputFormats')
+    AND EXISTS (
+      SELECT 1
+      FROM provider_executions AS executions
+      WHERE executions.attempt_id = job_attempts.id
+        AND executions.id = job_attempts.id
+        AND executions.provider_kind = job_attempts.provider_kind
+        AND executions.provider_policy = job_attempts.provider_policy
+        AND executions.status = 'PENDING'
+        AND executions.create_outcome IS submission_outcome
+        AND executions.provider_handle IS winning_runpod_job_id
+        AND executions.terminal_status IS runpod_terminal_status
+    )
     AND NOT EXISTS (
       SELECT 1
       FROM job_attempts AS active_attempt
@@ -77,6 +109,14 @@ const MARK_JOB_SUBMITTING_SQL = `
         AND status = 'SUBMITTING'
         AND claim_token_hash = ?3
         AND claim_issued_at = ?2
+        AND EXISTS (
+          SELECT 1
+          FROM provider_executions AS executions
+          WHERE executions.attempt_id = job_attempts.id
+            AND executions.status = 'CREATING'
+            AND executions.provider_kind = job_attempts.provider_kind
+            AND executions.provider_policy = job_attempts.provider_policy
+        )
     )
   RETURNING id
 `;
@@ -195,9 +235,26 @@ const FIND_CLAIM_CONTEXT_SQL = `
     jobs.source_etag
   FROM job_attempts AS attempts
   INNER JOIN jobs ON jobs.id = attempts.job_id
+  INNER JOIN provider_executions AS executions ON executions.attempt_id = attempts.id
   WHERE attempts.id = ?1
     AND attempts.job_id = ?2
     AND jobs.deleted_at IS NULL
+    AND attempts.provider_kind = 'runpod_serverless'
+    AND attempts.provider_policy = 'runpod_serverless_v1'
+    AND attempts.execution_contract_version = 1
+    AND attempts.execution_options_json IS NOT NULL
+    AND executions.id = attempts.id
+    AND executions.provider_kind = attempts.provider_kind
+    AND executions.provider_policy = attempts.provider_policy
+    AND executions.status = CASE attempts.status
+      WHEN 'SUBMITTING' THEN 'CREATING'
+      WHEN 'RUNNING' THEN 'RUNNING'
+      WHEN 'CANCEL_REQUESTED' THEN 'CANCEL_REQUESTED'
+      ELSE 'TERMINAL'
+    END
+    AND executions.create_outcome IS attempts.submission_outcome
+    AND executions.provider_handle IS attempts.winning_runpod_job_id
+    AND executions.terminal_status IS attempts.runpod_terminal_status
   LIMIT 1
 `;
 
@@ -615,6 +672,8 @@ const FIND_DISPATCHABLE_PENDING_JOB_SQL = `
     AND jobs.deleted_at IS NULL
     AND job_attempts.job_id = jobs.id
     AND job_attempts.status = 'SUBMISSION_PENDING'
+    AND job_attempts.provider_kind = 'runpod_serverless'
+    AND job_attempts.provider_policy = 'runpod_serverless_v1'
     AND NOT EXISTS (
       SELECT 1
       FROM job_attempts AS active_attempt

@@ -19,6 +19,13 @@ const PRIOR_NOTIFICATION_ID = "01ARZ3NDEKTSV4RRFFQ69G5FB1";
 const RUNPOD_JOB_ID = "runpod-job-id";
 const RETRY_RUNPOD_JOB_ID = "retry-runpod-job-id";
 const RESULT_PREFIX = `results/0123456789abcdef0123456789abcdef/${JOB_ID}/${ATTEMPT_ID}/`;
+const EXECUTION_OPTIONS = JSON.stringify({
+  contractVersion: 1,
+  language: "ja",
+  model: "large-v3-turbo",
+  outputFormats: ["markdown", "json", "srt"],
+  vad: true,
+});
 
 beforeAll(async () => {
   await applyD1Migrations(env.SCRIBE_DROP_DB, env.TEST_MIGRATIONS);
@@ -91,6 +98,10 @@ async function seedRunningJob(status: "CANCEL_REQUESTED" | "RUNNING" = "RUNNING"
           submission_outcome,
           submission_finished_at,
           claimed_at,
+          provider_kind,
+          provider_policy,
+          execution_contract_version,
+          execution_options_json,
           created_at,
           updated_at
         ) VALUES (
@@ -104,11 +115,15 @@ async function seedRunningJob(status: "CANCEL_REQUESTED" | "RUNNING" = "RUNNING"
           'accepted',
           '2026-07-25T00:00:01.000Z',
           '2026-07-25T00:00:02.000Z',
+          'runpod_serverless',
+          'runpod_serverless_v1',
+          1,
+          ?6,
           '2026-07-25T00:00:00.000Z',
           '2026-07-25T00:00:02.000Z'
         )
       `,
-    ).bind(ATTEMPT_ID, JOB_ID, status, RUNPOD_JOB_ID, RESULT_PREFIX),
+    ).bind(ATTEMPT_ID, JOB_ID, status, RUNPOD_JOB_ID, RESULT_PREFIX, EXECUTION_OPTIONS),
     env.SCRIBE_DROP_DB.prepare(
       `
         INSERT INTO runpod_submissions (
@@ -523,6 +538,40 @@ describe("RunPod completion reconciliation", () => {
       events: 1,
       outbox: 1,
     });
+  });
+
+  it("rejects a conflicting terminal observation after the first terminal write", async () => {
+    await seedRunningJob();
+    const repository = createD1CompletionRepository(env.SCRIBE_DROP_DB);
+    await expect(
+      repository.recordTerminalStatus({
+        attemptId: ATTEMPT_ID,
+        delayTime: 0,
+        executionTime: 100,
+        jobId: JOB_ID,
+        output: null,
+        runpodJobId: RUNPOD_JOB_ID,
+        status: "COMPLETED",
+        timestamp: NOW.toISOString(),
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      repository.recordTerminalStatus({
+        attemptId: ATTEMPT_ID,
+        delayTime: 0,
+        executionTime: 100,
+        jobId: JOB_ID,
+        output: null,
+        runpodJobId: RUNPOD_JOB_ID,
+        status: "FAILED",
+        timestamp: "2026-07-25T01:00:01.000Z",
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      env.SCRIBE_DROP_DB.prepare("SELECT runpod_terminal_status FROM job_attempts WHERE id = ?1")
+        .bind(ATTEMPT_ID)
+        .first(),
+    ).resolves.toEqual({ runpod_terminal_status: "COMPLETED" });
   });
 
   it("does not complete when the manifest is missing or an artifact size differs", async () => {
@@ -989,5 +1038,39 @@ describe("RunPod completion reconciliation", () => {
       .bind(JOB_ID)
       .first();
     expect(event).toEqual({ event_type: "job_reconciliation_expired" });
+  });
+
+  it("does not contact RunPod when the provider aggregate drifts", async () => {
+    await seedRunningJob();
+    await env.SCRIBE_DROP_DB.prepare(
+      "UPDATE provider_executions SET status = 'PENDING' WHERE attempt_id = ?1",
+    )
+      .bind(ATTEMPT_ID)
+      .run();
+    const getStatus = vi.fn<RunpodControlClient["getStatus"]>();
+    const cancel = vi.fn<RunpodControlClient["cancel"]>();
+
+    await expect(
+      reconcileRunpodCompletions(
+        {
+          RECORDINGS: env.RECORDINGS,
+          RUNPOD_API_KEY: "runpod-api-key-placeholder",
+          RUNPOD_ENDPOINT_ID: "endpoint-placeholder",
+          SCRIBE_DROP_DB: env.SCRIBE_DROP_DB,
+        },
+        logger(),
+        {
+          createRunpodClient: () => ({ cancel, getStatus }),
+          now: () => NOW,
+        },
+      ),
+    ).resolves.toEqual({
+      cancelledCount: 0,
+      completedCount: 0,
+      failedCount: 0,
+      terminalObservedCount: 0,
+    });
+    expect(cancel).not.toHaveBeenCalled();
+    expect(getStatus).not.toHaveBeenCalled();
   });
 });

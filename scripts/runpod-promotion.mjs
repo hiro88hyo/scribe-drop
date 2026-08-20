@@ -46,14 +46,15 @@ function requireArray(value, name) {
 
 function providerCapacity(untrustedEndpoint) {
   const endpoint = requireRecord(untrustedEndpoint, "RunPod endpoint capacity response");
+  if (!Object.hasOwn(endpoint, "dataCenterIds") || endpoint.dataCenterIds === undefined) {
+    throw new Error("RunPod endpoint data-center rollback evidence is missing");
+  }
   const gpuTypeIds = requireArray(endpoint.gpuTypeIds, "RunPod endpoint GPU types");
   const compliance = requireArray(endpoint.compliance, "RunPod endpoint compliance");
   const dataCenterIds =
-    endpoint.dataCenterIds === undefined
-      ? undefined
-      : typeof endpoint.dataCenterIds === "string"
-        ? endpoint.dataCenterIds.split(",").map((candidate) => candidate.trim())
-        : endpoint.dataCenterIds;
+    typeof endpoint.dataCenterIds === "string"
+      ? endpoint.dataCenterIds.split(",").map((candidate) => candidate.trim())
+      : endpoint.dataCenterIds;
   if (
     gpuTypeIds.length === 0 ||
     gpuTypeIds.length > 3 ||
@@ -61,19 +62,15 @@ function providerCapacity(untrustedEndpoint) {
     new Set(gpuTypeIds).size !== gpuTypeIds.length ||
     compliance.some((value) => typeof value !== "string" || !compliancePattern.test(value)) ||
     new Set(compliance).size !== compliance.length ||
-    (dataCenterIds !== undefined &&
-      (!Array.isArray(dataCenterIds) ||
-        dataCenterIds.length === 0 ||
-        dataCenterIds.some(
-          (value) => typeof value !== "string" || !dataCenterIdPattern.test(value),
-        ) ||
-        new Set(dataCenterIds).size !== dataCenterIds.length))
+    !Array.isArray(dataCenterIds) ||
+    dataCenterIds.some((value) => typeof value !== "string" || !dataCenterIdPattern.test(value)) ||
+    new Set(dataCenterIds).size !== dataCenterIds.length
   ) {
     throw new Error("RunPod endpoint capacity response is missing or invalid");
   }
   return {
     compliance: [...compliance].sort(),
-    ...(dataCenterIds === undefined ? {} : { dataCenterIds: [...dataCenterIds].sort() }),
+    dataCenterIds: [...dataCenterIds].sort(),
     gpuTypeIds: [...gpuTypeIds],
   };
 }
@@ -87,7 +84,7 @@ function validateImmutableCapacityPolicy(capacity, plan) {
 }
 
 function requireRollbackableCapacity(capacity) {
-  if (!Array.isArray(capacity.dataCenterIds) || capacity.dataCenterIds.length === 0) {
+  if (!Array.isArray(capacity.dataCenterIds)) {
     throw new Error("RunPod endpoint data-center rollback evidence is missing");
   }
   return capacity;

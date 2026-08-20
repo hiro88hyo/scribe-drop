@@ -8,13 +8,23 @@ import {
 } from "./runpod-environment-config.mjs";
 
 const image = `ghcr.io/example/scribe-drop-runpod-worker@sha256:${"b".repeat(64)}`;
+const cloudRunCandidate = {
+  commit: "a".repeat(40),
+  controllerImage: `asia-southeast1-docker.pkg.dev/scribe-drop/controller/runtime@sha256:${"c".repeat(64)}`,
+  runAttempt: "1",
+  runId: "123",
+  schemaVersion: 1,
+  workerImage: `asia-southeast1-docker.pkg.dev/scribe-drop/worker/runtime@sha256:${"d".repeat(64)}`,
+};
 
 function runpodPlan(environment, overrides = {}) {
   const createPlan =
     environment === "staging" ? createRunpodStagingPlan : createRunpodProductionPlan;
   return createPlan({
     accountId: environment === "staging" ? "a".repeat(32) : "b".repeat(32),
-    gpuTypeIds: overrides.gpuTypeIds ?? "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090",
+    gpuTypeIds:
+      overrides.gpuTypeIds ??
+      "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090,NVIDIA RTX PRO 6000 Blackwell Server Edition",
     image,
     imageVisibility: "private",
     orchestratorOrigin: `https://orchestrator-${environment}.example.invalid`,
@@ -26,6 +36,8 @@ function input(environment, overrides = {}) {
   const webOrigin = `https://web-${environment}.example.invalid`;
   return {
     environment,
+    cloudRunCandidate: overrides.cloudRunCandidate ?? cloudRunCandidate,
+    cloudRunRuntimeMode: environment === "staging" ? "synthetic-shadow" : "active",
     cors: {
       rules: [
         {
@@ -66,6 +78,8 @@ function input(environment, overrides = {}) {
       sourceRetentionDays: "7",
     },
     runpodPlan: runpodPlan(environment, overrides),
+    gpuExecutionAdmission: overrides.gpuExecutionAdmission ?? "active",
+    gpuExecutionPolicy: "cloud_run_jobs_l4_v1",
     webOrigin,
   };
 }
@@ -84,6 +98,17 @@ test("detects operational retention drift and rejects unreviewed GPU drift", () 
     () => environmentPolicyId(input("production", { gpuTypeIds: "NVIDIA L40S,NVIDIA L4" })),
     /RUNPOD_GPU_IDS/u,
   );
+  assert.notEqual(
+    stagingPolicy,
+    environmentPolicyId(
+      input("production", {
+        cloudRunCandidate: {
+          ...cloudRunCandidate,
+          workerImage: `asia-southeast1-docker.pkg.dev/scribe-drop/worker/runtime@sha256:${"e".repeat(64)}`,
+        },
+      }),
+    ),
+  );
 });
 
 test("rejects a CORS rule identifier from another environment", () => {
@@ -92,5 +117,12 @@ test("rejects a CORS rule identifier from another environment", () => {
   assert.throws(
     () => environmentPolicyId(production),
     /R2 CORS policy does not match the environment/u,
+  );
+});
+
+test("rejects a paused final execution admission policy", () => {
+  assert.throws(
+    () => environmentPolicyId(input("production", { gpuExecutionAdmission: "paused" })),
+    /Cloud Run environment policy is not active/u,
   );
 });

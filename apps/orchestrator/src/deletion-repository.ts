@@ -98,6 +98,56 @@ const FIND_RUNPOD_JOB_IDS_SQL = `
   LIMIT ?3
 `;
 
+const FIND_PROVIDER_EXECUTION_DRIFT_SQL = `
+  SELECT attempts.id
+  FROM job_attempts AS attempts
+  LEFT JOIN provider_executions AS executions ON executions.attempt_id = attempts.id
+  WHERE attempts.job_id = ?1
+    AND (
+      (attempts.provider_kind IS NULL AND executions.id IS NOT NULL)
+      OR (
+        attempts.provider_kind = 'runpod_serverless'
+        AND (
+          executions.id IS NULL
+          OR NOT (
+            executions.id = attempts.id
+            AND executions.provider_kind = attempts.provider_kind
+            AND executions.provider_policy = attempts.provider_policy
+            AND executions.status = CASE attempts.status
+              WHEN 'SUBMISSION_PENDING' THEN 'PENDING'
+              WHEN 'SUBMITTING' THEN 'CREATING'
+              WHEN 'RUNNING' THEN 'RUNNING'
+              WHEN 'CANCEL_REQUESTED' THEN 'CANCEL_REQUESTED'
+              ELSE 'TERMINAL'
+            END
+            AND executions.create_outcome IS attempts.submission_outcome
+            AND executions.provider_handle IS attempts.winning_runpod_job_id
+            AND executions.terminal_status IS attempts.runpod_terminal_status
+          )
+        )
+      )
+      OR (
+        attempts.provider_kind = 'cloud_run_jobs'
+        AND (
+          executions.id IS NULL
+          OR NOT (
+            executions.id = attempts.id
+            AND executions.provider_kind = attempts.provider_kind
+            AND executions.provider_policy = attempts.provider_policy
+            AND executions.status = 'TERMINAL'
+            AND executions.create_outcome IS attempts.submission_outcome
+            AND executions.cleanup_status = 'SUCCEEDED'
+          )
+        )
+      )
+      OR (
+        attempts.provider_kind IS NOT NULL
+        AND attempts.provider_kind NOT IN ('runpod_serverless', 'cloud_run_jobs')
+      )
+    )
+  LIMIT 1
+`;
+
 const DEFER_DELETION_SQL = `
   UPDATE jobs
   SET
@@ -162,6 +212,7 @@ export interface RunpodJobIdPage {
 export type DeleteJobRecordResult = "conflict" | "deleted" | "not_found";
 
 export interface DeletionRepository {
+  assertProviderCompatibility(jobId: string): Promise<void>;
   deferDeletion(input: {
     readonly expectedVersion: number;
     readonly jobId: string;
@@ -199,6 +250,15 @@ function parseLimit(limit: number, maximum: number): number {
 
 export function createD1DeletionRepository(database: D1Database): DeletionRepository {
   return {
+    async assertProviderCompatibility(jobId) {
+      const row = await database
+        .prepare(FIND_PROVIDER_EXECUTION_DRIFT_SQL)
+        .bind(ulidSchema.parse(jobId))
+        .first();
+      if (row !== null) {
+        throw new Error("Provider execution compatibility check failed");
+      }
+    },
     async deferDeletion(input) {
       const rows = await database
         .prepare(DEFER_DELETION_SQL)

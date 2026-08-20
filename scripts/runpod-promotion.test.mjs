@@ -15,7 +15,8 @@ import {
 
 const plan = createRunpodStagingPlan({
   accountId: "a".repeat(32),
-  gpuTypeIds: "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090",
+  gpuTypeIds:
+    "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090,NVIDIA RTX PRO 6000 Blackwell Server Edition",
   image: `ghcr.io/example/scribe-drop-runpod-worker@sha256:${"b".repeat(64)}`,
   imageVisibility: "private",
   orchestratorOrigin: "https://orchestrator-staging.example.invalid",
@@ -23,7 +24,8 @@ const plan = createRunpodStagingPlan({
 });
 const productionPlan = createRunpodProductionPlan({
   accountId: "a".repeat(32),
-  gpuTypeIds: "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090",
+  gpuTypeIds:
+    "NVIDIA GeForce RTX 5090,NVIDIA GeForce RTX 4090,NVIDIA RTX PRO 6000 Blackwell Server Edition",
   image: `ghcr.io/example/scribe-drop-runpod-worker@sha256:${"b".repeat(64)}`,
   imageVisibility: "private",
   orchestratorOrigin: "https://orchestrator-production.example.invalid",

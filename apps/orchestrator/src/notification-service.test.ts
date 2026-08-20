@@ -213,6 +213,40 @@ describe("notification service", () => {
     });
   });
 
+  it("injects a retryable notification outage only for the leased staging job", async () => {
+    const release = vi.fn<NotificationOutboxRepository["release"]>(() => Promise.resolve(true));
+    const createClient = vi.fn(() => ({
+      send: vi.fn<DiscordClient["send"]>(() => Promise.resolve({ outcome: "sent" })),
+    }));
+    await expect(
+      dispatchNextNotification(
+        environment({
+          APP_ENV: "staging",
+          STAGING_ACCEPTANCE_FAULT: "notification_unavailable",
+          STAGING_ACCEPTANCE_FAULT_EXPIRES_AT: "2026-07-25T01:30:00.000Z",
+          STAGING_ACCEPTANCE_FAULT_ISSUED_AT: "2026-07-25T01:00:00.000Z",
+          STAGING_ACCEPTANCE_FAULT_JOB_ID: DELIVERY.jobId,
+          WEB_BASE_URL: "https://staging.example.invalid",
+        }),
+        logger([]),
+        {
+          createClient,
+          createRepository: () => repository({ release }),
+          now: () => NOW,
+          random: () => 0,
+        },
+      ),
+    ).resolves.toBe("deferred");
+
+    expect(createClient).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledWith({
+      delivery: DELIVERY,
+      errorCode: "DISCORD_UNAVAILABLE",
+      nextAttemptAt: "2026-07-25T01:00:01.000Z",
+      status: "PENDING",
+    });
+  });
+
   it("does not claim an outbox row when notification configuration is missing", async () => {
     const createRepository = vi.fn();
     await expect(

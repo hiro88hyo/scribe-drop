@@ -1,9 +1,13 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 
 import { expect, test, type Download } from "@playwright/test";
 import { createJobResponseSchema } from "@scribe-drop/contracts";
 
 import { readCandidateFixture } from "../candidate-fixture.js";
+import {
+  requireStagingFailureEvidencePath,
+  writeStagingFailureEvidence,
+} from "../staging-failure-evidence.js";
 import { deleteStagingFixtureJob, waitForStagingJobCompletion } from "../staging-lifecycle.js";
 import {
   closeAuthenticatedStagingContext,
@@ -44,6 +48,17 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
   const { context, page } = await openAuthenticatedStagingPage(browser, baseURL);
   let createdJobId: string | undefined;
   let fixtureDeleted = false;
+  let fixtureHandedOff = false;
+  const cleanupEvidencePath =
+    process.env["STAGING_FAILURE_EVIDENCE_PATH"] === undefined
+      ? undefined
+      : requireStagingFailureEvidencePath(process.env["STAGING_FAILURE_EVIDENCE_PATH"]);
+
+  const removeCleanupEvidence = (): void => {
+    if (cleanupEvidencePath !== undefined && existsSync(cleanupEvidencePath)) {
+      unlinkSync(cleanupEvidencePath);
+    }
+  };
 
   try {
     await waitForAuthenticatedStagingDataPlane(page, baseURL);
@@ -129,6 +144,9 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
       throw new Error("Create job API returned an invalid success response");
     }
     createdJobId = createdJob.data.jobId;
+    if (cleanupEvidencePath !== undefined) {
+      writeStagingFailureEvidence(cleanupEvidencePath, createdJobId);
+    }
 
     const uploadAccepted = page.getByText("アップロードを受け付けました。");
     const uploadError = page.getByRole("alert");
@@ -180,12 +198,19 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
       validate(await readSuccessfulDownload(download));
     }
 
-    await deleteStagingFixtureJob(page, createdJobId);
-    fixtureDeleted = true;
+    if (cleanupEvidencePath === undefined) {
+      await deleteStagingFixtureJob(page, createdJobId);
+      fixtureDeleted = true;
+      removeCleanupEvidence();
+    } else {
+      fixtureHandedOff = true;
+    }
   } finally {
     try {
-      if (createdJobId !== undefined && !fixtureDeleted) {
+      if (createdJobId !== undefined && !fixtureDeleted && !fixtureHandedOff) {
         await deleteStagingFixtureJob(page, createdJobId);
+        fixtureDeleted = true;
+        removeCleanupEvidence();
       }
     } finally {
       await closeAuthenticatedStagingContext(context);

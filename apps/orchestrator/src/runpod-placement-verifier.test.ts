@@ -36,7 +36,11 @@ function podResponse(overrides: Readonly<Record<string, unknown>> = {}): Respons
 
 function options(fetchImplementation: typeof fetch): RunpodPlacementVerifierOptions {
   return {
-    allowedGpuTypeIds: ["NVIDIA GeForce RTX 5090", "NVIDIA GeForce RTX 4090"],
+    allowedGpuTypeIds: [
+      "NVIDIA GeForce RTX 5090",
+      "NVIDIA GeForce RTX 4090",
+      "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+    ],
     apiKey: API_KEY,
     endpointId: ENDPOINT_ID,
     expectedImage: EXPECTED_IMAGE,

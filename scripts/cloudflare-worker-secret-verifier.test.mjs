@@ -7,6 +7,8 @@ import {
 } from "./cloudflare-worker-secret-verifier.mjs";
 
 const completeOutput = JSON.stringify([
+  { name: "CLOUD_RUN_CONTROLLER_HMAC_PRIMARY", type: "secret_text" },
+  { name: "CLOUD_RUN_RUNTIME_DERIVATION_SECRET", type: "secret_text" },
   { name: "RUNPOD_ENDPOINT_ID", type: "secret_text" },
   { name: "RUNPOD_API_KEY", type: "secret_text" },
   { name: "R2_ACCESS_KEY_ID", type: "secret_text" },
@@ -14,21 +16,49 @@ const completeOutput = JSON.stringify([
   { name: "DISCORD_WEBHOOK_URL", type: "secret_text" },
 ]);
 
-test("accepts all required Orchestrator secret names without values", () => {
-  assert.deepEqual(verifyRequiredOrchestratorSecrets(completeOutput), {
-    listedCount: 5,
+test("accepts environment-specific Orchestrator secret names without values", () => {
+  assert.deepEqual(
+    verifyRequiredOrchestratorSecrets(completeOutput, "staging", "synthetic-shadow"),
+    {
+      listedCount: 7,
+      requiredCount: 7,
+    },
+  );
+  assert.deepEqual(verifyRequiredOrchestratorSecrets(completeOutput, "staging", "disabled"), {
+    listedCount: 7,
     requiredCount: 5,
+  });
+  assert.deepEqual(verifyRequiredOrchestratorSecrets(completeOutput, "production"), {
+    listedCount: 7,
+    requiredCount: 5,
+  });
+  assert.deepEqual(verifyRequiredOrchestratorSecrets(completeOutput, "production", "active"), {
+    listedCount: 7,
+    requiredCount: 7,
   });
 });
 
 test("rejects missing, malformed, and value-bearing Worker secret output", () => {
   assert.throws(
-    () => verifyRequiredOrchestratorSecrets(JSON.stringify(JSON.parse(completeOutput).slice(0, 4))),
-    /DISCORD_WEBHOOK_URL/u,
+    () =>
+      verifyRequiredOrchestratorSecrets(
+        JSON.stringify(JSON.parse(completeOutput).slice(2)),
+        "staging",
+        "synthetic-shadow",
+      ),
+    /CLOUD_RUN_CONTROLLER_HMAC_PRIMARY/u,
   );
   assert.throws(() => parseWorkerSecretNames("{}"), /must be an array/u);
   assert.throws(
     () => parseWorkerSecretNames('[{"name":"RUNPOD_API_KEY","value":"not-allowed"}]'),
     /invalid entry/u,
+  );
+  assert.throws(
+    () => verifyRequiredOrchestratorSecrets(completeOutput, "staging", "invalid"),
+    /mode is invalid/u,
+  );
+  assert.throws(
+    () => verifyRequiredOrchestratorSecrets(completeOutput, "production", "synthetic-shadow"),
+    /mode is invalid/u,
   );
 });
