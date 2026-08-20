@@ -96,6 +96,7 @@ try {
     const result = verifyAuthorizedAcceptanceSnapshot(
       { environmentDocument, executionDocuments, executions, jobs },
       expectedEpoch,
+      selectedEnvironment,
     );
     if (result.complete) {
       console.log(

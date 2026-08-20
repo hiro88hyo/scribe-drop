@@ -202,7 +202,6 @@ const notificationDeliveryBaseRowSchema = z
     id: ulidSchema,
     job_id: ulidSchema,
     job_version: z.number().int().positive(),
-    runpod_execution_ms: z.number().int().nonnegative().nullable(),
     title: z.string().min(1).max(MAX_JOB_TITLE_LENGTH),
   })
   .strict();
@@ -210,10 +209,12 @@ const notificationDeliveryBaseRowSchema = z
 const notificationDeliveryRowSchema = z.discriminatedUnion("terminal_status", [
   notificationDeliveryBaseRowSchema.extend({
     duration_seconds: z.number().nonnegative().max(28_800),
+    runpod_execution_ms: z.number().int().nonnegative(),
     terminal_status: z.literal("COMPLETED"),
   }),
   notificationDeliveryBaseRowSchema.extend({
     duration_seconds: z.number().nonnegative().max(28_800).nullable(),
+    runpod_execution_ms: z.number().int().nonnegative().nullable(),
     terminal_status: z.literal("FAILED"),
   }),
 ]);
@@ -223,17 +224,18 @@ interface NotificationDeliveryBase {
   readonly id: string;
   readonly jobId: string;
   readonly jobVersion: number;
-  readonly runpodExecutionMs: number | null;
   readonly title: string;
 }
 
 export type NotificationDelivery =
   | (NotificationDeliveryBase & {
       readonly durationSeconds: number;
+      readonly runpodExecutionMs: number;
       readonly terminalStatus: "COMPLETED";
     })
   | (NotificationDeliveryBase & {
       readonly durationSeconds: number | null;
+      readonly runpodExecutionMs: number | null;
       readonly terminalStatus: "FAILED";
     });
 
@@ -267,18 +269,19 @@ export function createD1NotificationOutboxRepository(
         id: row.id,
         jobId: row.job_id,
         jobVersion: row.job_version,
-        runpodExecutionMs: row.runpod_execution_ms,
         title: row.title,
       };
       return row.terminal_status === "COMPLETED"
         ? {
             ...deliveryBase,
             durationSeconds: row.duration_seconds,
+            runpodExecutionMs: row.runpod_execution_ms,
             terminalStatus: row.terminal_status,
           }
         : {
             ...deliveryBase,
             durationSeconds: row.duration_seconds,
+            runpodExecutionMs: row.runpod_execution_ms,
             terminalStatus: row.terminal_status,
           };
     },

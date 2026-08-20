@@ -117,6 +117,7 @@
     "staging:resume:inputs:verify": "node scripts/verify-staging-resume-inputs.mjs",
     "staging:e2e:fixture:verify": "node scripts/verify-staging-e2e-fixture.mjs",
     "staging:failure-notification:verify": "node scripts/verify-staging-failure-notification.mjs",
+    "staging:completion-notification:verify": "node scripts/verify-staging-completion-notification.mjs",
     "runpodctl": "./.tools/bin/runpodctl",
     "runpodctl:install": "bash scripts/install-runpodctl.sh",
     "runpod:config:staging": "node scripts/render-runpod-environment-config.mjs staging",

@@ -626,6 +626,11 @@ backend promotionが残した安全な`runpod_serverless_v1` baselineを照合�
 実M4A後のcleanup verifierは同じepoch、reserved execution 1、250円authorization、exact-one execution
 recordを各readで検証しながら、Job/Execution 0、`activeExecutions=0`、record `CLEANED`まで最大20分pollする。
 一時的なreaper収束待ちはpendingとし、identity、cost、reserved countの不一致は直ちに失敗とする。
+cleanup read-backへ進む前に、実M4Aのjobを削除せず
+`pnpm staging:completion-notification:verify <absolute-job-evidence-path>`を実行する。このgateはactive attemptが
+`cloud_run_jobs` / `cloud_run_jobs_l4_v1`で完了し、検証済み音声時間とclaimからterminalまでの処理時間がともに正、
+notification outboxがcurrent job versionを`SENT`、jobがnotifiedであることをremote D1で確認する。処理時間がnullまたは0の
+candidateはDiscord配送済みでも不合格とする。成功後にだけAccess認証済みowner pathでfixtureを削除する。
 続けて`pnpm cloud-run:staging:safety read`と
 `pnpm cloud-run:staging:paid-readiness <candidate-evidence>`を同じstepで実行し、disabled/zero、exact L4
 quota、Phase 15固定manifest、233円worst-caseが250円authorization内であることを照合する。backend

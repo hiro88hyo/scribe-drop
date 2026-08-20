@@ -521,7 +521,7 @@ jobs:
       contents: read
       id-token: write
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 55
     env:
       AUDIT_RETENTION_DAYS: ${{ vars.AUDIT_RETENTION_DAYS }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -716,6 +716,17 @@ jobs:
           path: ${{ runner.temp }}/staging-acceptance-cleanup/job.json
           if-no-files-found: ignore
           retention-days: 1
+
+      - name: Verify completed Cloud Run processing time and notification delivery
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: pnpm run staging:completion-notification:verify "${STAGING_FAILURE_EVIDENCE_PATH}"
+
+      - name: Delete the verified staging fixture through the authenticated owner path
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: pnpm --filter @scribe-drop/e2e run test:staging:failure-cleanup
 
       - name: Verify exact-one Cloud Run cleanup and provider storage convergence
         env:

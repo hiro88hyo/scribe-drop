@@ -48,6 +48,7 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
   const { context, page } = await openAuthenticatedStagingPage(browser, baseURL);
   let createdJobId: string | undefined;
   let fixtureDeleted = false;
+  let fixtureHandedOff = false;
   const cleanupEvidencePath =
     process.env["STAGING_FAILURE_EVIDENCE_PATH"] === undefined
       ? undefined
@@ -197,12 +198,16 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
       validate(await readSuccessfulDownload(download));
     }
 
-    await deleteStagingFixtureJob(page, createdJobId);
-    fixtureDeleted = true;
-    removeCleanupEvidence();
+    if (cleanupEvidencePath === undefined) {
+      await deleteStagingFixtureJob(page, createdJobId);
+      fixtureDeleted = true;
+      removeCleanupEvidence();
+    } else {
+      fixtureHandedOff = true;
+    }
   } finally {
     try {
-      if (createdJobId !== undefined && !fixtureDeleted) {
+      if (createdJobId !== undefined && !fixtureDeleted && !fixtureHandedOff) {
         await deleteStagingFixtureJob(page, createdJobId);
         fixtureDeleted = true;
         removeCleanupEvidence();

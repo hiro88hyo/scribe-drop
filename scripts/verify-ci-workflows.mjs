@@ -1471,9 +1471,29 @@ requireTextCount(
 requireTextOrder(
   stagingAcceptanceJob,
   "Verify authenticated data plane, then run real staging M4A lifecycle",
+  "Verify completed Cloud Run processing time and notification delivery",
+  "deploy-staging-candidate.yml acceptance job",
+  "processing time and completion notification after real staging E2E",
+);
+requireTextOrder(
+  stagingAcceptanceJob,
+  "Verify completed Cloud Run processing time and notification delivery",
+  "Delete the verified staging fixture through the authenticated owner path",
+  "deploy-staging-candidate.yml acceptance job",
+  "completion notification verification before fixture deletion",
+);
+requireTextOrder(
+  stagingAcceptanceJob,
+  "Delete the verified staging fixture through the authenticated owner path",
   "Verify exact-one Cloud Run cleanup and provider storage convergence",
   "deploy-staging-candidate.yml acceptance job",
-  "Cloud Run cleanup read-back after real staging E2E",
+  "Cloud Run cleanup read-back after verified fixture deletion",
+);
+requireText(
+  stagingAcceptanceJob,
+  'pnpm run staging:completion-notification:verify "${STAGING_FAILURE_EVIDENCE_PATH}"',
+  "deploy-staging-candidate.yml acceptance job",
+  "real completion notification and processing-time gate",
 );
 requireTextOrder(
   stagingAcceptanceJob,

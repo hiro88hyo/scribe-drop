@@ -24,7 +24,7 @@ function nullField(fields, name) {
   }
 }
 
-function singleExecutionRecord(executionDocuments) {
+function singleExecutionRecord(executionDocuments, expectedEnvironment) {
   if (
     !Array.isArray(executionDocuments?.documents) ||
     executionDocuments.documents.length !== 1 ||
@@ -37,7 +37,7 @@ function singleExecutionRecord(executionDocuments) {
     throw new Error("Controller execution record is invalid");
   }
   if (
-    stringField({ fields: record }, "environment") !== "staging" ||
+    stringField({ fields: record }, "environment") !== expectedEnvironment ||
     integerField({ fields: record }, "reservedWorstCaseJpy") !== 250
   ) {
     throw new Error("Controller execution record identity does not match staging acceptance");
@@ -57,11 +57,12 @@ function isCleanedRecord(record) {
   return false;
 }
 
-export function verifyAuthorizedAcceptanceSnapshot(input, expectedEpoch) {
+export function verifyAuthorizedAcceptanceSnapshot(input, expectedEpoch, expectedEnvironment) {
   if (!Array.isArray(input.jobs) || !Array.isArray(input.executions)) {
     throw new Error("Cloud Run acceptance resource inventory is invalid");
   }
   if (
+    !new Set(["staging", "production"]).has(expectedEnvironment) ||
     typeof expectedEpoch !== "string" ||
     !/^phase16-smoke-[a-f0-9]{40}-[1-9][0-9]*$/u.test(expectedEpoch)
   ) {
@@ -69,7 +70,7 @@ export function verifyAuthorizedAcceptanceSnapshot(input, expectedEpoch) {
   }
   const authorization = input.environmentDocument;
   if (
-    stringField(authorization, "environment") !== "staging" ||
+    stringField(authorization, "environment") !== expectedEnvironment ||
     stringField(authorization, "epoch") !== expectedEpoch ||
     integerField(authorization, "maxExecutions") !== 1 ||
     integerField(authorization, "maxWorstCaseJpy") !== 250 ||
@@ -83,7 +84,7 @@ export function verifyAuthorizedAcceptanceSnapshot(input, expectedEpoch) {
   if (activeExecutions !== 0 && activeExecutions !== 1) {
     throw new Error("Cloud Run acceptance authorization active count is invalid");
   }
-  const record = singleExecutionRecord(input.executionDocuments);
+  const record = singleExecutionRecord(input.executionDocuments, expectedEnvironment);
   return {
     complete:
       input.jobs.length === 0 &&
@@ -126,7 +127,7 @@ export function verifyRecoveredAcceptanceSnapshot(input, sourceRun) {
   if (!Number.isFinite(startedAt) || !Number.isFinite(completedAt) || completedAt < startedAt) {
     throw new Error("Source staging run timestamps are invalid");
   }
-  const record = singleExecutionRecord(input.executionDocuments);
+  const record = singleExecutionRecord(input.executionDocuments, "staging");
   if (!isCleanedRecord(record)) {
     throw new Error("Recovered Cloud Run acceptance execution is not CLEANED");
   }

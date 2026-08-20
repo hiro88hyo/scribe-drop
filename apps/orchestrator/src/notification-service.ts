@@ -47,17 +47,15 @@ function formatDuration(totalSeconds: number): string {
 function completionNotificationContent(
   title: string,
   durationSeconds: number,
-  executionMilliseconds: number | null,
+  executionMilliseconds: number,
   resultUrl: string,
 ): string {
   const safeTitle = title.replace(/[\r\n\t]+/gu, " ").trim();
-  const execution =
-    executionMilliseconds === null ? "未取得" : formatDuration(executionMilliseconds / 1_000);
   return [
     `「${safeTitle}」の文字起こしが完了しました。`,
     "",
     `音声時間: ${formatDuration(durationSeconds)}`,
-    `処理時間: ${execution}`,
+    `処理時間: ${formatDuration(executionMilliseconds / 1_000)}`,
     `結果: ${resultUrl}`,
   ].join("\n");
 }

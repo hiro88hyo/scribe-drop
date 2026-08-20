@@ -38,7 +38,7 @@ function authorization(overrides = {}) {
   };
 }
 
-function executionDocuments(state = "CLEANED") {
+function executionDocuments(state = "CLEANED", environment = "staging") {
   return {
     documents: [
       {
@@ -48,7 +48,7 @@ function executionDocuments(state = "CLEANED") {
               fields: {
                 cleanupIntent: { booleanValue: true },
                 createdAt: { stringValue: "2026-08-16T02:18:00.000Z" },
-                environment: { stringValue: "staging" },
+                environment: { stringValue: environment },
                 execution: { nullValue: null },
                 job: { nullValue: null },
                 reservedWorstCaseJpy: integerValue(250),
@@ -73,6 +73,7 @@ test("treats a still-active exact-one acceptance as pending rather than failed",
         jobs: [],
       },
       epoch,
+      "staging",
     ),
     { complete: false },
   );
@@ -88,6 +89,7 @@ test("accepts exact-one authorized cleanup only after full convergence", () => {
         jobs: [],
       },
       epoch,
+      "staging",
     ),
     { complete: true },
   );
@@ -101,8 +103,25 @@ test("accepts exact-one authorized cleanup only after full convergence", () => {
           jobs: [],
         },
         epoch,
+        "staging",
       ),
     /did not consume exact one/u,
+  );
+});
+
+test("validates production cleanup against the production controller identity", () => {
+  assert.deepEqual(
+    verifyAuthorizedAcceptanceSnapshot(
+      {
+        environmentDocument: authorization({ environment: "production" }),
+        executionDocuments: executionDocuments("CLEANED", "production"),
+        executions: [],
+        jobs: [],
+      },
+      epoch,
+      "production",
+    ),
+    { complete: true },
   );
 });
 

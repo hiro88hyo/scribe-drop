@@ -1940,6 +1940,16 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
   static verifierで強制する。未消費smoke authorizationは次のpromotion sequence前にexact failed-run epochのsource-managed
   recoveryでdisabled/zeroへ戻した。独立read-backはcontroller Service Ready、authorization disabled/zero、Firestore TTL 2、
   Cloud Run Job/Execution 0/0を確認した。
+- production cutover `32330064196`と実画面のexact-one smokeはCloud Run lifecycle、3 artifact、manifest、cleanup、Discord
+  配送まで成功したが、通知の処理時間が`未取得`だった。Cloud Run terminal finalizeが互換列
+  `job_attempts.runpod_execution_ms`を更新せず、従来のstaging acceptanceも完了通知の処理時間を検査せずfixtureを削除していた。
+  Cloud Runではattempt claimからterminal確定までを整数millisecondで保存し、完了通知は処理時間をnon-null必須としてfail closedに
+  する。staging acceptanceは実M4A完了後、正の音声時間、正の処理時間、Cloud Run provider identity、current job versionの
+  Discord `SENT`をD1で確認してからowner pathでfixtureを削除する。この検査を通らないcandidateはacceptance evidenceを発行せず、
+  productionは既存データを補正せず同一candidateのdeployだけを行う。
+- 同じsmoke後に判明したcleanup verifierのenvironment固定も、選択した`staging|production`をauthorization documentとexact-one
+  execution recordの両方へ要求する形へ修正した。production名を受理しながら内部でstagingだけを比較する状態を回帰testで拒否し、
+  production smoke verifierにも正の処理時間を追加した。
 
 実装:
 

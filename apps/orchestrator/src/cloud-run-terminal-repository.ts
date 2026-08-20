@@ -82,6 +82,10 @@ const COMPLETE_ATTEMPT_SQL = `
   SET
     status = 'COMPLETED',
     completed_at = ?9,
+    runpod_execution_ms = MAX(
+      0,
+      CAST(ROUND((julianday(?9) - julianday(claimed_at)) * 86400000) AS INTEGER)
+    ),
     media_duration_seconds = ?6,
     segment_count = ?8,
     error_code = NULL,
@@ -92,6 +96,8 @@ const COMPLETE_ATTEMPT_SQL = `
     AND provider_kind = 'cloud_run_jobs'
     AND provider_policy = 'cloud_run_jobs_l4_v1'
     AND status IN ('SUBMITTING', 'RUNNING', 'CANCEL_REQUESTED')
+    AND claimed_at IS NOT NULL
+    AND claimed_at <= ?9
     AND EXISTS (
       SELECT 1 FROM provider_executions
       WHERE attempt_id = ?1

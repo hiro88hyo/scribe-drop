@@ -24,6 +24,7 @@ export function productionSmokeQuery(jobId) {
       attempts.status AS attempt_status,
       attempts.provider_kind,
       attempts.provider_policy,
+      attempts.runpod_execution_ms,
       executions.status AS execution_status,
       executions.terminal_status,
       executions.cleanup_status,
@@ -81,6 +82,8 @@ export function parseProductionSmokeObservation(value, expectedJobId) {
       row.attempt_status !== "COMPLETED" ||
       row.provider_kind !== "cloud_run_jobs" ||
       row.provider_policy !== "cloud_run_jobs_l4_v1" ||
+      !Number.isSafeInteger(row.runpod_execution_ms) ||
+      row.runpod_execution_ms <= 0 ||
       row.execution_status !== "TERMINAL" ||
       row.terminal_status !== "COMPLETED" ||
       row.cleanup_status !== "SUCCEEDED" ||
@@ -127,6 +130,7 @@ export function parseProductionSmokeObservation(value, expectedJobId) {
     artifactKeys: objectKeys.sort(),
     attemptId,
     manifestKey: `${resultPrefix}manifest.json`,
+    processingMilliseconds: operation.results[0].runpod_execution_ms,
     sourceKey,
   };
 }

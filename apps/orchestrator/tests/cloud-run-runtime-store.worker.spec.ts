@@ -78,10 +78,10 @@ async function seedRuntimeContext(
       INSERT INTO job_attempts (
         id, job_id, generation, status, result_prefix, submission_outcome,
         provider_kind, provider_policy, execution_contract_version, execution_options_json,
-        created_at, updated_at
+        claimed_at, created_at, updated_at
       ) VALUES (
         ?1, ?2, 1, 'RUNNING', ?3, 'accepted', 'cloud_run_jobs',
-        'cloud_run_jobs_l4_v1', 2, ?4, ?5, ?5
+        'cloud_run_jobs_l4_v1', 2, ?4, ?5, ?5, ?5
       )
     `,
   )
@@ -296,6 +296,7 @@ describe("Cloud Run runtime D1 store", () => {
           executions.status AS execution_status,
           executions.terminal_status,
           executions.cleanup_status,
+          attempts.runpod_execution_ms,
           (SELECT COUNT(*) FROM job_artifacts WHERE attempt_id = ?1) AS artifact_count,
           (SELECT COUNT(*) FROM notification_outbox WHERE job_id = ?2) AS notification_count
         FROM jobs
@@ -313,6 +314,7 @@ describe("Cloud Run runtime D1 store", () => {
       execution_status: "TERMINAL",
       job_status: "COMPLETED",
       notification_count: 1,
+      runpod_execution_ms: 240_000,
       terminal_status: "COMPLETED",
     });
     await expect(
@@ -334,7 +336,7 @@ describe("Cloud Run runtime D1 store", () => {
     ).resolves.toMatchObject({
       durationSeconds: 60,
       jobId: JOB_ID,
-      runpodExecutionMs: null,
+      runpodExecutionMs: 240_000,
       terminalStatus: "COMPLETED",
     });
   });

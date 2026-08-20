@@ -54,6 +54,7 @@ try {
       jobId,
       manifestPresent: true,
       notificationSent: true,
+      processingMilliseconds: observation.processingMilliseconds,
       provider: "cloud_run_jobs",
     }),
   );
