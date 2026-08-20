@@ -657,12 +657,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
         run: |
-          workflow_created_at="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" --jq .created_at)"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            >"${RUNNER_TEMP}/current-staging-run.json"
+          workflow_created_at="$(node -p "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')).created_at" "${RUNNER_TEMP}/current-staging-run.json")"
           authorization_expiry="$(node -p 'new Date(Date.parse(process.argv[1]) + 2 * 60 * 60 * 1000).toISOString()' "${workflow_created_at}")"
           printf 'SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_EPOCH=phase16-smoke-%s-%s\n' \
             "${EXPECTED_COMMIT_SHA}" "${GITHUB_RUN_ID}" >>"${GITHUB_ENV}"
           printf 'SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_VALID_UNTIL=%s\n' \
             "${authorization_expiry}" >>"${GITHUB_ENV}"
+          printf 'CURRENT_STAGING_RUN_PATH=%s\n' \
+            "${RUNNER_TEMP}/current-staging-run.json" >>"${GITHUB_ENV}"
           SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_EPOCH="phase16-smoke-${EXPECTED_COMMIT_SHA}-${GITHUB_RUN_ID}" \
             SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_VALID_UNTIL="${authorization_expiry}" \
             pnpm run cloud-run:controller:deploy apply staging smoke \
@@ -731,7 +735,7 @@ jobs:
       - name: Verify exact-one Cloud Run cleanup and provider storage convergence
         env:
           GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
-        run: pnpm run cloud-run:acceptance:clean staging
+        run: pnpm run cloud-run:acceptance:clean staging "${CURRENT_STAGING_RUN_PATH}"
 
       - name: Disable staging controller authorization after cleanup
         env:

@@ -31,7 +31,8 @@ failed runを後から成功へ読み替えるとstaging promotion gateを弱め
   candidateであることを検証する。candidate commitをworkflowの`GITHUB_SHA`へ読み替えない。
 - 現在のlive stateはCloud Run Job/Execution 0、authorization disabled/全上限0、source runの時間範囲内に
   作成・更新されたexact-one execution record `CLEANED`、RunPod baseline、全Cloudflare resource read-backを
-  必須とする。
+  必須とする。controller execution collection全体が1件であることは要求しない。bounded inventoryを取得し、source runの
+  時間範囲外にある履歴recordもすべて`CLEANED`であることを要求する。paginationや100件超過はfail closedとする。
 - 復旧jobはD1 migration、Pages/Worker/RunPod deploy、controller apply、実E2Eを実行しない。通常acceptance
   jobがskipされたことをjob dependencyで確認し、paid GPU executionを0に固定する。
 - 合格時は現在の成功した復旧workflow run IDに結び付けた短命schema version 3 evidenceを発行する。
@@ -48,3 +49,5 @@ failed runを後から成功へ読み替えるとstaging promotion gateを弱め
   失敗すれば閉じる。
 - workflow controlと検証器の変更であり、application artifact、migration、runtime deployment設定は変更しない。
   復旧evidenceは元のimmutable candidateだけを参照する。
+- 通常cleanupとGPU-free復旧は同じsource-run scoped identity規則を使用するため、過去の正常な`CLEANED` recordが
+  残っていても現在runを一意に検証でき、未cleanupの履歴や同一run内の複数recordは拒否する。

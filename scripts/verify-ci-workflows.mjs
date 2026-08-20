@@ -1495,6 +1495,18 @@ requireText(
   "deploy-staging-candidate.yml acceptance job",
   "real completion notification and processing-time gate",
 );
+requireText(
+  stagingAcceptanceJob,
+  'pnpm run cloud-run:acceptance:clean staging "${CURRENT_STAGING_RUN_PATH}"',
+  "deploy-staging-candidate.yml acceptance job",
+  "source-run-scoped Cloud Run cleanup gate",
+);
+requireText(
+  stagingAcceptanceJob,
+  "CURRENT_STAGING_RUN_PATH=%s\\n",
+  "deploy-staging-candidate.yml acceptance job",
+  "current staging run identity export",
+);
 requireTextOrder(
   stagingAcceptanceJob,
   "Verify exact-one Cloud Run cleanup and provider storage convergence",
@@ -2014,6 +2026,7 @@ for (const [description, value] of Object.entries({
   "exact-one production authorization": "Verify exact-one L4 authorization and activate admission",
   "production smoke lifecycle verification": "pnpm run cloud-run:production:smoke:verify",
   "exact provider cleanup verification": "pnpm run cloud-run:acceptance:clean production",
+  "production cleanup source-run binding": 'production "${CUTOVER_RUN_PATH}"',
   "finite operational authorization": "cloud-run:controller:deploy apply production operational",
   "cutover evidence": "pnpm run production:cutover:evidence",
   "release evidence": "pnpm run production:release:evidence",

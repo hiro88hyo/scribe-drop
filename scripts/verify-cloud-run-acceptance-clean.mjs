@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import process from "node:process";
 
 import { verifyAuthorizedAcceptanceSnapshot } from "./cloud-run-acceptance-state.mjs";
@@ -66,9 +67,15 @@ async function firestore(path) {
   }
 }
 
-const [selectedEnvironment] = process.argv.slice(2);
-if (!new Set(["staging", "production"]).has(selectedEnvironment) || process.argv.length !== 3) {
-  throw new Error("Usage: verify-cloud-run-acceptance-clean <staging|production>");
+const [selectedEnvironment, sourceRunPath] = process.argv.slice(2);
+if (
+  !new Set(["staging", "production"]).has(selectedEnvironment) ||
+  sourceRunPath === undefined ||
+  process.argv.length !== 4
+) {
+  throw new Error(
+    "Usage: verify-cloud-run-acceptance-clean <staging|production> <source-run-json>",
+  );
 }
 const databaseId = databases[selectedEnvironment];
 const accessToken = process.env.GOOGLE_OAUTH_ACCESS_TOKEN;
@@ -91,12 +98,13 @@ try {
       runGcloud(["run", "jobs", "list", ...common]),
       runGcloud(["run", "jobs", "executions", "list", ...common]),
       firestore(`scribe_drop_controller_environments/${selectedEnvironment}`),
-      firestore("scribe_drop_controller_executions?pageSize=2"),
+      firestore("scribe_drop_controller_executions?pageSize=100"),
     ]);
     const result = verifyAuthorizedAcceptanceSnapshot(
       { environmentDocument, executionDocuments, executions, jobs },
       expectedEpoch,
       selectedEnvironment,
+      JSON.parse(readFileSync(sourceRunPath, "utf8")),
     );
     if (result.complete) {
       console.log(

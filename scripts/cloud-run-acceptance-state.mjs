@@ -24,25 +24,28 @@ function nullField(fields, name) {
   }
 }
 
-function singleExecutionRecord(executionDocuments, expectedEnvironment) {
+function executionRecords(executionDocuments, expectedEnvironment) {
   if (
     !Array.isArray(executionDocuments?.documents) ||
-    executionDocuments.documents.length !== 1 ||
+    executionDocuments.documents.length === 0 ||
+    executionDocuments.documents.length > 100 ||
     executionDocuments.nextPageToken !== undefined
   ) {
-    throw new Error("Cloud Run acceptance execution identity is not exact one");
+    throw new Error("Cloud Run acceptance execution inventory is not bounded");
   }
-  const record = executionDocuments.documents[0]?.fields?.record?.mapValue?.fields;
-  if (typeof record !== "object" || record === null) {
-    throw new Error("Controller execution record is invalid");
-  }
-  if (
-    stringField({ fields: record }, "environment") !== expectedEnvironment ||
-    integerField({ fields: record }, "reservedWorstCaseJpy") !== 250
-  ) {
-    throw new Error("Controller execution record identity does not match staging acceptance");
-  }
-  return record;
+  return executionDocuments.documents.map((document) => {
+    const record = document?.fields?.record?.mapValue?.fields;
+    if (typeof record !== "object" || record === null) {
+      throw new Error("Controller execution record is invalid");
+    }
+    if (
+      stringField({ fields: record }, "environment") !== expectedEnvironment ||
+      integerField({ fields: record }, "reservedWorstCaseJpy") !== 250
+    ) {
+      throw new Error("Controller execution record identity does not match staging acceptance");
+    }
+    return record;
+  });
 }
 
 function isCleanedRecord(record) {
@@ -57,14 +60,57 @@ function isCleanedRecord(record) {
   return false;
 }
 
-export function verifyAuthorizedAcceptanceSnapshot(input, expectedEpoch, expectedEnvironment) {
+function timestampField(record, name) {
+  const value = stringField({ fields: record }, name);
+  const milliseconds = Date.parse(value);
+  if (!Number.isFinite(milliseconds) || new Date(milliseconds).toISOString() !== value) {
+    throw new Error("Controller execution timestamp is invalid");
+  }
+  return milliseconds;
+}
+
+function githubTimestamp(value) {
+  const milliseconds = typeof value === "string" ? Date.parse(value) : Number.NaN;
+  if (!Number.isFinite(milliseconds)) throw new Error("Source staging run timestamps are invalid");
+  return milliseconds;
+}
+
+function executionRecordForRun(executionDocuments, expectedEnvironment, startedAt, completedAt) {
+  if (completedAt < startedAt) throw new Error("Source staging run timestamps are invalid");
+  const records = executionRecords(executionDocuments, expectedEnvironment);
+  const current = records.filter((record) => {
+    const createdAt = timestampField(record, "createdAt");
+    return createdAt >= startedAt && createdAt <= completedAt;
+  });
+  if (current.length !== 1) {
+    throw new Error("Cloud Run acceptance execution identity is not exact one for the source run");
+  }
+  for (const record of records) {
+    if (record !== current[0] && !isCleanedRecord(record)) {
+      throw new Error("Historical controller execution has not been cleaned");
+    }
+  }
+  return current[0];
+}
+
+export function verifyAuthorizedAcceptanceSnapshot(
+  input,
+  expectedEpoch,
+  expectedEnvironment,
+  sourceRun,
+) {
   if (!Array.isArray(input.jobs) || !Array.isArray(input.executions)) {
     throw new Error("Cloud Run acceptance resource inventory is invalid");
   }
+  const epochMatch =
+    typeof expectedEpoch === "string"
+      ? /^phase16-smoke-([a-f0-9]{40})-([1-9][0-9]*)$/u.exec(expectedEpoch)
+      : null;
   if (
     !new Set(["staging", "production"]).has(expectedEnvironment) ||
-    typeof expectedEpoch !== "string" ||
-    !/^phase16-smoke-[a-f0-9]{40}-[1-9][0-9]*$/u.test(expectedEpoch)
+    epochMatch === null ||
+    !Number.isSafeInteger(sourceRun?.id) ||
+    String(sourceRun.id) !== epochMatch[2]
   ) {
     throw new Error("Cloud Run acceptance epoch is invalid");
   }
@@ -84,7 +130,12 @@ export function verifyAuthorizedAcceptanceSnapshot(input, expectedEpoch, expecte
   if (activeExecutions !== 0 && activeExecutions !== 1) {
     throw new Error("Cloud Run acceptance authorization active count is invalid");
   }
-  const record = singleExecutionRecord(input.executionDocuments, expectedEnvironment);
+  const record = executionRecordForRun(
+    input.executionDocuments,
+    expectedEnvironment,
+    githubTimestamp(sourceRun.created_at),
+    timestampField(authorization?.fields, "validUntil"),
+  );
   return {
     complete:
       input.jobs.length === 0 &&
@@ -92,15 +143,6 @@ export function verifyAuthorizedAcceptanceSnapshot(input, expectedEpoch, expecte
       activeExecutions === 0 &&
       isCleanedRecord(record),
   };
-}
-
-function timestampField(record, name) {
-  const value = stringField({ fields: record }, name);
-  const milliseconds = Date.parse(value);
-  if (!Number.isFinite(milliseconds) || new Date(milliseconds).toISOString() !== value) {
-    throw new Error("Controller execution timestamp is invalid");
-  }
-  return milliseconds;
 }
 
 export function verifyRecoveredAcceptanceSnapshot(input, sourceRun) {
@@ -122,12 +164,9 @@ export function verifyRecoveredAcceptanceSnapshot(input, sourceRun) {
   ) {
     throw new Error("Recovered Cloud Run acceptance is not in the disabled zero state");
   }
-  const startedAt = Date.parse(sourceRun?.created_at);
-  const completedAt = Date.parse(sourceRun?.updated_at);
-  if (!Number.isFinite(startedAt) || !Number.isFinite(completedAt) || completedAt < startedAt) {
-    throw new Error("Source staging run timestamps are invalid");
-  }
-  const record = singleExecutionRecord(input.executionDocuments, "staging");
+  const startedAt = githubTimestamp(sourceRun?.created_at);
+  const completedAt = githubTimestamp(sourceRun?.updated_at);
+  const record = executionRecordForRun(input.executionDocuments, "staging", startedAt, completedAt);
   if (!isCleanedRecord(record)) {
     throw new Error("Recovered Cloud Run acceptance execution is not CLEANED");
   }

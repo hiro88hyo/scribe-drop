@@ -623,9 +623,12 @@ backend promotionの実deployは引き続き`runpod_serverless_v1`を選択す�
 同じjob-level値で代用してはならない。`resume_acceptance_only`のmutation前read-backも、前回のrecoveryまたは
 backend promotionが残した安全な`runpod_serverless_v1` baselineを照合し、acceptance内でCloud Run policyを
 有効化した後にだけ最終policyとの一致を要求する。
-実M4A後のcleanup verifierは同じepoch、reserved execution 1、250円authorization、exact-one execution
-recordを各readで検証しながら、Job/Execution 0、`activeExecutions=0`、record `CLEANED`まで最大20分pollする。
-一時的なreaper収束待ちはpendingとし、identity、cost、reserved countの不一致は直ちに失敗とする。
+実M4A後のcleanup verifierはworkflow source run JSONを入力に取り、同じepoch、reserved execution 1、
+250円authorization、source run時間内のexact-one execution recordを各readで検証しながら、Job/Execution 0、
+`activeExecutions=0`、record `CLEANED`まで最大20分pollする。controller executionは最大100件のbounded historyを読み、
+source run外の全recordも`CLEANED`を必須とする。collection全体の件数をexact oneとはせず、pagination、未cleanup履歴、
+source run内の0件または複数件は直ちに失敗とする。一時的なreaper収束待ちはpendingとし、identity、cost、reserved countの
+不一致も直ちに失敗とする。
 cleanup read-backへ進む前に、実M4Aのjobを削除せず
 `pnpm staging:completion-notification:verify <absolute-job-evidence-path>`を実行する。このgateはactive attemptが
 `cloud_run_jobs` / `cloud_run_jobs_l4_v1`で完了し、検証済み音声時間とclaimからterminalまでの処理時間がともに正、

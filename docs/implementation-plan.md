@@ -1956,6 +1956,15 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
   に従いcontrollerの完全PURLだけを2026-09-20まで除外し、実containerのNode processがOS `libssl`をloadしていないことを
   offline invariantで必須化する。他image、別package、期限切れ、shared object観測不能には例外を適用しない。このsource変更を
   含む新candidateをbuildし、staging acceptanceをやり直すまでproductionへ進まない。
+- application candidate `32333708361`とCloud Run candidate `32333708385`は同一commit
+  `d5233fde17fc0ed84fade8953c5d5d9dbb90471f`をbuild、scan、署名・attestし、GPU-free preflight
+  `32334434850`を通過した。staging acceptance `32335301895`はexact-one L4実行、実M4A lifecycle、正の音声時間・
+  処理時間、Discord `SENT`、owner deletion、reaper安全収束まで成功したが、cleanup verifierがFirestore collection全体を
+  exact oneと誤認し、正常な過去の`CLEANED` recordを含むinventoryを拒否した。recoveryはauthorization disabled/zero、
+  Cloud Run Job/Execution 0、RunPod baselineへの復元を完了し、追加GPUは実行していない。[ADR 0088](./adr/0088-recover-successful-staging-lifecycle-evidence.md)
+  の復旧条件に従い、通常cleanupとrecoveryの双方をsource run時間内のexact-one recordへ限定し、最大100件の履歴はすべて
+  `CLEANED`、paginationなしを要求する。修正後は同candidateと成功済みsource lifecycleをGPU-free recoveryで再検証し、
+  staging evidenceを復旧する。candidateの再build、deploy、migration、実E2E、GPU再実行は行わない。
 
 実装:
 

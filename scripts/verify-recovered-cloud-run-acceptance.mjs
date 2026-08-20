@@ -79,7 +79,7 @@ try {
     runGcloud(["run", "jobs", "list", ...common]),
     runGcloud(["run", "jobs", "executions", "list", ...common]),
     firestore("scribe_drop_controller_environments/staging", accessToken),
-    firestore("scribe_drop_controller_executions?pageSize=2", accessToken),
+    firestore("scribe_drop_controller_executions?pageSize=100", accessToken),
   ]);
   console.log(
     JSON.stringify(

@@ -202,6 +202,9 @@ jobs:
           gh run download "${CUTOVER_RUN_ID}" \
             --name "scribe-drop-production-cutover-${CANDIDATE_COMMIT_SHA}-${CUTOVER_RUN_ID}" \
             --dir production-cutover
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CUTOVER_RUN_ID}" \
+            >"${RUNNER_TEMP}/cutover-run.json"
+          printf 'CUTOVER_RUN_PATH=%s\n' "${RUNNER_TEMP}/cutover-run.json" >>"${GITHUB_ENV}"
           EXPECTED_CUTOVER_RUN_ID="${CUTOVER_RUN_ID}" \
             EXPECTED_STAGING_RUN_ID="${STAGING_RUN_ID}" \
             pnpm run production:cutover:evidence verify production-cutover
@@ -624,7 +627,7 @@ jobs:
           pnpm run cloudflare:config:production
           pnpm run cloudflare:readback:production
           pnpm run cloud-run:production:smoke:verify "${{ inputs.production_smoke_job_id }}"
-          pnpm run cloud-run:acceptance:clean production
+          pnpm run cloud-run:acceptance:clean production "${CUTOVER_RUN_PATH}"
 
       - name: Pause admission and disable the consumed smoke authorization
         env:
