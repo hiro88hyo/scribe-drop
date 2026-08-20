@@ -60,6 +60,13 @@
 - 手動で補った環境変数、引数、credential、resource状態、実行順序によって検証が成功した場合、その成功をremote workflowの
   実行根拠にしない。発見した前提を同じ変更でsource-managed verifierと回帰検査へ昇格し、対象workflow自身が外部readや
   mutationより前にそのverifierを実行するまでdispatchしない。`/tmp` script、shell履歴、会話、引き継ぎ文書だけに残さない。
+- workflowが失敗した場合、到達済みstepの直接原因だけを修正してredispatchしない。未到達stepを含む全commandについて、必須env、
+  引数、credential、artifact、生成元、job境界、外部状態、実行順序をsourceから列挙し、workflowとの対応を機械検査する。既知の
+  欠落文字列だけを確認するstatic checkや、workflowの成功そのものを完全性の証明として扱わない。
+- 複数のremote mutationを含むworkflowは、各mutation直後に失敗を注入した全prefix状態から安全に再開または収束できることを、
+  state-machine testとsource-managed recovery gateで証明する。部分適用状態に対する再開経路が未実装・未検証ならdispatchしない。
+- 「今回の失敗箇所は直した」「残りは目視した」「前回そこまでは成功した」という説明を次回dispatchの根拠にしない。利用者から
+  指摘される前に上記の完全性検査を実施し、検査結果をcommitへ固定する。
 - runtime、依存、deployment設定、migration、外部service連携へ影響する変更は、同じrelease candidateがstaging acceptanceを通過するまでproductionへdeployしない。
 - release candidateは`release/<version>`の単一commitから一度だけbuildし、production用に再buildしない。
 - stagingとproductionはresourceとsecretを分離するが、application artifact、RunPod image digest、migration集合は同一candidateを使用する。
