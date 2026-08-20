@@ -1985,6 +1985,13 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
   consumed exact-oneをService検査前にread-onlyで必須化する。旧枠はsource-run scoped cleanup、exact epoch、active/resource 0、
   explicit consumed-recovery opt-in、CAS、disabled/zero read-backでだけ閉じる。source変更をGPU-free staging gateへ戻すまで、
   production cleanup、cutover re-run、追加GPUを行わない。
+- authorization preflight修正後のGPU-free staging evidence `32340778282`、production preflight `32341254916`、旧smokeの
+  source-run scoped consumed recoveryは成功した。cutover `32338679303`のfailed-job rerunは全step、exact-one smoke、evidence uploadを
+  成功し、production job `01M0EZQ8GFQQKXWMF5GHW5HRVC`はCloud Run lifecycle、3 artifact、manifest、cleanup、Discord `SENT`、
+  処理時間19,821msを成功した。finalize `32342854011`はremote mutation前に、GitHub rerunが元headを保持する一方でfinalizeが
+  current headとreplacement staging run IDを過去cutoverへ要求したため停止した。cutoverは同じrelease branchの成功workflow、
+  candidate、cutover runへ固定し、当時のstaging IDを監査記録として保持する。replacement staging evidenceは別のcurrent gateとして
+  candidate identityとlive parityを検証し、過去cutover identityへ読み替えない。
 
 実装:
 

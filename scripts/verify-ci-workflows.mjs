@@ -2063,9 +2063,42 @@ requireTextCount(
 requireTextCount(
   productionWorkflowContents,
   "${GITHUB_SHA}",
-  2,
+  1,
   "deploy-production-candidate.yml",
-  "workflow commit only for staging and cutover run identity",
+  "workflow commit only for current staging run identity",
+);
+const productionFinalizeCutoverEvidenceStep = workflowStep(
+  productionVerificationJob,
+  "Verify immutable cutover evidence for finalize",
+  "deploy-production-candidate.yml verification job",
+);
+requireText(
+  productionFinalizeCutoverEvidenceStep,
+  "node scripts/verify-reusable-workflow-run.mjs",
+  "deploy-production-candidate.yml verification job",
+  "successful same-release cutover source verification",
+);
+forbidText(
+  productionFinalizeCutoverEvidenceStep,
+  'EXPECTED_COMMIT_SHA="${GITHUB_SHA}"',
+  "deploy-production-candidate.yml verification job",
+  "current workflow head requirement for a completed cutover",
+);
+forbidText(
+  productionFinalizeCutoverEvidenceStep,
+  'EXPECTED_STAGING_RUN_ID="${STAGING_RUN_ID}"',
+  "deploy-production-candidate.yml verification job",
+  "replacement staging evidence rewritten as the cutover source",
+);
+forbidText(
+  workflowStep(
+    productionFinalizeJob,
+    "Download immutable candidates and cutover evidence",
+    "deploy-production-candidate.yml finalize job",
+  ),
+  'EXPECTED_STAGING_RUN_ID="${STAGING_RUN_ID}"',
+  "deploy-production-candidate.yml finalize job",
+  "replacement staging evidence rewritten as the cutover source",
 );
 for (const stepName of [
   "Apply candidate migrations and reviewed R2 policies",

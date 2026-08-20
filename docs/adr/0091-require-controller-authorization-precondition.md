@@ -35,6 +35,10 @@ provider切替、authorization更新、GPU executionは行われていない。�
 - recoveryはstaging acceptanceやproduction release evidenceを発行せず、新しいGPU枠も開かない。安全状態へ戻した後、
   既に全input/preflight検証を通ったfailed cutover jobを同じrun attemptのre-run機構で再開する。
 - controller preflightとrecovery guard、cutover/finalizeの期待reservation bindingをunit/static testで固定する。
+- GitHubのfailed-job rerunは成功したcutoverの`head_sha`を元runのsourceへ固定する。finalizeはcutover runを同じrelease
+  branch、repository、workflow pathの成功runとして検証し、cutover evidenceをcandidate commitとcutover run IDへ固定するが、
+  後続のsource-only gate修正headやreplacement staging evidence IDへ書き換えない。finalizeで使う最新staging evidenceは別に
+  workflow identity、candidate identity、期限、live parityを検証する。
 
 ## Consequences
 
@@ -44,3 +48,5 @@ provider切替、authorization更新、GPU executionは行われていない。�
 - consumed recoveryは旧smokeを成功evidenceへ昇格する経路ではない。処理時間欠落を補正せず、旧枠を安全に閉じるだけである。
 - workflowとdeployment verifierのsource変更であるため、productionへ直接適用せず、GPU-free staging evidenceを更新してから
   production recoveryとcutover re-runへ進む。
+- source-only gate修正後も、既に成功したcutoverの実sourceと当時のstaging evidenceは監査記録として保持される。同一candidateを
+  検証したreplacement staging evidenceはfinalizeの現在gateを満たすが、過去cutoverのsource identityとは同一視しない。
