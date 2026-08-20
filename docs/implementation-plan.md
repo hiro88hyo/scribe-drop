@@ -1932,6 +1932,13 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
 - call-site修正後のsource-managed production recoveryは、旧cutover epochとactive/reserved 0/0を再照合して成功した。
   独立read-backはcontroller Service Ready、authorization disabled/zero、Firestore TTL 2、Cloud Run Job/Execution 0を確認し、
   GPU executionは行っていない。
+- GPU-free staging recovery `32319144830`とmutation-free production preflight `32319686819`は成功し、formal verifierで
+  production mutation 9 stepがすべてskipされたことを確認した。production cutover `32320261017`はmigration/R2、RunPod image
+  promotion、controller smoke構成、admission pausedのRunPod Orchestrator deployまで成功後、Pages deployが一般Cloudflare tokenを
+  継承して認証code 10000で停止した。provider切替、active admission、GPU execution、cutover evidenceは未実行である。実Pages
+  deployはpreflightと同じ専用Pages tokenへ明示的に束縛し、production workflow内の全Pages deploy件数と束縛件数の一致をCI
+  static verifierで強制する。未消費smoke authorizationは次のpromotion sequence前にexact failed-run epochのsource-managed
+  recoveryでdisabled/zeroへ戻す。
 
 実装:
 

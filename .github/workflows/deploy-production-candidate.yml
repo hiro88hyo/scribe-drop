@@ -424,7 +424,8 @@ jobs:
             --message "release candidate ${CANDIDATE_COMMIT_SHA}" \
             --config .wrangler/deploy/orchestrator-production.toml \
             --env production
-          pnpm exec wrangler pages deploy "${GITHUB_WORKSPACE}/pages-candidate" \
+          CLOUDFLARE_API_TOKEN="${CLOUDFLARE_PAGES_API_TOKEN}" \
+            pnpm exec wrangler pages deploy "${GITHUB_WORKSPACE}/pages-candidate" \
             --cwd apps/web \
             --project-name "${SCRIBE_DROP_PRODUCTION_PAGES_PROJECT}" \
             --branch main \

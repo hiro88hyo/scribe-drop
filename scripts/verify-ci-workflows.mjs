@@ -1981,6 +1981,8 @@ for (const [description, value] of Object.entries({
     "pnpm run cloudflare:worker-route:verify:production",
   "dedicated production Pages token":
     "CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}",
+  "dedicated production Pages token bound to the actual deploy":
+    'CLOUDFLARE_API_TOKEN="${CLOUDFLARE_PAGES_API_TOKEN}" \\\n            pnpm exec wrangler pages deploy',
   "read-only Pages deploy preflight": "wrangler pages deployment list",
   "read-only RunPod preflight": "pnpm run runpod:preflight:production",
   "candidate migration directory":
@@ -2010,6 +2012,20 @@ requireTextCount(
   3,
   "deploy-production-candidate.yml",
   "candidate identity in every production job",
+);
+requireTextCount(
+  productionWorkflowContents,
+  'pnpm exec wrangler pages deploy "',
+  1,
+  "deploy-production-candidate.yml",
+  "single production Pages deploy boundary",
+);
+requireTextCount(
+  productionWorkflowContents,
+  'CLOUDFLARE_API_TOKEN="${CLOUDFLARE_PAGES_API_TOKEN}" \\\n            pnpm exec wrangler pages deploy "',
+  1,
+  "deploy-production-candidate.yml",
+  "Pages token bound to every production Pages deploy",
 );
 requireTextCount(
   productionWorkflowContents,

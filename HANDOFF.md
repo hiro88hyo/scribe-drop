@@ -1,5 +1,30 @@
 # Phase 16 production release handoff
 
+## Latest continuation (2026-08-20 10:25 JST)
+
+- GPU-free staging recovery evidence `32319144830` and mutation-free production
+  preflight `32319686819` succeeded for workflow head
+  `8847fb44228d17e7537097dd786b2047d2719179`. The production preflight formal
+  verifier confirmed all nine mutation steps were skipped.
+- Approved production cutover `32320261017` failed in `Deploy exact application
+candidate with admission paused`. Migrations/R2, RunPod image promotion,
+  controller smoke configuration, and the paused RunPod Orchestrator deploy had
+  succeeded. Provider selection, active admission, GPU execution, and cutover
+  evidence did not run.
+- The exact failure was Wrangler Pages authentication code 10000. The preflight
+  correctly exercised the dedicated Pages token, but the actual Pages deploy
+  inherited the general Cloudflare token because that single command lacked an
+  explicit token binding.
+- The local fix binds `CLOUDFLARE_API_TOKEN` to
+  `CLOUDFLARE_PAGES_API_TOKEN` for the actual production Pages deploy. The CI
+  verifier now requires exactly one production Pages deploy and requires every
+  such deploy to have that binding. Full `pnpm check` and Git/worktree gitleaks
+  scans passed.
+- Production recovery for the unconsumed `32320261017` smoke authorization has
+  not run yet. Before any new staging/preflight/cutover sequence, use the
+  source-managed exact-epoch recovery and verify controller disabled/zero plus
+  Cloud Run Job/Execution zero. No GPU execution occurred in `32320261017`.
+
 ## Repository state
 
 - Repository: `/home/hiroyuki/projects/scribe-drop`
