@@ -36,6 +36,12 @@
   recovery command to return the production controller to disabled/zero and
   strictly read it back. This is a production mutation and requires explicit
   user approval. Do not manually patch Firestore.
+- The first approved recovery attempt passed the exact old-epoch/zero guard and
+  updated the Service to disabled configuration, but stopped before the
+  Firestore write because the second manager guard call omitted the production
+  environment argument. Firestore remains at the old unconsumed smoke
+  authorization and Job/Execution remain zero. The follow-up fix binds the
+  environment at both call sites and tests their complete source shape.
 
 Read `AGENTS.md` and `docs/implementation-plan.md` before continuing. Treat the
 remaining work as Phase 16.

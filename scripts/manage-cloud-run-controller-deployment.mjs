@@ -193,6 +193,7 @@ async function writeAuthorization(selected, expectedReservedExecutions, recovery
           : isAllowedControllerRecoveryDisable(
               observedAuthorization(current.body),
               recoveryEpoch,
+              selectedEnvironment,
             ))))
   ) {
     throw new Error("Controller disable reservation expectation does not match");

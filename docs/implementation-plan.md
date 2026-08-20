@@ -1926,6 +1926,9 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
   その集合に含まれる既知のproject-number originだけを出力する。production preflightでも同じexporterをactual deployer identityで
   実行する。失敗runが残した未消費smoke authorizationは、exact failed-run epoch、active 0、reserved 0だけを許すsource-managed
   production recoveryでdisabled/zeroへ戻し、read-back後に次のpromotion gateへ進む。
+- 最初のproduction recoveryは事前guardを通過してServiceをdisabled構成へ更新した後、Firestore書込み直前の同じguardへ
+  environment引数を渡していなかったため停止した。Firestore authorizationは旧smoke、Job/Executionは0のままである。manager内の
+  全2 call siteでenvironment伝播を必須にし、sourceを直接検査する回帰testで片方だけの修正を拒否する。
 
 実装:
 

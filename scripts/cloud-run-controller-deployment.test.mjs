@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -387,4 +388,18 @@ test("production recovery accepts only the exact unconsumed failed-cutover smoke
     false,
   );
   assert.equal(isAllowedControllerRecoveryDisable(smoke, epoch, "staging"), false);
+});
+
+test("passes the selected environment through every manager recovery guard", () => {
+  const manager = readFileSync(
+    new URL("./manage-cloud-run-controller-deployment.mjs", import.meta.url),
+    "utf8",
+  );
+  const calls = manager.match(/isAllowedControllerRecoveryDisable\s*\(/gu) ?? [];
+  const environmentBoundCalls =
+    manager.match(
+      /isAllowedControllerRecoveryDisable\(\s*observedAuthorization\(current\.body\),\s*(?:expectedEpoch|recoveryEpoch),\s*selectedEnvironment,\s*\)/gu,
+    ) ?? [];
+  assert.equal(calls.length, 2);
+  assert.equal(environmentBoundCalls.length, 2);
 });
