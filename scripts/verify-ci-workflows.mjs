@@ -1990,6 +1990,7 @@ for (const [description, value] of Object.entries({
   "successful production preflight run input": "preflight_run_id:",
   "cutover operation": "- cutover",
   "finalize operation": "- finalize",
+  "source-managed dispatch contract": "pnpm run production:dispatch:verify",
   "operation input validation": "pnpm run production:promotion:inputs:verify",
   "successful production preflight verification": "pnpm run production:preflight:verify",
   "trusted staging run verification": ".github/workflows/deploy-staging-candidate.yml",
@@ -2037,6 +2038,26 @@ for (const [description, value] of Object.entries({
   "production Access read-back": "pnpm run cloudflare:access:verify:production",
 })) {
   requireText(productionWorkflowContents, value, "deploy-production-candidate.yml", description);
+}
+
+const productionDispatchContractStep = workflowStep(
+  productionVerificationJob,
+  "Validate source-managed production workflow contract",
+  "deploy-production-candidate.yml verification job",
+);
+requireText(
+  productionDispatchContractStep,
+  "pnpm run production:dispatch:verify",
+  "deploy-production-candidate.yml verification job",
+  "source-managed dispatch contract invocation",
+);
+if (
+  productionVerificationJob.indexOf("pnpm run production:dispatch:verify") >=
+  productionVerificationJob.indexOf("pnpm run production:promotion:inputs:verify")
+) {
+  throw new Error(
+    "deploy-production-candidate.yml verification job: source contract must run before operation or remote verification",
+  );
 }
 
 requireTextCount(
@@ -2128,6 +2149,23 @@ requireText(
   "deploy-production-candidate.yml finalize job",
   "same-job cutover run path consumption",
 );
+requireText(
+  productionFinalizeCleanupStep,
+  "SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_EPOCH: phase16-smoke-${{ inputs.candidate_commit_sha }}-${{ inputs.cutover_run_id }}",
+  "deploy-production-candidate.yml finalize job",
+  "source cutover authorization epoch binding",
+);
+for (const [requiredEnvironment, description] of [
+  ["GOOGLE_OAUTH_ACCESS_TOKEN:", "Google read-back token"],
+  ["SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_EPOCH:", "source cutover epoch"],
+]) {
+  requireText(
+    productionFinalizeCleanupStep,
+    requiredEnvironment,
+    "deploy-production-candidate.yml finalize job",
+    `cleanup verifier ${description}`,
+  );
+}
 if (
   productionFinalizeJob.indexOf("printf 'CUTOVER_RUN_PATH=%s\\n'") >=
   productionFinalizeJob.indexOf(

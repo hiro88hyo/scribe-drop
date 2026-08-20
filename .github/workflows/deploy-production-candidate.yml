@@ -90,6 +90,9 @@ jobs:
       - name: Install JavaScript dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Validate source-managed production workflow contract
+        run: pnpm run production:dispatch:verify
+
       - name: Validate bounded production operation inputs
         env:
           CUTOVER_RUN_ID: ${{ inputs.cutover_run_id }}
@@ -627,6 +630,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}
           GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+          SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_EPOCH: phase16-smoke-${{ inputs.candidate_commit_sha }}-${{ inputs.cutover_run_id }}
           SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION: active
         run: |
           pnpm run cloudflare:config:production

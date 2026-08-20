@@ -1997,6 +1997,10 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
   cleanup verifierへ渡す`CUTOVER_RUN_PATH`をverification jobの`GITHUB_ENV`からfinalize jobへ引き継げると誤認して空文字で停止した。
   production mutationは行われていない。finalize job自身でexact cutover run JSONを再取得・exportし、同一job内のproducerがcleanup
   consumerより前にあることをstatic verifierで固定する。
+- path修正後のGPU-free staging evidence `32344508026`は成功したが、finalize `32344750423`はcleanup verifier必須の
+  `SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_EPOCH`がstepに未設定で、production smoke成功後、mutation前に停止した。ローカル実run
+  cleanup検証ではepochを手動設定したためworkflowの欠落を再現できていなかった。cleanup stepはcandidate commitとcutover run ID
+  からexact smoke epochを明示し、path、Google token、epochの全required inputをstatic verifierで固定する。
 
 実装:
 

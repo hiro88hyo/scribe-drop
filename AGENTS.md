@@ -57,6 +57,9 @@
 
 ### Staging promotion gate
 
+- 手動で補った環境変数、引数、credential、resource状態、実行順序によって検証が成功した場合、その成功をremote workflowの
+  実行根拠にしない。発見した前提を同じ変更でsource-managed verifierと回帰検査へ昇格し、対象workflow自身が外部readや
+  mutationより前にそのverifierを実行するまでdispatchしない。`/tmp` script、shell履歴、会話、引き継ぎ文書だけに残さない。
 - runtime、依存、deployment設定、migration、外部service連携へ影響する変更は、同じrelease candidateがstaging acceptanceを通過するまでproductionへdeployしない。
 - release candidateは`release/<version>`の単一commitから一度だけbuildし、production用に再buildしない。
 - stagingとproductionはresourceとsecretを分離するが、application artifact、RunPod image digest、migration集合は同一candidateを使用する。

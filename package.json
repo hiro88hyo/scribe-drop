@@ -70,6 +70,7 @@
     "cloud-run:production:origin:export": "node scripts/export-cloud-run-controller-origin.mjs",
     "cloud-run:production:worker-secrets:put": "node scripts/put-production-cloud-run-worker-secrets.mjs",
     "production:promotion:inputs:verify": "node scripts/verify-production-promotion-inputs.mjs",
+    "production:dispatch:verify": "node scripts/verify-ci-workflows.mjs && node scripts/verify-production-workflow-state-contract.mjs",
     "production:preflight:verify": "node scripts/verify-production-preflight-run.mjs",
     "production:environment:verify": "node scripts/verify-production-environment-contract.mjs",
     "production:workflow:verify": "node scripts/verify-production-workflow-state-contract.mjs",
