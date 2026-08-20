@@ -214,27 +214,30 @@ service identityがExecution UIDを署名しない残余riskはsingle-activeとl
 Phase 14 local preparationではforward-only D1 runtime schemaとrepositoryを追加した。bootstrap/claim/session eventは
 `provider_executions`へ外部キーで結び、source/result ownershipとcontract v2をread時にも完全比較する。terminal payloadは
 allowlist counterだけを保存し、event INSERT triggerがsequence更新とrevokeを同じstatementへ閉じ込める。
-`/internal/cloud-run/*`はstagingのexact synthetic modeとservice注入が揃うまで404/503で閉じたままである。
+`/internal/cloud-run/*`はstagingのexact synthetic modeとservice注入が揃うまで404/503で閉じたままである。Phase 14の
+staging限定composition rootはD1 store、Google OIDC、controller attestation/cleanup、R2 capability、HMAC/Ed25519を結ぶが、
+相異なるcanonical secret、fixed origins、dedicated runtime identityを含む全設定が揃わなければserviceを生成しない。
 controllerは共有HMAC contractのlive attestation endpointでstore、Job、Executionを照合し、Orchestrator clientは
-HTTPS、bounded response、timeout、response identityとexact cleanup mutationを強制する。どちらもdefault runtime
-serviceへ未注入である。Google OAuth JWKSのbounded fetch/cacheとRS256 verifierは数値subject ID、verified email、
-issuer/audience/timeを別々に検証するが、同じくdefault serviceへ未注入である。controllerのFirestore adapterはnamed
+HTTPS、bounded response、timeout、response identityとexact cleanup mutationを強制する。productionと通常routeへは未注入であり、
+staging shadow modeだけが上記composition rootを使う。Google OAuth JWKSのbounded fetch/cacheとRS256 verifierは数値subject ID、
+verified email、issuer/audience/timeを別々に検証する。controllerのFirestore adapterはnamed
 database、ADC、transaction callback再実行を前提に、environment singleton、request、executionをstrict schemaで永続化し、
 active 1、count/JPY reservation、rate、CAS、cleanup releaseを同一transactionへ閉じる。Firestore resource/TTL policy、
-service hosting、cloud resource、CI、product routingはまだ接続しない。local composition rootはmanifest、authorization、
+IAM、Secret Manager、image attestation、controller Serviceはstagingのdisabled authorizationでstrict read-backまで完了し、
+GPU executionは0のままである。productionとproduct routingは接続しない。controller composition rootはmanifest、authorization、
 Firestoreのenvironment/projectを完全照合してstore/provider/HMAC handlerを結び、disabled authorizationをADC/provider call
 より前に強制する。Node process境界はallowlist environment parser、bounded ADC/HMAC adapter、固定authorityのHTTP transport、
 safe JSON log、graceful shutdownを提供する。controller runtime imageはNode 24.18.0実測済みのimmutable distroless
 `linux/amd64` manifest、production dependencyだけ、UID/GID 10001、固定entrypointへ閉じ、local inspect、hardened offline run、
 runtime `.js`だけのbundle、toolchain/shell/source/declaration/source map不在検証、CycloneDX SBOM、HIGH/CRITICAL
-fail-close scanを通した。Secret Manager binding、image publish、controller service deploymentは
-行わない。Cloud Run Serviceのlocal deployment planはSingapore/Gen2、immutable image、専用identity、bounded
+fail-close scanを通した。stagingではSecret Manager fixed-version binding、image publish/attestation、controller Service
+deploymentを完了し、productionでは行わない。Cloud Run Serviceのdeployment planはSingapore/Gen2、immutable image、専用identity、bounded
 CPU/memory/concurrency/scaling/timeout、traffic 100%、public HMAC ingress、Binary Authorization default policy、固定secret version、
 environment allowlistを表現し、normalized read-backの完全一致だけを受ける。Cloud Run v2 raw responseをstrict parseして収束・ready・
 traffic・URIを検証するadapterと、IAM、Singapore Secret Manager fixed version、Binary Authorization default policyのstrict local
 observation verifierも追加し、必須observationを同一project/environmentのatomic local evidenceへ束ねる。read-only clientは固定Google
 API origin/pathへのGET、`getIamPolicy`、署名を変更しないBinary Authorization validation POSTだけへ閉じ、redirect拒否、10秒/256 KiB上限、同一access token、`x-goog-user-project`、2回のstable snapshotへ閉じ、Secret
-Manager payload accessを行わない。実credentialによるlive read-backとresource mutationは未接続である。詳細は
+Manager payload accessを行わない。実credentialによるstaging live read-backと必要なnon-GPU resource mutationは完了した。詳細は
 [staging dark deployment](./cloud-run-staging-dark-deployment.md)を正とする。
 
 release supply chainはADR 0080のproject-singleton Binary Authorization attestor、global Artifact Analysis Note、Singapore
@@ -243,14 +246,14 @@ resource IAMのstrict double-snapshot read-backをlocal実装した。両candida
 各1件のOccurrence、Binary Authorization `VERIFIED`を照合し、validation前後の置換を拒否する。release用WIFはglobal poolと
 GitHub provider、canonical audience、immutable repository/owner ID、release branch、workflow dispatch、固定workflowをpure planへ
 固定する。publisher/signer service accountにはrepository IDの単一principalだけをimpersonation memberとして許可し、active resource、
-exact IAM、相異なるservice-account ID、user-managed key 0をdouble-snapshotで検証する。Occurrence発行、実credential実行、
-cloud/CI resourceは未接続である。
+exact IAM、相異なるservice-account ID、user-managed key 0をdouble-snapshotで検証する。staging candidateのOccurrence発行と
+実credential read-backは完了し、production resourceは未接続である。
 
 controller IAMは[ADR 0078](./adr/0078-split-controller-iam-by-resource-boundary.md)に従い、Cloud Run JobsとFirestoreのcustom roleを分離する。
 Cloud Run roleから未使用のJob listとExecution getを除き、Firestore roleはtransactionと固定document CRUDだけにする。project policyの
 controller principal binding、database condition、runtime service account `actAs`、Artifact Registry repository readerをresource identityと
-custom role raw definitionごとlocalで完全照合する。固定endpointのIAM read-only clientも追加し、custom role GET、project/repository/runtime
-accountの`getIamPolicy`を2回取得してstable snapshotだけを受ける。`setIamPolicy`、IAM APIのlive read-back、mutationは行わない。
+custom role raw definitionごと完全照合する。固定endpointのIAM read-only clientはcustom role GET、project/repository/runtime
+accountの`getIamPolicy`を2回取得してstable snapshotだけを受ける。staging IAM mutationとlive read-backは完了し、productionでは行わない。
 
 controller Firestore resourceは
 [ADR 0079](./adr/0079-fix-controller-firestore-database-and-ttl-policy.md)に従い、environment専用named database、Singapore、Native/

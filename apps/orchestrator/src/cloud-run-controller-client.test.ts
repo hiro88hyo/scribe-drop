@@ -66,7 +66,7 @@ async function expectSignature(
   );
   expect(new Headers(init?.headers).get("x-scribe-signature")).toBe(expected);
   expect(new Headers(init?.headers).get("x-scribe-key-id")).toBe("primary");
-  expect(init?.redirect).toBe("error");
+  expect(new Request(requestUrl, init).redirect).toBe("manual");
 }
 
 function attestationResponse(requestId: string): Response {
@@ -95,7 +95,8 @@ function attestationResponse(requestId: string): Response {
 describe("Cloud Run controller Orchestrator client", () => {
   it("reads a bounded live attestation with an exact HMAC request", async () => {
     const calls: URL[] = [];
-    const providerFetch: typeof fetch = async (input, init) => {
+    const providerFetch: typeof fetch = async function (this: unknown, input, init) {
+      expect(this).toBeUndefined();
       const requestUrl = url(input);
       calls.push(requestUrl);
       const request = cloudRunControllerAttestationRequestSchema.parse(body(init));
@@ -105,6 +106,7 @@ describe("Cloud Run controller Orchestrator client", () => {
 
     await expect(client(providerFetch).read(HANDLE)).resolves.toEqual({
       activeExecutionCount: 1,
+      controllerVersion: 7,
       environment: "staging",
       executionHandle: HANDLE,
       executionName: "execution-1",
@@ -150,6 +152,45 @@ describe("Cloud Run controller Orchestrator client", () => {
       CLOUD_RUN_CONTROLLER_ATTEST_PATH,
       CLOUD_RUN_CONTROLLER_MUTATION_PATH,
     ]);
+  });
+
+  it("returns a bounded structured mutation rejection for stale-version recovery", async () => {
+    const providerFetch: typeof fetch = async (input, init) => {
+      const requestUrl = url(input);
+      const request = cloudRunControllerRequestSchema.parse(body(init));
+      await expectSignature(requestUrl, init, request);
+      return Response.json(
+        {
+          errorCode: "STALE_VERSION",
+          executionHandle: request.executionHandle,
+          outcome: "rejected",
+          requestId: request.requestId,
+          schemaVersion: 1,
+          version: 8,
+        },
+        { status: 409 },
+      );
+    };
+    const request = cloudRunControllerRequestSchema.parse({
+      action: "cleanup",
+      environment: "staging",
+      executionHandle: HANDLE,
+      expectedVersion: 6,
+      expiresAt: new Date(NOW.getTime() + 30_000).toISOString(),
+      issuedAt: NOW.toISOString(),
+      policyId: "cloud_run_jobs_l4_v1",
+      requestId: IDS[0],
+      schemaVersion: 1,
+    });
+
+    await expect(client(providerFetch).mutate(request)).resolves.toEqual({
+      errorCode: "STALE_VERSION",
+      executionHandle: HANDLE,
+      outcome: "rejected",
+      requestId: IDS[0],
+      schemaVersion: 1,
+      version: 8,
+    });
   });
 
   it("does not retry an unknown cleanup mutation outcome", async () => {

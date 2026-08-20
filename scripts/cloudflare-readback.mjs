@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
+import { validateStagingAcceptanceFaultIdentifiers } from "./cloudflare-environment-config.mjs";
 import { validateRunpodPlan } from "./runpod-environment-config.mjs";
 
 function countOccurrences(value, needle) {
@@ -68,7 +69,11 @@ export function verifyCloudflareReadback(outputs, expected) {
       pagesProject?.name !== expected.pagesProjectName ||
       pagesProject?.production_branch !== expected.pagesBranch ||
       pagesProject?.deployment_configs?.production?.wrangler_config_hash !==
-        expected.pagesConfigHash
+        expected.pagesConfigHash ||
+      Object.keys(pagesProject?.deployment_configs?.production?.queue_producers ?? {}).length !==
+        1 ||
+      pagesProject?.deployment_configs?.production?.queue_producers?.CONTROL_EVENTS?.name !==
+        expected.queueName
     ) {
       throw new Error("Cloudflare Pages deployed configuration read-back does not match");
     }
@@ -128,7 +133,7 @@ export function verifyCloudflareReadback(outputs, expected) {
   );
 
   requireOnce(outputs.queue, `Queue Name: ${expected.queueName}`, "Queue name");
-  requireOnce(outputs.queue, "Number of Producers: 1", "Queue producer count");
+  requireOnce(outputs.queue, "Number of Producers: 2", "Queue producer count");
   requireOnce(outputs.queue, `Producers: r2_bucket:${expected.bucketName}`, "Queue producer");
   requireOnce(outputs.queue, "Number of Consumers: 1", "Queue consumer count");
   requireOnce(outputs.queue, `Consumers: worker:${expected.workerName}`, "Queue consumer");
@@ -444,6 +449,88 @@ export async function runCloudflareReadback(input) {
       },
     ],
   ]);
+  const cloudRunMode = process.env[`${environmentPrefix}_CLOUD_RUN_RUNTIME_MODE`] ?? "disabled";
+  const activeCloudRunMode = input.environment === "staging" ? "synthetic-shadow" : "active";
+  if (cloudRunMode !== "disabled" && cloudRunMode !== activeCloudRunMode) {
+    throw new Error(`${input.environment} Cloud Run runtime mode is invalid`);
+  }
+  const gpuExecutionPolicy =
+    process.env[`${environmentPrefix}_GPU_EXECUTION_POLICY`] ?? "runpod_serverless_v1";
+  if (!new Set(["runpod_serverless_v1", "cloud_run_jobs_l4_v1"]).has(gpuExecutionPolicy)) {
+    throw new Error(`${input.environment} GPU execution policy is invalid`);
+  }
+  if (gpuExecutionPolicy === "cloud_run_jobs_l4_v1" && cloudRunMode !== activeCloudRunMode) {
+    throw new Error(`Cloud Run execution requires the ${input.environment} runtime service`);
+  }
+  expectedBindings.set("GPU_EXECUTION_POLICY", {
+    text: gpuExecutionPolicy,
+    type: "plain_text",
+  });
+  const gpuExecutionAdmission =
+    process.env[`${environmentPrefix}_GPU_EXECUTION_ADMISSION`] ?? "active";
+  if (gpuExecutionAdmission !== "active" && gpuExecutionAdmission !== "paused") {
+    throw new Error(`${input.environment} GPU execution admission is invalid`);
+  }
+  expectedBindings.set("GPU_EXECUTION_ADMISSION", {
+    text: gpuExecutionAdmission,
+    type: "plain_text",
+  });
+  if (cloudRunMode === activeCloudRunMode) {
+    expectedBindings.set("CLOUD_RUN_CONTROLLER_HMAC_PRIMARY", { type: "secret_text" });
+    expectedBindings.set("CLOUD_RUN_RUNTIME_DERIVATION_SECRET", { type: "secret_text" });
+    expectedBindings.set("CLOUD_RUN_CONTROLLER_ORIGIN", {
+      text: process.env[`${environmentPrefix}_CLOUD_RUN_CONTROLLER_ORIGIN`],
+      type: "plain_text",
+    });
+    expectedBindings.set("CLOUD_RUN_ORCHESTRATOR_ORIGIN", {
+      text: process.env[`${environmentPrefix}_ORCHESTRATOR_ORIGIN`],
+      type: "plain_text",
+    });
+    expectedBindings.set("CLOUD_RUN_RUNTIME_MODE", {
+      text: cloudRunMode,
+      type: "plain_text",
+    });
+    expectedBindings.set("CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT", {
+      text: process.env[`${environmentPrefix}_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT`],
+      type: "plain_text",
+    });
+  }
+  const acceptanceFaultIdentifiers = {
+    acceptanceFault: process.env.SCRIBE_DROP_STAGING_ACCEPTANCE_FAULT,
+    acceptanceFaultExpiresAt: process.env.SCRIBE_DROP_STAGING_ACCEPTANCE_FAULT_EXPIRES_AT,
+    acceptanceFaultIssuedAt: process.env.SCRIBE_DROP_STAGING_ACCEPTANCE_FAULT_ISSUED_AT,
+    acceptanceFaultJobId: process.env.SCRIBE_DROP_STAGING_ACCEPTANCE_FAULT_JOB_ID,
+  };
+  if (
+    input.environment === "production" &&
+    Object.values(acceptanceFaultIdentifiers).some((value) => value !== undefined)
+  ) {
+    throw new Error("Staging acceptance fault configuration is forbidden in production");
+  }
+  if (input.environment === "staging") {
+    const acceptanceFault = validateStagingAcceptanceFaultIdentifiers(
+      acceptanceFaultIdentifiers,
+      cloudRunMode,
+    );
+    if (acceptanceFault !== undefined) {
+      expectedBindings.set("STAGING_ACCEPTANCE_FAULT", {
+        text: acceptanceFault.fault,
+        type: "plain_text",
+      });
+      expectedBindings.set("STAGING_ACCEPTANCE_FAULT_EXPIRES_AT", {
+        text: acceptanceFault.expiresAt,
+        type: "plain_text",
+      });
+      expectedBindings.set("STAGING_ACCEPTANCE_FAULT_ISSUED_AT", {
+        text: acceptanceFault.issuedAt,
+        type: "plain_text",
+      });
+      expectedBindings.set("STAGING_ACCEPTANCE_FAULT_JOB_ID", {
+        text: acceptanceFault.jobId,
+        type: "plain_text",
+      });
+    }
+  }
   verifyCloudflareReadback(outputs, {
     bucketName,
     bindings: expectedBindings,

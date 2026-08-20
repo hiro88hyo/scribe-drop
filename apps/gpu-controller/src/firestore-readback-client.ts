@@ -30,7 +30,11 @@ export function controllerFirestoreStabilityProjection(
 ): unknown {
   if (key === "database") {
     const parsed = firestoreDatabaseReadbackSchema.parse(value);
-    return { ...parsed, earliestVersionTime: "volatile-output-only" };
+    return {
+      ...parsed,
+      earliestVersionTime: "volatile-output-only",
+      etag: "volatile-output-only",
+    };
   }
   if (key === "ttlPolicies") {
     const parsed = firestoreTtlPolicyListReadbackSchema.parse(value);
@@ -55,7 +59,7 @@ export function createControllerFirestoreReadbackRequests(
     {
       key: "ttlPolicies",
       method: "GET",
-      url: `https://firestore.googleapis.com/v1/${expected.database.name}/collectionGroups/-/fields?filter=ttlConfig%3A*&pageSize=3`,
+      url: `https://firestore.googleapis.com/v1/${expected.database.name}/collectionGroups/-/fields?filter=ttlConfig%3A*`,
     },
     {
       key: "requestTtl",

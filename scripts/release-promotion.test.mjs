@@ -63,7 +63,19 @@ function createCandidate() {
     runpodImageReferencePath: path.join(repositoryRoot, "runpod-image.txt"),
     supplyChainDirectory: path.join(repositoryRoot, "supply-chain"),
   });
-  return { candidateDirectory, repositoryRoot };
+  const cloudRunCandidateEvidencePath = path.join(repositoryRoot, "cloud-run-candidate.json");
+  writeFileSync(
+    cloudRunCandidateEvidencePath,
+    `${JSON.stringify({
+      commit: commitSha,
+      controllerImage: `asia-southeast1-docker.pkg.dev/scribe-drop/controller/runtime@sha256:${"d".repeat(64)}`,
+      runAttempt: "1",
+      runId: "789",
+      schemaVersion: 1,
+      workerImage: `asia-southeast1-docker.pkg.dev/scribe-drop/worker/runtime@sha256:${"e".repeat(64)}`,
+    })}\n`,
+  );
+  return { candidateDirectory, cloudRunCandidateEvidencePath, repositoryRoot };
 }
 
 test("assembles Pages advanced-mode output only from a verified candidate", () => {
@@ -98,7 +110,7 @@ test("refuses to assemble Pages output after candidate mutation", () => {
 });
 
 test("creates and verifies short-lived staging acceptance evidence", () => {
-  const { candidateDirectory, repositoryRoot } = createCandidate();
+  const { candidateDirectory, cloudRunCandidateEvidencePath, repositoryRoot } = createCandidate();
   const evidenceDirectory = path.join(repositoryRoot, "evidence");
   mkdirSync(evidenceDirectory);
   const acceptedAt = new Date("2026-07-27T12:00:00.000Z");
@@ -106,19 +118,19 @@ test("creates and verifies short-lived staging acceptance evidence", () => {
     acceptedAt,
     candidateDirectory,
     candidateRunId,
+    cloudRunCandidateEvidencePath,
     commitSha,
     environmentPolicyId,
     expectedReleaseVersion: "0.1.0",
     outputPath: acceptanceEvidencePath(evidenceDirectory),
     stagingRunId,
   });
-  assert.equal(evidence.schemaVersion, 3);
-  assert.equal(evidence.policyVersion, "adr-0059-v1");
+  assert.equal(evidence.schemaVersion, 4);
+  assert.equal(evidence.policyVersion, "adr-0086-v1");
   assert.equal(evidence.environment, "staging");
   assert.equal(evidence.checks.endToEndM4a, true);
-  assert.equal(evidence.checks.failedEndToEndM4a, true);
-  assert.equal(evidence.checks.failureNotificationDelivered, true);
-  assert.equal(evidence.checks.failureJobCleanupRequested, true);
+  assert.equal(evidence.checks.cloudRunEndToEndM4a, true);
+  assert.equal(evidence.cloudRunCandidate.runId, "789");
 
   const verified = verifyStagingAcceptance({
     candidateDirectory,
@@ -134,7 +146,7 @@ test("creates and verifies short-lived staging acceptance evidence", () => {
 });
 
 test("rejects expired, incomplete, or mismatched staging acceptance", () => {
-  const { candidateDirectory, repositoryRoot } = createCandidate();
+  const { candidateDirectory, cloudRunCandidateEvidencePath, repositoryRoot } = createCandidate();
   const evidenceDirectory = path.join(repositoryRoot, "evidence");
   mkdirSync(evidenceDirectory);
   const evidencePath = acceptanceEvidencePath(evidenceDirectory);
@@ -142,6 +154,7 @@ test("rejects expired, incomplete, or mismatched staging acceptance", () => {
     acceptedAt: new Date("2026-07-27T12:00:00.000Z"),
     candidateDirectory,
     candidateRunId,
+    cloudRunCandidateEvidencePath,
     commitSha,
     environmentPolicyId,
     outputPath: evidencePath,
@@ -200,7 +213,7 @@ test("rejects expired, incomplete, or mismatched staging acceptance", () => {
 });
 
 test("rejects unknown staging acceptance fields", () => {
-  const { candidateDirectory, repositoryRoot } = createCandidate();
+  const { candidateDirectory, cloudRunCandidateEvidencePath, repositoryRoot } = createCandidate();
   const evidenceDirectory = path.join(repositoryRoot, "evidence");
   mkdirSync(evidenceDirectory);
   const evidencePath = acceptanceEvidencePath(evidenceDirectory);
@@ -208,6 +221,7 @@ test("rejects unknown staging acceptance fields", () => {
     acceptedAt: new Date("2026-07-27T12:00:00.000Z"),
     candidateDirectory,
     candidateRunId,
+    cloudRunCandidateEvidencePath,
     commitSha,
     environmentPolicyId,
     outputPath: evidencePath,

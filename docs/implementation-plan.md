@@ -1340,7 +1340,7 @@ pnpm check
   Orchestrator HMAC client、Firestore control-store adapterはPhase 14 local preparationで追加したが、default service
   wiringには接続していない。
 
-### Phase 14: staging dark deployment（release foundation構築済み、candidate未発行）
+### Phase 14: staging dark deployment（final exact 1 GPU実行成功、全synthetic resource cleanup済み）
 
 実装:
 
@@ -1355,6 +1355,27 @@ pnpm check
 
 local preparation（2026-08-11〜12）:
 
+- PR #19をstrict required checks成功、未解決conversation 0、approval 0のsolo-maintainer policyでmerge commitにより
+  `develop`へ統合し、`release/0.2.0`を作成した。root package、Python worker、uv lockのversionを`0.2.0`へ同期した。
+  candidate workflowはこのversion commitの全gateが成功するまで実行しない。
+- 初回candidate runはpublisher OIDC preflightで停止し、image build/push、Occurrence、Cloud Run mutationへ到達しなかった。
+  Artifact Registry両repositoryが空、project Occurrence 0をread-backした。GitHub Environment jobのdefault subjectが
+  branch contextではなくenvironment contextになるため、WIF planをimmutable repository prefixのexact staging subject、
+  数値ID、repository/owner名、environment、release ref、event、workflowの同時照合へ修正した。
+- 修正後runはOIDCとkeyless gcloud preflightに成功したが、auth actionの一時credentialをPrettierが対象にしてimage build前に
+  停止した。local application/secret/dependency gateをcloud authより前へ移し、OIDCはimage build直前に維持する。一時
+  `gha-creds-*.json`をGit/Docker build contextから除外し、static workflow verifierで順序と除外を固定した。
+- 次のrunはfull gate、OIDC、keyless gcloud preflightを通過し、controller image build後のinspectionで停止した。
+  Dockerfileの`CMD []`がengine差で返す`Config.Cmd: null`またはfield省略をno-commandとして固定し、unexpected commandを
+  拒否する回帰テストを追加した。candidate workflowと同じcontroller/workerのbuild、check、SBOM、HIGH/CRITICAL scanは
+  localで全て成功した。image push、Occurrence、Cloud Run mutationには到達していない。
+- 修正後runは全gate、両imageの1回push、digest解決、isolated signer OIDCまで成功した。pinned gcloudに`beta` componentがなく
+  attestation commandのcomponent promptで停止した。両repository各1 image、Occurrence 0をread-backし、部分署名がないことを
+  確認した。setup-gcloudでversion 579と`beta`を同時に固定し、失敗candidate imageは成功candidate検証後にexact cleanupする。
+- component修正後runは全stepに成功し、candidate evidence identity/digestも一致した。両Occurrenceは作成済みだが、strict
+  read-backのproject-scoped、schemeなしfilterが空を返した。公式手順と同じNote-scoped endpointと
+  単一resource filterへ修正する。live gcloud 579のschemeなし`resourceUri`に対しschemeなしfilterだけが各1件、`https://`
+  filterが0件であることをread-backした。このverifierを含む新candidateまで既存runをacceptance evidenceにしない。
 - forward-only `0011_cloud_run_runtime_protocol.sql`でbootstrap、challenge/session、allowlist terminal eventを
   provider executionへ外部キーで固定した。challenge消費、sequence、terminal revokeはD1 CAS/triggerへ収束する。
 - D1 production repositoryはactive attempt、provider kind/policy、contract v2、source key/ETag/size、result prefixを
@@ -1378,8 +1399,8 @@ local preparation（2026-08-11〜12）:
 - `@google-cloud/firestore`のnamed-database adapterを追加した。environment singleton、request replay、execution recordを
   一つのtransactionへ閉じ、active 1、finite count/JPY reservation、rate window、version CAS、cleanup時だけのactive slot
   releaseを永続化する。SDK transaction callbackの再実行、並行admission/CAS、adapter restart、authorization/path/TTL/
-  singleton driftをlocal fakeで検証し、strict persisted schema違反はfail closedにする。TTL fieldは保存するがTTL policyは
-  cloud側へ未設定である。
+  singleton driftをlocal fakeで検証し、strict persisted schema違反はfail closedにする。このlocal実装時点ではTTL fieldだけを保存し、
+  後続のnon-GPU preflightでcloud TTL policyを`ACTIVE`へ収束させた。
 - strict composition rootでmanifest、authorization、Firestoreのenvironment/project、image repository、runtime service
   accountを完全照合し、Firestore store、Cloud Run client、HMAC HTTP handlerをlocal結線した。default disabled
   authorizationでは署名済みcreateもADC token取得/Cloud Run call前に停止する。Google ADC access tokenはvisible ASCIIかつ
@@ -1394,7 +1415,7 @@ local preparation（2026-08-11〜12）:
   `no-new-privileges`、PID/memory/CPU上限、noexec tmpfsでcontainer invariantを実行する。CycloneDX SBOMは`/tmp`だけへ
   生成し、TrivyのHIGH/CRITICAL fail-close scanを通過した。bundleはregular `.js`だけを選び、shell、BusyBox、npm/pnpm、
   TypeScript、`@types/node`、source tree、declaration、source mapの不在とproduction runtime dependencyの存在をcontainer内で
-  検証する。image publish、registry、CI、service deploymentは変更していない。
+  検証する。このlocal image gate時点ではimage publish、registry、CI、service deploymentを変更していなかった。
 - controller Cloud Run Serviceのpure deployment planとnormalized read-back verifierを追加した。Singapore、Gen2、immutable
   controller image、専用service account、1 vCPU/512 MiB、request-based CPU、service/revision max instance 1、min 0、concurrency
   8、60秒timeout、latest revision 100%、volume/VPCなし、default URI有効、IAP無効、public ingressとapplication HMAC、Binary
@@ -1411,7 +1432,7 @@ local preparation（2026-08-11〜12）:
   authoritative evidence取得、resource作成、deployは行わない。
 - ephemeral GPU JobにもBinary Authorization default policyを固定し、create bodyとlive read-backの両方で欠落、無効化、
   policy override、breakglassを拒否する。project default policy/attestorのauthoritative read-backは2026-08-12に成功した。
-  worker image attestationはcandidate workflow未実行のためまだ存在しない。
+  このplan追加時点ではworker image attestationは存在せず、後続candidateでcontroller/worker各1件を作成・検証した。
 - [ADR 0080](./adr/0080-use-kms-backed-binary-authorization-attestations.md)でproject-singleton release attestor、global
   Artifact Analysis Noteのmetadata例外、Singapore software KMS ECDSA P-256 key、keyless GitHub OIDC signer、publisherとの
   権限分離、controller/worker両digestのattestation、月額約US$0.06のkey保持費を固定した。project numberとdeployment
@@ -1432,8 +1453,8 @@ local preparation（2026-08-11〜12）:
   `importOnly`/`disabled`はresponse省略を許す一方trueを拒否するよう修正した。
 - `.github/workflows/publish-cloud-run-candidate.yml`を追加し、`release/<version>`のmanual dispatch、GitHub OIDC、分離identity、
   full local gate、SBOM、HIGH/CRITICAL scan、各image 1 push、registry digest read-back、KMS attestation、metadata-only evidenceを
-  固定した。workflowとOccurrenceはまだ実行しておらず、Artifact Registryのcandidate imageも0件である。production resource、
-  Cloud Run Service/Job、Firestore、Secret Manager、remote D1、product routingは変更していない。
+  固定した。workflow追加時点ではOccurrenceとArtifact Registry candidate imageは0件で、production resource、Cloud Run
+  Service/Job、Firestore、Secret Manager、remote D1、product routingを変更していなかった。
 - [ADR 0078](./adr/0078-split-controller-iam-by-resource-boundary.md)に従いcontroller IAM pure planを追加した。Cloud Run Jobs custom roleは
   実clientが使うJob create/get/delete/run、Execution list/cancel/delete、Operation getだけ、Firestore custom roleはtransactionと
   entity get/create/update/deleteだけへ固定する。project binding、database完全一致condition、runtime account上の
@@ -1446,14 +1467,116 @@ local preparation（2026-08-11〜12）:
   environment専用named databaseをSingapore/Native/Standard、pessimistic transaction、delete protection、Firestore-only accessへ固定する。
   staging PITR無効/1時間retention、production PITR有効/7日retentionを分離し、request/execution collection groupの`ttlExpiresAt`だけを
   offset 0かつ`ACTIVE`で受ける。fixed database/field GETとdatabase-wide `ttlConfig:*` listを同じtoken/quota projectで2回実行し、
-  期待2件以外、重複、paginationを拒否する。list順序だけを正規化し、継続変化するoutput-only `earliestVersionTime`だけを安定性比較から
-  除外するlocal clientも追加した。Service/security、IAM、Firestoreを同じdeployment expectationから
+  期待2件以外、重複、paginationを拒否する。list順序だけを正規化し、継続変化するoutput-only `earliestVersionTime`と連動する
+  `etag`だけを安定性比較から除外するlocal clientも追加した。Service/security、IAM、Firestoreを同じdeployment expectationから
   導出するatomic evidence verifierでcross-project/database mixと未知sectionを拒否する。deployment-level read-only clientは個別clientと
-  pure endpoint builderを共有し、全resourceを一つのtoken/quota projectと同じdouble-snapshot windowで取得する。実credential、database/TTL
-  作成、mutationは行わない。
-- release branch/version、candidate workflow、CI、Firestore database/TTL policy、identity/controller deployment wiring、service
-  hosting、IAM、secret resource、cloud resource、deploy、product routingは変更していない。このためPhase 14の完了条件は
-  未達である。
+  pure endpoint builderを共有し、全resourceを一つのtoken/quota projectと同じdouble-snapshot windowで取得する。
+- 最終candidate buildを待たず、既存の署名検証済みimageでstaging non-GPU preflightを行った。Firestore named databaseとTTL 2件、
+  controller/runtime identity、Jobs/Firestore custom roleと限定IAM、固定versionのHMAC secret、disabled controller Serviceを作成した。
+  Standard/NativeのRealtime enabled、access-mode省略、TTL listの`pageSize`制約、inherited index scope省略、sliding
+  `earliestVersionTime`/`etag`、Secret Managerのproject number resource名、IAM `deleted: false`省略、Cloud Run v2のsafe default省略と
+  startup probe/label伝播をlive contractとして回帰testへ固定した。全resourceのstrict double-snapshotは完全一致した。
+- 既存worker digestで固定manifestのephemeral Jobをcreate/read-backし、Binary Authorization、runtime identity、task/retry/timeoutを
+  照合した。`jobs.run`は呼ばずExecution 0のままJobをexact deleteし、不存在まで確認した。production resource、CI、remote D1、
+  Cloudflare routingは変更していない。既存imageは後続source変更を含まないため、最終acceptanceには新candidateが必要である。
+- 最終candidateのbuild/publish/attestationとService digest差し替え、staging D1 shadow wiring、exact 1 GPU execution、timeout/reaper/
+  artifact/cleanup evidenceが残るため、Phase 14の完了条件は未達である。
+- 既存署名済みimageによるnon-GPU preflight後、Cloud Run runtimeのproduction portがdefault Workerへ意図的に未注入だったblockerを
+  解消するstaging限定composition rootを追加した。exact `synthetic-shadow`、相異なるcanonical controller/runtime secret、fixed
+  controller/orchestrator origin、dedicated runtime identity、D1/R2/account設定がすべて揃う場合だけD1 store、Google OIDC、controller
+  attestation/cleanup、R2 capability、HMAC/Ed25519を結線する。欠落、padding、同一secret、production、origin/identity driftでは
+  service生成前にfail closedとし、Workers integrationを50件へ増やした。source defaultはstaging `disabled`、production bindingなしである。
+- 最終candidateの両digest/attestation、controller Service、D1 shadow wiring、finite 1 execution/250 JPY authorization、
+  L4 quota、Execution 0をstrict read-back後、2026-08-13に合成fixtureのGPU Executionをexact 1件だけ起動した。task 1、
+  parallelism 1、retry 0のまま約21秒で`INTERNAL_ERROR`となり、bootstrap/event 0、capability/source download/transcription/
+  artifact upload 0でfail closedした。controller cleanupはresponse lossを結果不明として再観測後`CLEANED`へ収束し、Cloud Run
+  Job/Execution、Firestore synthetic document、R2 fixture/result/manifestを0へ戻し、shadow routeとauthorizationをdisabled/0へ戻した。
+  D1 cleanup mutation後の独立readは最初OAuth 7403となったが、再認証後に今回のexact target 0を確認した。database全体の既存
+  staging fixtureは保持し、全table 0をcleanup条件とはしない。productionは変更していない。
+- 同じcandidate source/imageのlocal CPU・network-none再現で、固定commandの`python -m scribe_drop_worker.one_shot`がentry moduleを
+  `__main__`としてロードした後、HTTP adapterが同moduleをpackage名でruntime importし、例外classを二重化する原因を特定した。
+  shared allowlist errorを独立moduleへ移し、module entrypoint回帰testで`BOOTSTRAP_REJECTED`の同一class処理を固定する。実Cloud Run v2の
+  `Execution.job`が短いJob IDを返すことも確認し、exact requested IDとfull Execution parentを照合してcanonical parentへ正規化する。
+  source変更により既存candidate evidenceは無効となるため、新commit/new candidateからPhase 14 gateをやり直す。
+- entrypoint/Execution parent修正後のcandidate `c3b1e89`について、controller/worker attestation、Binary Authorization、Service、
+  staging D1/R2、finite 1 execution/250 JPY authorization、L4 quota 3、Execution 0をstrict read-backした。2026-08-13に合成WAVの
+  GPU Executionをexact 1件だけ起動し、task 1、parallelism 1、retry 0、image import約1分37秒、task約9秒で
+  `SESSION_REJECTED`となった。bootstrap/event、capability、source download、CUDA/model load、transcription、artifactは0だった。
+- Cloudflare evidenceはbootstrap HTTP 500が1件、同じWorker invocationのexternal subrequest 0、remote D1 exact attempt lookup
+  1 query/1 row、controller attest 0だった。exact staging rowとlive-shaped Google RSA/JWTはworkerdで成功したため、単一のremote
+  root causeは断定せず、Google JWKSのtransport/429/5xxだけを最大2 attemptで再試行し、verifier例外を
+  `AUTHENTICATION_FAILED`へ正規化する。
+- Cloud Run taskがcontroller observeより先に起動する正常な順序では、旧attestationが`EXECUTION_PENDING`と未保存Execution UIDを
+  必ず拒否する別のraceを確認した。[ADR 0081](./adr/0081-attest-live-execution-before-controller-observe.md)に従い、durable run intent、
+  stored Job UID、exact 1 live Execution、fixed manifestを満たすpending recordをread-only attestし、stored Executionがある場合の
+  UID一致は維持する回帰testを追加した。
+- second execution後はCloud Run Job/Execution、Firestore synthetic document、D1 exact targetを0、R2 fixture/result/manifestを
+  不存在、shadow routeとauthorizationをdisabled/0へ戻し、local secret/fixtureを削除した。production resource、product routing、
+  CI configは変更していない。source変更によりcandidate `c3b1e89`のevidenceは無効となり、新candidateが必要である。
+- identity/JWKS retryとpending attestation修正を含むcandidate `810189b`をbuild run `31673063867`から1回だけpublishし、
+  controller/worker各1 attestation、Binary Authorization、non-GPU manifest preflight、finite 1 execution/250 JPY authorization、
+  L4 quota 3、D1/R2 fixture、shadow bindingをstrict read-backした。承認済みGPU Executionはtask 1、parallelism 1、retry 0のまま
+  image importとcontainer起動に成功したが、約16秒で`SESSION_REJECTED`/exit 1となった。D1 bootstrap/event、R2 capability、
+  source download、CUDA/model load、artifactは0だった。Job/Execution、Firestore、D1、R2を0、不存在へ戻し、shadow routeと
+  controller authorizationをdisabled/0へ戻した。追加GPU executionは行っていない。
+- 同じ署名済みimage/runtime service accountのGPUなしprobeでGoogle metadata tokenのheader/claim/audience/service account/
+  issuer/lifetimeがcontractと一致する一方、bootstrapは403、17 byte、non-JSONでWorkers POST tailへ到達しないことを再現した。
+  Cloudflare Security EventsはSingaporeのCloud Run ASNを`action=block`、`source=bic`として記録した。このPCから同じendpointへ
+  送る無効JSONはWorkerの`INVALID_REQUEST`を返したため、root causeをGoogle OIDCではなくBrowser Integrity Checkのedge blockと
+  確定した。[ADR 0082](./adr/0082-skip-browser-integrity-check-for-cloud-run-runtime.md)に従い、staging host/queryなしPOST/5 exact
+  runtime pathだけでproduct `bic`をskipするstrict planと、GPUなしでOIDC後のcontroller `RESOURCE_DRIFT`まで証明するpreflightを追加する。
+  source/WAF plan変更によりcandidate `810189b` evidenceは無効であり、新commit/new candidateからやり直す。
+- WAF/preflight修正commit `4fa6c80`のcandidate build `31678897389`は全gate、controller/worker各1 image push、各1 attestation、
+  Binary Authorization `VERIFIED`を完了し、controller Serviceもcandidate digestへ更新してstrict read-backを通した。ADR 0082の
+  BIC skipはexact host/queryなしPOST/5 path/`bic`だけ/logging有効でapply/read-backに成功した。GPU 0のbootstrap preflightを
+  task 1、parallelism 1、retry 0でexact 1回実行するとSecurity Eventsは`action=skip`、Workerは1 request、edgeは403となり、
+  BIC解消後のapplicationまで到達したが期待する`RESOURCE_DRIFT` markerを得ずexit 1となった。D1 bootstrap/event 0、controller
+  attestation到達証拠なしで、既存metadata probeのtoken shape/claimは全条件に一致した。Cloudflare公式では例外になったfetchを
+  subrequest countへ含めないため、同時刻のsubrequest 0だけでtoken precheckとJWKS transport exceptionを区別しない。
+- blind retryを避け、Google JWKSのtransport/429/5xx retryを最大3 attemptへ強化し、token、claim、URL、provider responseを含まない
+  allowlist rejection stageだけを構造化logへ追加した。このsourceを新candidateにし、GPU-free preflightでOIDC後の
+  `RESOURCE_DRIFT`を証明するまでGPUを起動しない。失敗後はCloud Run Job/Execution、Firestore controller document、D1 exact targetを
+  0、shadow route/controller authorizationをdisabled/0へ戻し、R2は作成しなかった。WAF exact skipとdisabled candidate controller
+  Serviceは維持し、productionとCI workflowは変更していない。
+- identity診断commit `11cabe1`のcandidate build `31685398800`はfull gate、両imageの各1 push/KMS署名/各1 attestation、
+  Binary Authorization `VERIFIED`、controller Serviceのstrict read-backを完了した。GPU 0、CPU 1、512 MiB、task 1、
+  parallelism 1、retry 0のpreflightをexact 1回だけ実行し、Worker allowlist logで
+  `cloud_run_identity_rejected` / `JWKS_TRANSPORT_REJECTED`を確定した。3 attemptともHTTP response前の例外であり、
+  Google JWKS verifierだけが[ADR 0016](./adr/0016-use-manual-redirects-in-workers.md)に反して`redirect: "error"`を指定していた。
+  live Workers runtimeはこの値をrequest構築時に`TypeError`で拒否するため、`redirect: "manual"`へ統一し、3xxは追従せず
+  `JWKS_RESPONSE_REJECTED`へfail closedにする。unit/workerd回帰testは実`Request`のmanual modeを固定する。preflight後は
+  Worker route/controller authorizationをdisabled/0、Cloud Run Job/Execution、D1 exact target、Firestore controller documentを
+  0へ戻し、R2とGPUは使用せず、local inputも削除した。productionとCI workflowは変更していない。このsource修正により
+  candidate `11cabe1` evidenceは無効であり、新commitのlocal gateを一括完了後にcandidateを1回だけbuildする。
+- manual redirect修正commit `0ab7bf3`のcandidate build `31687874021`はfull gate、両imageのbuild/check/SBOM/scan、
+  各1 push/KMS署名/各1 attestation、Binary Authorization `VERIFIED`を完了した。controller Service generation 17と
+  Worker `synthetic-shadow`をread-backし、GPU 0、CPU 1、512 MiB、task 1、parallelism 1、retry 0のpreflightを
+  exact 1回だけ実行したが、allowlist logは再び`JWKS_TRANSPORT_REJECTED`だった。追加execution、GPU、R2、controller
+  attestation、bootstrap/session eventは使用していない。これにより`redirect: "error"`は実欠陥だが唯一のremote rootではない。
+  host `fetch`を`this.#ports.fetch(...)`とmethod呼出しして誤ったreceiverを渡す残存欠陥をGoogle JWKS/controller clientの
+  両方でlocal再現し、standalone呼出しとreceiver-sensitive回帰testへ修正する。controllerに残る`redirect: "error"`もmanualへ
+  統一する。Cloud Run Job/Execution、D1 exact targetを0、Worker routeを404/disabledへ戻し、local inputを削除した。
+  productionとCI workflowは変更していない。remote root確定は次candidateのGPU-free `RESOURCE_DRIFT` evidenceまで保留する。
+- receiver保持修正commit `cdfc394`のcandidate build `31695586010`はfull local/application gate、controller/worker両imageの
+  build/check/SBOM/HIGH・CRITICAL scan、各1 push、KMS署名、各1 attestationを完了し、Binary Authorizationは2 digestとも
+  `VERIFIED`だった。controller Serviceを同candidateへ更新し、Service/IAM/Secret/Firestore、L4 no-zonal quota 3、Cloud Run
+  Job/Execution 0をstrict read-backした。同じworker digest/runtime identityのGPU-free preflightはGPU 0、CPU 1、512 MiB、
+  task 1、parallelism 1、retry 0でexact 1回だけ実行し、Google OIDCとcontroller境界を通過した期待どおりの
+  `RESOURCE_DRIFT` marker 1で成功した。終了後はJob/Execution、D1 exact target、Firestore controller documentを0、Worker routeを
+  404へ戻した。
+- 実行直前に4 vCPU、16 GiB、L4 1、task 1、parallelism 1、retry 0、timeout 3,300秒、Binary Authorization、worker digest、
+  Execution 0、有限1 execution/250 JPY authorizationを別processで照合した。公式Cloud Run単価、USD/JPY ceiling 200、税10%、
+  network allowanceを含むworst-caseは233円だった。合成16分WAVだけを使い、承認後にdurable `RUN_INTENT`を保存して
+  `jobs.run`をexact 1回送った。createとrunのresponseをそれぞれ破棄して同一requestをreplayし、Firestore重複排除により
+  Job 1、Execution 1を維持した。
+- runtimeはbootstrap/claim/ack後に`bootstrap`、`download`、`transcribe`、`publish`の順でheartbeatを記録し、duration 960秒、
+  segment 20、artifact 3、manifest written 1、terminal `succeeded`、session revokeへ収束した。manifest v2はcompleteで、Markdown
+  1,251 byte、JSON 2,036 byte、SRT 1,589 byteのsize/SHA-256が全件一致した。Cloud Loggingは同一Executionのentry 10、
+  task attempt/index 0だけ、success marker 1、failure marker 0だった。Worker invocationはruntime request 8件、error 0だった。
+- terminal cleanup schedule後の`CLEANUP_PENDING`を再観測して`CLEANED`へ収束させ、Cloud Run Job/Execution 0、D1今回target
+  5系統0、R2 fixture/artifact/manifest 5 object不存在、Firestore controller 3 collection空を独立read-backした。Workerは
+  `disabled`/route 404、controller Service generation 20とFirestore authorizationは0、active/reserved executionとJPYも0へ
+  戻した。local合成fixture/secretは削除し、production resource、product routing、CI workflowは変更していない。
 
 完了条件:
 
@@ -1463,7 +1586,227 @@ local preparation（2026-08-11〜12）:
   timeout/lifetime、reaperを実環境で検証する。
 - stagingにactive execution、provider resource、persistent storage、operation、fixture、capabilityが残らない。
 
-### Phase 15: `0.2.0` candidate and formal staging
+### Phase 15: `0.2.0` candidate and formal staging（完了、2026-08-15）
+
+Local implementation status (2026-08-13):
+
+- [ADR 0083](./adr/0083-connect-cloud-run-to-formal-staging-routing.md)に従い、staging限定provider switch、attempt単位の
+  immutable selection、D1 create/reconcile/version recovery、runtime terminalからartifact/job/notificationへの確定、
+  cancel/delete/retentionのcleanup gateを実装した。tracked defaultとproductionはRunPodのままである。
+- このsource変更によりPhase 14 candidate `cdfc394`のpromotion evidenceは失効した。local gateとcommit完了後に新candidateを
+  一度だけbuildし、Phase 14のdark deployment、exact one GPU gate、cleanupからやり直す。現時点ではCI、remote D1、
+  Cloudflare/GCP resource、productionを変更していない。
+
+Remote acceptance status (2026-08-14):
+
+- source `0280e5b`のbuild-once candidateについて、両image、KMS attestation、Binary Authorization、controller Service、
+  migration `0012`、WAF、shadow binding、有限1 execution/250 JPY authorization、L4 quota 3、Job/Execution 0をstrict
+  read-backした。production resourceとCI workflowは変更していない。
+- Access保護済みWebからcandidate合成fixtureをuploadし、通常Queue経路がCloud Run providerをexact 1回選択した。
+  L4 1、4 vCPU、16 GiB、task 1、parallelism 1、retry 0、timeout 3,300秒のJob/Execution各1件だけを作成した。
+  submission開始からruntime claimまで約5分5秒、claimからterminal successまで約16秒で、10分start SLOと233 JPYの
+  実行前worst-case上限を満たした。
+- runtimeはCUDA/float16 transcriptionとmanifest-lastを完了した。D1 job/attemptは`COMPLETED`、notificationは`SENT`、
+  manifest v2とMarkdown/JSON/SRTの3 artifactはsize、SHA-256、JSON contractが一致した。
+- provider policyを最初にRunPodへ戻して新規Cloud Run投入を停止した後、controllerは`CLEANED`、Cloud Run Job/Executionは0へ
+  収束した。deployed Cronを観測できなかったため、確定したcontroller responseをdry-runとexact version条件付きの同じrepository
+  CASへ一度だけ適用し、D1 cleanupを`SUCCEEDED`へ収束した。直接SQL mutationは行っていない。
+- controller/Firestore authorizationはactive/reserved execution、request rate、JPYを0へ戻した。同じcandidate bundleをexact
+  byte uploadしたWorkerはCloud Run平文bindingなし、RunPod policy、traffic 100%、bootstrap route 404である。詳細は
+  [Phase 15 staging record](./deployments/2026-08-14-phase-15-staging.md)に記録する。
+- 利用者deleteはWebで受理され、capability grace後の次のdeployed CronでD1親子rowを0へ削除した。remote R2 bindingの
+  exact source/result prefix listingもobject 0だった。provider cleanup自体はdeployed Cronだけで収束した証拠がなく、残りの
+  failure/cancel acceptanceも未完了である。このrunだけでPhase 15完了またはproduction promotion可とは判定しない。
+
+Local follow-up status (2026-08-14):
+
+- 実runではD1のprovider version 6に対してcontrollerがversion 8まで進んでいた。従来のscheduled reconciliationは最初の
+  `STALE_VERSION` responseをD1へCAS適用した時点で終了し、次の5分Cronまで本来のcleanup requestを送らないため、cleanupの
+  自動収束確認を一巡余分に遅らせていた。
+- exact requestのtransport replayは同一request ID/bodyで最大2回のまま維持し、`STALE_VERSION`のD1 CAS成功後だけ、更新後の
+  versionと新request IDで同じactionを同一sweep内に最大1回再要求するよう修正した。二度目のversion driftまたはD1 CAS競合は
+  次のCronへdeferする。unit testと実D1 repositoryを使うWorkers integration testで、version 6 -> 8 -> cleanup 9、bounded
+  retry、CAS競合を検証した。
+- このsource変更により`0280e5b`のstaging evidenceは次candidateのpromotionには使用できない。CI、remote staging、GPU、
+  productionは変更しておらず、新commitからbuild-once candidateを作成してPhase 14 gateとPhase 15 acceptanceをやり直す。
+- follow-up source `3ea5d21`のrelease candidate workflow `31773131482`とCloud Run image workflow `31773131847`は成功し、
+  両imageのKMS attestation/Binary Authorization、controller Service、Worker shadow bundleをstrict read-backした。
+  GPU 0、CPU 1、512 MiB、retry 0のfresh bootstrap preflightはGPU、D1 fixture、R2 objectを使わず固定failure markerで終了し、
+  Job/Executionを0へcleanupした。controller authorizationは0、provider policyはRunPod、productionとCI workflowは未変更である。
+- 原因はruntime serviceがGoogle OIDCより先にD1 contextをlookupし、不存在handleへ`EXECUTION_NOT_FOUND`を返す一方、preflightが
+  既存context前提の`RESOURCE_DRIFT`だけを成功としていた順序不整合だった。identity verificationをcontext lookupより先へ移し、
+  fresh handleでは認証後の404 `EXECUTION_NOT_FOUND`だけを成功markerとする。無効identityにはhandleの存在有無を露出せず
+  `AUTHENTICATION_FAILED`を返す回帰testを追加した。このsource変更により`3ea5d21` evidenceは失効し、新candidateが必要である。
+
+Remote rerun status (2026-08-14):
+
+- source `26a09dc`のrelease candidate workflow `31779830488`とCloud Run image workflow `31779830806`は成功した。
+  build-once candidate、controller/worker両image、KMS attestation、Binary Authorization、controller Service、Worker bundleを
+  strict read-backし、同じworker imageによるGPU 0、CPU 1、512 MiB、retry 0のfresh preflightは認証後の
+  `EXECUTION_NOT_FOUND` marker 1で成功した。production resourceとCI workflowは変更していない。
+- stagingを有限1 execution/250 JPY authorizationと`cloud_run_jobs_l4_v1`へ切り替え、Access保護済みWebの通常upload/Queue経路から
+  合成M4Aを1件だけ投入した。D1はjob、attempt、provider executionを各1件、runtime bootstrap 1件、runtime event 6件として記録し、
+  `bootstrap`、`download`、`transcribe`、`publish` heartbeat、terminal `succeeded`、session revokeへ収束した。
+- manifest-lastとMarkdown/JSON/SRTの3 artifactはsize、SHA-256、JSON contractが一致し、notificationは`SENT`へ収束した。
+  新規投入停止を先に行うためprovider policyをRunPodへ戻し、active Worker 1 version、traffic 100%、binding 25を照合した。
+- deployed CronはD1 provider version 6に対するcontroller version 8の`STALE_VERSION`をCAS適用後、同じsweep内のbounded retryで
+  cleanupを再要求した。D1 cleanupは`SUCCEEDED`、provider version 9、Firestore executionは`CLEANED` version 9となり、
+  手動repository repairや直接SQL mutationなしでautomatic cleanup acceptanceが成功した。
+- controller/Firestore authorizationを0へ戻し、利用者delete後の次のCronでD1対象rowを0へ削除した。Cloud Run Job/Execution 0、
+  Firestore controller 3 collection空、R2 source/result prefix空、検査用read-only Worker不存在を独立read-backした。
+  failure/cancel系を含む残りのformal staging条件は未完了であり、この成功系だけでPhase 15完了またはproduction promotion可とはしない。
+
+Local bounded-fault preparation (2026-08-14):
+
+- worker停止、heartbeat response loss、通知一時障害を同一candidateで再現するため、[ADR 0084](./adr/0084-bound-staging-fault-acceptance-by-job-and-time.md)
+  のstaging-only leaseを実装した。固定3 scenario、単一job ULID、最大30分の完全設定だけを受理し、部分設定、任意fault、
+  local/production設定をfail closedにする。公開管理endpoint、D1 fault table、title/filename triggerは追加していない。
+- runtime faultはD1のcurrent active Cloud Run attemptとjob IDを完全一致させ、session認証とack/heartbeat永続化が成功した後だけ
+  responseを失わせる。認証失敗をfault responseで上書きしない。通知faultは対象jobのoutboxだけをretryableへ戻し、Discordを
+  呼ばない。lease除去後は通常outbox retryを使う。
+- targeted unit 50件と実migrationを使うWorkers integration 66件を通した。staging renderer/read-backはfault時だけ4件をexact照合し、
+  production renderer/read-backは入力・active bindingの両方で4件を拒否する。CI workflow、remote staging、GPU、cloud resource、
+  productionは変更していない。このsource変更により`26a09dc`の成功系evidenceは次candidate promotionへ使用できず、全local gate後の
+  新commitをbuild-onceする。
+
+Remote bounded-failure batch (2026-08-14):
+
+- source `c03fd7f`の同一candidateを使い、承認済み上限5 L4 execution、1,250 JPY、task/parallelism 1、retry 0の
+  範囲でformal stagingを実行した。通常成功と通知一時障害、claim後worker停止、heartbeat response loss、実破損M4Aは
+  expected terminal、通知、artifact有無、cleanupへ収束した。5 execution消費後の追加投入はauthorization境界でGPUを作らず
+  rejectされ、Cloud Run Job/Execution 0を維持した。
+- 実行中jobをWeb UIから一度cancelした試験では、D1は直ちに`CANCEL_REQUESTED`となったがcontroller cancel requestは0件のまま、
+  44秒後にruntimeの`TRANSCRIPTION_FAILED`が先に確定した。Web cancelからprovider伝播が5分Cronだけに依存する実装欠陥であり、
+  このscenarioはacceptance failureとする。Phase 15は未完了、production promotionはblockedである。
+- provider policyとfault bindingを通常RunPodへ戻し、controller authorization/Firestore budgetを0へ無効化した。Cloud Run
+  Job/Executionは0、Firestore controller 3 collectionは空、対象6 fixtureのD1親子rowは0へ収束した。D1物理削除はapplication
+  deletion serviceのR2 delete-and-verify後だけ成立するが、承認待ち中にrowが削除されたため、このbatch固有R2 keyの独立HEAD
+  再検証はできなかった。productionとCIは変更していない。
+
+Local immediate-cancel remediation (2026-08-15):
+
+- [ADR 0085](./adr/0085-dispatch-user-cancellation-through-existing-queue.md)に従い、owner検証済みWeb cancelのD1確定後にstrictな
+  `job-control` eventを既存environment Queueへawait送信し、OrchestratorがD1 primaryからexact current Cloud Run candidateを
+  再検証してcontroller cancelを即時dispatchする経路を追加した。送信失敗はHTTP retry、duplicateはD1/controller version CAS、
+  effect不明はQueue retry、最終的なlost wake-upは既存Cronで回復する。
+- Pagesの`CONTROL_EVENTS` producer bindingをtracked staging/production configへ追加し、read-backはmain Queueのproducer 2件
+  （R2、Web）、consumer 1件とPages production configのexact bindingを要求する。新規Queue resource、public control endpoint、
+  Webへのcontroller secretは追加しない。修正時点でremote staging、GPU、CI、productionは変更していない。
+- このsource変更により`c03fd7f`の全remote evidenceはpromotionへ使用できない。local gateとcommit後、新candidateを一度だけ
+  buildし、Phase 14 gateからやり直す。新しいGPU executionは別の明示承認まで開始しない。
+
+Remote immediate-cancel candidate check (2026-08-15):
+
+- source `fe90b14`のbuild-once candidateでPhase 14 gateを通し、staging限定、最大5 L4 execution、1,250 JPY、
+  task/parallelism 1、retry 0のauthorizationを設定した。監視titleの不一致で最初のVAD有効fixtureはcancel前に正常完了したが、
+  artifact 3件、notification `SENT`、provider cleanup、Cloud Run Job/Execution 0へ収束し、利用者delete後にD1親子row 0を確認した。
+- 2本目はVADを無効化してruntime ack後にWeb UIからcancelを一度だけ要求した。D1のcancel requestは
+  `2026-08-15T03:51:31.929Z`、Cloud Run Executionのcancel完了は`2026-08-15T03:52:03.423015Z`で、約31.5秒後に
+  `cancelledCount=1`、failed/succeeded 0へ停止した。Queue即時dispatchは機能し、artifactとnotificationは0を維持した。
+- 一方、controllerのdurable recordは最初のcancel前に保存した`running` execution snapshotを保持し、以後のcancel actionで
+  providerを再観測せず同じcancelを再送した。04:00、04:05のCron後もD1は`CANCEL_REQUESTED`のままterminal/cleanupへ
+  収束しなかったため、このscenarioはformal acceptance failureとする。残り3 GPU scenarioは実行せず、provider policyを
+  RunPodへ戻した。productionとCIは変更していない。
+- failure確定後は利用者deleteからcontroller cleanupを行い、Cloud Run Job/Execution 0、対象2 fixtureのD1親子row 0へ
+  収束した。controller ServiceとFirestore authorizationをdisabled/0へ戻し、cleaned execution 2件と対応request 13件を
+  update-time条件付きで削除した。最終read-backはFirestore controller 3 collection空、OrchestratorのRunPod policy、
+  exact candidate単一version 100%を確認した。
+
+Local cancel convergence remediation (2026-08-15):
+
+- controllerは初回cancelを従来どおり即時送信し、`cancelIntent`が既に永続化された次のcancel actionではprovider executionを
+  先に再観測する。既にcancelledなら新しいcancel mutationを送らずdurable stateを`CANCELLED`へ進める。
+- 実providerと同じ「cancel mutation後に保存snapshotはrunningのまま、provider readはcancelled」の再現testを追加した。
+  修正前は`pending`となって失敗し、修正後は`cancelled`、cancel call 1件を確認した。gpu-controller全106 testとstrict
+  typecheckは成功した。
+- このsource変更で`fe90b14`のremote evidenceはpromotionへ使用できない。全local gate、commit、build-once、Phase 14、
+  Phase 15を新candidateでやり直し、別の明示承認なしに追加GPU executionを開始しない。
+
+Remote cancel-convergence candidate Phase 14 gate (2026-08-15):
+
+- source `b7ae428`のapplication workflow `31864679572`とCloud Run workflow `31864679844`は成功した。
+  RunPod Workerは検証済みdigestを再利用し、controller/Cloud Run Worker imageはbuild-once、SBOM、scan、KMS
+  attestation、Binary Authorizationを通過した。controller Service、IAM、Secret Manager、Firestore、両attestationを
+  strict read-backし、同じWorker digestのGPU 0 preflightは認証後の`EXECUTION_NOT_FOUND` marker 1で成功した。
+- staging限定1 execution/250 JPY、L4 1、4 vCPU、16 GiB、task/parallelism 1、retry 0、timeout 3,300秒を
+  実行直前に照合し、16分の非機密合成WAVをexact 1回実行した。runtimeは`bootstrap`、`download`、`transcribe`、
+  `publish` heartbeat、terminal `succeeded`、session revokeへ収束し、segment 20、manifest v2、Markdown/JSON/SRT
+  3 artifactのsizeとSHA-256が一致した。Cloud LoggingはExecution 1、success marker 1、failure marker 0、task
+  attempt/index 0だけだった。
+- terminal後の自動cleanupが監視pollより先にExecutionを削除したため、一時監視scriptはExecution 0を失敗表示した。
+  D1 terminal、Cloud Logging、controller `CLEANUP_PENDING`を独立read-backして正常なcleanup開始と確定し、追加Executionや
+  再試行は行わなかった。controllerは`CLEANED` version 9へ収束した。
+- provider policyをRunPodへ戻し、controller/Firestore authorizationをdisabled/0へ戻した。最終read-backはCloud Run
+  Job/Execution 0、D1対象5系統0、R2 fixture/artifact/manifest 5 object不存在、Firestore controller 3 collection空、
+  exact candidate単一version 100%だった。production resourceとCI workflowは変更していない。Phase 15はcancel scenarioを
+  最初に実行し、同じ不具合の解消を実providerで確定するまで残りのGPU scenarioを開始しない。
+
+Remote cancel-convergence candidate Phase 15 cancel gate (2026-08-15):
+
+- 最初のpreflightでFirestore finite authorization文書の作成を欠落させたoperator errorがあり、controller create/reconcileは
+  `INTERNAL_ERROR`で拒否された。Cloud Run mutation、Job/Execution、Firestore execution、GPU executionはいずれも0で、
+  無効fixtureをD1/R2から削除した。cleanup用empty検査を実行前gateへ誤用したことが原因であり、ServiceとFirestoreの
+  finite authorization、active/reserved 0を含む単一fail-closed preflightへ固定した。
+- 修正後preflightでexact `b7ae428`、fault不存在、1 execution/250 JPY、Cloud Run 0、L4 quota 3、Pages/Worker bindingを
+  一括照合した。通常Web upload/Queue経路のruntime `ack`後、cancelをUIからexact 1回送った。Cloud Audit Loggingの
+  `CancelExecution`はexact 1件、Executionは`cancelledCount=1`、failed/succeeded 0へ約29.3秒で停止した。
+- controller requestは初回cancelと再観測の2件、provider cancel mutationは1件だった。再観測でdurable stateは
+  `CANCELLED` version 10、D1はjob/attempt `CANCELLED`、provider `TERMINAL/CANCELLED`へ収束し、artifact/notificationは0だった。
+  利用者delete後、delete結果不明を次Cronで再確認してcontroller `CLEANED` version 13、D1対象row 0へ収束した。
+- 最終read-backはCloud Run Job/Execution 0、R2対象5 object不存在、Firestore controller 3 collection空、Orchestrator
+  RunPod policy、authorization disabled/0、exact candidate単一version 100%だった。productionとCIは未変更である。
+  cancel scenarioは成功した。残り4 GPU scenarioは別の明示承認まで開始せず、Phase 15 overallは未完了とする。
+
+Remote remaining bounded-failure batch (2026-08-15):
+
+- 同じsource `b7ae428`とbuild-once artifactに対し、staging限定で最大4 L4 execution、合計1,000 JPY、
+  1 executionあたり250 JPYを明示承認した。単一preflightでfault不存在、task/parallelism 1、retry 0、
+  timeout 3,300秒、Cloud Run Job/Execution 0、Firestore active/reserved 0、L4 quota 3、Worker/Pagesのexact
+  candidateを照合した。公式単価と保守的な為替・税・network allowanceによる1 executionのworst-caseは233 JPYだった。
+- 通知一時障害は通常runtime success、manifestとMarkdown/JSON/SRT 3 artifactのsize/SHA-256/contract一致を維持し、
+  対象jobだけnotification attempt 1を`DISCORD_UNAVAILABLE` / `PENDING`へ戻した。fault leaseを全削除した後、同じ
+  outbox rowが次Cronでattempt 2 / `SENT`となった。monitorの最初の7分窓が06:25 UTC Cronの約3秒前に終了した
+  operator false-negativeがあったが、同一jobの次Cron結果を読み直しており、追加GPU executionはない。
+- claim後worker停止はruntime `ack` 1、heartbeat 0、terminal event 0、artifact 0、heartbeat response lossは
+  `ack` 1、heartbeat 1、terminal event 0、artifact 0となった。どちらもD1 job/attempt `FAILED`、失敗通知`SENT`、
+  controller cleanup `SUCCEEDED`へdeployed Cronだけで収束し、scenarioごとにfault 4 bindingを除去した。
+- 実破損66 byte M4Aはfaultを使わず、runtime terminal `INVALID_MEDIA` 1、artifact 0、失敗通知`SENT`、cleanup
+  `SUCCEEDED`へ収束した。remote D1の複数table監視queryがtimeoutしたため、primary-key単表readへ軽量化して同一jobを
+  判定した。実行の再投入や追加GPU executionは行っていない。
+- 4 execution消費後の追加fixtureは有限authorization境界で`cloud_run_submission_rejected` 1、bootstrap 0、artifact 0、
+  cleanup `SUCCEEDED`となり、Cloud Run Job/ExecutionとGPUを作成しなかった。各GPU scenario後はactive 0を確認し、
+  最終予約は4 execution / 1,000 JPYだった。
+- Web UIから5 fixtureを削除し、D1 job graph 5件を0、保存済みexact keyに対するR2 source/manifest/3 artifact
+  計25 objectを404として独立確認した。controllerは4 execution document、18 request document、environment 1件を
+  update-time条件付きで削除し、3 collection空となった。最終read-backはCloud Run Job/Execution 0、controller
+  authorization disabled/0、Service generation 43、Orchestrator RunPod policy、fault不存在、exact candidate単一version
+  100%、Pages exact candidateだった。production resourceとCI workflowは変更していない。
+- candidate `b7ae428`のcancel、通知障害、worker停止、heartbeat response loss、破損media、capacity rejectionは成功した。
+  Phase 15 overallはAndroid実機file picker/upload、利用者向けartifact download、controller outageの同candidate evidenceが
+  完了するまでIn progressを維持し、Phase 16 production promotionは開始しない。
+
+Remote final Android/download/controller-outage gate (2026-08-15):
+
+- 同じsource `b7ae428`とbuild-once artifactについて、staging限定L4 exact 1 execution、上限250 JPYを追加承認した。
+  実行直前にcontroller/Firestore authorization 1 execution/250 JPY、Cloud Run Job/Execution 0、active job 0、
+  cleanup未完了Cloud Run provider 0、L4 quota、exact Worker/Pages candidateを一括照合した。worst-caseは233 JPYで、
+  task/parallelism 1、retry 0、timeout 3,300秒を維持した。
+- Android実機のfile pickerから非機密M4Aを通常Web upload/Queue経路へ1件だけ投入した。承認後に作成されたjobは
+  正確に1件だったため、そのauthorization windowで対象を固定し、再uploadを行わなかった。runtimeは`ack` 1、
+  heartbeat 4へ進み、provider `RUNNING`中に実controller Service ingressをinternalへ変更した。candidate revisionを
+  変えずに実transportを遮断し、terminal 1、job/attempt `COMPLETED`、manifestと3 artifact、provider `TERMINAL`、
+  cleanup `PENDING`を遮断中に確認した。
+- terminal後も35秒以上遮断を維持してからpublic ingressへ戻し、同じrevisionをread-backした。deployed Cronだけで
+  cleanupは`IN_PROGRESS`から`SUCCEEDED`、通知は`SENT`へ収束した。追加GPU executionや手動cleanup requestはない。
+- 利用者はAndroid実機でMarkdownをdownloadして端末で開いた。独立read-backはmanifest identity、Markdown/JSON/SRT
+  3 artifactのsize、SHA-256、JSON contractをすべて照合した。利用者delete後はD1 job graph 1件を0、保存済みexact
+  keyへのR2 source/manifest/3 artifact計5 objectを404として確認した。
+- controller authorizationをdisabled/0、OrchestratorをRunPod policyへ戻した。exact `CLEANED` execution 1件、request
+  4件、disabled environment 1件だけをupdate-time条件付きで削除した。最終read-backはCloud Run Job/Execution 0、
+  Firestore 3 collection空、controller Service generation 47、fault不存在、exact candidate単一Worker version 100% / binding
+  25、Pages exact candidateだった。production resourceとCI workflowは変更していない。
+- Android file picker/upload、artifact download、controller outageを含むPhase 15の全完了条件を同じcandidateへ結び付けた。
+  Phase 15を完了とし、Phase 16はこのevidenceとcandidateだけを入力にする。
 
 実装:
 
@@ -1481,17 +1824,221 @@ local preparation（2026-08-11〜12）:
 - acceptance失敗時はproduction workflowを起動せず、原因をlocal/fake testまたはprovider証拠へ還元して
   新commitからcandidateを作り直す。
 
-### Phase 16: production cutover and `v0.2.0`
+### Phase 16: production cutover and `v0.2.0`（完了、2026-08-20）
+
+Local gate hardening after the first Phase 16 preflight (2026-08-15):
+
+- 最初のstaging workflowはEnvironmentのcontroller origin欠落によりremote mutation、Cloud Run Job、GPU、課金の
+  前に停止した。read-only監査でcontroller HMAC secret version、controller origin、runtime service account、R2 hostの
+  計4 variable欠落を確認した。値を手作業で追加して再dispatchせず、[ADR 0087](./adr/0087-fail-before-paid-staging-acceptance-and-recover.md)
+  に従い20 variable/6 secretの完全一致contractと4値の実resource read-backをsourceへ追加した。
+- Phase 14/15の手動GPU 0 bootstrap proof、Playwright install順序、3,600秒token、acceptance発行前のRunPod復帰と
+  disabled/zero read-back、失敗時fixture/controller/resource回収を一つのworkflowへ固定した。staging専用preflight
+  roleはproduction deployerへ権限を広げず、`runWithOverrides`を持たない。GPU固有に制限できない`run.jobs.run`は
+  exact workflow identityとGPU fieldを拒否するsource-controlled managerで閉じる。
+- Phase 15で確定済みのL4 quota 3、fixed manifest、worst-case 233円/authorization 250円を再評価せず
+  source-controlled paid-readinessへ移植した。backend promotionはRunPod選択を維持し、Cloud Run選択を
+  readiness後だけに限定する。acceptanceが失敗/cancelされた場合はarm outputなしでrecoveryを起動し、
+  YAML重複keyとrecovery stepの暗黙skipをCI static verifierで拒否する。
+- 同じcommitのworkflow dispatchとjob re-runを拒否する。failed acceptanceのrecoveryは新規GPUを作らず、同じrunの
+  stateだけを安全状態へ収束し、evidenceを発行しない。local source変更だけであり、この時点ではGitHub Environment、
+  GCP IAM、staging resource、CI run、GPU、productionを変更していない。
+- candidate deploymentはpreflight、migration、Pages、R2、RunPod、Orchestrator promotion後、acceptance最初の
+  candidate identity検証で停止した。`EXPECTED_RELEASE_BRANCH`がpreflightにだけあり、acceptanceとrecoveryに
+  伝播していなかったため、両jobとも同じfail-closed verifierを実行できなかった。acceptance mutation前の停止と
+  resource zero convergenceを確認し、`verify-workflow-run.mjs`を呼ぶ全jobをYAML ASTから列挙してcommit、branch、
+  workflow別dispatch input bindingの完全一致を`pnpm ci:verify`でPublish前に強制した。acceptance欠落、recovery欠落、
+  untrusted run ID、新規jobの検査漏れをそれぞれlocal回帰testで拒否する。
+- 次のcandidateは両Publishとremote preflightを通り、acceptanceのcandidate identity検証も成功したが、clean checkoutで
+  `@scribe-drop/contracts`等のbuild出力がないままcontrollerだけをtarget buildして停止した。aggregate local checkは先に
+  全workspaceをbuildした生成物を残すため、このworkflow順序不整合を隠していた。staging acceptance/recoveryとproduction
+  preflight/finalizeの同型4箇所をdependency closure付きroot scriptへ統一し、`pnpm check`ではtestとaggregate buildより前に
+  clean controller buildを実行する。package scriptと全workflow stepの完全一致はYAML AST gateで強制し、target-only build、
+  production側の同一regression、clean buildの後置をlocal testで拒否する。
+- dependency closure修正後のstaging acceptanceはcontroller buildを通過したが、disabled controller適用後の15 endpoint
+  一括read-backがrequest key/statusを隠して停止し、recoveryも同じread-backでRunPod再有効化前に停止した。実resourceは
+  controller authorization disabled/0、Cloud Run Job/Execution 0、Firestore request/execution 0、Orchestrator
+  `runpod_serverless_v1` / admission pausedへ収束している。`/tmp` prototypeで全15 endpoint、実Service requestの
+  `validateOnly=true` PATCH、Service非変更を確認してから、固定request key/statusだけを出す診断、同じdouble-snapshot
+  read-back、validate-only前後のService完全一致をsourceとtestへ昇格した。
+- staging workflowにmutation-free `preflight_only`を追加し、同じWIF deployerでcandidate、全remote prerequisite、controller
+  validate-only/read-backを検証した後に終了できるようにした。D1 migration以降はboolean gateとjob dependencyで開始不能とし、
+  preflight-only runは通常Deployのexact-oneを消費しない一方、偽装したrun identityを拒否する。通常staging acceptanceと
+  recovery、production cutover/finalizeも同じdependency-closed buildとcontroller preflightを使い、実identityの
+  preflight-only evidenceが成功するまで新しいstaging mutationを行わない。
+- 最初のmutation-free preflightは同一commitの両candidate照合とCloud Run Service `validateOnly`を通過後、Firestore database
+  metadata GETで403停止した。release deployer roleはtransaction用`datastore.databases.get`を持っていたが、database object
+  読取に必要な`datastore.databases.getMetadata`を欠いていた。公式IAM契約に合わせてread-only permissionを追加し、既存shared
+  custom roleだけをupdate/read-backする専用commandを追加した。full foundation apply、secret rotation、database/Service/IAM binding
+  mutationをこの修復経路から排除し、permission集合とcommand mutation scopeをlocal回帰testで固定する。
+- bounded acceptanceの実M4A lifecycleはexact-one L4 authorizationで成功したが、cleanup verifierがreaperの
+  Firestore収束を単発readして`activeExecutions=1`を失敗判定した。実resourceはその後Job/Execution 0、record
+  `CLEANED`へ収束し、recoveryもauthorization disabled/zeroとRunPod baselineを復元した。[ADR 0088](./adr/0088-recover-successful-staging-lifecycle-evidence.md)
+  に従い、通常verifierを最大20分のbounded pollへ変更する。今回のsource runは実M4A成功step、cleanup verifierだけの
+  failure、recovery全安全stepを固定fingerprintで検証し、source時間内のexact-one `CLEANED` recordと現在の全live parityを
+  再検証するGPU-free jobだけで短命acceptanceへ復旧する。通常acceptance job、migration、deploy、controller apply、GPUは
+  実行せず、candidate identityにworkflow `GITHUB_SHA`を代入する既存evidence CLIの不整合もstatic gateで拒否する。
+- GPU-free staging run `31922702942`はsource lifecycle、Cloud Run/Firestoreのexact-one `CLEANED` state、RunPod baseline、
+  全Cloudflare read-back、schema version 3 evidence発行を完了し、通常acceptance/GPU/migration/deployはskipした。
+  production workflowをdispatchせず末尾までtraceした結果、workflow commitをcandidate artifact/evidenceへ代入する同型不整合を
+  RunPod promotion、cutover/release evidenceまで確認した。[ADR 0089](./adr/0089-separate-production-workflow-and-candidate-identity.md)
+  に従いcandidate commitを必須入力へ分離し、productionの全remote prerequisiteだけを実行する`preflight_only`を追加する。
+  9 mutation stepのskipをsourceと成功run APIの両方で検証し、そのpreflight run IDなしに実cutoverを開始できないようにする。
+- 最初のproduction preflight run `31923304805`はproduction Environment承認後も全mutationをskipしたが、acceptanceから
+  `GITHUB_ENV`へexportしたcandidate run IDを同じstepで参照して空IDのartifact downloadが404となった。staging evidenceと
+  candidate自体の事前照合は成功し、production resourceは未変更である。cutover/finalizeの両方でacceptance exportとcandidate
+  downloadを別stepへ分離し、同じstepでの`${CANDIDATE_RUN_ID}`参照をstatic gateで拒否する。
+- 次のproduction preflight run `31923669728`はfoundation read-backを通過したが、初回productionではcontroller Serviceが
+  未作成であるにもかかわらずvalidate-only PATCHを先行させ、Cloud Runが404を返した。未作成Serviceは既存のread-only
+  control-plane preflightで許容する一方、PATCHを送らない。既存Serviceだけは従来どおりvalidate-only PATCHと前後snapshot
+  完全一致を必須にし、未作成時のPATCH 0回、既存時の二重snapshot、変更検知をlocal testで固定する。このrunもGPU、migration、
+  deploy、provider切替、authorizationを含む全production mutation stepはskipした。
+- production preflight run `31924206961`はcandidate、staging identity、foundation、controller absent-Service read-backを通過後、
+  disabled config renderでproduction EnvironmentのRunPod GPU集合が固定3種ではなく2種だったため停止した。全production mutationは
+  skipされた。このdispatch前に外形検査可能だったdriftと、actual cutoverのRunPod promotionが要求するenvironment policy IDを
+  cutover job内で生成していないstep間契約欠落を同時に修正する。source-controlled local contractはworkflowが参照する15 variable、
+  6 secret名、production render、candidate/staging policy parity、policy producer/consumer順序を完全一致検査する。実Environmentの
+  read-only検査ではGPU集合だけが不一致で、固定3種への単一補正をmemory上で適用すると15値とstaging parityがすべて成功することを
+  確認した。production GitHub controlsとCloud Run foundationの実read-backも成功した。外部値は承認前に変更せず、workflowも
+  dispatchしない。source/workflow/config変更後はGPUを再実行せずGPU-free staging evidenceを更新する。
+- GPU-free staging run `32312021835`は変更後source、両candidate、source lifecycle、全live parityを再検証して成功した。
+  production preflight `32312333527`は全mutationをskipし、sourceで要求済みのproduction RunPod capacityに実endpointが未移行の
+  ため停止した。明示承認後、local-only managerがjob/worker全0を確認し、data centerをAny Region、GPUを固定3種へ各1回更新して
+  完全read-backした。replacement preflight `32313523493`ではRunPod capacity readyまで成功したが、最後のWrangler Pages
+  deployment read-backが同stepのbackend tokenをPages専用tokenより優先して認証失敗した。Pages commandだけprocess-localに専用
+  tokenをbindし、Cloudflare/RunPod個別commandの完全順序とtoken overrideをstatic contractで固定する。両runともmigration、deploy、
+  provider切替、authorization、GPU、evidence発行はskipされた。
+- GPU-free staging run `32314247491`とproduction preflight `32314590987`は修正後sourceで成功し、preflightの9 mutation stepも
+  API verifierで全skipを確認した。production cutover `32314997150`はmigration/R2 policyとRunPod image promotionまで成功したが、
+  未作成controller Serviceへ`allowMissing=true`と`updateMask`を併用したPATCHが404で停止した。application deploy、provider切替、
+  authorization、GPUは未実行である。Cloud Audit Logは`update_mask requires the resource to exist`を返したため、初回だけ公式
+  CreateService POST、既存ServiceだけPATCHへ分離する。初回preflightもPOST `validateOnly=true`を実行し、実production planで
+  request受理、13 read-back、Service非作成を確認した。CreateService bodyは実API要件に従いidentifier `name`を含めない。
+- production preflight `32315945525`はGitHub production deployerでCreateService validate-onlyを実行し、全mutationをskipしたまま
+  `invoker_iam_disabled`に必要な`run.services.setIamPolicy`不足を検出した。local userでの成功をworkflow identityの成功と扱った
+  事前検査が不十分だった。cutover全後続stepをAPI/identity/permission/resourceごとに追跡し、D1/R2/RunPodは先行cutoverで実成功、
+  Cloudflare write権限はtoken contractと実upload/read-back、GCP runtime権限はfoundation exact role/bindingとstaging acceptanceで確認した。
+  shared release deployer roleへ不足1権限を追加し、Service create/update/read-backの完全permission集合を回帰testで固定する。
+- GPU-free staging recovery `32316687544`とproduction preflight `32316969311`は修正後sourceで成功した。production cutover
+  `32317373734`は全external control-plane、migration/R2、RunPod promotion、controller Service作成まで成功したが、Cloud Run v2の
+  main `uri`がhash形式である一方、exporterがproject-number形式だけを`uri`として許可したため、application deploy前に停止した。
+  ServiceはReady、application/providerはRunPodのまま、GPU executionは0である。exporterは対象Service名と公式`urls[]`を検証し、
+  その集合に含まれる既知のproject-number originだけを出力する。production preflightでも同じexporterをactual deployer identityで
+  実行する。失敗runが残した未消費smoke authorizationは、exact failed-run epoch、active 0、reserved 0だけを許すsource-managed
+  production recoveryでdisabled/zeroへ戻し、read-back後に次のpromotion gateへ進む。
+- 最初のproduction recoveryは事前guardを通過してServiceをdisabled構成へ更新した後、Firestore書込み直前の同じguardへ
+  environment引数を渡していなかったため停止した。Firestore authorizationは旧smoke、Job/Executionは0のままである。manager内の
+  全2 call siteでenvironment伝播を必須にし、sourceを直接検査する回帰testで片方だけの修正を拒否する。
+- call-site修正後のsource-managed production recoveryは、旧cutover epochとactive/reserved 0/0を再照合して成功した。
+  独立read-backはcontroller Service Ready、authorization disabled/zero、Firestore TTL 2、Cloud Run Job/Execution 0を確認し、
+  GPU executionは行っていない。
+- GPU-free staging recovery `32319144830`とmutation-free production preflight `32319686819`は成功し、formal verifierで
+  production mutation 9 stepがすべてskipされたことを確認した。production cutover `32320261017`はmigration/R2、RunPod image
+  promotion、controller smoke構成、admission pausedのRunPod Orchestrator deployまで成功後、Pages deployが一般Cloudflare tokenを
+  継承して認証code 10000で停止した。provider切替、active admission、GPU execution、cutover evidenceは未実行である。実Pages
+  deployはpreflightと同じ専用Pages tokenへ明示的に束縛し、production workflow内の全Pages deploy件数と束縛件数の一致をCI
+  static verifierで強制する。未消費smoke authorizationは次のpromotion sequence前にexact failed-run epochのsource-managed
+  recoveryでdisabled/zeroへ戻した。独立read-backはcontroller Service Ready、authorization disabled/zero、Firestore TTL 2、
+  Cloud Run Job/Execution 0/0を確認した。
+- production cutover `32330064196`と実画面のexact-one smokeはCloud Run lifecycle、3 artifact、manifest、cleanup、Discord
+  配送まで成功したが、通知の処理時間が`未取得`だった。Cloud Run terminal finalizeが互換列
+  `job_attempts.runpod_execution_ms`を更新せず、従来のstaging acceptanceも完了通知の処理時間を検査せずfixtureを削除していた。
+  Cloud Runではattempt claimからterminal確定までを整数millisecondで保存し、完了通知は処理時間をnon-null必須としてfail closedに
+  する。staging acceptanceは実M4A完了後、正の音声時間、正の処理時間、Cloud Run provider identity、current job versionの
+  Discord `SENT`をD1で確認してからowner pathでfixtureを削除する。この検査を通らないcandidateはacceptance evidenceを発行せず、
+  productionは既存データを補正せず同一candidateのdeployだけを行う。
+- 同じsmoke後に判明したcleanup verifierのenvironment固定も、選択した`staging|production`をauthorization documentとexact-one
+  execution recordの両方へ要求する形へ修正した。production名を受理しながら内部でstagingだけを比較する状態を回帰testで拒否し、
+  production smoke verifierにも正の処理時間を追加した。
+- 処理時間修正candidateのcontroller scanは、固定distroless Debian 13 package
+  `libssl3t64 3.5.6-1~deb13u2`に新規HIGH `CVE-2026-14456`を検出してpublish前に停止した。公式Node 24 imageの最新digestも
+  同じpackageで、CVEの対象はcontrollerが使用しないOpenSSL QUIC server Listenerである。[ADR 0090](./adr/0090-scope-controller-openssl-quic-scan-exception.md)
+  に従いcontrollerの完全PURLだけを2026-09-20まで除外し、実containerのNode processがOS `libssl`をloadしていないことを
+  offline invariantで必須化する。他image、別package、期限切れ、shared object観測不能には例外を適用しない。このsource変更を
+  含む新candidateをbuildし、staging acceptanceをやり直すまでproductionへ進まない。
+- application candidate `32333708361`とCloud Run candidate `32333708385`は同一commit
+  `d5233fde17fc0ed84fade8953c5d5d9dbb90471f`をbuild、scan、署名・attestし、GPU-free preflight
+  `32334434850`を通過した。staging acceptance `32335301895`はexact-one L4実行、実M4A lifecycle、正の音声時間・
+  処理時間、Discord `SENT`、owner deletion、reaper安全収束まで成功したが、cleanup verifierがFirestore collection全体を
+  exact oneと誤認し、正常な過去の`CLEANED` recordを含むinventoryを拒否した。recoveryはauthorization disabled/zero、
+  Cloud Run Job/Execution 0、RunPod baselineへの復元を完了し、追加GPUは実行していない。[ADR 0088](./adr/0088-recover-successful-staging-lifecycle-evidence.md)
+  の復旧条件に従い、通常cleanupとrecoveryの双方をsource run時間内のexact-one recordへ限定し、最大100件の履歴はすべて
+  `CLEANED`、paginationなしを要求する。修正後は同candidateと成功済みsource lifecycleをGPU-free recoveryで再検証し、
+  staging evidenceを復旧する。candidateの再build、deploy、migration、実E2E、GPU再実行は行わない。
+- 最初のGPU-free recovery `32337084095`は全remote preflightを成功し、全mutation jobと通常acceptanceをskipしたが、
+  source lifecycle verifierが以前のresume-only run形状だけを想定し、正式なfull staging sourceで成功済みのmigration／
+  promotion jobsを`skipped`でないとして拒否した。resource mutationとGPU実行は0である。source runはmigration／promotion
+  3 jobsが全件`success`のfull staging、または全件`skipped`のresume-only stagingだけを許可し、混在を拒否する。recovery run
+  自身は従来どおり全mutation jobのskipを必須とし、同candidate・同source runでGPU-free evidence復旧だけを再実行する。
+- replacement GPU-free recovery `32337567653`は全remote preflight、source lifecycle fingerprint、source-run scoped
+  controller execution history、Cloud Run/Firestore disabled zero、RunPod baseline、全Cloudflare live parity、schema version 3
+  acceptance発行・uploadを成功した。D1 migration、Pages promotion、R2/RunPod/Orchestrator promotion、通常acceptance、
+  automatic recoveryはすべてskipされ、GPU executionは0である。staging evidenceはimmutable candidate commit
+  `d5233fde17fc0ed84fade8953c5d5d9dbb90471f`、application candidate run `32333708361`、Cloud Run candidate run
+  `32333708385`へ固定され、productionではこのcandidateを再build・修正せずdeployだけ行う。
+- current release headと一致するGPU-free staging evidence `32337888748`、production preflight `32338096197`は成功し、
+  preflightのproduction mutation 9 stepはすべてskipされた。production cutover `32338679303`はmigration/R2 policyとRunPod
+  image promotion後、controller deployが旧cutover `32330064196`で消費済みのsmoke authorizationを検出し、application deploy、
+  provider切替、authorization更新、GPU実行前に停止した。旧smokeは処理時間未取得のためfinalizeを保留してreserved 1のまま
+  だったが、Service validate-only中心のpreflightがFirestore authorizationを読まず合格したことが原因である。
+  [ADR 0091](./adr/0091-require-controller-authorization-precondition.md)に従い、cutover preflightはdisabled/全0、finalize preflightは
+  consumed exact-oneをService検査前にread-onlyで必須化する。旧枠はsource-run scoped cleanup、exact epoch、active/resource 0、
+  explicit consumed-recovery opt-in、CAS、disabled/zero read-backでだけ閉じる。source変更をGPU-free staging gateへ戻すまで、
+  production cleanup、cutover re-run、追加GPUを行わない。
+- authorization preflight修正後のGPU-free staging evidence `32340778282`、production preflight `32341254916`、旧smokeの
+  source-run scoped consumed recoveryは成功した。cutover `32338679303`のfailed-job rerunは全step、exact-one smoke、evidence uploadを
+  成功し、production job `01M0EZQ8GFQQKXWMF5GHW5HRVC`はCloud Run lifecycle、3 artifact、manifest、cleanup、Discord `SENT`、
+  処理時間19,821msを成功した。finalize `32342854011`はremote mutation前に、GitHub rerunが元headを保持する一方でfinalizeが
+  current headとreplacement staging run IDを過去cutoverへ要求したため停止した。cutoverは同じrelease branchの成功workflow、
+  candidate、cutover runへ固定し、当時のstaging IDを監査記録として保持する。replacement staging evidenceは別のcurrent gateとして
+  candidate identityとlive parityを検証し、過去cutover identityへ読み替えない。
+- source identity修正後のGPU-free staging evidence `32343296158`は全mutation/GPU jobをskipして成功した。finalize
+  `32343565236`はcutover evidence、controller consumed exact-one preflight、production smoke、Cloudflare read-backまで成功したが、
+  cleanup verifierへ渡す`CUTOVER_RUN_PATH`をverification jobの`GITHUB_ENV`からfinalize jobへ引き継げると誤認して空文字で停止した。
+  production mutationは行われていない。finalize job自身でexact cutover run JSONを再取得・exportし、同一job内のproducerがcleanup
+  consumerより前にあることをstatic verifierで固定する。
+- path修正後のGPU-free staging evidence `32344508026`は成功したが、finalize `32344750423`はcleanup verifier必須の
+  `SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_EPOCH`がstepに未設定で、production smoke成功後、mutation前に停止した。ローカル実run
+  cleanup検証ではepochを手動設定したためworkflowの欠落を再現できていなかった。cleanup stepはcandidate commitとcutover run ID
+  からexact smoke epochを明示し、path、Google token、epochの全required inputをstatic verifierで固定する。
+- source-managed gate追加後のGPU-free staging evidence `32345694386`は成功した。finalize `32346058051`はsmoke、notification、
+  provider cleanupを成功した後、Orchestrator admissionを`paused`へdeploy・read-backしたが、同じstepのcontroller disableに
+  `SCRIBE_DROP_CLOUD_RUN_EXPECTED_AUTHORIZATION_EPOCH`がなく入力検証で停止した。controller/Firestore mutationと追加GPU executionは
+  発生せず、live stateは`smoke-paused`である。既知envだけを検査したgateはworkflow全体の証明になっていなかった。
+- [ADR 0092](./adr/0092-make-production-finalize-resumable.md)に従い、finalizeを5つの外形状態と4つの独立mutationへ分割する。
+  cutover epochとproduction smoke handleへ結び付くread-only entry verifier、candidate+cutover固定operational epoch、全prefix failure injection test、全stepの
+  env/引数/条件/順序contractが成功するまでproductionを再dispatchしない。現在状態からは`smoke-paused`を明示して前方収束する。
+- entry verifierの初版はproduction smokeをcutover workflowの時刻窓で識別したため、実resource read-backでmutation前に拒否された。
+  smokeはcutover完了後に投入されるため、D1でE2E成功を検証したjobの`provider_handle`とFirestore recordの`executionHandle`を
+  完全一致させる方式へ修正した。別handle拒否の回帰テスト後、live `smoke-paused`、Cloud Run Job/Execution 0、active 0、
+  `CLEANED`をread-onlyで確認した。
+- source `5cf23bacfe45bbb9273b20a4d471c95a4c0aa1a2`のGPU-free staging evidence `32349481133`は全remote preflight、
+  source lifecycle、両candidate、live parityを再検証し、migration、Pages/RunPod/Orchestrator promotion、通常acceptance、recoveryを
+  すべてskipして成功した。production finalize `32349830887`は`smoke-paused` entryをmutation前に完全read-backし、smoke枠disable、
+  5 execution/1,250 JPYの有限operational authorization、admission active、final parity、Access、release evidence uploadまで成功した。
+  独立post-readbackもWorker `active` / `cloud_run_jobs_l4_v1`、controller `operational-active`、active execution 0、Cloud Run Job/Execution 0、
+  smoke record `CLEANED`を確認した。追加GPU executionとcandidate再publishは0である。最終記録は
+  [v0.2.0 production deployment record](./deployments/2026-08-20-v0.2.0-production.md)を正とする。
 
 実装:
 
-- Phase 15のexact candidateと未失効acceptanceだけをproduction workflowへ渡す。
+- ADR 0086のproduction port、admission、promotion workflowを含む単一release commitからapplication/Cloud Run
+  candidateを各1回buildし、GPU前のWIF/foundation preflightとexact-one正常lifecycleだけのbounded staging
+  acceptanceを1回通す。Phase 15のfault matrixは採用根拠として保持するが、この新candidateの代替にしない。
+- source-controlled bootstrapでstaging/production deployment WIF、deployer identity、production controller/runtime
+  identity、Firestore/TTL、regional secret、最小IAMを作成・strict read-backする。production controller Serviceは
+  staging acceptance前に作らない。
+- 未作成のproduction controller Serviceはcreate requestの`validateOnly=true`と直後の404 read-backをproduction preflightで
+  必須にする。実cutoverは同じbodyをCreateService POSTへ渡し、作成後の更新だけfield mask付きPATCHを使用する。
+- 新candidateのexact artifactと未失効acceptanceだけをproduction workflowへ渡す。
 - migration適用後、new-provider switch disabledのままcontroller、Orchestrator、Web、policyをdeployし、
   production read-backを先に完了する。
 - 新規executionを一時停止し、既存RunPod attemptがterminalまたは安全なpendingへ収束してから、
   provider switchを新attemptにだけ有効化する。
-- synthetic production smoke 1件のidentity、artifact、通知、provider resource/storage不存在、費用guardを
-  確認する。
+- `cutover`は別途承認されたL4 exact 1件・250円だけを開ける。production Accessへservice principalを追加せず、
+  利用者が実画面で1件uploadし、artifact/通知を確認する。
+- `finalize`は指定されたsmoke job IDのidentity、artifact、通知、provider resource/storage不存在、費用guardを
+  確認し、admissionをpauseしてsmoke authorizationをdisabledへ戻してから、明示された有限運用枠を設定する。
 
 完了条件:
 

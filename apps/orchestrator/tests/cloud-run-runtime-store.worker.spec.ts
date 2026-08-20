@@ -2,7 +2,11 @@ import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { createCloudRunRuntimeService } from "../src/cloud-run-runtime-composition.js";
+import { createD1RuntimeFaultTargetRepository } from "../src/cloud-run-runtime-fault-service.js";
 import { D1CloudRunRuntimeStore } from "../src/cloud-run-runtime-d1-store.js";
+import { CloudRunTerminalFinalizer } from "../src/cloud-run-terminal-finalizer.js";
+import { createD1NotificationOutboxRepository } from "../src/notification-outbox-repository.js";
 import type {
   RuntimeAttemptContext,
   RuntimeBootstrapRecord,
@@ -24,13 +28,28 @@ const OPTIONS = {
   outputFormats: ["markdown", "json", "srt"] as const,
   vad: true,
 };
+const STAGING_OPTIONS = { ...OPTIONS, language: "ja" as const };
+const CLOUD_RUN_CONTROLLER_SECRET = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
+const CLOUD_RUN_DERIVATION_SECRET = "CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg";
 
 beforeAll(async () => {
   await applyD1Migrations(env.SCRIBE_DROP_DB, env.TEST_MIGRATIONS);
 });
 
-beforeEach(async () => {
-  await env.SCRIBE_DROP_DB.exec("DELETE FROM jobs;");
+async function seedRuntimeContext(
+  overrides: {
+    readonly options?: typeof OPTIONS | typeof STAGING_OPTIONS;
+    readonly sourceContentType?: string;
+    readonly sourceEtag?: string;
+    readonly sourceKey?: string;
+    readonly sourceSizeBytes?: number;
+  } = {},
+): Promise<void> {
+  const options = overrides.options ?? OPTIONS;
+  const sourceContentType = overrides.sourceContentType ?? "audio/mp4";
+  const sourceEtag = overrides.sourceEtag ?? "synthetic-etag";
+  const sourceKey = overrides.sourceKey ?? `incoming/${OWNER_HASH}/${JOB_ID}/${NONCE}/source.m4a`;
+  const sourceSizeBytes = overrides.sourceSizeBytes ?? 1024;
   await env.SCRIBE_DROP_DB.prepare(
     `
       INSERT INTO jobs (
@@ -39,42 +58,108 @@ beforeEach(async () => {
         options_json, created_at, updated_at
       ) VALUES (
         ?1, 'owner-sub', 'owner@example.invalid', 'Synthetic runtime', 'source.m4a',
-        'recording-transcriber-test', ?2, 'audio/mp4', 1024, 1024, 'synthetic-etag',
-        'RUNNING', ?3, ?4, ?4
+        'recording-transcriber-test', ?2, ?3, ?4, ?4, ?5,
+        'RUNNING', ?6, ?7, ?7
       )
     `,
   )
     .bind(
       JOB_ID,
-      `incoming/${OWNER_HASH}/${JOB_ID}/${NONCE}/source.m4a`,
-      JSON.stringify(OPTIONS),
+      sourceKey,
+      sourceContentType,
+      sourceSizeBytes,
+      sourceEtag,
+      JSON.stringify(options),
       NOW,
     )
     .run();
   await env.SCRIBE_DROP_DB.prepare(
     `
       INSERT INTO job_attempts (
-        id, job_id, generation, status, winning_runpod_job_id, result_prefix,
+        id, job_id, generation, status, result_prefix, submission_outcome,
         provider_kind, provider_policy, execution_contract_version, execution_options_json,
-        created_at, updated_at
+        claimed_at, created_at, updated_at
       ) VALUES (
-        ?1, ?2, 1, 'RUNNING', ?3, ?4, 'cloud_run_jobs', 'cloud_run_jobs_l4_v1', 2,
-        ?5, ?6, ?6
+        ?1, ?2, 1, 'RUNNING', ?3, 'accepted', 'cloud_run_jobs',
+        'cloud_run_jobs_l4_v1', 2, ?4, ?5, ?5, ?5
       )
     `,
   )
     .bind(
       ATTEMPT_ID,
       JOB_ID,
-      HANDLE,
       `results/${OWNER_HASH}/${JOB_ID}/${ATTEMPT_ID}/`,
-      JSON.stringify(OPTIONS),
+      JSON.stringify(options),
       NOW,
     )
+    .run();
+  await env.SCRIBE_DROP_DB.prepare(
+    `
+      UPDATE provider_executions
+      SET provider_handle = ?2, provider_version = 1
+      WHERE attempt_id = ?1
+    `,
+  )
+    .bind(ATTEMPT_ID, HANDLE)
     .run();
   await env.SCRIBE_DROP_DB.prepare("UPDATE jobs SET active_attempt_id = ?2 WHERE id = ?1")
     .bind(JOB_ID, ATTEMPT_ID)
     .run();
+}
+
+beforeEach(async () => {
+  await env.SCRIBE_DROP_DB.exec("DELETE FROM jobs;");
+  await seedRuntimeContext();
+});
+
+describe("Cloud Run runtime composition", () => {
+  const configuration = {
+    APP_ENV: "staging",
+    CLOUD_RUN_CONTROLLER_HMAC_PRIMARY: CLOUD_RUN_CONTROLLER_SECRET,
+    CLOUD_RUN_CONTROLLER_ORIGIN:
+      "https://scribe-drop-staging-gpu-controller-123456789012.asia-southeast1.run.app",
+    CLOUD_RUN_ORCHESTRATOR_ORIGIN: "https://orchestrator-staging.example.invalid",
+    CLOUD_RUN_RUNTIME_DERIVATION_SECRET: CLOUD_RUN_DERIVATION_SECRET,
+    CLOUD_RUN_RUNTIME_MODE: "synthetic-shadow",
+    CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT: "gpu-runtime@scribe-drop.iam.gserviceaccount.com",
+    R2_SECRET_ACCESS_KEY: "0000000000000000",
+  };
+
+  it("injects all reviewed production ports only for the complete staging boundary", () => {
+    expect(createCloudRunRuntimeService({ ...env, ...configuration })).toBeDefined();
+    expect(
+      createCloudRunRuntimeService({
+        ...env,
+        ...configuration,
+        CLOUD_RUN_RUNTIME_DERIVATION_SECRET: `${CLOUD_RUN_DERIVATION_SECRET}=`,
+      }),
+    ).toBeUndefined();
+    expect(
+      createCloudRunRuntimeService({ ...env, ...configuration, APP_ENV: "production" }),
+    ).toBeUndefined();
+  });
+
+  it("rejects a staging acceptance fault lease in production composition", () => {
+    expect(() =>
+      createCloudRunRuntimeService({
+        ...env,
+        ...configuration,
+        APP_ENV: "production",
+        STAGING_ACCEPTANCE_FAULT: "worker_disconnect_after_claim",
+        STAGING_ACCEPTANCE_FAULT_EXPIRES_AT: "2026-08-11T00:30:00.000Z",
+        STAGING_ACCEPTANCE_FAULT_ISSUED_AT: "2026-08-11T00:00:00.000Z",
+        STAGING_ACCEPTANCE_FAULT_JOB_ID: JOB_ID,
+      }),
+    ).toThrow("Staging acceptance fault configuration is invalid");
+  });
+});
+
+describe("Cloud Run staging acceptance fault target", () => {
+  it("resolves only the active Cloud Run attempt from the real D1 schema", async () => {
+    const repository = createD1RuntimeFaultTargetRepository(env.SCRIBE_DROP_DB);
+    await expect(repository.findJobId(HANDLE)).resolves.toBe(JOB_ID);
+    await expect(repository.findJobId("z".repeat(43))).resolves.toBeUndefined();
+  });
 });
 
 function store(): D1CloudRunRuntimeStore {
@@ -113,6 +198,7 @@ async function context(repository: D1CloudRunRuntimeStore): Promise<RuntimeAttem
 
 async function begin(repository: D1CloudRunRuntimeStore): Promise<void> {
   const result = await repository.beginBootstrap({
+    controllerVersion: 7,
     context: await context(repository),
     now: NOW,
     record: bootstrapRecord(),
@@ -137,6 +223,188 @@ async function claim(repository: D1CloudRunRuntimeStore): Promise<void> {
 }
 
 describe("Cloud Run runtime D1 store", () => {
+  it("verifies manifest v2 and atomically finalizes artifacts, job, outbox, and cleanup", async () => {
+    const repository = store();
+    await claim(repository);
+    const common = {
+      executionHandle: HANDLE,
+      sessionId: SESSION_ID,
+      sessionToken: "s".repeat(43),
+    };
+    await repository.applySessionEvent({
+      digest: "1".repeat(43),
+      event: { kind: "ack", request: { ...common, sequence: 0, state: "ready" } },
+      now: "2026-08-11T00:02:00.000Z",
+      tokenHash: "t".repeat(43),
+    });
+    const terminal = {
+      artifactCount: 3,
+      durationSeconds: 60,
+      errorCode: null,
+      executionHandle: HANDLE,
+      manifestWritten: true,
+      segmentCount: 4,
+      sequence: 1,
+      sessionId: SESSION_ID,
+      sessionToken: "s".repeat(43),
+      status: "succeeded" as const,
+    };
+    await repository.applySessionEvent({
+      digest: "2".repeat(43),
+      event: { kind: "terminal", request: terminal },
+      now: "2026-08-11T00:03:00.000Z",
+      tokenHash: "t".repeat(43),
+    });
+    const prefix = `results/${OWNER_HASH}/${JOB_ID}/${ATTEMPT_ID}/`;
+    const objects = [
+      { format: "markdown", key: `${prefix}transcript.md`, body: "markdown" },
+      { format: "json", key: `${prefix}transcript.json`, body: "json" },
+      { format: "srt", key: `${prefix}transcript.srt`, body: "srt" },
+    ] as const;
+    for (const object of objects) await env.RECORDINGS.put(object.key, object.body);
+    const manifest = {
+      artifacts: objects.map((object, index) => ({
+        format: object.format,
+        key: object.key,
+        sha256: String(index + 1).repeat(64),
+        sizeBytes: new TextEncoder().encode(object.body).byteLength,
+      })),
+      attemptId: ATTEMPT_ID,
+      complete: true,
+      executionContractVersion: 2,
+      jobId: JOB_ID,
+      requestedFormats: ["markdown", "json", "srt"],
+      schemaVersion: 2,
+    } as const;
+    await env.RECORDINGS.put(`${prefix}manifest.json`, JSON.stringify(manifest));
+    const finalizer = new CloudRunTerminalFinalizer(env.SCRIBE_DROP_DB, env.RECORDINGS, {
+      createEventId: () => "01ARZ3NDEKTSV4RRFFQ69G5FB0",
+      createNotificationId: () => "01ARZ3NDEKTSV4RRFFQ69G5FB1",
+      now: () => new Date("2026-08-11T00:04:00.000Z"),
+    });
+    const selected = await repository.getAttempt(HANDLE);
+    if (selected === null) throw new Error("missing terminal attempt");
+    await expect(
+      finalizer.finalize({ context: selected, request: terminal }),
+    ).resolves.toBeUndefined();
+
+    const row = await env.SCRIBE_DROP_DB.prepare(
+      `
+        SELECT
+          jobs.status AS job_status,
+          attempts.status AS attempt_status,
+          executions.status AS execution_status,
+          executions.terminal_status,
+          executions.cleanup_status,
+          attempts.runpod_execution_ms,
+          (SELECT COUNT(*) FROM job_artifacts WHERE attempt_id = ?1) AS artifact_count,
+          (SELECT COUNT(*) FROM notification_outbox WHERE job_id = ?2) AS notification_count
+        FROM jobs
+        INNER JOIN job_attempts AS attempts ON attempts.id = jobs.active_attempt_id
+        INNER JOIN provider_executions AS executions ON executions.attempt_id = attempts.id
+        WHERE jobs.id = ?2
+      `,
+    )
+      .bind(ATTEMPT_ID, JOB_ID)
+      .first();
+    expect(row).toEqual({
+      artifact_count: 3,
+      attempt_status: "COMPLETED",
+      cleanup_status: "PENDING",
+      execution_status: "TERMINAL",
+      job_status: "COMPLETED",
+      notification_count: 1,
+      runpod_execution_ms: 240_000,
+      terminal_status: "COMPLETED",
+    });
+    await expect(
+      repository.applySessionEvent({
+        digest: "2".repeat(43),
+        event: { kind: "terminal", request: terminal },
+        now: "2026-08-11T00:05:00.000Z",
+        tokenHash: "t".repeat(43),
+      }),
+    ).resolves.toMatchObject({
+      context: { attemptId: ATTEMPT_ID, status: "TERMINAL_REPORTED" },
+      outcome: "duplicate",
+    });
+    await expect(
+      createD1NotificationOutboxRepository(env.SCRIBE_DROP_DB).claimNext(
+        "2026-08-11T00:04:00.000Z",
+        "2026-08-11T00:06:00.000Z",
+      ),
+    ).resolves.toMatchObject({
+      durationSeconds: 60,
+      jobId: JOB_ID,
+      runpodExecutionMs: 240_000,
+      terminalStatus: "COMPLETED",
+    });
+  });
+
+  it("atomically promotes a live controller execution before accepting bootstrap", async () => {
+    await env.SCRIBE_DROP_DB.batch([
+      env.SCRIBE_DROP_DB.prepare(
+        "UPDATE provider_executions SET status = 'CREATING', create_outcome = NULL WHERE attempt_id = ?1",
+      ).bind(ATTEMPT_ID),
+      env.SCRIBE_DROP_DB.prepare(
+        "UPDATE job_attempts SET status = 'SUBMITTING', submission_outcome = NULL WHERE id = ?1",
+      ).bind(ATTEMPT_ID),
+      env.SCRIBE_DROP_DB.prepare("UPDATE jobs SET status = 'SUBMITTING' WHERE id = ?1").bind(
+        JOB_ID,
+      ),
+    ]);
+    const repository = store();
+    const selected = await context(repository);
+    await expect(
+      repository.beginBootstrap({
+        controllerVersion: 7,
+        context: selected,
+        now: NOW,
+        record: bootstrapRecord(),
+      }),
+    ).resolves.toMatchObject({ outcome: "accepted" });
+    const row = await env.SCRIBE_DROP_DB.prepare(
+      `
+        SELECT
+          jobs.status AS job_status,
+          attempts.status AS attempt_status,
+          executions.status AS execution_status,
+          executions.create_outcome
+        FROM jobs
+        INNER JOIN job_attempts AS attempts ON attempts.id = jobs.active_attempt_id
+        INNER JOIN provider_executions AS executions ON executions.attempt_id = attempts.id
+        WHERE jobs.id = ?1
+      `,
+    )
+      .bind(JOB_ID)
+      .first();
+    expect(row).toEqual({
+      attempt_status: "RUNNING",
+      create_outcome: "accepted",
+      execution_status: "RUNNING",
+      job_status: "RUNNING",
+    });
+  });
+
+  it("loads the exact staging speech fixture row shape", async () => {
+    const sourceKey = `incoming/${OWNER_HASH}/${JOB_ID}/-R11Ugfp9MqCogQ0ts4R6Q/source.wav`;
+    await env.SCRIBE_DROP_DB.exec("DELETE FROM jobs;");
+    await seedRuntimeContext({
+      options: STAGING_OPTIONS,
+      sourceContentType: "audio/wav",
+      sourceEtag: "e3509457b255603cf39afd39f3281d46",
+      sourceKey,
+      sourceSizeBytes: 30_720_044,
+    });
+    await expect(store().getAttempt(HANDLE)).resolves.toMatchObject({
+      options: STAGING_OPTIONS,
+      sourceEtag: "e3509457b255603cf39afd39f3281d46",
+      sourceKey,
+      sourceSizeBytes: 30_720_044,
+      status: "PENDING_BOOTSTRAP",
+    });
+  });
+
   it("loads only an exact active provider binding and converges bootstrap replay", async () => {
     const repository = store();
     await expect(repository.getAttempt(HANDLE)).resolves.toMatchObject({
@@ -149,13 +417,24 @@ describe("Cloud Run runtime D1 store", () => {
     });
     const selected = await context(repository);
     await expect(
-      repository.beginBootstrap({ context: selected, now: NOW, record: bootstrapRecord() }),
+      repository.beginBootstrap({
+        controllerVersion: 7,
+        context: selected,
+        now: NOW,
+        record: bootstrapRecord(),
+      }),
     ).resolves.toMatchObject({ outcome: "accepted" });
     await expect(
-      repository.beginBootstrap({ context: selected, now: NOW, record: bootstrapRecord() }),
+      repository.beginBootstrap({
+        controllerVersion: 7,
+        context: selected,
+        now: NOW,
+        record: bootstrapRecord(),
+      }),
     ).resolves.toMatchObject({ outcome: "duplicate" });
     await expect(
       repository.beginBootstrap({
+        controllerVersion: 7,
         context: selected,
         now: NOW,
         record: bootstrapRecord({ requestDigest: "x".repeat(43) }),

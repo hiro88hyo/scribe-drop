@@ -26,8 +26,8 @@ function requireSnapshotValue<Key extends string>(
   return snapshot.get(key);
 }
 
-function occurrenceFilter(note: string, image: string): string {
-  return `kind="ATTESTATION" AND noteName="${note}" AND resourceUrl="${image}"`;
+function occurrenceFilter(image: string): string {
+  return `resourceUrl="${image}"`;
 }
 
 function occurrenceListRequest(
@@ -36,13 +36,13 @@ function occurrenceListRequest(
   image: string,
 ): GoogleControlPlaneReadRequest<CandidateAttestationListReadbackKey> {
   const query = new URLSearchParams({
-    filter: occurrenceFilter(expected.artifactAnalysisNote.name, image),
+    filter: occurrenceFilter(image),
     pageSize: "2",
   });
   return {
     key,
     method: "GET",
-    url: `https://containeranalysis.googleapis.com/v1/projects/${expected.projectId}/occurrences?${query.toString()}`,
+    url: `https://containeranalysis.googleapis.com/v1/${expected.artifactAnalysisNote.name}/occurrences?${query.toString()}`,
   };
 }
 

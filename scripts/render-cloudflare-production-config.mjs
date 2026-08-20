@@ -46,12 +46,22 @@ const runpodWorkerImage = requiresOrchestratorPolicy
       }).runpodWorker.image
   : undefined;
 const identifiers = {
+  acceptanceFault: process.env.SCRIBE_DROP_STAGING_ACCEPTANCE_FAULT,
+  acceptanceFaultExpiresAt: process.env.SCRIBE_DROP_STAGING_ACCEPTANCE_FAULT_EXPIRES_AT,
+  acceptanceFaultIssuedAt: process.env.SCRIBE_DROP_STAGING_ACCEPTANCE_FAULT_ISSUED_AT,
+  acceptanceFaultJobId: process.env.SCRIBE_DROP_STAGING_ACCEPTANCE_FAULT_JOB_ID,
   accessAudience: process.env.SCRIBE_DROP_PRODUCTION_ACCESS_AUDIENCE,
   accessTeamDomain: process.env.SCRIBE_DROP_PRODUCTION_ACCESS_TEAM_DOMAIN,
   accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
   auditRetentionDays: process.env.AUDIT_RETENTION_DAYS,
   candidateMigrationsDirectory: process.env.SCRIBE_DROP_CANDIDATE_MIGRATIONS_DIR,
+  cloudRunControllerOrigin: process.env.SCRIBE_DROP_PRODUCTION_CLOUD_RUN_CONTROLLER_ORIGIN,
+  cloudRunRuntimeMode: process.env.SCRIBE_DROP_PRODUCTION_CLOUD_RUN_RUNTIME_MODE,
+  cloudRunRuntimeServiceAccount:
+    process.env.SCRIBE_DROP_PRODUCTION_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT,
   d1DatabaseId: process.env.SCRIBE_DROP_PRODUCTION_D1_DATABASE_ID,
+  gpuExecutionPolicy: process.env.SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_POLICY,
+  gpuExecutionAdmission: process.env.SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION,
   multipartRetentionHours: process.env.MULTIPART_RETENTION_HOURS,
   orchestratorOrigin: process.env.SCRIBE_DROP_PRODUCTION_ORCHESTRATOR_ORIGIN,
   resultRetentionDays: process.env.RESULT_RETENTION_DAYS,

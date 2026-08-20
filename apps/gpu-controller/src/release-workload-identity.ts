@@ -8,6 +8,7 @@ import {
 const githubRepository = "hiro88hyo/scribe-drop";
 const githubRepositoryOwnerId = "1670222";
 const githubRepositoryId = "1312444559";
+const githubEnvironment = "staging";
 const githubWorkflowPath = ".github/workflows/publish-cloud-run-candidate.yml";
 const resourceNameSchema = z.string().min(1).max(1024);
 
@@ -30,6 +31,7 @@ export const releaseWorkloadIdentityPlanSchema = z
   .object({
     github: z
       .object({
+        environment: z.literal(githubEnvironment),
         repository: z.literal(githubRepository),
         repositoryId: z.literal(githubRepositoryId),
         repositoryOwnerId: z.literal(githubRepositoryOwnerId),
@@ -64,7 +66,7 @@ export const releaseWorkloadIdentityPlanSchema = z
             "google.subject": z.literal("assertion.sub"),
           })
           .strict(),
-        description: z.literal("Trusts only the immutable ScribeDrop release workflow identity."),
+        description: z.literal("Trusts only the exact ScribeDrop staging release workflow claims."),
         disabled: z.literal(false),
         displayName: z.literal("ScribeDrop GitHub"),
         name: resourceNameSchema,
@@ -122,12 +124,15 @@ export const releaseWorkloadIdentityPlanSchema = z
 export type ReleaseWorkloadIdentityPlan = z.infer<typeof releaseWorkloadIdentityPlanSchema>;
 
 function githubAttributeCondition(): string {
-  const immutableSubject = `repo:hiro88hyo@${githubRepositoryOwnerId}/scribe-drop@${githubRepositoryId}:ref:refs/heads/release/`;
+  const immutableEnvironmentSubject = `repo:hiro88hyo@${githubRepositoryOwnerId}/scribe-drop@${githubRepositoryId}:environment:${githubEnvironment}`;
   const workflowRef = `${githubRepository}/${githubWorkflowPath}@refs/heads/release/`;
   return [
+    `assertion.repository == '${githubRepository}'`,
     `assertion.repository_id == '${githubRepositoryId}'`,
+    "assertion.repository_owner == 'hiro88hyo'",
     `assertion.repository_owner_id == '${githubRepositoryOwnerId}'`,
-    `assertion.sub.startsWith('${immutableSubject}')`,
+    `assertion.sub == '${immutableEnvironmentSubject}'`,
+    `assertion.environment == '${githubEnvironment}'`,
     "assertion.ref.startsWith('refs/heads/release/')",
     "assertion.ref_type == 'branch'",
     "assertion.event_name == 'workflow_dispatch'",
@@ -160,6 +165,7 @@ export function createReleaseWorkloadIdentityPlan(
   const signerName = `projects/${parsed.projectId}/serviceAccounts/${parsed.identities.signer}`;
   return releaseWorkloadIdentityPlanSchema.parse({
     github: {
+      environment: githubEnvironment,
       repository: githubRepository,
       repositoryId: githubRepositoryId,
       repositoryOwnerId: githubRepositoryOwnerId,
@@ -192,7 +198,7 @@ export function createReleaseWorkloadIdentityPlan(
         "attribute.repository_owner_id": "assertion.repository_owner_id",
         "google.subject": "assertion.sub",
       },
-      description: "Trusts only the immutable ScribeDrop release workflow identity.",
+      description: "Trusts only the exact ScribeDrop staging release workflow claims.",
       disabled: false,
       displayName: "ScribeDrop GitHub",
       name: `${pool}/providers/github-actions`,

@@ -114,6 +114,34 @@ describe("createStructuredLogger", () => {
     });
   });
 
+  it("allows a fixed Cloud Run identity rejection stage without arbitrary metadata", () => {
+    const lines: string[] = [];
+    const logger = createStructuredLogger({
+      environment: "staging",
+      now: () => FIXED_DATE,
+      service: "orchestrator",
+      sink: (line) => {
+        lines.push(line);
+      },
+    });
+
+    logger.warn("cloud_run_identity_rejected", {
+      errorCode: "JWKS_TRANSPORT_REJECTED",
+      // @ts-expect-error Exercise the runtime sanitizer with secret-bearing input.
+      identityToken: "secret-token",
+    });
+
+    expect(JSON.parse(lines[0] ?? "")).toEqual({
+      environment: "staging",
+      errorCode: "JWKS_TRANSPORT_REJECTED",
+      event: "cloud_run_identity_rejected",
+      level: "warn",
+      service: "orchestrator",
+      timestamp: "2026-07-25T00:00:00.000Z",
+    });
+    expect(lines[0]).not.toContain("secret-token");
+  });
+
   it("never serializes unknown fields passed through a wider object", () => {
     const lines: string[] = [];
     const logger = createStructuredLogger({

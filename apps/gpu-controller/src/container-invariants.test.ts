@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  inspectControllerSharedObjects,
   verifyControllerContainerFilesystem,
   verifyControllerContainerRuntime,
 } from "./container-invariants.js";
@@ -10,10 +11,33 @@ const expected = {
   home: "/nonexistent",
   nodeEnvironment: "production",
   nodeVersion: "v24.18.0",
+  operatingSystemLibsslLoaded: false,
+  sharedObjectReportAvailable: true,
   uid: 10_001,
 } as const;
 
 describe("GPU controller container invariants", () => {
+  it("fails closed unless the process report proves OS libssl is not loaded", () => {
+    expect(
+      inspectControllerSharedObjects({ sharedObjects: ["/lib/x86_64-linux-gnu/libc.so.6"] }),
+    ).toEqual({
+      operatingSystemLibsslLoaded: false,
+      sharedObjectReportAvailable: true,
+    });
+    expect(
+      inspectControllerSharedObjects({
+        sharedObjects: ["/lib/x86_64-linux-gnu/libssl.so.3"],
+      }),
+    ).toEqual({
+      operatingSystemLibsslLoaded: true,
+      sharedObjectReportAvailable: true,
+    });
+    expect(inspectControllerSharedObjects({ sharedObjects: "unavailable" })).toEqual({
+      operatingSystemLibsslLoaded: true,
+      sharedObjectReportAvailable: false,
+    });
+  });
+
   it("accepts only the fixed non-root Node runtime", () => {
     expect(() => {
       verifyControllerContainerRuntime(expected);
@@ -26,6 +50,12 @@ describe("GPU controller container invariants", () => {
     }).toThrow();
     expect(() => {
       verifyControllerContainerRuntime({ ...expected, home: "/root" });
+    }).toThrow();
+    expect(() => {
+      verifyControllerContainerRuntime({ ...expected, operatingSystemLibsslLoaded: true });
+    }).toThrow();
+    expect(() => {
+      verifyControllerContainerRuntime({ ...expected, sharedObjectReportAvailable: false });
     }).toThrow();
   });
 

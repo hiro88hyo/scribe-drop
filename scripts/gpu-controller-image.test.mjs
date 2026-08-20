@@ -8,6 +8,7 @@ function inspection() {
     {
       Architecture: "amd64",
       Config: {
+        Cmd: null,
         Entrypoint: ["/nodejs/bin/node", "dist/entrypoint.js"],
         Env: [
           "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -36,11 +37,15 @@ function inspection() {
 
 test("accepts the exact non-root controller image inspection", () => {
   assert.doesNotThrow(() => verifyGpuControllerImageInspection(inspection()));
+  const omittedCommand = inspection();
+  delete omittedCommand[0].Config.Cmd;
+  assert.doesNotThrow(() => verifyGpuControllerImageInspection(omittedCommand));
 });
 
 test("rejects credential, entrypoint, platform, and volume drift", () => {
   const cases = [
     { Config: { Env: ["SCRIBE_DROP_CONTROLLER_HMAC_PRIMARY=secret"] } },
+    { Config: { Cmd: ["unexpected"] } },
     { Config: { Entrypoint: ["sh"] } },
     { Architecture: "arm64" },
     { Config: { Volumes: { "/data": {} } } },

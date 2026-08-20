@@ -54,17 +54,31 @@ const attemptRowSchema = z
     attempt_id: ulidSchema,
     attempt_provider_kind: z.literal("cloud_run_jobs"),
     attempt_provider_policy: z.literal("cloud_run_jobs_l4_v1"),
-    attempt_status: z.enum(["RUNNING", "CANCEL_REQUESTED"]),
+    attempt_status: z.enum([
+      "SUBMITTING",
+      "RUNNING",
+      "CANCEL_REQUESTED",
+      "COMPLETED",
+      "FAILED",
+      "CANCELLED",
+    ]),
     claim_digest: runtimeDigestSchema.nullable(),
     execution_contract_version: z.literal(2),
     execution_handle: cloudRunOpaqueHandleSchema,
     execution_options_json: z.string(),
     execution_provider_kind: z.literal("cloud_run_jobs"),
     execution_provider_policy: z.literal("cloud_run_jobs_l4_v1"),
-    execution_status: z.enum(["RUNNING", "CANCEL_REQUESTED"]),
+    execution_status: z.enum(["CREATING", "RUNNING", "CANCEL_REQUESTED", "TERMINAL"]),
     expected_size_bytes: z.number().int().positive(),
     job_id: ulidSchema,
-    job_status: z.enum(["RUNNING", "CANCEL_REQUESTED"]),
+    job_status: z.enum([
+      "SUBMITTING",
+      "RUNNING",
+      "CANCEL_REQUESTED",
+      "COMPLETED",
+      "FAILED",
+      "CANCELLED",
+    ]),
     result_prefix: z.string().min(1).max(900).startsWith("results/").endsWith("/"),
     revoked_at: utcDateTimeSchema.nullable(),
     session_id: ulidSchema.nullable(),
@@ -137,10 +151,21 @@ const FIND_ATTEMPT_SQL = `
   WHERE executions.provider_kind = 'cloud_run_jobs'
     AND executions.provider_policy = 'cloud_run_jobs_l4_v1'
     AND executions.provider_handle = ?1
-    AND executions.status IN ('RUNNING', 'CANCEL_REQUESTED')
-    AND attempts.status IN ('RUNNING', 'CANCEL_REQUESTED')
-    AND jobs.status IN ('RUNNING', 'CANCEL_REQUESTED')
+    AND (
+      (
+        executions.status IN ('CREATING', 'RUNNING', 'CANCEL_REQUESTED')
+        AND attempts.status IN ('SUBMITTING', 'RUNNING', 'CANCEL_REQUESTED')
+        AND jobs.status IN ('SUBMITTING', 'RUNNING', 'CANCEL_REQUESTED')
+      )
+      OR (
+        ?2 = 1
+        AND executions.status = 'TERMINAL'
+        AND attempts.status IN ('COMPLETED', 'FAILED', 'CANCELLED')
+        AND jobs.status = attempts.status
+      )
+    )
     AND jobs.active_attempt_id = attempts.id
+    AND jobs.deleted_at IS NULL
     AND attempts.provider_kind = executions.provider_kind
     AND attempts.provider_policy = executions.provider_policy
     AND attempts.execution_contract_version = 2
@@ -214,6 +239,60 @@ const INSERT_BOOTSTRAP_SQL = `
     )
   ON CONFLICT DO NOTHING
   RETURNING bootstrap_request_id
+`;
+
+const MARK_EXECUTION_RUNNING_SQL = `
+  UPDATE provider_executions
+  SET
+    status = 'RUNNING',
+    create_outcome = 'accepted',
+    provider_version = ?5,
+    version = version + 1,
+    updated_at = ?4
+  WHERE attempt_id = ?1
+    AND provider_handle = ?2
+    AND provider_kind = 'cloud_run_jobs'
+    AND provider_policy = 'cloud_run_jobs_l4_v1'
+    AND status = 'CREATING'
+    AND EXISTS (
+      SELECT 1 FROM job_attempts
+      WHERE id = ?1 AND job_id = ?3 AND status = 'SUBMITTING'
+    )
+  RETURNING id
+`;
+
+const MARK_ATTEMPT_RUNNING_SQL = `
+  UPDATE job_attempts
+  SET
+    status = 'RUNNING',
+    submission_outcome = 'accepted',
+    submission_finished_at = COALESCE(submission_finished_at, ?3),
+    claimed_at = COALESCE(claimed_at, ?3),
+    updated_at = ?3
+  WHERE id = ?1
+    AND job_id = ?2
+    AND status = 'SUBMITTING'
+    AND provider_kind = 'cloud_run_jobs'
+    AND provider_policy = 'cloud_run_jobs_l4_v1'
+    AND EXISTS (
+      SELECT 1 FROM provider_executions
+      WHERE attempt_id = ?1 AND status = 'RUNNING'
+    )
+  RETURNING id
+`;
+
+const MARK_JOB_RUNNING_SQL = `
+  UPDATE jobs
+  SET status = 'RUNNING', updated_at = ?3, version = version + 1
+  WHERE id = ?1
+    AND active_attempt_id = ?2
+    AND status = 'SUBMITTING'
+    AND deleted_at IS NULL
+    AND EXISTS (
+      SELECT 1 FROM job_attempts
+      WHERE id = ?2 AND job_id = ?1 AND status = 'RUNNING'
+    )
+  RETURNING id
 `;
 
 const CONSUME_CHALLENGE_SQL = `
@@ -350,7 +429,7 @@ export class D1CloudRunRuntimeStore implements CloudRunRuntimeStore {
     const row = await this.#database
       .withSession("first-primary")
       .prepare(FIND_ATTEMPT_SQL)
-      .bind(cloudRunOpaqueHandleSchema.parse(executionHandle))
+      .bind(cloudRunOpaqueHandleSchema.parse(executionHandle), 0)
       .first();
     return row === null ? null : mapAttempt(row, this.#environment);
   }
@@ -363,6 +442,7 @@ export class D1CloudRunRuntimeStore implements CloudRunRuntimeStore {
   }
 
   async beginBootstrap(input: {
+    readonly controllerVersion: number;
     readonly context: RuntimeAttemptContext;
     readonly now: string;
     readonly record: RuntimeBootstrapRecord;
@@ -411,25 +491,37 @@ export class D1CloudRunRuntimeStore implements CloudRunRuntimeStore {
     ) {
       return { outcome: "conflict" };
     }
-    const result = await this.#database
-      .prepare(INSERT_BOOTSTRAP_SQL)
-      .bind(
-        record.bootstrapRequestId,
-        record.requestDigest,
-        record.executionHandle,
-        record.executionName,
-        record.jobName,
-        record.publicKey,
-        record.publicKeyDigest,
-        record.challengeId,
-        record.challengeHash,
-        record.challengeExpiresAt,
-        now,
-        context.attemptId,
-        context.jobId,
-      )
-      .all();
-    const inserted = returnedBootstrapRowsSchema.parse(result.results)[0];
+    const results = await this.#database.batch([
+      this.#database
+        .prepare(MARK_EXECUTION_RUNNING_SQL)
+        .bind(
+          context.attemptId,
+          context.executionHandle,
+          context.jobId,
+          now,
+          z.number().int().positive().parse(input.controllerVersion),
+        ),
+      this.#database.prepare(MARK_ATTEMPT_RUNNING_SQL).bind(context.attemptId, context.jobId, now),
+      this.#database.prepare(MARK_JOB_RUNNING_SQL).bind(context.jobId, context.attemptId, now),
+      this.#database
+        .prepare(INSERT_BOOTSTRAP_SQL)
+        .bind(
+          record.bootstrapRequestId,
+          record.requestDigest,
+          record.executionHandle,
+          record.executionName,
+          record.jobName,
+          record.publicKey,
+          record.publicKeyDigest,
+          record.challengeId,
+          record.challengeHash,
+          record.challengeExpiresAt,
+          now,
+          context.attemptId,
+          context.jobId,
+        ),
+    ]);
+    const inserted = returnedBootstrapRowsSchema.parse(results[3]?.results ?? [])[0];
     if (inserted !== undefined) {
       const stored = await this.getBootstrap(inserted.bootstrap_request_id);
       if (stored === null) throw new Error("Cloud Run bootstrap write was not observable");
@@ -706,7 +798,7 @@ export class D1CloudRunRuntimeStore implements CloudRunRuntimeStore {
     if (replay.kind !== event.kind || replay.request_digest !== digest) {
       return { outcome: "conflict" };
     }
-    const context = await this.getAttempt(event.request.executionHandle);
+    const context = await this.#getReplayAttempt(event.request.executionHandle);
     return context === null
       ? { outcome: "conflict" }
       : {
@@ -714,5 +806,14 @@ export class D1CloudRunRuntimeStore implements CloudRunRuntimeStore {
           context,
           outcome: "duplicate",
         };
+  }
+
+  async #getReplayAttempt(executionHandle: string): Promise<RuntimeAttemptContext | null> {
+    const row = await this.#database
+      .withSession("first-primary")
+      .prepare(FIND_ATTEMPT_SQL)
+      .bind(cloudRunOpaqueHandleSchema.parse(executionHandle), 1)
+      .first();
+    return row === null ? null : mapAttempt(row, this.#environment);
   }
 }

@@ -74,6 +74,7 @@ describe("controller Firestore deployment policy", () => {
       deleteProtectionState: "DELETE_PROTECTION_ENABLED",
       locationId: "asia-southeast1",
       pointInTimeRecoveryEnablement: "POINT_IN_TIME_RECOVERY_DISABLED",
+      realtimeUpdatesMode: "REALTIME_UPDATES_MODE_ENABLED",
       type: "FIRESTORE_NATIVE",
     });
     expect(production.database.pointInTimeRecoveryEnablement).toBe(
@@ -94,6 +95,38 @@ describe("controller Firestore deployment policy", () => {
       databaseUpdateTime: "2026-08-11T00:01:00.000Z",
       ttlStates: ["ACTIVE", "ACTIVE"],
     });
+  });
+
+  it("accepts Standard database output that omits fixed access-mode defaults", () => {
+    const plan = createControllerFirestoreDeploymentPlan(configuration());
+    const observed = rawFirestoreReadback(plan);
+    delete observed.database.firestoreDataAccessMode;
+    delete observed.database.mongodbCompatibleDataAccessMode;
+
+    expect(verifyControllerFirestoreReadback(plan, observed).ttlStates).toEqual([
+      "ACTIVE",
+      "ACTIVE",
+    ]);
+  });
+
+  it("accepts live inherited indexes that omit the default ANY_API scope", () => {
+    const plan = createControllerFirestoreDeploymentPlan(configuration());
+    const observed = rawFirestoreReadback(plan);
+    for (const field of observed.ttlFields) {
+      if (field.indexConfig === undefined) throw new Error("TTL index fixture is incomplete");
+      field.indexConfig.indexes = [
+        {
+          fields: [{ fieldPath: "ttlExpiresAt", order: "ASCENDING" }],
+          queryScope: "COLLECTION",
+          state: "READY",
+        },
+      ];
+    }
+
+    expect(verifyControllerFirestoreReadback(plan, observed).ttlStates).toEqual([
+      "ACTIVE",
+      "ACTIVE",
+    ]);
   });
 
   it("rejects location, TTL convergence, and inherited-index drift", () => {

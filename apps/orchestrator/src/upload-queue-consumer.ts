@@ -1,4 +1,5 @@
 import {
+  jobControlEventSchema,
   normalizedR2ObjectCreatedEventSchema,
   r2EventNotificationSchema,
 } from "@scribe-drop/contracts";
@@ -8,9 +9,12 @@ import { z } from "zod";
 
 import {
   parseOrchestratorConfig,
-  parseRunpodConfig,
+  parseGpuExecutionAdmission,
+  parseGpuExecutionSelection,
+  type GpuExecutionSelection,
+  type GpuExecutionAdmissionEnvironment,
+  type GpuExecutionSelectionEnvironment,
   type OrchestratorConfigEnvironment,
-  type RunpodConfig,
   type RunpodConfigEnvironment,
 } from "./config.js";
 import { parseSourceObjectKey } from "./source-object-key.js";
@@ -18,6 +22,11 @@ import {
   createD1UploadIngestionRepository,
   type UploadIngestionRepository,
 } from "./upload-ingestion-repository.js";
+import {
+  reconcileCloudRunCancellation,
+  type CloudRunCancellationResult,
+  type CloudRunReconciliationEnvironment,
+} from "./cloud-run-reconciliation-service.js";
 
 const MAX_RETRY_DELAY_SECONDS = 15 * 60;
 const BASE_RETRY_DELAY_SECONDS = 15;
@@ -41,7 +50,12 @@ const r2HeadResultSchema = z.object({
 });
 
 export interface UploadQueueEnvironment
-  extends OrchestratorConfigEnvironment, RunpodConfigEnvironment {
+  extends
+    OrchestratorConfigEnvironment,
+    GpuExecutionSelectionEnvironment,
+    GpuExecutionAdmissionEnvironment,
+    RunpodConfigEnvironment,
+    CloudRunReconciliationEnvironment {
   readonly RECORDINGS: R2Bucket;
   readonly SCRIBE_DROP_DB: D1Database;
 }
@@ -66,10 +80,15 @@ export interface UploadQueueDependencies {
   readonly now?: () => Date;
   readonly random?: () => number;
   readonly randomBytes?: RandomBytes;
+  readonly reconcileCancellation?: (
+    jobId: string,
+    environment: UploadQueueEnvironment,
+    logger: StructuredLogger,
+  ) => Promise<CloudRunCancellationResult>;
   readonly submitPendingJob?: (
     jobId: string,
     database: D1Database,
-    config: RunpodConfig,
+    selection: GpuExecutionSelection,
     logger: StructuredLogger,
   ) => Promise<unknown>;
 }
@@ -97,6 +116,36 @@ async function processMessage(
 ): Promise<"ack" | "retry"> {
   const config = parseOrchestratorConfig(environment);
   if (config === undefined) {
+    logger.error("upload_event_configuration_invalid", {
+      errorCode: "INTERNAL_ERROR",
+    });
+    return "retry";
+  }
+
+  const controlEvent = jobControlEventSchema.safeParse(message.body);
+  if (controlEvent.success) {
+    const reconcile =
+      dependencies.reconcileCancellation ??
+      ((jobId: string, selectedEnvironment: UploadQueueEnvironment, selectedLogger) =>
+        reconcileCloudRunCancellation(jobId, selectedEnvironment, selectedLogger));
+    const result = await reconcile(controlEvent.data.jobId, environment, logger);
+    const event =
+      result.outcome === "applied"
+        ? "job.cancel_dispatch_applied"
+        : result.outcome === "deferred"
+          ? "job.cancel_dispatch_deferred"
+          : "job.cancel_dispatch_ignored";
+    if (result.outcome === "deferred") {
+      logger.warn(event, { jobId: controlEvent.data.jobId, status: "CANCEL_REQUESTED" });
+      return "retry";
+    }
+    logger.info(event, { jobId: controlEvent.data.jobId, status: "CANCEL_REQUESTED" });
+    return "ack";
+  }
+
+  const configuredSelection = parseGpuExecutionSelection(environment);
+  const executionAdmission = parseGpuExecutionAdmission(environment);
+  if (configuredSelection === undefined || executionAdmission === undefined) {
     logger.error("upload_event_configuration_invalid", {
       errorCode: "INTERNAL_ERROR",
     });
@@ -152,6 +201,7 @@ async function processMessage(
     });
     return "ack";
   }
+  const selection = job.generationOneSelection ?? configuredSelection;
   const headSourceObject =
     dependencies.headSourceObject ?? ((bucket: R2Bucket, key: string) => bucket.head(key));
   const untrustedHead = await headSourceObject(environment.RECORDINGS, job.sourceKey);
@@ -277,6 +327,7 @@ async function processMessage(
     eventId: createEventId(now.getTime()),
     job,
     ownerHash: parsedKey.ownerHash,
+    selection,
     sizeBytes: headResult.data.size,
     sourceEtag: headResult.data.etag,
     timestamp: now.toISOString(),
@@ -300,16 +351,12 @@ async function processMessage(
     sizeBytes: headResult.data.size,
     status: "SUBMISSION_PENDING",
   });
-  if (dependencies.submitPendingJob !== undefined) {
-    const runpodConfig = parseRunpodConfig(environment);
-    if (runpodConfig === undefined) {
-      logger.error("upload_event_configuration_invalid", {
-        errorCode: "INTERNAL_ERROR",
-        jobId: job.id,
-      });
-      return "retry";
-    }
-    await dependencies.submitPendingJob(job.id, environment.SCRIBE_DROP_DB, runpodConfig, logger);
+  if (
+    executionAdmission === "active" &&
+    dependencies.submitPendingJob !== undefined &&
+    (result === "ingested" || result === "duplicate")
+  ) {
+    await dependencies.submitPendingJob(job.id, environment.SCRIBE_DROP_DB, selection, logger);
   }
   return "ack";
 }

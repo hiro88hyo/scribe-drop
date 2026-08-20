@@ -1,3 +1,5 @@
+import type { JobControlEvent } from "@scribe-drop/contracts";
+
 import type { AuthContext } from "./security/access-jwt.js";
 
 export type WebRequestData = Record<string, unknown> & {
@@ -11,6 +13,7 @@ export interface WebEnvironment {
   ALLOWED_ORIGIN: string;
   APP_ENV: string;
   CLOUDFLARE_ACCOUNT_ID: string;
+  CONTROL_EVENTS: Queue<JobControlEvent>;
   CSRF_HMAC_SECRET: string;
   OWNER_HASH_HMAC_SECRET: string;
   R2_PARENT_ACCESS_KEY_ID: string;

@@ -74,6 +74,9 @@ pnpm exec wrangler queues consumer list recording-uploaded-staging
 
 consumerはbatch全体ではなくmessageごとに次を決める。
 
+- strictな`job-control` cancel eventは、D1 primaryのcurrent active attemptとprovider aggregateを
+  再検証する。exact Cloud Run candidateだけを即時controller cancelへ渡し、effect不明またはCAS競合は
+  retryする。terminal、対象外provider、Cloud Run未採用environmentは冪等なno-opとしてackする。
 - strict schema、account、bucket、生成規則、D1 sourceが不一致のmessageは恒久拒否として
   ackする。raw body、object key、ETagはlogへ出さない。
 - sourceのサイズ不一致や不許可actionは、可能な場合にjobへ安全なerror codeと
@@ -314,14 +317,54 @@ timeoutでは「10分ちょうどでprovider queueから消える」と扱わな
   `pnpm container:check:cloud-run`、`container:sbom:cloud-run`、`container:scan:cloud-run`で再生成する。SBOMを
   repositoryへ追加せず、local imageをregistryへpushしない。terminal reportはcleanup pendingであり、provider
   Execution/Job不存在とartifact/finalizeを確認するまで手動で`COMPLETED`へ変更しない。
-- Phase 14 local preparationで`0011` migrationとshadow namespaceを追加したが、remote D1へ未適用で運用対象ではない。
-  `CLOUD_RUN_RUNTIME_MODE`をWrangler、dashboard、secretへ手動設定しない。local D1 eventのsequenceやrevokeを直接更新せず、
-  repository経由のexact replayだけを使う。実staging運用は[dark deployment](./cloud-run-staging-dark-deployment.md)の残gateを
-  同一candidateで満たしてから別途開始する。
+- Phase 15 candidate `0280e5b`で`0012` migration、通常uploadからexact one L4 execution、artifact、通知、利用者deleteを
+  stagingで検証した。provider cleanupのcontroller responseは`CLEANED`だったがdeployed CronからD1へ反映されず、dry-runと
+  exact version条件付きの同じrepository CASで`SUCCEEDED`へ一度だけ収束した。直接SQL mutationは行わない。このrunを完全自動の
+  cleanup acceptanceやproduction promotionへ使わず、残りのfailure/cancel経路と自動cleanupを完了する。後続のlocal修正は、
+  `STALE_VERSION`をD1へCAS適用できた場合だけ更新versionと新request IDで同じactionを同一Cron内に最大1回再要求する。同じ
+  requestのtransport replayはexact bodyで最大2回とし、二度目のversion driftまたはCAS競合は次のCronへdeferする。この変更後は
+  新candidateでPhase 14 gateからやり直す。現在はprovider switch RunPod、Cloud Run Job/Execution 0、fixture D1/R2 0、controller
+  authorization 0である。D1 eventのsequenceやrevokeを直接更新せず、repository経由のexact replayだけを使う。
+- staging GPU実行前のbootstrap preflightにはD1に存在しないfresh execution handleを使う。runtime serviceはGoogle OIDCを
+  context lookupより先に検証し、preflightは認証後の404 JSON `EXECUTION_NOT_FOUND`だけを成功とする。edge 403/non-JSON、
+  `AUTHENTICATION_FAILED`、`RESOURCE_DRIFT`、success challengeはすべて失敗である。過去の既存contextに依存した
+  `RESOURCE_DRIFT` preflight evidenceを新candidateへ流用しない。
+- Phase 16 workflowはbootstrap preflightをCPU 1、512 MiB、GPU 0、task/parallelism 1、retry 0、60秒へ
+  固定し、exact Jobを成否にかかわらず削除してJob/Execution 0まで待つ。手動jobで代替せず、同じcommitの
+  workflow dispatchとjob attemptは各1回だけとする。
+- backend promotionからpaid readinessまではRunPod選択を維持する。GPU 0 proof後にdisabled/zero、exact
+  L4 quota、fixed manifest、233円/250円を一括照合し、成功後だけCloud Run admissionをactiveにする。
+- acceptance失敗/cancel時は同じjobをrerunしない。失敗専用recovery jobは事前のarm outputへ依存せず、
+  RunPod policyでadmissionをpauseし、E2Eの
+  未解決fixtureがある場合だけmode 0600の短命evidenceを使ってowner-scoped deleteを行う。5分周期のdeployed
+  reaperでCloud Run Job/Execution/active execution 0へ収束後、同じworkflow runのsmoke epochだけをdisabledへ
+  CAS更新し、RunPodをactiveへ戻す。各安全stepは先行する非必須stepの失敗で暗黙skipせず、安全な依存条件を
+  満たす操作だけを試行して最後に全outcomeを集約する。recoveryはacceptanceを成功へ変更せず、収束しない場合も
+  productionをblockedにする。
 - Phase 14 staging release foundationのArtifact Registry、WIF、service account、KMS key、Artifact Analysis Note、Binary
   Authorization attestor/policyは作成済みである。KMS active key versionの保持費を監視し、candidate監査とproduction昇格が
   終わる前に削除しない。publisher/signerへuser-managed keyを作らず、candidate workflow外からimage pushまたはOccurrenceを
-  発行しない。candidate image/Occurrence、Cloud Run Service/Job、Firestore、Secret Managerはまだ未作成である。
+  発行しない。Phase 14 candidate image/Occurrence、controller Service、Firestore、Secret Managerは作成済みで、synthetic
+  authorizationはdisabled、Cloud Run Job/Executionとfixtureは0へcleanup済みである。
+- Phase 15の`GPU_EXECUTION_POLICY`は新規generation-one attemptだけを選択する。rollbackでは最初に
+  `runpod_serverless_v1`へ戻し、保存済み`cloud_run_jobs_l4_v1` attemptのobserve/cancel/cleanupを止めない。
+  `provider_executions.cleanup_status=SUCCEEDED`になる前に利用者deleteやretentionのD1/R2物理削除を手動で進めない。
+- Phase 14のCloud Run runtimeをstagingで有効化する前に、[ADR 0082](./adr/0082-skip-browser-integrity-check-for-cloud-run-runtime.md)の
+  BIC exceptionをstrict read-backする。`CLOUDFLARE_WAF_API_TOKEN`はexact staging zoneの
+  `Zone WAF Edit`/`Zone Read`だけを持つ一時tokenとし、local credential storeから注入して次を実行する。
+  `CLOUDFLARE_ZONE_NAME`と`SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN`も実値をGitへ残さずlocal環境から渡す。
+
+  ```bash
+  pnpm cloudflare:waf:cloud-run:read:staging
+  pnpm cloudflare:waf:cloud-run:apply:staging
+  pnpm cloudflare:waf:cloud-run:read:staging
+  ```
+
+  applyは関連ruleの重複を拒否し、host、queryなしPOST、5 exact path、product `bic`だけ、logging
+  enabledを二重read-backする。rollbackで例外を除去する場合はshadow modeとcontroller authorizationを
+  先にdisabled/0へ戻し、active Execution 0を確認してから
+  `pnpm cloudflare:waf:cloud-run:remove:staging`を実行する。tokenは終了後にshellから除去する。
+
 - terminal statusをD1で観測していないjobは、manifestが存在しても`COMPLETED`にしない。
 - 手動修復が必要でもjob/attempt/outboxを直接SQLで更新しない。同じrepositoryとserviceを
   使う専用repair commandを先に実装し、dry-run、CAS、監査eventを必須とする。

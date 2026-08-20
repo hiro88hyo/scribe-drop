@@ -85,7 +85,9 @@ export class GpuControllerService {
     if (claim.outcome === "conflict" || claim.outcome === "not_found") {
       return this.#rejected(request, "CONFLICT");
     }
-    if (claim.outcome === "stale") return this.#rejected(request, "STALE_VERSION");
+    if (claim.outcome === "stale") {
+      return this.#rejected(request, "STALE_VERSION", claim.record.version);
+    }
     if (claim.outcome === "rate_limited") return this.#rejected(request, "RATE_LIMITED");
     if (claim.outcome === "duplicate") return this.#response(request, claim.record);
     let record = claim.record;
@@ -146,10 +148,11 @@ export class GpuControllerService {
       record.executionHandle,
       record.bootstrapRequestId,
     );
+    const storedExecutionMatches =
+      (record.state === "EXECUTION_PENDING" && record.execution === null) ||
+      (record.state === "RUNNING" && record.execution?.uid === execution.uid);
     const storedResourcesMatch =
-      record.state === "RUNNING" &&
-      record.job?.uid === jobRead.job.uid &&
-      record.execution?.uid === execution.uid;
+      record.runIntent && record.job?.uid === jobRead.job.uid && storedExecutionMatches;
     return {
       attestation: {
         activeExecutionCount: 1,
@@ -402,7 +405,9 @@ export class GpuControllerService {
 
   async #cancelRecord(record: ControlRecord): Promise<ControlRecord> {
     let current = record;
-    if (current.execution === null) current = await this.#observeExecution(current);
+    if (current.execution === null || current.cancelIntent) {
+      current = await this.#observeExecution(current);
+    }
     if (
       current.execution === null ||
       ["SUCCEEDED", "FAILED", "CANCELLED"].includes(current.state)
@@ -515,13 +520,17 @@ export class GpuControllerService {
     };
   }
 
-  #rejected(request: ControllerRequest, errorCode: ControllerErrorCode): ControllerResponse {
+  #rejected(
+    request: ControllerRequest,
+    errorCode: ControllerErrorCode,
+    version = request.expectedVersion,
+  ): ControllerResponse {
     return {
       schemaVersion: 1,
       requestId: request.requestId,
       executionHandle: request.executionHandle,
       outcome: "rejected",
-      version: request.expectedVersion,
+      version,
       errorCode,
     };
   }

@@ -87,6 +87,7 @@ describe("Google controller Firestore read-back client", () => {
           ...raw.database,
           earliestVersionTime:
             databaseReads++ === 0 ? "2026-08-11T12:00:00.000Z" : "2026-08-11T12:00:01.000Z",
+          etag: databaseReads === 1 ? "first-volatile-etag" : "second-volatile-etag",
         };
         return Promise.resolve(Response.json(database));
       }
@@ -106,12 +107,12 @@ describe("Google controller Firestore read-back client", () => {
       fakeFetch,
     ).readAndVerify(plan);
 
-    expect(evidence.databaseEtag).toBe("firestore-database-etag");
+    expect(evidence.databaseEtag).toBe("second-volatile-etag");
     expect(calls).toHaveLength(8);
     expect(new Set(calls.map(({ url }) => url))).toEqual(
       new Set([
         `https://firestore.googleapis.com/v1/${plan.database.name}`,
-        `https://firestore.googleapis.com/v1/${plan.database.name}/collectionGroups/-/fields?filter=ttlConfig%3A*&pageSize=3`,
+        `https://firestore.googleapis.com/v1/${plan.database.name}/collectionGroups/-/fields?filter=ttlConfig%3A*`,
         ...plan.ttlFields.map(({ name }) => `https://firestore.googleapis.com/v1/${name}`),
       ]),
     );

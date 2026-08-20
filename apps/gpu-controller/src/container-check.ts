@@ -2,12 +2,15 @@ import { existsSync } from "node:fs";
 import process from "node:process";
 
 import {
+  inspectControllerSharedObjects,
   verifyControllerContainerFilesystem,
   verifyControllerContainerRuntime,
 } from "./container-invariants.js";
 
 try {
+  const sharedObjectState = inspectControllerSharedObjects(process.report.getReport());
   verifyControllerContainerRuntime({
+    ...sharedObjectState,
     gid: process.getgid?.() ?? -1,
     home: process.env["HOME"],
     nodeEnvironment: process.env["NODE_ENV"],

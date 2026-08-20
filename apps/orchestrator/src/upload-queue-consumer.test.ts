@@ -30,11 +30,20 @@ const EVENT = {
     size: 1024,
   },
 } as const;
+const CONTROL_EVENT = {
+  action: "cancel",
+  eventId: EVENT_ID,
+  jobId: JOB_ID,
+  requestedAt: NOW.toISOString(),
+  schemaVersion: 1,
+  type: "job-control",
+} as const;
 const JOB = {
   activeAttemptId: null,
   actualSizeBytes: null,
   expectedSizeBytes: 1024,
   generationOneAttemptId: null,
+  generationOneSelection: null,
   id: JOB_ID,
   options: {
     language: "auto",
@@ -73,6 +82,7 @@ function environment(): UploadQueueEnvironment {
   return {
     APP_ENV: "local",
     CLOUDFLARE_ACCOUNT_ID: EVENT.account,
+    GPU_EXECUTION_POLICY: "runpod_serverless_v1",
     R2_ACCESS_KEY_ID: "r2-access-key-placeholder",
     // These bindings are never invoked because every unit test injects its ports.
     RECORDINGS: {} as R2Bucket,
@@ -127,6 +137,50 @@ describe("source object key boundary", () => {
 });
 
 describe("R2 upload Queue consumer", () => {
+  it("dispatches a bounded control event immediately and acknowledges it", async () => {
+    const message = new FakeMessage(CONTROL_EVENT);
+    const reconcileCancellation = vi.fn().mockResolvedValue({
+      appliedCount: 1,
+      deferredCount: 0,
+      outcome: "applied",
+    });
+    let repositoryCreations = 0;
+
+    await handleUploadQueueBatch({ messages: [message] }, environment(), {
+      createRepository: () => {
+        repositoryCreations += 1;
+        return fakeRepository();
+      },
+      logger: logger([]),
+      now: () => NOW,
+      reconcileCancellation,
+    });
+
+    expect(reconcileCancellation).toHaveBeenCalledWith(
+      JOB_ID,
+      expect.objectContaining({ SCRIBE_DROP_DB: environment().SCRIBE_DROP_DB }),
+      expect.any(Object),
+    );
+    expect(message.acknowledgements).toBe(1);
+    expect(message.retryDelays).toEqual([]);
+    expect(repositoryCreations).toBe(0);
+  });
+
+  it("retries an immediate cancellation when the exact controller effect is unknown", async () => {
+    const message = new FakeMessage(CONTROL_EVENT, 2);
+
+    await handleUploadQueueBatch({ messages: [message] }, environment(), {
+      logger: logger([]),
+      now: () => NOW,
+      random: () => 0.5,
+      reconcileCancellation: () =>
+        Promise.resolve({ appliedCount: 0, deferredCount: 1, outcome: "deferred" }),
+    });
+
+    expect(message.acknowledgements).toBe(0);
+    expect(message.retryDelays).toEqual([16]);
+  });
+
   it("revalidates HEAD, creates one pending attempt, and acknowledges the message", async () => {
     const message = new FakeMessage(EVENT);
     const records: string[] = [];
@@ -169,8 +223,82 @@ describe("R2 upload Queue consumer", () => {
       JOB_ID,
       environment().SCRIBE_DROP_DB,
       expect.objectContaining({
-        runpodEndpointId: "endpoint-placeholder",
+        contractVersion: 1,
+        kind: "runpod_serverless",
+        policy: "runpod_serverless_v1",
       }),
+      expect.any(Object),
+    );
+  });
+
+  it("ingests and acknowledges while execution admission is paused without dispatching", async () => {
+    const message = new FakeMessage(EVENT);
+    const submitPendingJob = vi.fn();
+    const ingestSource = vi.fn<UploadIngestionRepository["ingestSource"]>(() =>
+      Promise.resolve("ingested"),
+    );
+
+    await handleUploadQueueBatch(
+      { messages: [message] },
+      { ...environment(), GPU_EXECUTION_ADMISSION: "paused" },
+      {
+        createAttemptId: () => ATTEMPT_ID,
+        createEventId: () => EVENT_ID,
+        createRepository: () => fakeRepository({ ingestSource }),
+        headSourceObject: () =>
+          Promise.resolve({ etag: EVENT.object.eTag, size: EVENT.object.size }),
+        logger: logger([]),
+        now: () => NOW,
+        submitPendingJob,
+      },
+    );
+
+    expect(ingestSource).toHaveBeenCalledOnce();
+    expect(submitPendingJob).not.toHaveBeenCalled();
+    expect(message.acknowledgements).toBe(1);
+    expect(message.retryDelays).toEqual([]);
+  });
+
+  it("uses the immutable attempt selection when the staging switch changes", async () => {
+    const message = new FakeMessage(EVENT);
+    const submitPendingJob = vi.fn().mockResolvedValue("accepted");
+    const selected = {
+      ...JOB,
+      activeAttemptId: ATTEMPT_ID,
+      actualSizeBytes: EVENT.object.size,
+      generationOneAttemptId: ATTEMPT_ID,
+      generationOneSelection: {
+        contractVersion: 1,
+        kind: "runpod_serverless",
+        policy: "runpod_serverless_v1",
+      },
+      sourceEtag: EVENT.object.eTag,
+      status: "SUBMISSION_PENDING",
+    } satisfies SourceJob;
+    await handleUploadQueueBatch(
+      { messages: [message] },
+      {
+        ...environment(),
+        APP_ENV: "staging",
+        GPU_EXECUTION_POLICY: "cloud_run_jobs_l4_v1",
+      },
+      {
+        createRepository: () =>
+          fakeRepository({
+            findSourceJob: () => Promise.resolve(selected),
+            ingestSource: () => Promise.resolve("duplicate"),
+          }),
+        headSourceObject: () =>
+          Promise.resolve({ etag: EVENT.object.eTag, size: EVENT.object.size }),
+        logger: logger([]),
+        now: () => NOW,
+        submitPendingJob,
+      },
+    );
+    expect(submitPendingJob).toHaveBeenCalledWith(
+      JOB_ID,
+      environment().SCRIBE_DROP_DB,
+      selected.generationOneSelection,
       expect.any(Object),
     );
   });
@@ -323,6 +451,11 @@ describe("R2 upload Queue consumer", () => {
       activeAttemptId: ATTEMPT_ID,
       actualSizeBytes: EVENT.object.size,
       generationOneAttemptId: ATTEMPT_ID,
+      generationOneSelection: {
+        contractVersion: 1,
+        kind: "runpod_serverless",
+        policy: "runpod_serverless_v1",
+      },
       sourceEtag: EVENT.object.eTag,
       status: "SUBMISSION_PENDING",
     } satisfies SourceJob;

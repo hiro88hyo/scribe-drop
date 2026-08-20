@@ -74,6 +74,12 @@ jobs:
           pnpm run gitleaks:install
           pnpm run trivy:install
 
+      - name: Run complete application and dependency gates
+        run: |
+          pnpm check
+          pnpm run secrets:check
+          pnpm run security:audit
+
       - name: Authenticate publisher through fixed GitHub OIDC
         id: publisher-preflight
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
@@ -87,6 +93,7 @@ jobs:
       - name: Set up pinned Google Cloud CLI
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
         with:
+          install_components: beta
           version: 579.0.0
           project_id: scribe-drop
 
@@ -94,12 +101,6 @@ jobs:
         run: |
           test "$(gcloud version | sed -n 's/^Google Cloud SDK //p')" = "579.0.0"
           gcloud auth print-access-token >/dev/null
-
-      - name: Run complete application and dependency gates
-        run: |
-          pnpm check
-          pnpm run secrets:check
-          pnpm run security:audit
 
       - name: Build and inspect exact controller and worker images
         run: |
@@ -200,12 +201,19 @@ jobs:
               --quiet
           done
 
-      - name: Upload metadata-only candidate evidence and SBOMs
+      - name: Upload metadata-only candidate evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: scribe-drop-cloud-run-candidate-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cloud-run-candidate.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload candidate SBOMs separately
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scribe-drop-cloud-run-sboms-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            ${{ runner.temp }}/cloud-run-candidate.json
             /tmp/scribe-drop-gpu-controller.cdx.json
             /tmp/scribe-drop-cloud-run-worker.cdx.json
           if-no-files-found: error

@@ -4,6 +4,7 @@ import {
   verifyBinaryAuthorizationPolicyReadback,
   verifyControllerSecretReadback,
   verifyControllerServiceIamReadback,
+  verifyIamPrincipalBindingsReadback,
   verifyIamPolicyBindingsReadback,
 } from "./control-plane-readback.js";
 
@@ -61,12 +62,43 @@ describe("controller control-plane read-back", () => {
     expect(() => verifyIamPolicyBindingsReadback(expected, excess)).toThrow();
   });
 
+  it("compares only the controller principal within a shared IAM role binding", () => {
+    const principal = "serviceAccount:gpu-controller@scribe-phase14.iam.gserviceaccount.com";
+    const expected = [{ members: [principal], role: "roles/artifactregistry.reader" }];
+    expect(() =>
+      verifyIamPrincipalBindingsReadback(principal, expected, {
+        bindings: [
+          {
+            members: [
+              principal,
+              "serviceAccount:gpu-controller-production@scribe-phase14.iam.gserviceaccount.com",
+            ],
+            role: "roles/artifactregistry.reader",
+          },
+        ],
+        etag: "BwY=",
+        version: 1,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      verifyIamPrincipalBindingsReadback(principal, expected, {
+        bindings: [
+          { members: [principal], role: "roles/artifactregistry.reader" },
+          { members: [principal], role: "roles/owner" },
+        ],
+        etag: "BwY=",
+        version: 1,
+      }),
+    ).toThrow("controller principal IAM bindings exceed the expected policy");
+  });
+
   it("requires a fixed enabled Singapore secret version and exact accessor policy", () => {
     const expectation = {
       controllerServiceAccount: "gpu-controller@scribe-phase14.iam.gserviceaccount.com",
       environment: "staging" as const,
       name: "scribe-drop-staging-controller-primary",
       projectId: "scribe-phase14",
+      projectNumber: "123456789012",
       version: "7",
     };
     const secret = {
@@ -77,7 +109,7 @@ describe("controller control-plane read-back", () => {
         "scribe-drop-component": "gpu-controller",
         "scribe-drop-environment": "staging",
       },
-      name: "projects/scribe-phase14/secrets/scribe-drop-staging-controller-primary",
+      name: "projects/123456789012/secrets/scribe-drop-staging-controller-primary",
       replication: { userManaged: { replicas: [{ location: "asia-southeast1" }] } },
       topics: [],
       versionAliases: {},
@@ -86,7 +118,7 @@ describe("controller control-plane read-back", () => {
       clientSpecifiedPayloadChecksum: true,
       createTime: "2026-08-11T00:01:00Z",
       etag: "version-etag",
-      name: "projects/scribe-phase14/secrets/scribe-drop-staging-controller-primary/versions/7",
+      name: "projects/123456789012/secrets/scribe-drop-staging-controller-primary/versions/7",
       replicationStatus: {
         userManaged: { replicas: [{ location: "asia-southeast1" }] },
       },

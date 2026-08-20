@@ -10,6 +10,8 @@ import {
   cloudRunControllerRequestSchema,
   cloudRunControllerResponseSchema,
   cloudRunOpaqueHandleSchema,
+  type CloudRunControllerRequest,
+  type CloudRunControllerResponse,
   type CloudRunControllerAttestationResponse,
   type CloudRunControllerKeyId,
 } from "@scribe-drop/contracts";
@@ -189,6 +191,7 @@ export class CloudRunControllerClient
     if (response.outcome !== "found") return null;
     return {
       activeExecutionCount: response.attestation.activeExecutionCount,
+      controllerVersion: response.attestation.controllerVersion,
       environment: response.attestation.environment,
       executionHandle: response.attestation.executionHandle,
       executionName: response.attestation.executionName,
@@ -200,6 +203,22 @@ export class CloudRunControllerClient
       state: response.attestation.state,
       taskCount: response.attestation.taskCount,
     };
+  }
+
+  async mutate(request: CloudRunControllerRequest): Promise<CloudRunControllerResponse> {
+    if (request.environment !== this.#environment) {
+      throw new Error("Cloud Run controller environment mismatch");
+    }
+    const response = cloudRunControllerResponseSchema.parse(
+      await this.#post(CLOUD_RUN_CONTROLLER_MUTATION_PATH, request),
+    );
+    if (
+      response.requestId !== request.requestId ||
+      response.executionHandle !== request.executionHandle
+    ) {
+      throw new Error("Cloud Run controller response identity mismatch");
+    }
+    return response;
   }
 
   async schedule(input: {
@@ -225,9 +244,7 @@ export class CloudRunControllerClient
       requestId: this.#ports.ids.next(),
       schemaVersion: 1,
     });
-    const response = cloudRunControllerResponseSchema.parse(
-      await this.#post(CLOUD_RUN_CONTROLLER_MUTATION_PATH, request),
-    );
+    const response = await this.mutate(request);
     if (
       response.requestId !== request.requestId ||
       response.executionHandle !== request.executionHandle ||
@@ -274,9 +291,10 @@ export class CloudRunControllerClient
     const timeout = setTimeout(() => {
       controller.abort();
     }, CONTROLLER_TIMEOUT_MS);
+    const providerFetch = this.#ports.fetch;
     let response: Response;
     try {
-      response = await this.#ports.fetch(new URL(path, this.#baseUrl), {
+      response = await providerFetch(new URL(path, this.#baseUrl), {
         body,
         headers: {
           "content-type": "application/json",
@@ -284,7 +302,7 @@ export class CloudRunControllerClient
           "x-scribe-signature": signature,
         },
         method: "POST",
-        redirect: "error",
+        redirect: "manual",
         signal: controller.signal,
       });
     } catch {
@@ -292,7 +310,11 @@ export class CloudRunControllerClient
     } finally {
       clearTimeout(timeout);
     }
-    if (response.status !== 200) throw new Error("Cloud Run controller request failed");
+    const structuredMutationRejection =
+      path === CLOUD_RUN_CONTROLLER_MUTATION_PATH && response.status === 409;
+    if (response.status !== 200 && !structuredMutationRejection) {
+      throw new Error("Cloud Run controller request failed");
+    }
     return readBoundedJson(response);
   }
 }

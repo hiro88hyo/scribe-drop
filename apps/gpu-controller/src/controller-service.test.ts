@@ -455,6 +455,38 @@ describe("GPU controller durable lifecycle", () => {
     expect(provider.jobs.size).toBe(0);
   });
 
+  it("re-observes a previously requested cancellation instead of resending it forever", async () => {
+    const provider = new FakeCloudRun();
+    const clock = new MutableClock();
+    const lifecycle = service(provider, clock);
+    await createAndReconcile(lifecycle.service, lifecycle.store);
+    let record = await lifecycle.store.get(HANDLE);
+    const pending = record === null ? undefined : provider.executions.get(record.jobId)?.[0];
+    if (record === null || pending === undefined) throw new Error("execution missing");
+    provider.replaceExecution(pending, { ...pending, status: "running" });
+    await lifecycle.service.execute(request("observe", 3, record.version), "observe-running");
+    record = await lifecycle.store.get(HANDLE);
+    if (record === null) throw new Error("record missing");
+
+    const first = await lifecycle.service.execute(
+      request("cancel", 4, record.version),
+      "cancel-first",
+    );
+    expect(first.outcome).toBe("pending");
+    expect(provider.cancelCalls).toBe(1);
+
+    record = await lifecycle.store.get(HANDLE);
+    if (record === null) throw new Error("record missing");
+    const recovered = await lifecycle.service.execute(
+      request("cancel", 5, record.version),
+      "cancel-reobserve",
+    );
+
+    expect(recovered.outcome).toBe("cancelled");
+    expect(provider.cancelCalls).toBe(1);
+    expect((await lifecycle.store.get(HANDLE))?.state).toBe("CANCELLED");
+  });
+
   it("reaps only expired or explicitly cleanup-marked records", async () => {
     const provider = new FakeCloudRun();
     const clock = new MutableClock();
@@ -500,6 +532,55 @@ describe("GPU controller durable lifecycle", () => {
       schemaVersion: 1,
     });
     expect((await lifecycle.store.get(HANDLE))?.version).toBe(record.version);
+  });
+
+  it("attests the exact live execution before the first observe catches up", async () => {
+    const provider = new FakeCloudRun();
+    const clock = new MutableClock();
+    const lifecycle = service(provider, clock);
+    await createAndReconcile(lifecycle.service, lifecycle.store);
+    const record = await lifecycle.store.get(HANDLE);
+    const pending = record === null ? undefined : provider.executions.get(record.jobId)?.[0];
+    if (record === null || pending === undefined) throw new Error("execution missing");
+    expect(record).toMatchObject({
+      execution: null,
+      runIntent: true,
+      state: "EXECUTION_PENDING",
+    });
+    provider.replaceExecution(pending, { ...pending, status: "running" });
+
+    await expect(lifecycle.service.attest(attestationRequest())).resolves.toMatchObject({
+      attestation: {
+        activeExecutionCount: 1,
+        manifestMatches: true,
+        state: "running",
+      },
+      outcome: "found",
+    });
+    expect((await lifecycle.store.get(HANDLE))?.version).toBe(record.version);
+  });
+
+  it("rejects a pre-observe execution without durable run intent", async () => {
+    const provider = new FakeCloudRun();
+    const clock = new MutableClock();
+    const lifecycle = service(provider, clock);
+    await createAndReconcile(lifecycle.service, lifecycle.store);
+    const record = await lifecycle.store.get(HANDLE);
+    const pending = record === null ? undefined : provider.executions.get(record.jobId)?.[0];
+    if (record === null || pending === undefined) throw new Error("execution missing");
+    expect(
+      await lifecycle.store.compareAndSet(record.version, {
+        ...record,
+        runIntent: false,
+        version: record.version + 1,
+      }),
+    ).toBe(true);
+    provider.replaceExecution(pending, { ...pending, status: "running" });
+
+    await expect(lifecycle.service.attest(attestationRequest())).resolves.toMatchObject({
+      attestation: { manifestMatches: false },
+      outcome: "found",
+    });
   });
 
   it("reports live manifest drift and refuses ambiguous execution lists", async () => {

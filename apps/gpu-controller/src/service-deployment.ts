@@ -198,6 +198,7 @@ export const controllerServiceDeploymentPlanSchema = z
           .object({
             "scribe-drop-component": z.literal("gpu-controller"),
             "scribe-drop-environment": z.enum(["staging", "production"]),
+            "scribe-drop-policy": z.literal("cloud-run-jobs-l4-v1"),
           })
           .strict(),
         maxInstanceRequestConcurrency: z.literal(8),
@@ -281,6 +282,7 @@ export function createControllerServiceDeploymentPlan(
   const labels = {
     "scribe-drop-component": "gpu-controller",
     "scribe-drop-environment": environment,
+    "scribe-drop-policy": "cloud-run-jobs-l4-v1",
   } as const;
   const env = [
     { name: "APP_ENV", value: environment },
@@ -326,7 +328,7 @@ export function createControllerServiceDeploymentPlan(
     iapEnabled: false,
     ingress: "INGRESS_TRAFFIC_ALL",
     invokerIamDisabled: true,
-    labels: { ...labels, "scribe-drop-policy": "cloud-run-jobs-l4-v1" },
+    labels,
     launchStage: "GA",
     multiRegionSettings: null,
     name: `projects/${parsed.manifest.projectId}/locations/asia-southeast1/services/${parsed.serviceName}`,

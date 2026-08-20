@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import runpy
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Final
@@ -25,14 +26,17 @@ from scribe_drop_worker.cloud_run_contracts import (
     TerminalRequest,
     TerminalResponse,
 )
+from scribe_drop_worker.cloud_run_errors import (
+    BOOTSTRAP_REJECTED,
+    OneShotRuntimeError,
+    UnknownControlOutcomeError,
+)
 from scribe_drop_worker.media import MediaInfo
 from scribe_drop_worker.one_shot import (
     CloudRunOneShotService,
     OneShotDependencies,
     OneShotResult,
-    OneShotRuntimeError,
     RuntimeKeyPair,
-    UnknownControlOutcomeError,
     create_runtime_key_pair,
     frame_runtime_challenge,
     load_one_shot_environment,
@@ -532,3 +536,27 @@ def test_main_normalizes_failed_result_and_adapter_exception(
     with pytest.raises(SystemExit):
         main(environment())
     assert capsys.readouterr().err == "cloud-run-one-shot:failed:INTERNAL_ERROR\n"
+
+
+def test_module_entrypoint_uses_the_same_bootstrap_error_class(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`python -m` must not duplicate the runtime exception class through a circular import."""
+    for key, value in environment().items():
+        monkeypatch.setenv(key, value)
+
+    def reject_identity(_self: object, _audience: str) -> str:
+        raise OneShotRuntimeError(BOOTSTRAP_REJECTED)
+
+    monkeypatch.setattr(cloud_run_http.MetadataIdentityClient, "token", reject_identity)
+    with (
+        pytest.warns(RuntimeWarning, match="found in sys.modules"),
+        pytest.raises(SystemExit) as exit_info,
+    ):
+        runpy.run_module("scribe_drop_worker.one_shot", run_name="__main__", alter_sys=True)
+
+    assert exit_info.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "cloud-run-one-shot:failed:BOOTSTRAP_REJECTED\n"

@@ -536,7 +536,7 @@ export class FirestoreControlStore implements ControlStore {
       if (executionValue === null) return { outcome: "not_found" };
       const record = parseRecordDocument(executionValue, request.executionHandle);
       if (record.environment !== request.environment) return { outcome: "environment_mismatch" };
-      if (record.version !== request.expectedVersion) return { outcome: "stale" };
+      if (record.version !== request.expectedVersion) return { outcome: "stale", record };
       const nowMs = Date.parse(request.now);
       const recent = pruneRecent(environment, nowMs);
       if (

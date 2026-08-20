@@ -9,7 +9,7 @@ const MANIFEST = createFixedJobManifest(
     projectId: "scribe-phase12",
     imageDigest: `asia-southeast1-docker.pkg.dev/scribe-phase12/worker/runtime@sha256:${"a".repeat(64)}`,
     runtimeServiceAccount: "runtime@scribe-phase12.iam.gserviceaccount.com",
-    orchestratorOrigin: "https://orchestrator.example.test/",
+    orchestratorOrigin: "https://orchestrator.example.test",
     resultHost: "storage.example.test",
     sourceHost: "storage.example.test",
   },
@@ -23,6 +23,7 @@ const JOB: ProviderJob = {
   ready: true,
   manifest: MANIFEST,
 };
+const EXECUTION_REF = `${JOB.ref}/executions/sd-stg-job-abcde`;
 
 function requestUrl(input: RequestInfo | URL): string {
   if (typeof input === "string") return input;
@@ -58,6 +59,12 @@ describe("Cloud Run Jobs REST adapter", () => {
       "https://run.googleapis.com/v2/projects/scribe-phase12/locations/asia-southeast1/jobs?jobId=sd-stg-job",
     );
     expect(JSON.parse(requestBody(calls[0]?.init.body))).toEqual(MANIFEST);
+    expect(MANIFEST.template.template.containers[0].env[4].value).toBe(
+      "https://orchestrator.example.test/",
+    );
+    expect(MANIFEST.template.template.containers[0].env[5].value).toBe(
+      "https://orchestrator.example.test/internal/cloud-run/bootstrap",
+    );
     expect(calls[1]?.url).toBe(
       "https://run.googleapis.com/v2/projects/scribe-phase12/locations/asia-southeast1/jobs/sd-stg-job:run",
     );
@@ -84,6 +91,87 @@ describe("Cloud Run Jobs REST adapter", () => {
 
     expect(await client.listExecutions("sd-stg-job")).toEqual({ outcome: "unavailable" });
     expect(await client.getJob("sd-stg-job")).toEqual({ outcome: "unavailable" });
+  });
+
+  it("normalizes the live short Execution job ID only after exact parent validation", async () => {
+    const client = new CloudRunJobsClient(
+      { projectId: "scribe-phase12", region: "asia-southeast1" },
+      { getAccessToken: () => Promise.resolve("token") },
+      () =>
+        Promise.resolve(
+          Response.json({
+            executions: [
+              {
+                name: EXECUTION_REF,
+                uid: "22222222-2222-4222-8222-222222222222",
+                etag: "execution-etag",
+                job: "sd-stg-job",
+                taskCount: 1,
+                parallelism: 1,
+                retriedCount: 0,
+                runningCount: 1,
+              },
+            ],
+          }),
+        ),
+    );
+
+    expect(await client.listExecutions("sd-stg-job")).toEqual({
+      outcome: "found",
+      executions: [
+        {
+          ref: EXECUTION_REF,
+          uid: "22222222-2222-4222-8222-222222222222",
+          etag: "execution-etag",
+          jobRef: JOB.ref,
+          status: "running",
+          taskCount: 1,
+          parallelism: 1,
+          retriedCount: 0,
+        },
+      ],
+    });
+  });
+
+  it("rejects an Execution whose short job ID or full resource parent drifts", async () => {
+    const responses = [
+      {
+        executions: [
+          {
+            name: EXECUTION_REF,
+            uid: "22222222-2222-4222-8222-222222222222",
+            etag: "execution-etag",
+            job: "other-job",
+            taskCount: 1,
+            parallelism: 1,
+          },
+        ],
+      },
+      {
+        executions: [
+          {
+            name: "projects/other/locations/asia-southeast1/jobs/sd-stg-job/executions/escaped",
+            uid: "22222222-2222-4222-8222-222222222222",
+            etag: "execution-etag",
+            job: "sd-stg-job",
+            taskCount: 1,
+            parallelism: 1,
+          },
+        ],
+      },
+    ];
+    const client = new CloudRunJobsClient(
+      { projectId: "scribe-phase12", region: "asia-southeast1" },
+      { getAccessToken: () => Promise.resolve("token") },
+      () => {
+        const response = responses.shift();
+        if (response === undefined) throw new Error("unexpected request");
+        return Promise.resolve(Response.json(response));
+      },
+    );
+
+    expect(await client.listExecutions("sd-stg-job")).toEqual({ outcome: "unavailable" });
+    expect(await client.listExecutions("sd-stg-job")).toEqual({ outcome: "unavailable" });
   });
 
   it("rejects a Job whose Binary Authorization protection is missing or weakened", async () => {

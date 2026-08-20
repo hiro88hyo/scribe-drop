@@ -110,7 +110,7 @@ try {
       candidateDirectory,
       evidencePath,
       expectedCandidateRunId: process.env["EXPECTED_CANDIDATE_RUN_ID"],
-      expectedCommitSha: process.env["GITHUB_SHA"],
+      expectedCommitSha: process.env["EXPECTED_COMMIT_SHA"],
       expectedEnvironmentPolicyId,
       expectedReleaseVersion: process.env["EXPECTED_RELEASE_VERSION"],
       expectedStagingRunId: process.env["EXPECTED_STAGING_RUN_ID"],

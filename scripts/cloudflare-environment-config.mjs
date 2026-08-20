@@ -7,6 +7,18 @@ const d1DatabaseIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0
 const runpodGpuIdPattern = /^[A-Za-z0-9][A-Za-z0-9 ._-]{1,126}[A-Za-z0-9]$/u;
 const runpodImagePattern =
   /^ghcr\.io\/[a-z0-9]+(?:[._-][a-z0-9]+)*\/scribe-drop-runpod-worker@sha256:[0-9a-f]{64}$/u;
+const ulidPattern = /^[0-9A-HJKMNP-TV-Z]{26}$/u;
+const stagingAcceptanceFaults = new Set([
+  "notification_unavailable",
+  "runtime_heartbeat_response_loss",
+  "worker_disconnect_after_claim",
+]);
+const stagingAcceptanceFaultIdentifierKeys = [
+  "acceptanceFault",
+  "acceptanceFaultExpiresAt",
+  "acceptanceFaultIssuedAt",
+  "acceptanceFaultJobId",
+];
 
 const accountIdPlaceholder = "0".repeat(32);
 const accessAudiencePlaceholder = "replace-with-access-audience";
@@ -16,12 +28,24 @@ const stagingD1DatabaseIdPlaceholder = "00000000-0000-0000-0000-000000000101";
 const stagingOrchestratorHostnamePlaceholder = "replace-with-staging-orchestrator.example.invalid";
 const stagingOrchestratorOriginPlaceholder =
   "https://replace-with-staging-orchestrator.example.invalid";
+const stagingCloudRunControllerOriginPlaceholder =
+  "https://replace-with-staging-gpu-controller.example.invalid";
+const stagingCloudRunOrchestratorOriginPlaceholder =
+  "https://replace-with-staging-cloud-run-orchestrator.example.invalid";
+const stagingCloudRunRuntimeServiceAccountPlaceholder =
+  "replace-with-staging-runtime@replace-with-project.iam.gserviceaccount.com";
 const webOriginPlaceholder = "https://replace-with-staging-web.example.invalid";
 const productionD1DatabaseIdPlaceholder = "00000000-0000-0000-0000-000000000201";
 const productionOrchestratorHostnamePlaceholder =
   "replace-with-production-orchestrator.example.invalid";
 const productionOrchestratorOriginPlaceholder =
   "https://replace-with-production-orchestrator.example.invalid";
+const productionCloudRunControllerOriginPlaceholder =
+  "https://replace-with-production-gpu-controller.example.invalid";
+const productionCloudRunOrchestratorOriginPlaceholder =
+  "https://replace-with-production-cloud-run-orchestrator.example.invalid";
+const productionCloudRunRuntimeServiceAccountPlaceholder =
+  "replace-with-production-runtime@replace-with-project.iam.gserviceaccount.com";
 const productionWebOriginPlaceholder = "https://replace-with-production-web.example.invalid";
 const retentionDefaults = {
   auditRetentionDays: 180,
@@ -78,6 +102,124 @@ function requireExactHttpsOrigin(value, name) {
   }
 
   return value;
+}
+
+function validatedStagingCloudRunConfiguration(identifiers, orchestratorOrigin) {
+  const mode = identifiers.cloudRunRuntimeMode ?? "disabled";
+  if (mode !== "disabled" && mode !== "synthetic-shadow") {
+    throw new Error("SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_MODE is invalid");
+  }
+  if (mode === "disabled") {
+    return { mode };
+  }
+  const controllerOrigin = requireExactHttpsOrigin(
+    identifiers.cloudRunControllerOrigin,
+    "SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_ORIGIN",
+  );
+  if (
+    !/^scribe-drop-staging-gpu-controller-[0-9]+\.asia-southeast1\.run\.app$/u.test(
+      new URL(controllerOrigin).hostname,
+    )
+  ) {
+    throw new Error("SCRIBE_DROP_STAGING_CLOUD_RUN_CONTROLLER_ORIGIN is invalid");
+  }
+  const runtimeServiceAccount = requireIdentifier(
+    identifiers.cloudRunRuntimeServiceAccount,
+    /^gpu-runtime@scribe-drop\.iam\.gserviceaccount\.com$/u,
+    "SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT",
+  );
+  return { controllerOrigin, mode, orchestratorOrigin, runtimeServiceAccount };
+}
+
+function validatedStagingGpuExecutionPolicy(identifiers, cloudRun) {
+  const policy = identifiers.gpuExecutionPolicy ?? "runpod_serverless_v1";
+  if (!new Set(["runpod_serverless_v1", "cloud_run_jobs_l4_v1"]).has(policy)) {
+    throw new Error("SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY is invalid");
+  }
+  if (policy === "cloud_run_jobs_l4_v1" && cloudRun.mode !== "synthetic-shadow") {
+    throw new Error("Cloud Run execution requires the staging runtime service");
+  }
+  return policy;
+}
+
+function validatedGpuExecutionAdmission(identifiers, environment) {
+  const admission = identifiers.gpuExecutionAdmission ?? "active";
+  if (admission !== "active" && admission !== "paused") {
+    throw new Error(`SCRIBE_DROP_${environment.toUpperCase()}_GPU_EXECUTION_ADMISSION is invalid`);
+  }
+  return admission;
+}
+
+function validatedProductionCloudRunConfiguration(identifiers, orchestratorOrigin) {
+  const mode = identifiers.cloudRunRuntimeMode ?? "disabled";
+  if (mode !== "disabled" && mode !== "active") {
+    throw new Error("SCRIBE_DROP_PRODUCTION_CLOUD_RUN_RUNTIME_MODE is invalid");
+  }
+  if (mode === "disabled") return { mode };
+  const controllerOrigin = requireExactHttpsOrigin(
+    identifiers.cloudRunControllerOrigin,
+    "SCRIBE_DROP_PRODUCTION_CLOUD_RUN_CONTROLLER_ORIGIN",
+  );
+  if (
+    !/^scribe-drop-production-gpu-controller-[0-9]+\.asia-southeast1\.run\.app$/u.test(
+      new URL(controllerOrigin).hostname,
+    )
+  ) {
+    throw new Error("SCRIBE_DROP_PRODUCTION_CLOUD_RUN_CONTROLLER_ORIGIN is invalid");
+  }
+  const runtimeServiceAccount = requireIdentifier(
+    identifiers.cloudRunRuntimeServiceAccount,
+    /^gpu-runtime-production@scribe-drop\.iam\.gserviceaccount\.com$/u,
+    "SCRIBE_DROP_PRODUCTION_CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT",
+  );
+  return { controllerOrigin, mode, orchestratorOrigin, runtimeServiceAccount };
+}
+
+function validatedProductionGpuExecutionPolicy(identifiers, cloudRun) {
+  const policy = identifiers.gpuExecutionPolicy ?? "runpod_serverless_v1";
+  if (!new Set(["runpod_serverless_v1", "cloud_run_jobs_l4_v1"]).has(policy)) {
+    throw new Error("SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_POLICY is invalid");
+  }
+  if (policy === "cloud_run_jobs_l4_v1" && cloudRun.mode !== "active") {
+    throw new Error("Cloud Run execution requires the production runtime service");
+  }
+  return policy;
+}
+
+export function validateStagingAcceptanceFaultIdentifiers(identifiers, cloudRunMode) {
+  const values = stagingAcceptanceFaultIdentifierKeys.map((key) => identifiers[key]);
+  if (values.every((value) => value === undefined)) return undefined;
+  if (values.some((value) => typeof value !== "string") || cloudRunMode !== "synthetic-shadow") {
+    throw new Error("Staging acceptance fault configuration is incomplete or unavailable");
+  }
+  if (!stagingAcceptanceFaults.has(identifiers.acceptanceFault)) {
+    throw new Error("Staging acceptance fault is invalid");
+  }
+  const jobId = requireIdentifier(
+    identifiers.acceptanceFaultJobId,
+    ulidPattern,
+    "STAGING_ACCEPTANCE_FAULT_JOB_ID",
+  );
+  const issuedAt = identifiers.acceptanceFaultIssuedAt;
+  const expiresAt = identifiers.acceptanceFaultExpiresAt;
+  const issuedMilliseconds = Date.parse(issuedAt);
+  const expiresMilliseconds = Date.parse(expiresAt);
+  if (
+    !Number.isFinite(issuedMilliseconds) ||
+    !Number.isFinite(expiresMilliseconds) ||
+    new Date(issuedMilliseconds).toISOString() !== issuedAt ||
+    new Date(expiresMilliseconds).toISOString() !== expiresAt ||
+    expiresMilliseconds <= issuedMilliseconds ||
+    expiresMilliseconds - issuedMilliseconds > 30 * 60 * 1_000
+  ) {
+    throw new Error("Staging acceptance fault lifetime is invalid");
+  }
+  return {
+    expiresAt,
+    fault: identifiers.acceptanceFault,
+    issuedAt,
+    jobId,
+  };
 }
 
 function rejectEnvironmentMarker(value, marker, name) {
@@ -196,6 +338,10 @@ export function renderOrchestratorStagingConfig(template, identifiers) {
     "SCRIBE_DROP_STAGING_ORCHESTRATOR_ORIGIN",
   );
   const orchestratorHostname = new URL(orchestratorOrigin).hostname;
+  const cloudRun = validatedStagingCloudRunConfiguration(identifiers, orchestratorOrigin);
+  const gpuExecutionPolicy = validatedStagingGpuExecutionPolicy(identifiers, cloudRun);
+  const gpuExecutionAdmission = validatedGpuExecutionAdmission(identifiers, "staging");
+  const acceptanceFault = validateStagingAcceptanceFaultIdentifiers(identifiers, cloudRun.mode);
   const webOrigin = requireExactHttpsOrigin(
     identifiers.webOrigin,
     "SCRIBE_DROP_STAGING_WEB_ORIGIN",
@@ -236,6 +382,63 @@ export function renderOrchestratorStagingConfig(template, identifiers) {
     `RUNPOD_INTERNAL_BASE_URL = "${orchestratorOrigin}"`,
     "orchestrator staging internal origin",
   );
+  stagingConfig = replaceOnce(
+    stagingConfig,
+    'GPU_EXECUTION_POLICY = "runpod_serverless_v1"',
+    `GPU_EXECUTION_POLICY = "${gpuExecutionPolicy}"`,
+    "orchestrator staging GPU execution policy",
+  );
+  stagingConfig = replaceOnce(
+    stagingConfig,
+    'GPU_EXECUTION_ADMISSION = "active"',
+    `GPU_EXECUTION_ADMISSION = "${gpuExecutionAdmission}"`,
+    "orchestrator staging GPU execution admission",
+  );
+  const cloudRunBindings = [
+    [
+      `CLOUD_RUN_CONTROLLER_ORIGIN = "${stagingCloudRunControllerOriginPlaceholder}"`,
+      `CLOUD_RUN_CONTROLLER_ORIGIN = "${cloudRun.controllerOrigin}"`,
+      "orchestrator staging Cloud Run controller origin",
+    ],
+    [
+      `CLOUD_RUN_ORCHESTRATOR_ORIGIN = "${stagingCloudRunOrchestratorOriginPlaceholder}"`,
+      `CLOUD_RUN_ORCHESTRATOR_ORIGIN = "${cloudRun.orchestratorOrigin}"`,
+      "orchestrator staging Cloud Run orchestrator origin",
+    ],
+    [
+      'CLOUD_RUN_RUNTIME_MODE = "disabled"',
+      `CLOUD_RUN_RUNTIME_MODE = "${cloudRun.mode}"`,
+      "orchestrator staging Cloud Run runtime mode",
+    ],
+    [
+      `CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT = "${stagingCloudRunRuntimeServiceAccountPlaceholder}"`,
+      `CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT = "${cloudRun.runtimeServiceAccount}"`,
+      "orchestrator staging Cloud Run runtime service account",
+    ],
+  ];
+  for (const [source, activeValue, label] of cloudRunBindings) {
+    stagingConfig = replaceOnce(
+      stagingConfig,
+      `${source}\n`,
+      cloudRun.mode === "disabled" ? "" : `${activeValue}\n`,
+      label,
+    );
+  }
+  if (acceptanceFault !== undefined) {
+    stagingConfig = replaceOnce(
+      stagingConfig,
+      "[env.staging.vars]\n",
+      [
+        "[env.staging.vars]",
+        `STAGING_ACCEPTANCE_FAULT = "${acceptanceFault.fault}"`,
+        `STAGING_ACCEPTANCE_FAULT_EXPIRES_AT = "${acceptanceFault.expiresAt}"`,
+        `STAGING_ACCEPTANCE_FAULT_ISSUED_AT = "${acceptanceFault.issuedAt}"`,
+        `STAGING_ACCEPTANCE_FAULT_JOB_ID = "${acceptanceFault.jobId}"`,
+        "",
+      ].join("\n"),
+      "orchestrator staging acceptance fault variables",
+    );
+  }
   stagingConfig = replaceOnce(
     stagingConfig,
     `RUNPOD_ALLOWED_GPU_IDS = "${runpodGpuIdsPlaceholder}"`,
@@ -349,6 +552,16 @@ export function renderWebStagingConfig(template, identifiers) {
     "web staging E2E service token common name",
   );
 
+  const queueProducer = `[[queues.producers]]
+binding = "CONTROL_EVENTS"
+queue = "recording-uploaded-staging"`;
+  rendered = replaceOnce(
+    rendered,
+    queueProducer,
+    queueProducer,
+    "web staging control Queue producer",
+  );
+
   return replaceOnce(
     rendered,
     'pages_build_output_dir = "./dist"',
@@ -424,6 +637,9 @@ export function renderOrchestratorProductionConfig(template, identifiers) {
   const { accountId, d1DatabaseId } = validatedProductionResourceIdentifiers(identifiers);
   const retention = validatedRetentionIdentifiers(identifiers);
   const runpodPlacement = validatedRunpodPlacementPolicy(identifiers, "production");
+  if (stagingAcceptanceFaultIdentifierKeys.some((key) => identifiers[key] !== undefined)) {
+    throw new Error("Staging acceptance fault configuration is forbidden in production");
+  }
   const orchestratorOrigin = requireExactHttpsOrigin(
     identifiers.orchestratorOrigin,
     "SCRIBE_DROP_PRODUCTION_ORCHESTRATOR_ORIGIN",
@@ -434,6 +650,9 @@ export function renderOrchestratorProductionConfig(template, identifiers) {
     "SCRIBE_DROP_PRODUCTION_ORCHESTRATOR_ORIGIN",
   );
   const orchestratorHostname = new URL(orchestratorOrigin).hostname;
+  const cloudRun = validatedProductionCloudRunConfiguration(identifiers, orchestratorOrigin);
+  const gpuExecutionPolicy = validatedProductionGpuExecutionPolicy(identifiers, cloudRun);
+  const gpuExecutionAdmission = validatedGpuExecutionAdmission(identifiers, "production");
   const webOrigin = requireExactHttpsOrigin(
     identifiers.webOrigin,
     "SCRIBE_DROP_PRODUCTION_WEB_ORIGIN",
@@ -449,6 +668,9 @@ export function renderOrchestratorProductionConfig(template, identifiers) {
   const stagingIndex = precedingConfig.indexOf("[env.staging");
   const baseConfig = stagingIndex === -1 ? precedingConfig : precedingConfig.slice(0, stagingIndex);
   let productionConfig = template.slice(productionIndex);
+  if (/^[\t ]*STAGING_ACCEPTANCE_FAULT(?:_[A-Z_]+)?[\t ]*=/mu.test(productionConfig)) {
+    throw new Error("Staging acceptance fault variables are forbidden in production");
+  }
   productionConfig = replaceOnce(
     productionConfig,
     `CLOUDFLARE_ACCOUNT_ID = "${accountIdPlaceholder}"`,
@@ -473,6 +695,48 @@ export function renderOrchestratorProductionConfig(template, identifiers) {
     `RUNPOD_INTERNAL_BASE_URL = "${orchestratorOrigin}"`,
     "orchestrator production internal origin",
   );
+  productionConfig = replaceOnce(
+    productionConfig,
+    'GPU_EXECUTION_POLICY = "runpod_serverless_v1"',
+    `GPU_EXECUTION_POLICY = "${gpuExecutionPolicy}"`,
+    "orchestrator production GPU execution policy",
+  );
+  productionConfig = replaceOnce(
+    productionConfig,
+    'GPU_EXECUTION_ADMISSION = "active"',
+    `GPU_EXECUTION_ADMISSION = "${gpuExecutionAdmission}"`,
+    "orchestrator production GPU execution admission",
+  );
+  const cloudRunBindings = [
+    [
+      `CLOUD_RUN_CONTROLLER_ORIGIN = "${productionCloudRunControllerOriginPlaceholder}"`,
+      `CLOUD_RUN_CONTROLLER_ORIGIN = "${cloudRun.controllerOrigin}"`,
+      "orchestrator production Cloud Run controller origin",
+    ],
+    [
+      `CLOUD_RUN_ORCHESTRATOR_ORIGIN = "${productionCloudRunOrchestratorOriginPlaceholder}"`,
+      `CLOUD_RUN_ORCHESTRATOR_ORIGIN = "${cloudRun.orchestratorOrigin}"`,
+      "orchestrator production Cloud Run orchestrator origin",
+    ],
+    [
+      'CLOUD_RUN_RUNTIME_MODE = "disabled"',
+      `CLOUD_RUN_RUNTIME_MODE = "${cloudRun.mode}"`,
+      "orchestrator production Cloud Run runtime mode",
+    ],
+    [
+      `CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT = "${productionCloudRunRuntimeServiceAccountPlaceholder}"`,
+      `CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT = "${cloudRun.runtimeServiceAccount}"`,
+      "orchestrator production Cloud Run runtime service account",
+    ],
+  ];
+  for (const [source, activeValue, label] of cloudRunBindings) {
+    productionConfig = replaceOnce(
+      productionConfig,
+      `${source}\n`,
+      cloudRun.mode === "disabled" ? "" : `${activeValue}\n`,
+      label,
+    );
+  }
   productionConfig = replaceOnce(
     productionConfig,
     `RUNPOD_ALLOWED_GPU_IDS = "${runpodGpuIdsPlaceholder}"`,
@@ -568,6 +832,16 @@ export function renderWebProductionConfig(template, identifiers) {
     `ALLOWED_ORIGIN = "${productionWebOriginPlaceholder}"`,
     `ALLOWED_ORIGIN = "${webOrigin}"`,
     "web production origin",
+  );
+
+  const queueProducer = `[[queues.producers]]
+binding = "CONTROL_EVENTS"
+queue = "recording-uploaded-production"`;
+  rendered = replaceOnce(
+    rendered,
+    queueProducer,
+    queueProducer,
+    "web production control Queue producer",
   );
 
   return replaceOnce(

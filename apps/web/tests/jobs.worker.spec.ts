@@ -8,6 +8,7 @@ import {
   listJobsResponseSchema,
   type CreateJobRequest,
   type JobOptions,
+  type JobControlEvent,
   type JobStatus,
   type TemporaryUploadCredentials,
 } from "@scribe-drop/contracts";
@@ -17,7 +18,7 @@ import {
 } from "@scribe-drop/domain";
 import { applyD1Migrations } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   handleCancelJob,
@@ -303,6 +304,7 @@ async function seedCompletedJob(owner = OWNER_A): Promise<{
 
 function handlerEnvironment(): {
   readonly CLOUDFLARE_ACCOUNT_ID: string;
+  readonly CONTROL_EVENTS: Queue<JobControlEvent>;
   readonly OWNER_HASH_HMAC_SECRET: string;
   readonly R2_PARENT_ACCESS_KEY_ID: string;
   readonly R2_PARENT_SECRET_ACCESS_KEY: string;
@@ -312,6 +314,7 @@ function handlerEnvironment(): {
 } {
   return {
     CLOUDFLARE_ACCOUNT_ID: env.CLOUDFLARE_ACCOUNT_ID,
+    CONTROL_EVENTS: env.CONTROL_EVENTS,
     OWNER_HASH_HMAC_SECRET: env.OWNER_HASH_HMAC_SECRET,
     R2_PARENT_ACCESS_KEY_ID: env.R2_PARENT_ACCESS_KEY_ID,
     R2_PARENT_SECRET_ACCESS_KEY: env.R2_PARENT_SECRET_ACCESS_KEY,
@@ -1507,6 +1510,8 @@ describe("job API handlers", () => {
 
   it("accepts a strict owner-scoped cancellation request", async () => {
     const active = await seedActiveJob("RUNNING");
+    const cancellationEventId = nextId();
+    const enqueueJobControlEvent = vi.fn().mockResolvedValue(undefined);
     const response = await handleCancelJob(
       {
         data: requestData(),
@@ -1519,7 +1524,8 @@ describe("job API handlers", () => {
         }),
       },
       {
-        createEventId: () => nextId(),
+        createEventId: () => cancellationEventId,
+        enqueueJobControlEvent,
         now: () => NOW,
       },
     );
@@ -1527,6 +1533,14 @@ describe("job API handlers", () => {
     expect(jobActionResponseSchema.parse(await response.json()).job).toMatchObject({
       id: active.jobId,
       status: "CANCEL_REQUESTED",
+    });
+    expect(enqueueJobControlEvent).toHaveBeenCalledWith(env.CONTROL_EVENTS, {
+      action: "cancel",
+      eventId: cancellationEventId,
+      jobId: active.jobId,
+      requestedAt: NOW.toISOString(),
+      schemaVersion: 1,
+      type: "job-control",
     });
 
     const foreign = await seedActiveJob("RUNNING", OWNER_B);
@@ -1541,6 +1555,56 @@ describe("job API handlers", () => {
       }),
     });
     expect(hiddenResponse.status).toBe(404);
+  });
+
+  it("re-enqueues an idempotent cancellation after a Queue send failure", async () => {
+    const active = await seedActiveJob("RUNNING");
+    const firstEventId = nextId();
+    const secondEventId = nextId();
+    const firstEnqueue = vi.fn().mockRejectedValue(new Error("Queue unavailable"));
+    const request = (): Request =>
+      new Request(`https://example.test/api/jobs/${active.jobId}/cancel`, {
+        body: "{}",
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+
+    await expect(
+      handleCancelJob(
+        {
+          data: requestData(),
+          env: handlerEnvironment(),
+          params: { id: active.jobId },
+          request: request(),
+        },
+        {
+          createEventId: () => firstEventId,
+          enqueueJobControlEvent: firstEnqueue,
+          now: () => NOW,
+        },
+      ),
+    ).rejects.toThrow("Queue unavailable");
+
+    const secondEnqueue = vi.fn().mockResolvedValue(undefined);
+    const retryResponse = await handleCancelJob(
+      {
+        data: requestData(),
+        env: handlerEnvironment(),
+        params: { id: active.jobId },
+        request: request(),
+      },
+      {
+        createEventId: () => secondEventId,
+        enqueueJobControlEvent: secondEnqueue,
+        now: () => NOW,
+      },
+    );
+
+    expect(retryResponse.status).toBe(200);
+    expect(secondEnqueue).toHaveBeenCalledWith(
+      env.CONTROL_EVENTS,
+      expect.objectContaining({ eventId: secondEventId, jobId: active.jobId }),
+    );
   });
 
   it("accepts strict owner-scoped deletion and returns no job metadata", async () => {

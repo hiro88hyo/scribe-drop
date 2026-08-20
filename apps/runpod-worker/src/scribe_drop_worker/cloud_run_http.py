@@ -21,6 +21,12 @@ from .cloud_run_contracts import (
     TerminalRequest,
     TerminalResponse,
 )
+from .cloud_run_errors import (
+    BOOTSTRAP_REJECTED,
+    SESSION_REJECTED,
+    OneShotRuntimeError,
+    UnknownControlOutcomeError,
+)
 from .http_client import (
     CONNECT_TIMEOUT_SECONDS,
     MAX_CONTROL_RESPONSE_BYTES,
@@ -30,17 +36,11 @@ from .http_client import (
     CapabilityHttpClient,
     PinnedDnsTransport,
 )
-from .one_shot import (
-    BOOTSTRAP_REJECTED,
-    SESSION_REJECTED,
-    OneShotEnvironment,
-    OneShotRuntimeError,
-    UnknownControlOutcomeError,
-)
 from .url_policy import UrlPolicy, UrlPurpose
 
 if TYPE_CHECKING:
     from .http_client import TransportFactory
+    from .one_shot import OneShotEnvironment
 
 METADATA_IDENTITY_URL: Final = (
     "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity"

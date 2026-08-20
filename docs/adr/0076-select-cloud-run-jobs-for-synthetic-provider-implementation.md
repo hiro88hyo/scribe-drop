@@ -70,6 +70,9 @@ RunPod Pods比較案はpublic IP、create idempotency、provider署名instance i
 - 上記identityはexact Executionを署名するprovider attestationではない。別workloadへのruntime service account流用、
   active execution複数、read-back不一致、challenge replayではfail closedにする。この残余リスクをPhase 15の
   production adoptionで再評価し、黙ってhost attestationへ格上げしない。
+- Cloud Run v2のExecution listが`job`をfull resource nameではなく短いJob IDで返す場合、adapterは要求したexact
+  Job IDまたはそのcanonical full resourceだけを許可する。Execution `name`のparentも同じcanonical Jobへ完全一致させてから
+  controller内部のfull parentへ正規化し、任意の短い値や別project/region parentを受け入れない。
 - GPU Jobはlistenerとinbound endpointを持たない。初期実装はexternal R2とOrchestratorへHTTPS接続するため
   default outboundを使い、application clientのexact HTTPS origin、port 443、redirect拒否、DNS/IP再検証を維持する。
   network層のdomain allowlistではないことを残余リスクとする。Phase 12はnetwork fakeだけ、Phase 14までは

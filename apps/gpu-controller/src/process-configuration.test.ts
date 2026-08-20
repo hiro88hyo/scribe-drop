@@ -18,7 +18,7 @@ function environment(): NodeJS.ProcessEnv {
     SCRIBE_DROP_CONTROLLER_HMAC_PRIMARY: encode(new Uint8Array(32).fill(1)),
     SCRIBE_DROP_FIRESTORE_DATABASE_ID: "scribe-staging-controller",
     SCRIBE_DROP_GCP_PROJECT_ID: "scribe-phase14",
-    SCRIBE_DROP_ORCHESTRATOR_ORIGIN: "https://orchestrator.example.test/",
+    SCRIBE_DROP_ORCHESTRATOR_ORIGIN: "https://orchestrator.example.test",
     SCRIBE_DROP_RESULT_HOST: "storage.example.test",
     SCRIBE_DROP_SOURCE_HOST: "storage.example.test",
   };
@@ -32,6 +32,7 @@ describe("controller process configuration", () => {
     });
 
     expect(parsed.port).toBe(8080);
+    expect(parsed.runtime.manifest.orchestratorOrigin).toBe("https://orchestrator.example.test/");
     expect(parsed.runtime.authorization).toEqual({
       environment: "staging",
       epoch: "disabled",

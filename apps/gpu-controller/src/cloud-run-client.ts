@@ -303,13 +303,30 @@ export class CloudRunJobsClient implements CloudRunAdminPort {
     const parsed = executionListSchema.safeParse(response.value);
     if (!parsed.success || parsed.data.nextPageToken !== undefined)
       return { outcome: "unavailable" };
+    const jobRef = this.#jobRef(jobId);
+    const executionPrefix = `${jobRef}/executions/`;
+    if (
+      (parsed.data.executions ?? []).some((execution) => {
+        const executionId = execution.name.slice(executionPrefix.length);
+        return (
+          (execution.job !== jobId && execution.job !== jobRef) ||
+          !execution.name.startsWith(executionPrefix) ||
+          executionId.length === 0 ||
+          executionId.includes("/") ||
+          executionId.includes("?") ||
+          executionId.includes("#")
+        );
+      })
+    ) {
+      return { outcome: "unavailable" };
+    }
     return {
       outcome: "found",
       executions: (parsed.data.executions ?? []).map((execution) => ({
         ref: execution.name,
         uid: execution.uid,
         etag: execution.etag,
-        jobRef: execution.job,
+        jobRef,
         status: this.#executionStatus(execution),
         taskCount: execution.taskCount,
         parallelism: execution.parallelism,
@@ -320,6 +337,10 @@ export class CloudRunJobsClient implements CloudRunAdminPort {
 
   #collection(): string {
     return `https://run.googleapis.com/v2/projects/${this.#configuration.projectId}/locations/${this.#configuration.region}/jobs`;
+  }
+
+  #jobRef(jobId: string): string {
+    return `projects/${this.#configuration.projectId}/locations/${this.#configuration.region}/jobs/${jobId}`;
   }
 
   #resource(reference: string): string {

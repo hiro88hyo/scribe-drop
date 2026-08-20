@@ -92,21 +92,24 @@ function jwksResponse(keys: readonly JWK[], cacheControl = "public, max-age=3600
 function verifier(
   providerFetch: typeof fetch,
   clock = new MutableClock(),
+  onRejected?: (code: string) => void,
 ): GoogleOidcIdentityVerifier {
   return new GoogleOidcIdentityVerifier(
     { clockSkewMs: 30_000, fetchTimeoutMs: 5_000, issuer: ISSUER },
-    { clock, fetch: providerFetch },
+    { clock, fetch: providerFetch, ...(onRejected === undefined ? {} : { onRejected }) },
   );
 }
 
 describe("GoogleOidcIdentityVerifier", () => {
   it("verifies an exact service-account token and reuses bounded JWKS cache", async () => {
     let requests = 0;
-    const providerFetch: typeof fetch = (input, init) => {
+    const providerFetch: typeof fetch = function (this: unknown, input, init) {
+      expect(this).toBeUndefined();
       requests += 1;
       expect(input).toBe(GOOGLE_OAUTH_JWKS_URL);
       expect(init?.method).toBe("GET");
-      expect(init?.redirect).toBe("error");
+      const request = new Request(input, init);
+      expect(request.redirect).toBe("manual");
       return Promise.resolve(jwksResponse([first.jwk]));
     };
     const identity = verifier(providerFetch);
@@ -170,6 +173,137 @@ describe("GoogleOidcIdentityVerifier", () => {
       Promise.all([identity.verify(signed, AUDIENCE), identity.verify(signed, AUDIENCE)]),
     ).resolves.toHaveLength(2);
     expect(requests).toBe(1);
+  });
+
+  it("retries one transient JWKS transport failure with bounded caller-owned delay", async () => {
+    let requests = 0;
+    const delays: number[] = [];
+    const identity = new GoogleOidcIdentityVerifier(
+      { clockSkewMs: 30_000, fetchTimeoutMs: 5_000, issuer: ISSUER },
+      {
+        clock: new MutableClock(),
+        fetch: () => {
+          requests += 1;
+          if (requests === 1) return Promise.reject(new TypeError("transient transport failure"));
+          return Promise.resolve(jwksResponse([first.jwk]));
+        },
+        retryDelay: (attempt) => {
+          delays.push(attempt);
+          return Promise.resolve();
+        },
+      },
+    );
+
+    await expect(identity.verify(await token(first), AUDIENCE)).resolves.toBeDefined();
+    expect(requests).toBe(2);
+    expect(delays).toEqual([0]);
+  });
+
+  it("classifies exhausted JWKS transport retries without exposing failure details", async () => {
+    const delays: number[] = [];
+    const rejections: string[] = [];
+    let requests = 0;
+    const identity = new GoogleOidcIdentityVerifier(
+      { clockSkewMs: 30_000, fetchTimeoutMs: 5_000, issuer: ISSUER },
+      {
+        clock: new MutableClock(),
+        fetch: () => {
+          requests += 1;
+          return Promise.reject(new TypeError("secret transport detail"));
+        },
+        onRejected: (code) => {
+          rejections.push(code);
+        },
+        retryDelay: (attempt) => {
+          delays.push(attempt);
+          return Promise.resolve();
+        },
+      },
+    );
+
+    await expect(identity.verify(await token(first), AUDIENCE)).rejects.toThrow(
+      "Google identity token was rejected",
+    );
+    expect(requests).toBe(3);
+    expect(delays).toEqual([0, 1]);
+    expect(rejections).toEqual(["JWKS_TRANSPORT_REJECTED"]);
+  });
+
+  it("emits only allowlisted rejection stages once", async () => {
+    const cases = [
+      {
+        expected: "TOKEN_SYNTAX_REJECTED",
+        identityToken: "invalid",
+        providerFetch: () => Promise.resolve(jwksResponse([first.jwk])),
+      },
+      {
+        expected: "JWKS_RESPONSE_REJECTED",
+        identityToken: await token(first),
+        providerFetch: () => Promise.resolve(new Response(null, { status: 400 })),
+      },
+      {
+        expected: "JWKS_KEY_REJECTED",
+        identityToken: await token(second),
+        providerFetch: () => Promise.resolve(jwksResponse([first.jwk])),
+      },
+      {
+        expected: "TOKEN_VERIFICATION_REJECTED",
+        identityToken: await token(second, { headerKeyId: FIRST_KID }),
+        providerFetch: () => Promise.resolve(jwksResponse([first.jwk])),
+      },
+      {
+        expected: "TOKEN_CLAIMS_REJECTED",
+        identityToken: await token(first, { emailVerified: false }),
+        providerFetch: () => Promise.resolve(jwksResponse([first.jwk])),
+      },
+    ] as const;
+
+    for (const candidate of cases) {
+      const rejections: string[] = [];
+      await expect(
+        verifier(candidate.providerFetch, new MutableClock(), (code) => {
+          rejections.push(code);
+        }).verify(candidate.identityToken, AUDIENCE),
+      ).rejects.toThrow("Google identity token was rejected");
+      expect(rejections).toEqual([candidate.expected]);
+    }
+  });
+
+  it("retries only transient JWKS response statuses", async () => {
+    const signed = await token(first);
+    for (const status of [429, 503]) {
+      let requests = 0;
+      const delays: number[] = [];
+      const identity = new GoogleOidcIdentityVerifier(
+        { clockSkewMs: 30_000, fetchTimeoutMs: 5_000, issuer: ISSUER },
+        {
+          clock: new MutableClock(),
+          fetch: () => {
+            requests += 1;
+            return Promise.resolve(
+              requests === 1 ? new Response(null, { status }) : jwksResponse([first.jwk]),
+            );
+          },
+          retryDelay: (attempt) => {
+            delays.push(attempt);
+            return Promise.resolve();
+          },
+        },
+      );
+      await expect(identity.verify(signed, AUDIENCE)).resolves.toBeDefined();
+      expect(requests).toBe(2);
+      expect(delays).toEqual([0]);
+    }
+
+    let permanentRequests = 0;
+    const permanent = verifier(() => {
+      permanentRequests += 1;
+      return Promise.resolve(new Response(null, { status: 400 }));
+    });
+    await expect(permanent.verify(signed, AUDIENCE)).rejects.toThrow(
+      "Google identity token was rejected",
+    );
+    expect(permanentRequests).toBe(1);
   });
 
   it("rejects redirect, oversized, and cache-policy drift without exposing responses", async () => {

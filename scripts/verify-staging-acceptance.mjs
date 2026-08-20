@@ -21,6 +21,7 @@ try {
     candidateDirectory: path.resolve(candidateDirectory),
     evidencePath: acceptanceEvidencePath(path.resolve(evidenceDirectory)),
     expectedCandidateRunId: process.env["EXPECTED_CANDIDATE_RUN_ID"],
+    expectedCloudRunCandidateRunId: process.env["EXPECTED_CLOUD_RUN_CANDIDATE_RUN_ID"],
     expectedCommitSha: process.env["EXPECTED_COMMIT_SHA"],
     expectedEnvironmentPolicyId: process.env["EXPECTED_ENVIRONMENT_POLICY_ID"],
     expectedReleaseVersion: process.env["EXPECTED_RELEASE_VERSION"],

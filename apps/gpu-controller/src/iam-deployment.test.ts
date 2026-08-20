@@ -105,7 +105,13 @@ describe("controller IAM deployment policy", () => {
 
   it("accepts unrelated principals but verifies every controller grant exactly", () => {
     const plan = createControllerIamDeploymentPlan(configuration);
-    const evidence = verifyControllerIamReadback(plan, rawIamReadback());
+    const observed = rawIamReadback();
+    const projectBindings = observed.project.iamPolicy.bindings;
+    if (projectBindings === undefined) throw new Error("project IAM fixture is incomplete");
+    const controllerBinding = projectBindings[1];
+    if (controllerBinding === undefined) throw new Error("project IAM fixture is incomplete");
+    controllerBinding.members.push("user:operator@example.test");
+    const evidence = verifyControllerIamReadback(plan, observed);
 
     expect(evidence).toEqual({
       artifactRepository: { etag: "repository-iam-etag", version: 1 },
@@ -116,7 +122,16 @@ describe("controller IAM deployment policy", () => {
     });
   });
 
-  it("rejects excess roles, shared bindings, role drift, and database-condition drift", () => {
+  it("accepts live custom role output that omits deleted false", () => {
+    const plan = createControllerIamDeploymentPlan(configuration);
+    const observed = rawIamReadback();
+    delete observed.cloudRunRole.deleted;
+    delete observed.firestoreRole.deleted;
+
+    expect(() => verifyControllerIamReadback(plan, observed)).not.toThrow();
+  });
+
+  it("rejects excess roles, role drift, and database-condition drift", () => {
     const plan = createControllerIamDeploymentPlan(configuration);
     const excess = rawIamReadback();
     const excessBindings = excess.project.iamPolicy.bindings;
@@ -126,14 +141,6 @@ describe("controller IAM deployment policy", () => {
       role: "roles/owner",
     });
     expect(() => verifyControllerIamReadback(plan, excess)).toThrow();
-
-    const shared = rawIamReadback();
-    const sharedBindings = shared.project.iamPolicy.bindings;
-    if (sharedBindings === undefined) throw new Error("project IAM fixture is incomplete");
-    const controllerBinding = sharedBindings[1];
-    if (controllerBinding === undefined) throw new Error("project IAM fixture is incomplete");
-    controllerBinding.members.push("user:operator@example.test");
-    expect(() => verifyControllerIamReadback(plan, shared)).toThrow();
 
     const roleDrift = rawIamReadback();
     roleDrift.cloudRunRole.includedPermissions.push("run.jobs.update");

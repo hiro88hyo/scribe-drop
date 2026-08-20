@@ -35,6 +35,7 @@ export const controllerControlPlaneReadbackExpectationSchema = z
   .object({
     binaryAuthorization: binaryAuthorizationReadbackExpectationSchema,
     deployment: controllerServiceDeploymentConfigurationSchema,
+    projectNumber: z.string().regex(/^[1-9][0-9]{5,19}$/u),
   })
   .strict()
   .superRefine((expectation, context) => {
@@ -85,6 +86,7 @@ export function verifyControllerControlPlaneReadback(
       environment: expected.deployment.manifest.environment,
       name: expected.deployment.primaryHmacSecret.name,
       projectId: expected.deployment.manifest.projectId,
+      projectNumber: expected.projectNumber,
       version: expected.deployment.primaryHmacSecret.version,
     },
     observed.primarySecret.secret,
@@ -104,6 +106,7 @@ export function verifyControllerControlPlaneReadback(
             environment: expected.deployment.manifest.environment,
             name: expectedSecondary.name,
             projectId: expected.deployment.manifest.projectId,
+            projectNumber: expected.projectNumber,
             version: expectedSecondary.version,
           },
           observed.secondarySecret.secret,

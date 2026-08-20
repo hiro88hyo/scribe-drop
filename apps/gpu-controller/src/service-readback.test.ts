@@ -44,10 +44,18 @@ function rawServiceFromPlan(plan: ControllerServiceDeploymentPlan): Record<strin
     launchStage: plan.launchStage,
     name: plan.name,
     observedGeneration: "1",
-    reconciling: false,
+    sshEnabled: false,
     scaling: plan.scaling,
     template: {
-      containers: plan.template.containers,
+      containers: plan.template.containers.map((container) => ({
+        ...container,
+        startupProbe: {
+          failureThreshold: 1,
+          periodSeconds: 240,
+          tcpSocket: { port: 8080 },
+          timeoutSeconds: 240,
+        },
+      })),
       executionEnvironment: plan.template.executionEnvironment,
       healthCheckDisabled: plan.template.healthCheckDisabled,
       labels: plan.template.labels,
@@ -79,7 +87,10 @@ function rawServiceFromPlan(plan: ControllerServiceDeploymentPlan): Record<strin
 describe("Cloud Run v2 controller Service read-back", () => {
   it("normalizes documented defaults and returns non-secret output evidence", () => {
     const plan = createControllerServiceDeploymentPlan(configuration);
-    const evidence = verifyCloudRunV2ControllerServiceReadback(plan, rawServiceFromPlan(plan));
+    const observed = rawServiceFromPlan(plan);
+    const trafficStatuses = observed["trafficStatuses"] as { revision?: string }[];
+    delete trafficStatuses[0]?.revision;
+    const evidence = verifyCloudRunV2ControllerServiceReadback(plan, observed);
 
     expect(evidence).toEqual({
       createTime: "2026-08-11T00:00:00Z",
@@ -102,6 +113,20 @@ describe("Cloud Run v2 controller Service read-back", () => {
     const reconciling = rawServiceFromPlan(plan);
     reconciling["reconciling"] = true;
     expect(() => verifyCloudRunV2ControllerServiceReadback(plan, reconciling)).toThrow();
+
+    const sshEnabled = rawServiceFromPlan(plan);
+    sshEnabled["sshEnabled"] = true;
+    expect(() => verifyCloudRunV2ControllerServiceReadback(plan, sshEnabled)).toThrow();
+
+    const probeDrift = rawServiceFromPlan(plan);
+    const probeTemplate = structuredClone(probeDrift["template"]) as {
+      containers: { startupProbe: { periodSeconds: number } }[];
+    };
+    const probeContainer = probeTemplate.containers[0];
+    if (probeContainer === undefined) throw new Error("fixture container missing");
+    probeContainer.startupProbe.periodSeconds = 30;
+    probeDrift["template"] = probeTemplate;
+    expect(() => verifyCloudRunV2ControllerServiceReadback(plan, probeDrift)).toThrow();
 
     const trafficDrift = rawServiceFromPlan(plan);
     trafficDrift["trafficStatuses"] = [];

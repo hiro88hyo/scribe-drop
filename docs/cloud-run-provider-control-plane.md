@@ -2,13 +2,18 @@
 
 ## 1. Status and scope
 
-- Status: `Implementation selected`、Phase 12/13 local implementation完了、cloud未接続
-- Date: 2026-08-11
-- Decision: [ADR 0076](./adr/0076-select-cloud-run-jobs-for-synthetic-provider-implementation.md)
+- Status: `Formal staging success path verified`、Phase 15残余acceptance未完了
+- Date: 2026-08-14
+- Decision: [ADR 0076](./adr/0076-select-cloud-run-jobs-for-synthetic-provider-implementation.md)、
+  [ADR 0083](./adr/0083-connect-cloud-run-to-formal-staging-routing.md)
 - Product routing: 現行RunPod Serverlessのまま
 
-この文書はPhase 12からPhase 14のsynthetic-only実装境界を固定する。cloud resource、credential、CI、
-staging、productionを変更する実行手順ではない。実録音、R2 capability、利用者metadataをcontrollerへ渡さない。
+この文書はPhase 12からPhase 15のprovider境界を固定する。Phase 15 candidate `0280e5b`はremote D1 migration、
+exact one synthetic GPU lifecycle、artifact、通知、利用者deleteまでstagingで通過した。provider cleanupのD1反映には
+guarded manual repository CASを要したため、完全自動のcleanup acceptanceと残りのfailure/cancel経路は未完了である。
+原因となったstale-version一巡遅延はlocalで修正したが、修正版のremote acceptanceはまだ実施していない。staging switchは
+RunPod、Cloud Run Job/Executionとfixture storageは0、controller authorizationは0へ戻した。CIとproductionは変更していない。
+実録音、R2 capability、利用者metadataをcontrollerへ渡さない。
 
 ## 2. Components and trust boundaries
 
@@ -116,6 +121,10 @@ Firestore custom role `scribeDropFirestoreController`は`datastore.databases.get
 - dedicated runtime service account上の`roles/iam.serviceAccountUser`
 - exact Artifact Registry repository上の`roles/artifactregistry.reader`
 - exact Secret Manager secret上の`roles/secretmanager.secretAccessor`
+
+GPU-free bootstrapでJobを作成するstaging deployerにも、image importに必要な
+`artifactregistry.repositories.downloadArtifacts`をworker repository上の
+`roles/artifactregistry.reader`だけで付与する。
 
 Cloud Run Serviceはsecretの数値versionだけを参照する。SecretVersion単位のIAM bindingがあるとは扱わない。
 
@@ -225,11 +234,18 @@ capabilityだけでこのprotocolを実装し、Phase 15 acceptanceが残余リ�
   retryしない。
 - Orchestratorの既存scheduled reconciliationがcontrollerのbounded reconcile endpointを呼ぶ。controller停止中も
   provider task timeoutがGPU taskをstopするため、Cronをhard lifetimeの代替にしない。
+- controllerとD1のversionがずれた場合、`STALE_VERSION` responseのD1 CAS成功後だけ更新versionと新request IDで同じactionを
+  同一sweep内に最大1回再要求する。同じrequestのtransport replayはexact bodyで最大2回に限定し、二度目のversion driftまたは
+  D1 CAS競合は次のCronへdeferする。
 - cancelはexact Execution nameとetagへ一度送り、timeout後は同じExecutionをgetする。
 - terminal確認後にExecution delete、Job deleteをetag付きで行い、Job/Execution listからabsenceを確認する。
 - delete outcome不明、provider read outage、unexpected second Executionではbudget reservationとrecordを残し、
   orphan reaperが同じresourceだけを回収する。
 - Job delete受理、container exit、terminal reportのいずれか一つだけでcleanup completeにしない。
+- `GPU_EXECUTION_POLICY`は新規generation-one attemptだけへsnapshotする。switchをRunPodへ戻しても保存済みCloud Run
+  attemptはCronでobserve/cancel/cleanupし続け、`cleanup_status=SUCCEEDED`まで利用者deleteとretentionの物理削除を止める。
+- runtime terminal成功はmanifest v2、requested format、exact result prefix、全artifact sizeをR2で確認してからproduct
+  jobとnotification outboxを確定する。controllerだけがterminalになりruntime terminalを欠く場合はjobを安全な失敗へ収束させる。
 
 ## 11. Error mapping
 
@@ -304,6 +320,9 @@ allowlist reasonからsafe error kindへ変換する。
 - GPU Job manifestにもBinary Authorization default policyを固定し、Cloud Run v2 Job read-backで欠落、無効化、
   policy override、breakglassを拒否する。project default policyとexact attestorのauthoritative read-back、worker imageへの
   attestation発行は実staging gateに残す。
+- Cloud Run v2の実Execution listでは`Execution.job`が短いJob IDとして返る。adapterは要求した短いIDまたは同じ
+  canonical full resourceだけを受け、Execution `name`のparentを別に完全照合してからfull parentへ正規化する。別Job、
+  別project/region、path追加は`unavailable`としてfail closedにする。
 - [ADR 0080](./adr/0080-use-kms-backed-binary-authorization-attestations.md)のproject-singleton attestor、global Artifact
   Analysis Note、Singapore KMS signing version、publisher/signer分離、controller/worker両digestをpure deployment planへ固定した。
   attestor/Note/KMS public keyとCRC32C、version 1だけのactive set、resource IAMをstrict read-backし、固定Google API endpointの
@@ -317,6 +336,10 @@ allowlist reasonからsafe error kindへ変換する。
 
 - service identityのExecution非結合、default outbound、Singaporeへのdata transfer、HMAC-protected public controller、
   capacity、budget、CI identity、rollbackをformal staging acceptanceで再判定する。
+- 2026-08-14のsuccess pathは10分start SLO、exact one L4 execution、manifest/3 artifact、通知、利用者delete、
+  provider resource/storage 0を確認した。一方、provider cleanupはdeployed CronだけでD1へ収束せずmanual repository CASを
+  要したため、残りのfailure/cancel経路とともにproduction blockerとして維持する。stale-version一巡遅延のlocal修正は
+  unit testとD1 integration testを通したが、source変更後の新candidateでremote cleanup acceptanceをやり直す。
 - successful acceptanceと別`Production adopted` ADRなしにPhase 16 routingを変更しない。
 
 ## 13. Official references

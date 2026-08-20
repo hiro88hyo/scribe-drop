@@ -2,8 +2,8 @@
 
 ## Status and scope
 
-- Status: Phase 13 local implementation complete
-- Date: 2026-08-11
+- Status: Phase 14 final synthetic staging execution succeeded; all execution resources cleaned
+- Date: 2026-08-13
 - Policy: `cloud_run_jobs_l4_v1`
 - Runtime contract: v1 bootstrap/session protocol、bounded execution contract v2、manifest v2
 - Product routing: RunPod Serverlessのまま
@@ -51,6 +51,9 @@ URL、object key、Execution/Job IDをlogへ出さない。
 
 `cloud-run.Dockerfile`は更新済みの固定RunPod worker imageをbaseにし、model、CUDA、FFmpeg、Python、uv lockを再利用して
 entrypointだけをone-shotへ固定する。runtime install/model downloadはなく、`USER 10001:10001`を継承する。
+固定entrypointの`python -m scribe_drop_worker.one_shot`ではentry moduleをruntime adapterからimportし直さない。
+adapterとentrypointが共有するallowlist error classは独立moduleに置き、`__main__`とpackage名でclassが二重化して
+`BOOTSTRAP_REJECTED`を`INTERNAL_ERROR`へ誤分類しない。module entrypointそのものを実行する回帰testで固定する。
 
 ```bash
 pnpm container:build:runpod
@@ -59,6 +62,16 @@ pnpm container:check:cloud-run
 pnpm container:sbom:cloud-run
 pnpm container:scan:cloud-run
 ```
+
+staging GPU executionの直前には、同じcandidate imageとruntime service accountをGPUなしJobで
+`python -m scribe_drop_worker.cloud_run_staging_bootstrap_preflight`として起動する。preflightは
+実metadata identity tokenとD1に存在しないfresh execution handleを使ってbootstrapする。runtime serviceは
+Google OIDCをcontext lookupより先に検証し、認証後のapplication `EXECUTION_NOT_FOUND` JSONだけを
+成功markerとして受ける。Cloudflare edgeの403/non-JSON、`AUTHENTICATION_FAILED`、`RESOURCE_DRIFT`、
+成功challengeはすべて失敗とする。この順序により未認証requestへexecutionの存在有無を露出しない。
+preflightはCUDA discovery、capability発行、source download、model loadを行わない。stagingのexact 5 runtime POSTだけに
+[ADR 0082](./adr/0082-skip-browser-integrity-check-for-cloud-run-runtime.md)のBIC skipがstrict
+read-backされていなければ、このpreflightもGPU実行も開始しない。
 
 2026-08-11のlocal gateではimage `sha256:51348577a3682bb190ca1c7f60bc2165cd12551e47b1d6e96dc2298726851d8f`
 を`--network none --read-only`、3 GiB memory-backed `/tmp`、non-rootで起動した。GPU count mock=1、memory-only key、
@@ -70,13 +83,42 @@ audience、resource drift、bootstrap/claim response loss、capability replay、
 schedule response lossを検証する。Python/TypeScript共有fixtureはlanguage、VAD、selected format、exact result key、manifest v2を
 同じ値で検証する。
 
+second exact-one executionではruntime bootstrapがHTTP 500で拒否され、D1 bootstrap/event 0のまま終了した。remote D1の
+attempt lookupは1 query/1 row、controller attest requestは0、同じWorker invocationのexternal subrequestは0だった。
+exact speech fixture rowとlive-shaped Google RSA/JWTはworkerd回帰testで成功した。Google JWKS transport/429/5xxだけを
+5秒timeout、指数backoff+jitter、最大3 attemptへ限定し、schema、redirect、署名、claim拒否は再試行しない。identity verifierの
+例外は`AUTHENTICATION_FAILED`へ正規化し、未知例外のHTTP 500と区別する。拒否時はtoken、claim、URL、provider responseを
+記録せず、syntax、header、JWKS transport/response/key、verification、claimのallowlist stageだけを構造化logへ1件残す。
+
+後続のGPU-free preflightでallowlist stageは`JWKS_TRANSPORT_REJECTED`を記録した。Google JWKS verifierの
+`redirect: "error"`はWorkers runtimeがrequest構築時に拒否する既知の欠陥なので、[ADR 0016](./adr/0016-use-manual-redirects-in-workers.md)
+どおり`manual`へ統一し、3xxは追従せず非成功responseとして拒否した。unit/workerd testは実`Request`のmanual modeと
+redirect拒否を固定した。しかし修正candidateのexact-one GPU-free preflightでも同じstageが継続したため、redirectだけを
+唯一のremote root causeとは扱わない。
+
+残存していた即時例外をlocalで再現できる実装として、Google JWKSとcontroller clientが注入されたhost `fetch`を
+`this.#ports.fetch(...)`とmethod呼出しし、誤ったreceiverを渡していた。注入関数をlocal変数へ取り出してstandaloneで呼ぶ
+receiver-sensitive testを両clientへ追加し、controller側に残っていた`redirect: "error"`もmanualへ統一する。
+candidate `cdfc394`のGPU-free preflightはGoogle OIDC後のcontroller `RESOURCE_DRIFT`まで到達し、このreceiver欠陥が
+残存root causeだったことをremoteで確認した。
+
+このhistorical preflightは既存D1 contextに依存していたため、fresh candidateの再現可能な実行前gateには使用しない。
+以後はD1に存在しないhandleを使い、Google OIDC検証後の`EXECUTION_NOT_FOUND`だけを成功とする。runtime serviceは
+identity verificationをcontext lookupより先に行い、無効なidentityにはhandleの存在有無にかかわらず
+`AUTHENTICATION_FAILED`を返す回帰testで順序を固定する。
+
+またCloud Run taskはcontroller observeより先に起動するため、[ADR 0081](./adr/0081-attest-live-execution-before-controller-observe.md)に
+従い、durable run intent、stored Job UID、exact 1 live Execution、fixed manifestを満たす`EXECUTION_PENDING`だけをread-only
+attestationへ許可する。stored Executionがある場合のUID一致は維持する。
+
 ## Residual risk and next gate
 
 Google identity tokenはruntime service accountを署名するがExecution UIDを署名しない。single-active、dedicated identity、
-ephemeral key、controller live read-backは補償controlでありhost attestationではない。Phase 14で実identity/read-back、
-permission/resource manifest parity、hard timeout、resource absence、費用終了をsynthetic staging execution 1件だけで確認し、
-Phase 15 acceptanceまでは実録音とproduction routingを禁止する。
+ephemeral key、controller live read-backは補償controlでありhost attestationではない。Phase 14はcandidate `cdfc394`の
+exact 1 synthetic executionで実identity/read-back、permission/resource manifest parity、hard timeout設定、artifact/manifest、
+resource/storage absence、費用終了を確認した。Phase 15 acceptanceまでは実録音とproduction routingを禁止する。
 
 Phase 14 local preparationのD1 CASとroute gateは
 [staging dark deployment](./cloud-run-staging-dark-deployment.md)に記録する。local D1成功はremote migration、実identity、
-controller read-back、provider cleanup、課金終了の代替ではない。
+controller read-back、provider cleanup、課金終了の代替ではない。これらの実staging evidenceは
+[staging dark deployment](./cloud-run-staging-dark-deployment.md)へ記録した。

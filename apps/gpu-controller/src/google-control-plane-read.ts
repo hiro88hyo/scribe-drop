@@ -181,6 +181,7 @@ export class BoundedGoogleControlPlaneReadClient {
     const timeout = setTimeout(() => {
       abort.abort();
     }, CONTROL_PLANE_TIMEOUT_MS);
+    let responseStatus = "unavailable";
     try {
       const response = await this.#fetch(request.url, {
         method: request.method === "GET" ? "GET" : "POST",
@@ -194,6 +195,7 @@ export class BoundedGoogleControlPlaneReadClient {
         redirect: "manual",
         signal: abort.signal,
       });
+      responseStatus = String(response.status);
       if (
         response.type === "opaqueredirect" ||
         response.status !== 200 ||
@@ -228,7 +230,9 @@ export class BoundedGoogleControlPlaneReadClient {
       }
       return JSON.parse(text) as unknown;
     } catch {
-      throw new Error("control-plane read-back request failed");
+      throw new Error(
+        `control-plane read-back request failed [${request.key}; status=${responseStatus}]`,
+      );
     } finally {
       clearTimeout(timeout);
     }

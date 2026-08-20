@@ -32,7 +32,11 @@ try {
   if (result.error !== undefined || result.status !== 0) {
     throw new Error("Wrangler could not list encrypted staging Worker secret names");
   }
-  const verification = verifyRequiredOrchestratorSecrets(result.stdout);
+  const verification = verifyRequiredOrchestratorSecrets(
+    result.stdout,
+    "staging",
+    process.env.SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_MODE ?? "disabled",
+  );
   console.log(`Verified required encrypted staging Worker secrets: ${verification.requiredCount}`);
 } catch (error) {
   console.error(error instanceof Error ? error.message : "Failed to verify staging Worker secrets");

@@ -20,6 +20,7 @@ const fixedGpuTypeIds = [
   "NVIDIA GeForce RTX 4090",
   "NVIDIA RTX PRO 6000 Blackwell Server Edition",
 ];
+export const fixedRunpodGpuTypeIds = Object.freeze([...fixedGpuTypeIds]);
 // An empty list is the explicit plan representation for RunPod's "Any Region"
 // placement. It is not missing configuration: GraphQL read-back normalizes a
 // null/empty locations field to this value and promotion compares it exactly.

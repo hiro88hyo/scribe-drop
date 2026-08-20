@@ -11,12 +11,18 @@ const serviceAccountSchema = z
   .string()
   .regex(/^[a-z][a-z0-9-]{4,28}@[a-z][a-z0-9-]{4,28}\.iam\.gserviceaccount\.com$/u);
 const projectSchema = z.string().regex(/^[a-z][a-z0-9-]{4,28}$/u);
-const originSchema = z.url().refine((value) => {
-  const url = new URL(value);
-  return (
-    url.protocol === "https:" && url.username === "" && url.password === "" && url.pathname === "/"
-  );
-});
+const originSchema = z
+  .url()
+  .refine((value) => {
+    const url = new URL(value);
+    return (
+      url.protocol === "https:" &&
+      url.username === "" &&
+      url.password === "" &&
+      url.pathname === "/"
+    );
+  })
+  .transform((value) => `${new URL(value).origin}/`);
 const exactHostnameSchema = z
   .string()
   .min(1)

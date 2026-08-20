@@ -39,6 +39,13 @@ from .cloud_run_contracts import (
     TerminalRequest,
     TerminalResponse,
 )
+from .cloud_run_errors import (
+    BOOTSTRAP_REJECTED,
+    SESSION_REJECTED,
+    OneShotRuntimeError,
+    RuntimeErrorCode,
+    UnknownControlOutcomeError,
+)
 from .constants import MAX_DURATION_SECONDS, MAX_SOURCE_BYTES
 from .errors import WorkerError
 from .http_client import SourceDownloadExpectation
@@ -71,24 +78,8 @@ ENVIRONMENT_KEYS: Final = (
     "SCRIBE_DROP_SOURCE_HOST",
 )
 
-RuntimeErrorCode = Literal[
-    "BOOTSTRAP_REJECTED",
-    "SESSION_REJECTED",
-    "SOURCE_DOWNLOAD_FAILED",
-    "SOURCE_SIZE_MISMATCH",
-    "SOURCE_ETAG_MISMATCH",
-    "INVALID_MEDIA",
-    "DURATION_LIMIT_EXCEEDED",
-    "TRANSCRIPTION_FAILED",
-    "ARTIFACT_UPLOAD_FAILED",
-    "MANIFEST_UPLOAD_FAILED",
-    "CANCELLED",
-    "INTERNAL_ERROR",
-]
 CANCELLED: Final = "CANCELLED"
 TRANSCRIPTION_FAILED: Final = "TRANSCRIPTION_FAILED"
-SESSION_REJECTED: Final = "SESSION_REJECTED"
-BOOTSTRAP_REJECTED: Final = "BOOTSTRAP_REJECTED"
 INTERNAL_ERROR: Final = "INTERNAL_ERROR"
 ALLOWED_RUNTIME_ERROR_CODES: Final[frozenset[str]] = frozenset(
     {
@@ -104,19 +95,6 @@ ALLOWED_RUNTIME_ERROR_CODES: Final[frozenset[str]] = frozenset(
         "INTERNAL_ERROR",
     }
 )
-
-
-class OneShotRuntimeError(Exception):
-    """Stable error safe for the terminal contract and process marker."""
-
-    def __init__(self, code: RuntimeErrorCode) -> None:
-        """Retain only an allowlisted code."""
-        super().__init__(code)
-        self.code = code
-
-
-class UnknownControlOutcomeError(Exception):
-    """Signal a response loss for an idempotent exact control request."""
 
 
 class OneShotEnvironment(BaseModel):

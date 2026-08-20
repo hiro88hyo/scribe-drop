@@ -18,6 +18,12 @@ try {
     JSON.parse(readFileSync(acceptanceEvidencePath(path.resolve(evidenceDirectory)), "utf8")),
   );
   appendFileSync(githubEnvironmentPath, `CANDIDATE_RUN_ID=${evidence.candidateRunId}\n`, "utf8");
+  appendFileSync(
+    githubEnvironmentPath,
+    `CLOUD_RUN_CANDIDATE_RUN_ID=${evidence.cloudRunCandidate.runId}\n`,
+    "utf8",
+  );
+  appendFileSync(githubEnvironmentPath, `CANDIDATE_COMMIT_SHA=${evidence.commitSha}\n`, "utf8");
   console.log("Validated staging acceptance identity.");
 } catch (error) {
   console.error(

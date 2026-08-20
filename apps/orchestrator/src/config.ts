@@ -1,6 +1,8 @@
 import { DEPLOYMENT_ENVIRONMENTS, type DeploymentEnvironment } from "@scribe-drop/observability";
 import { z } from "zod";
 
+import type { StagingAcceptanceFaultEnvironment } from "./staging-acceptance-fault.js";
+
 const orchestratorConfigSchema = z
   .object({
     appEnvironment: z.enum(DEPLOYMENT_ENVIRONMENTS),
@@ -37,6 +39,9 @@ const retentionIntegerSchema = z
   .regex(/^[1-9][0-9]*$/u)
   .transform(Number)
   .pipe(z.number().int().positive().max(3_650));
+
+const gpuExecutionPolicySchema = z.enum(["runpod_serverless_v1", "cloud_run_jobs_l4_v1"]);
+const gpuExecutionAdmissionSchema = z.enum(["active", "paused"]);
 
 function isAllowedInternalBaseUrl(value: string): boolean {
   let url: URL;
@@ -126,12 +131,120 @@ const retentionConfigSchema = z
     },
   );
 
-const cloudRunRuntimeShadowConfigSchema = z
+const cloudRunRuntimeModeSchema = z.discriminatedUnion("appEnvironment", [
+  z
+    .object({
+      appEnvironment: z.literal("staging"),
+      mode: z.literal("synthetic-shadow"),
+    })
+    .strict(),
+  z
+    .object({
+      appEnvironment: z.literal("production"),
+      mode: z.literal("active"),
+    })
+    .strict(),
+]);
+
+function isExactHttpsRoot(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "https:" &&
+      url.username === "" &&
+      url.password === "" &&
+      url.port === "" &&
+      (url.pathname === "" || url.pathname === "/") &&
+      url.search === "" &&
+      url.hash === ""
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function decodeCloudRunRuntimeSecret(value: string): Uint8Array | undefined {
+  if (!/^[A-Za-z0-9_-]+$/u.test(value) || value.length % 4 === 1) return undefined;
+  try {
+    const decoded = Uint8Array.from(
+      atob(
+        value
+          .replaceAll("-", "+")
+          .replaceAll("_", "/")
+          .padEnd(Math.ceil(value.length / 4) * 4, "="),
+      ),
+      (character) => character.charCodeAt(0),
+    );
+    const canonical = btoa(String.fromCharCode(...decoded))
+      .replaceAll("+", "-")
+      .replaceAll("/", "_")
+      .replace(/=+$/u, "");
+    return canonical === value && decoded.byteLength >= 32 && decoded.byteLength <= 64
+      ? decoded
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const cloudRunSecretSchema = z
+  .string()
+  .min(43)
+  .max(86)
+  .refine((value) => decodeCloudRunRuntimeSecret(value) !== undefined);
+
+const cloudRunRuntimeServiceConfigSchema = z
   .object({
-    appEnvironment: z.literal("staging"),
-    mode: z.literal("synthetic-shadow"),
+    appEnvironment: z.enum(["staging", "production"]),
+    cloudflareAccountId: z.string().regex(/^[a-f0-9]{32}$/u),
+    controllerHmacPrimary: cloudRunSecretSchema,
+    controllerOrigin: z
+      .string()
+      .refine(isExactHttpsRoot)
+      .refine((value) => {
+        const hostname = new URL(value).hostname;
+        return /^scribe-drop-(?:staging|production)-gpu-controller-[0-9]+\.asia-southeast1\.run\.app$/u.test(
+          hostname,
+        );
+      })
+      .transform((value) => new URL(value).toString()),
+    mode: z.enum(["synthetic-shadow", "active"]),
+    orchestratorOrigin: z
+      .string()
+      .refine(isExactHttpsRoot)
+      .transform((value) => new URL(value).toString()),
+    r2AccessKeyId: z.string().min(1).max(256),
+    r2BucketName: z.string().min(3).max(63),
+    r2SecretAccessKey: z.string().min(1).max(256),
+    runtimeDerivationSecret: cloudRunSecretSchema,
+    runtimeServiceAccount: z
+      .string()
+      .regex(/^gpu-runtime(?:-production)?@scribe-drop\.iam\.gserviceaccount\.com$/u),
   })
-  .strict();
+  .strict()
+  .refine(
+    ({ appEnvironment, controllerOrigin, mode, runtimeServiceAccount }) => {
+      const hostname = new URL(controllerOrigin).hostname;
+      if (appEnvironment === "staging") {
+        return (
+          mode === "synthetic-shadow" &&
+          hostname.startsWith("scribe-drop-staging-gpu-controller-") &&
+          runtimeServiceAccount === "gpu-runtime@scribe-drop.iam.gserviceaccount.com"
+        );
+      }
+      return (
+        mode === "active" &&
+        hostname.startsWith("scribe-drop-production-gpu-controller-") &&
+        runtimeServiceAccount === "gpu-runtime-production@scribe-drop.iam.gserviceaccount.com"
+      );
+    },
+    { message: "Cloud Run runtime settings do not match the deployment environment" },
+  )
+  .refine(
+    ({ controllerHmacPrimary, runtimeDerivationSecret }) =>
+      controllerHmacPrimary !== runtimeDerivationSecret,
+    { message: "Cloud Run controller and runtime derivation secrets must be distinct" },
+  );
 
 function isAllowedWebBaseUrl(value: string, environment: DeploymentEnvironment): boolean {
   if (environment !== "local") {
@@ -160,6 +273,15 @@ export interface OrchestratorConfigEnvironment {
   readonly R2_BUCKET_NAME: string;
 }
 
+export interface GpuExecutionSelectionEnvironment {
+  readonly APP_ENV: string;
+  readonly GPU_EXECUTION_POLICY: string;
+}
+
+export interface GpuExecutionAdmissionEnvironment {
+  readonly GPU_EXECUTION_ADMISSION?: string;
+}
+
 export interface RunpodConfigEnvironment extends OrchestratorConfigEnvironment {
   readonly R2_ACCESS_KEY_ID: string;
   readonly R2_SECRET_ACCESS_KEY: string;
@@ -170,7 +292,7 @@ export interface RunpodConfigEnvironment extends OrchestratorConfigEnvironment {
   readonly RUNPOD_WORKER_IMAGE: string;
 }
 
-export interface NotificationConfigEnvironment {
+export interface NotificationConfigEnvironment extends StagingAcceptanceFaultEnvironment {
   readonly APP_ENV: string;
   readonly DISCORD_WEBHOOK_URL?: string;
   readonly WEB_BASE_URL?: string;
@@ -188,11 +310,38 @@ export interface CloudRunRuntimeShadowConfigEnvironment {
   readonly CLOUD_RUN_RUNTIME_MODE?: string;
 }
 
+export interface CloudRunRuntimeServiceConfigEnvironment
+  extends CloudRunRuntimeShadowConfigEnvironment, StagingAcceptanceFaultEnvironment {
+  readonly CLOUDFLARE_ACCOUNT_ID: string;
+  readonly CLOUD_RUN_CONTROLLER_HMAC_PRIMARY?: string;
+  readonly CLOUD_RUN_CONTROLLER_ORIGIN?: string;
+  readonly CLOUD_RUN_ORCHESTRATOR_ORIGIN?: string;
+  readonly CLOUD_RUN_RUNTIME_DERIVATION_SECRET?: string;
+  readonly CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT?: string;
+  readonly R2_ACCESS_KEY_ID: string;
+  readonly R2_BUCKET_NAME: string;
+  readonly R2_SECRET_ACCESS_KEY: string;
+}
+
 export interface OrchestratorConfig {
   readonly appEnvironment: DeploymentEnvironment;
   readonly cloudflareAccountId: string;
   readonly r2BucketName: string;
 }
+
+export type GpuExecutionSelection =
+  | {
+      readonly contractVersion: 1;
+      readonly kind: "runpod_serverless";
+      readonly policy: "runpod_serverless_v1";
+    }
+  | {
+      readonly contractVersion: 2;
+      readonly kind: "cloud_run_jobs";
+      readonly policy: "cloud_run_jobs_l4_v1";
+    };
+
+export type GpuExecutionAdmission = "active" | "paused";
 
 export interface RunpodConfig extends OrchestratorConfig {
   readonly r2AccessKeyId: string;
@@ -216,9 +365,22 @@ export interface RetentionConfig {
   readonly sourceRetentionDays: number;
 }
 
-export interface CloudRunRuntimeShadowConfig {
-  readonly appEnvironment: "staging";
-  readonly mode: "synthetic-shadow";
+export type CloudRunRuntimeShadowConfig =
+  | { readonly appEnvironment: "staging"; readonly mode: "synthetic-shadow" }
+  | { readonly appEnvironment: "production"; readonly mode: "active" };
+
+export interface CloudRunRuntimeServiceConfig {
+  readonly appEnvironment: "staging" | "production";
+  readonly cloudflareAccountId: string;
+  readonly controllerHmacPrimary: string;
+  readonly controllerOrigin: string;
+  readonly mode: "active" | "synthetic-shadow";
+  readonly orchestratorOrigin: string;
+  readonly r2AccessKeyId: string;
+  readonly r2BucketName: string;
+  readonly r2SecretAccessKey: string;
+  readonly runtimeDerivationSecret: string;
+  readonly runtimeServiceAccount: string;
 }
 
 export function parseOrchestratorConfig(
@@ -229,6 +391,29 @@ export function parseOrchestratorConfig(
     cloudflareAccountId: environment.CLOUDFLARE_ACCOUNT_ID,
     r2BucketName: environment.R2_BUCKET_NAME,
   });
+  return result.success ? result.data : undefined;
+}
+
+export function parseGpuExecutionSelection(
+  environment: GpuExecutionSelectionEnvironment,
+): GpuExecutionSelection | undefined {
+  const appEnvironment = z.enum(DEPLOYMENT_ENVIRONMENTS).safeParse(environment.APP_ENV);
+  const policy = gpuExecutionPolicySchema.safeParse(environment.GPU_EXECUTION_POLICY);
+  if (!appEnvironment.success || !policy.success) return undefined;
+  if (policy.data === "cloud_run_jobs_l4_v1") {
+    return appEnvironment.data === "staging" || appEnvironment.data === "production"
+      ? { contractVersion: 2, kind: "cloud_run_jobs", policy: policy.data }
+      : undefined;
+  }
+  return { contractVersion: 1, kind: "runpod_serverless", policy: policy.data };
+}
+
+export function parseGpuExecutionAdmission(
+  environment: GpuExecutionAdmissionEnvironment,
+): GpuExecutionAdmission | undefined {
+  const result = gpuExecutionAdmissionSchema.safeParse(
+    environment.GPU_EXECUTION_ADMISSION ?? "active",
+  );
   return result.success ? result.data : undefined;
 }
 
@@ -278,9 +463,28 @@ export function parseRetentionConfig(
 export function parseCloudRunRuntimeShadowConfig(
   environment: CloudRunRuntimeShadowConfigEnvironment,
 ): CloudRunRuntimeShadowConfig | undefined {
-  const result = cloudRunRuntimeShadowConfigSchema.safeParse({
+  const result = cloudRunRuntimeModeSchema.safeParse({
     appEnvironment: environment.APP_ENV,
     mode: environment.CLOUD_RUN_RUNTIME_MODE,
+  });
+  return result.success ? result.data : undefined;
+}
+
+export function parseCloudRunRuntimeServiceConfig(
+  environment: CloudRunRuntimeServiceConfigEnvironment,
+): CloudRunRuntimeServiceConfig | undefined {
+  const result = cloudRunRuntimeServiceConfigSchema.safeParse({
+    appEnvironment: environment.APP_ENV,
+    cloudflareAccountId: environment.CLOUDFLARE_ACCOUNT_ID,
+    controllerHmacPrimary: environment.CLOUD_RUN_CONTROLLER_HMAC_PRIMARY,
+    controllerOrigin: environment.CLOUD_RUN_CONTROLLER_ORIGIN,
+    mode: environment.CLOUD_RUN_RUNTIME_MODE,
+    orchestratorOrigin: environment.CLOUD_RUN_ORCHESTRATOR_ORIGIN,
+    r2AccessKeyId: environment.R2_ACCESS_KEY_ID,
+    r2BucketName: environment.R2_BUCKET_NAME,
+    r2SecretAccessKey: environment.R2_SECRET_ACCESS_KEY,
+    runtimeDerivationSecret: environment.CLOUD_RUN_RUNTIME_DERIVATION_SECRET,
+    runtimeServiceAccount: environment.CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT,
   });
   return result.success ? result.data : undefined;
 }

@@ -36,7 +36,7 @@ export const controllerFirestoreDeploymentPlanSchema = z
           "POINT_IN_TIME_RECOVERY_DISABLED",
           "POINT_IN_TIME_RECOVERY_ENABLED",
         ]),
-        realtimeUpdatesMode: z.literal("REALTIME_UPDATES_MODE_DISABLED"),
+        realtimeUpdatesMode: z.literal("REALTIME_UPDATES_MODE_ENABLED"),
         type: z.literal("FIRESTORE_NATIVE"),
       })
       .strict(),
@@ -82,7 +82,7 @@ export function createControllerFirestoreDeploymentPlan(
         parsed.manifest.environment === "production"
           ? "POINT_IN_TIME_RECOVERY_ENABLED"
           : "POINT_IN_TIME_RECOVERY_DISABLED",
-      realtimeUpdatesMode: "REALTIME_UPDATES_MODE_DISABLED",
+      realtimeUpdatesMode: "REALTIME_UPDATES_MODE_ENABLED",
       type: "FIRESTORE_NATIVE",
     },
     environment: parsed.manifest.environment,
@@ -116,7 +116,7 @@ const indexFieldSchema = z
 
 const indexSchema = z
   .object({
-    apiScope: z.literal("ANY_API"),
+    apiScope: z.literal("ANY_API").optional(),
     density: z.enum(["DENSITY_UNSPECIFIED", "SPARSE_ALL"]).optional(),
     fields: z.array(indexFieldSchema).min(1).max(100),
     multikey: z.literal(false).optional(),
@@ -162,19 +162,23 @@ export const firestoreDatabaseReadbackSchema = z
     deleteTime: z.never().optional(),
     earliestVersionTime: timestampSchema,
     etag: z.string().min(1).max(1024),
-    firestoreDataAccessMode: z.enum([
-      "DATA_ACCESS_MODE_UNSPECIFIED",
-      "DATA_ACCESS_MODE_ENABLED",
-      "DATA_ACCESS_MODE_DISABLED",
-    ]),
+    firestoreDataAccessMode: z
+      .enum([
+        "DATA_ACCESS_MODE_UNSPECIFIED",
+        "DATA_ACCESS_MODE_ENABLED",
+        "DATA_ACCESS_MODE_DISABLED",
+      ])
+      .optional(),
     freeTier: z.boolean().optional(),
     keyPrefix: z.string().max(1024).optional(),
     locationId: z.string().min(1).max(128),
-    mongodbCompatibleDataAccessMode: z.enum([
-      "DATA_ACCESS_MODE_UNSPECIFIED",
-      "DATA_ACCESS_MODE_ENABLED",
-      "DATA_ACCESS_MODE_DISABLED",
-    ]),
+    mongodbCompatibleDataAccessMode: z
+      .enum([
+        "DATA_ACCESS_MODE_UNSPECIFIED",
+        "DATA_ACCESS_MODE_ENABLED",
+        "DATA_ACCESS_MODE_DISABLED",
+      ])
+      .optional(),
     name: databaseResourceSchema,
     pointInTimeRecoveryEnablement: z.enum([
       "POINT_IN_TIME_RECOVERY_ENABLEMENT_UNSPECIFIED",
@@ -281,9 +285,11 @@ export function verifyControllerFirestoreReadback(
     actualDatabase.deleteProtectionState !== desiredDatabase.deleteProtectionState ||
     actualDatabase.databaseEdition !== desiredDatabase.databaseEdition ||
     actualDatabase.realtimeUpdatesMode !== desiredDatabase.realtimeUpdatesMode ||
-    actualDatabase.firestoreDataAccessMode !== desiredDatabase.firestoreDataAccessMode ||
-    actualDatabase.mongodbCompatibleDataAccessMode !==
-      desiredDatabase.mongodbCompatibleDataAccessMode ||
+    (actualDatabase.firestoreDataAccessMode !== undefined &&
+      actualDatabase.firestoreDataAccessMode !== desiredDatabase.firestoreDataAccessMode) ||
+    (actualDatabase.mongodbCompatibleDataAccessMode !== undefined &&
+      actualDatabase.mongodbCompatibleDataAccessMode !==
+        desiredDatabase.mongodbCompatibleDataAccessMode) ||
     actualDatabase.pointInTimeRecoveryEnablement !==
       desiredDatabase.pointInTimeRecoveryEnablement ||
     actualDatabase.versionRetentionPeriod !==

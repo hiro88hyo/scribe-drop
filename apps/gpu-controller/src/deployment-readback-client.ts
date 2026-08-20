@@ -50,6 +50,18 @@ function stabilityProjection(key: ControllerDeploymentReadbackKey, value: unknow
   return value;
 }
 
+function deploymentReadbackRequests(
+  expected: ControllerControlPlaneReadbackExpectation,
+): readonly GoogleControlPlaneReadRequest<ControllerDeploymentReadbackKey>[] {
+  const iamPlan = createControllerIamDeploymentPlan(expected.deployment);
+  const firestorePlan = createControllerFirestoreDeploymentPlan(expected.deployment);
+  return [
+    ...createControllerControlPlaneReadbackRequests(expected),
+    ...createControllerIamReadbackRequests(iamPlan),
+    ...createControllerFirestoreReadbackRequests(firestorePlan),
+  ];
+}
+
 export class GoogleControllerDeploymentReadbackClient {
   readonly #reads: BoundedGoogleControlPlaneReadClient;
 
@@ -57,17 +69,29 @@ export class GoogleControllerDeploymentReadbackClient {
     this.#reads = new BoundedGoogleControlPlaneReadClient(tokens, controlPlaneFetch);
   }
 
+  async preflight(
+    expectation: ControllerControlPlaneReadbackExpectation,
+    options: { readonly allowMissingService?: boolean } = {},
+  ): Promise<{ readonly requestCount: number }> {
+    const expected = controllerControlPlaneReadbackExpectationSchema.parse(expectation);
+    const requests = deploymentReadbackRequests(expected).filter(
+      ({ key }) =>
+        options.allowMissingService !== true || (key !== "service" && key !== "serviceIamPolicy"),
+    );
+    await this.#reads.stableSnapshot(
+      expected.deployment.manifest.projectId,
+      requests,
+      stabilityProjection,
+    );
+    return { requestCount: requests.length };
+  }
+
   async readAndVerify(
     expectation: ControllerControlPlaneReadbackExpectation,
   ): Promise<ControllerDeploymentReadbackEvidence> {
     const expected = controllerControlPlaneReadbackExpectationSchema.parse(expectation);
     const iamPlan = createControllerIamDeploymentPlan(expected.deployment);
-    const firestorePlan = createControllerFirestoreDeploymentPlan(expected.deployment);
-    const requests: readonly GoogleControlPlaneReadRequest<ControllerDeploymentReadbackKey>[] = [
-      ...createControllerControlPlaneReadbackRequests(expected),
-      ...createControllerIamReadbackRequests(iamPlan),
-      ...createControllerFirestoreReadbackRequests(firestorePlan),
-    ];
+    const requests = deploymentReadbackRequests(expected);
     const snapshot = await this.#reads.stableSnapshot(
       expected.deployment.manifest.projectId,
       requests,

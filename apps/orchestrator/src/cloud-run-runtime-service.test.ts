@@ -90,6 +90,7 @@ const configuration: CloudRunRuntimeConfiguration = {
 
 const readback: ControllerExecutionReadback = {
   activeExecutionCount: 1,
+  controllerVersion: 7,
   environment: "staging",
   executionHandle: HANDLE,
   executionName: "sd-stg-execution-1",
@@ -128,7 +129,9 @@ class FixedIds {
 function createPorts(
   overrides: {
     readonly cleanup?: CloudRunRuntimeServicePorts["cleanup"];
+    readonly finalizer?: CloudRunRuntimeServicePorts["finalizer"];
     readonly identity?: VerifiedGoogleIdentity;
+    readonly identityVerifier?: CloudRunRuntimeServicePorts["identity"];
     readonly readback?: ControllerExecutionReadback;
     readonly store?: InMemoryCloudRunRuntimeStore;
   } = {},
@@ -156,7 +159,10 @@ function createPorts(
     cleanup: overrides.cleanup ?? { schedule: () => Promise.resolve() },
     clock: { now: () => new Date("2026-08-11T00:00:00.000Z") },
     ids: new FixedIds(),
-    identity: { verify: () => Promise.resolve(overrides.identity ?? verifiedIdentity) },
+    identity: overrides.identityVerifier ?? {
+      verify: () => Promise.resolve(overrides.identity ?? verifiedIdentity),
+    },
+    finalizer: overrides.finalizer ?? { finalize: () => Promise.resolve() },
     secrets: new HmacRuntimeSecretDeriver(new Uint8Array(32).fill(7)),
     signatures: new WebCryptoEd25519Verifier(),
     store: overrides.store ?? new InMemoryCloudRunRuntimeStore([context]),
@@ -310,6 +316,43 @@ describe("CloudRunRuntimeService", () => {
     const service = new CloudRunRuntimeService(configuration, createPorts({ identity }));
     await expect(service.bootstrap(bootstrapRequest(keys.publicKey))).rejects.toMatchObject({
       code: "AUTHENTICATION_FAILED",
+    });
+  });
+
+  it("normalizes verifier failures to the authentication boundary", async () => {
+    const keys = await keyPair();
+    const service = new CloudRunRuntimeService(
+      configuration,
+      createPorts({
+        identityVerifier: {
+          verify: () => Promise.reject(new Error("untrusted verifier detail")),
+        },
+      }),
+    );
+    await expect(service.bootstrap(bootstrapRequest(keys.publicKey))).rejects.toMatchObject({
+      code: "AUTHENTICATION_FAILED",
+    });
+  });
+
+  it("verifies identity before revealing a missing execution context", async () => {
+    const keys = await keyPair();
+    const store = new InMemoryCloudRunRuntimeStore([]);
+    const rejected = new CloudRunRuntimeService(
+      configuration,
+      createPorts({
+        identityVerifier: {
+          verify: () => Promise.reject(new Error("untrusted verifier detail")),
+        },
+        store,
+      }),
+    );
+    await expect(rejected.bootstrap(bootstrapRequest(keys.publicKey))).rejects.toMatchObject({
+      code: "AUTHENTICATION_FAILED",
+    });
+
+    const verified = new CloudRunRuntimeService(configuration, createPorts({ store }));
+    await expect(verified.bootstrap(bootstrapRequest(keys.publicKey))).rejects.toMatchObject({
+      code: "EXECUTION_NOT_FOUND",
     });
   });
 

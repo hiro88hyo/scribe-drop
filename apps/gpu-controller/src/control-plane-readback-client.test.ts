@@ -11,6 +11,7 @@ const expectation: ControllerControlPlaneReadbackExpectation = {
     attestors: ["projects/scribe-phase14/attestors/release-candidate"],
     projectId: "scribe-phase14",
   },
+  projectNumber: "123456789012",
   deployment: {
     authorization: defaultSyntheticAuthorizations().staging,
     controllerImageDigest: `asia-southeast1-docker.pkg.dev/scribe-phase14/controller/runtime@sha256:${"b".repeat(64)}`,
@@ -33,6 +34,8 @@ const expectation: ControllerControlPlaneReadbackExpectation = {
 const serviceResource =
   "projects/scribe-phase14/locations/asia-southeast1/services/scribe-drop-staging-gpu-controller";
 const secretResource = "projects/scribe-phase14/secrets/scribe-drop-staging-controller-primary";
+const canonicalSecretResource =
+  "projects/123456789012/secrets/scribe-drop-staging-controller-primary";
 const urls = {
   binaryAuthorizationPolicy:
     "https://binaryauthorization.googleapis.com/v1/projects/scribe-phase14/policy",
@@ -105,7 +108,7 @@ function responses(): ReadonlyMap<string, unknown> {
           "scribe-drop-component": "gpu-controller",
           "scribe-drop-environment": "staging",
         },
-        name: secretResource,
+        name: canonicalSecretResource,
         replication: { userManaged: { replicas: [{ location: "asia-southeast1" }] } },
         topics: [],
         versionAliases: {},
@@ -117,7 +120,7 @@ function responses(): ReadonlyMap<string, unknown> {
         clientSpecifiedPayloadChecksum: true,
         createTime: "2026-08-11T00:01:00Z",
         etag: "version-etag",
-        name: `${secretResource}/versions/7`,
+        name: `${canonicalSecretResource}/versions/7`,
         replicationStatus: {
           userManaged: { replicas: [{ location: "asia-southeast1" }] },
         },
@@ -273,6 +276,22 @@ describe("Google controller control-plane read-back client", () => {
         expectation,
       ),
     ).rejects.toThrow("control-plane read-back authentication is unavailable");
+  });
+
+  it("reports only the fixed request key and HTTP status on a failed read", async () => {
+    const forbidden: typeof fetch = (input) =>
+      Promise.resolve(
+        requestUrl(input) === urls.service
+          ? Response.json(
+              { error: { message: "provider detail must stay hidden" } },
+              { status: 403 },
+            )
+          : Response.json(responses().get(requestUrl(input))),
+      );
+
+    await expect(
+      new GoogleControllerControlPlaneReadbackClient(tokens, forbidden).readAndVerify(expectation),
+    ).rejects.toThrow("control-plane read-back request failed [service; status=403]");
   });
 
   it("aborts every bounded request at the fixed timeout", async () => {

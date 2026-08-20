@@ -30,7 +30,7 @@ export function verifyGpuControllerImageInspection(value) {
     configuration.Entrypoint.length !== 2 ||
     configuration.Entrypoint[0] !== "/nodejs/bin/node" ||
     configuration.Entrypoint[1] !== "dist/entrypoint.js" ||
-    configuration.Cmd !== undefined
+    (configuration.Cmd !== undefined && configuration.Cmd !== null)
   ) {
     throw new Error("GPU controller entrypoint drifted");
   }

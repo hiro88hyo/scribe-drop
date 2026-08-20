@@ -74,7 +74,7 @@ export type ClaimRequestResult =
   | { readonly outcome: "environment_mismatch" }
   | { readonly outcome: "not_found" }
   | { readonly outcome: "rate_limited" }
-  | { readonly outcome: "stale" };
+  | { readonly outcome: "stale"; readonly record: ControlRecord };
 
 export interface AdmitCreateInput extends RequestIdentity {
   readonly expectedVersion: 0;
@@ -197,7 +197,8 @@ export class InMemoryControlStore implements ControlStore {
     const record = this.#records.get(input.executionHandle);
     if (record === undefined) return { outcome: "not_found" };
     if (record.environment !== input.environment) return { outcome: "environment_mismatch" };
-    if (record.version !== input.expectedVersion) return { outcome: "stale" };
+    if (record.version !== input.expectedVersion)
+      return { outcome: "stale", record: clone(record) };
     const now = Date.parse(input.now);
     const authorization = this.#authorizations[input.environment];
     if (
