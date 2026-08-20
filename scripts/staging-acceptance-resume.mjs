@@ -28,6 +28,26 @@ function requireStep(job, name, conclusion) {
   }
 }
 
+function requirePromotionMode(jobs) {
+  const conclusions = [
+    "Apply candidate D1 migrations",
+    "Promote exact candidate Pages deployment",
+    "Promote R2, RunPod, and Orchestrator",
+  ].map((name) => {
+    const matches = jobs.filter((job) => job?.name === name);
+    if (matches.length !== 1 || matches[0]?.status !== "completed") {
+      throw new Error(`Source staging ${name} job is invalid`);
+    }
+    return matches[0].conclusion;
+  });
+  if (
+    !new Set(["success", "skipped"]).has(conclusions[0]) ||
+    !conclusions.every((conclusion) => conclusion === conclusions[0])
+  ) {
+    throw new Error("Source staging promotion jobs are inconsistent");
+  }
+}
+
 export function verifyStagingAcceptanceResume(runValue, jobsValue, expected) {
   const run = requireRecord(runValue, "Source staging run");
   const jobsEnvelope = requireRecord(jobsValue, "Source staging jobs");
@@ -57,9 +77,7 @@ export function verifyStagingAcceptanceResume(runValue, jobsValue, expected) {
   }
 
   requireJob(jobs, "Verify candidate and all remote prerequisites", "success");
-  requireJob(jobs, "Apply candidate D1 migrations", "skipped");
-  requireJob(jobs, "Promote exact candidate Pages deployment", "skipped");
-  requireJob(jobs, "Promote R2, RunPod, and Orchestrator", "skipped");
+  requirePromotionMode(jobs);
   const acceptance = requireJob(
     jobs,
     "Verify live resources and run real staging acceptance",

@@ -22,8 +22,10 @@ failed runを後から成功へ読み替えるとstaging promotion gateを弱め
 
 - 通常のfailed/cancelled acceptanceは引き続きADR 0087に従い、evidenceを発行しない。
 - GPU-free復旧は、明示されたsource runが初回workflow dispatch、exact release branch/repository/workflow、
-  exact candidate run IDであり、preflight成功、mutation job skip、実M4A lifecycle成功、cleanup convergence
-  verifierだけ失敗、後続のauthorization disable・RunPod restore・evidence発行がskipだった場合だけ許可する。
+  exact candidate run IDであり、preflight成功、実M4A lifecycle成功、cleanup convergence verifierだけ失敗、
+  後続のauthorization disable・RunPod restore・evidence発行がskipだった場合だけ許可する。source runのmigration jobと
+  2 promotion jobsは、初回full stagingなら全件`success`、resume-only stagingなら全件`skipped`のどちらか完全一致を
+  必須とし、混在を拒否する。GPU-free復旧workflow自身のmutation jobsはすべて`skipped`とする。
 - source recoveryはreaper convergence、同run authorization disable、RunPod復元、最終safety read-backの
   各step成功を必須とする。jobの最終集約が別の生成plan欠落で失敗していても、この各stepと現在のlive stateを
   独立して再検証できる場合だけ続行する。

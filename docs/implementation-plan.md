@@ -1965,6 +1965,11 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
   の復旧条件に従い、通常cleanupとrecoveryの双方をsource run時間内のexact-one recordへ限定し、最大100件の履歴はすべて
   `CLEANED`、paginationなしを要求する。修正後は同candidateと成功済みsource lifecycleをGPU-free recoveryで再検証し、
   staging evidenceを復旧する。candidateの再build、deploy、migration、実E2E、GPU再実行は行わない。
+- 最初のGPU-free recovery `32337084095`は全remote preflightを成功し、全mutation jobと通常acceptanceをskipしたが、
+  source lifecycle verifierが以前のresume-only run形状だけを想定し、正式なfull staging sourceで成功済みのmigration／
+  promotion jobsを`skipped`でないとして拒否した。resource mutationとGPU実行は0である。source runはmigration／promotion
+  3 jobsが全件`success`のfull staging、または全件`skipped`のresume-only stagingだけを許可し、混在を拒否する。recovery run
+  自身は従来どおり全mutation jobのskipを必須とし、同candidate・同source runでGPU-free evidence復旧だけを再実行する。
 
 実装:
 

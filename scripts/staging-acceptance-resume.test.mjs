@@ -81,6 +81,25 @@ test("accepts only a recovered source run whose real lifecycle succeeded", () =>
   });
 });
 
+test("accepts a full staging source whose promotion jobs all succeeded", () => {
+  const value = fixture();
+  for (const index of [1, 2, 3]) value.jobs.jobs[index].conclusion = "success";
+  assert.deepEqual(verifyStagingAcceptanceResume(value.run, value.jobs, expected), {
+    headSha: "a".repeat(40),
+    recoveryRequiresLiveReverification: false,
+    sourceRunId: "123",
+  });
+});
+
+test("rejects mixed promotion conclusions in the source lifecycle", () => {
+  const value = fixture();
+  value.jobs.jobs[1].conclusion = "success";
+  assert.throws(
+    () => verifyStagingAcceptanceResume(value.run, value.jobs, expected),
+    /promotion jobs are inconsistent/u,
+  );
+});
+
 test("accepts a recovered source whose final aggregation is reverified live", () => {
   const value = fixture();
   value.jobs.jobs[5].conclusion = "failure";
