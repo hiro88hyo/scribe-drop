@@ -1950,6 +1950,12 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
 - 同じsmoke後に判明したcleanup verifierのenvironment固定も、選択した`staging|production`をauthorization documentとexact-one
   execution recordの両方へ要求する形へ修正した。production名を受理しながら内部でstagingだけを比較する状態を回帰testで拒否し、
   production smoke verifierにも正の処理時間を追加した。
+- 処理時間修正candidateのcontroller scanは、固定distroless Debian 13 package
+  `libssl3t64 3.5.6-1~deb13u2`に新規HIGH `CVE-2026-14456`を検出してpublish前に停止した。公式Node 24 imageの最新digestも
+  同じpackageで、CVEの対象はcontrollerが使用しないOpenSSL QUIC server Listenerである。[ADR 0090](./adr/0090-scope-controller-openssl-quic-scan-exception.md)
+  に従いcontrollerの完全PURLだけを2026-09-20まで除外し、実containerのNode processがOS `libssl`をloadしていないことを
+  offline invariantで必須化する。他image、別package、期限切れ、shared object観測不能には例外を適用しない。このsource変更を
+  含む新candidateをbuildし、staging acceptanceをやり直すまでproductionへ進まない。
 
 実装:
 

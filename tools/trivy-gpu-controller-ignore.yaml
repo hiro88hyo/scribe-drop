@@ -1,0 +1,8 @@
+vulnerabilities:
+  - id: CVE-2026-14456
+    purls:
+      - "pkg:deb/debian/libssl3t64@3.5.6-1~deb13u2?arch=amd64&distro=debian-13.6"
+    expired_at: 2026-09-20
+    statement: >-
+      Not affected: the controller is a TCP HTTP service, does not create an OpenSSL QUIC listener,
+      and its offline container invariant proves that the Node process does not load the operating-system libssl shared object.

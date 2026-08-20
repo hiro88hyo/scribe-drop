@@ -6,6 +6,8 @@ const controllerContainerRuntimeSchema = z
     home: z.literal("/nonexistent"),
     nodeEnvironment: z.literal("production"),
     nodeVersion: z.literal("v24.18.0"),
+    operatingSystemLibsslLoaded: z.literal(false),
+    sharedObjectReportAvailable: z.literal(true),
     uid: z.literal(10_001),
   })
   .strict();
@@ -15,8 +17,19 @@ export interface ControllerContainerRuntime {
   readonly home: string | undefined;
   readonly nodeEnvironment: string | undefined;
   readonly nodeVersion: string;
+  readonly operatingSystemLibsslLoaded: boolean;
+  readonly sharedObjectReportAvailable: boolean;
   readonly uid: number;
 }
+
+export interface ControllerSharedObjectState {
+  readonly operatingSystemLibsslLoaded: boolean;
+  readonly sharedObjectReportAvailable: boolean;
+}
+
+const processReportSchema = z.object({
+  sharedObjects: z.array(z.string()),
+});
 
 const controllerContainerFilesystemSchema = z
   .object({
@@ -58,6 +71,22 @@ export interface ControllerContainerFilesystem {
 
 export function verifyControllerContainerRuntime(input: ControllerContainerRuntime): void {
   controllerContainerRuntimeSchema.parse(input);
+}
+
+export function inspectControllerSharedObjects(input: unknown): ControllerSharedObjectState {
+  const result = processReportSchema.safeParse(input);
+  if (!result.success) {
+    return {
+      operatingSystemLibsslLoaded: true,
+      sharedObjectReportAvailable: false,
+    };
+  }
+  return {
+    operatingSystemLibsslLoaded: result.data.sharedObjects.some((sharedObject) =>
+      /(?:^|\/)libssl\.so(?:\.|$)/u.test(sharedObject),
+    ),
+    sharedObjectReportAvailable: true,
+  };
 }
 
 export function verifyControllerContainerFilesystem(input: ControllerContainerFilesystem): void {

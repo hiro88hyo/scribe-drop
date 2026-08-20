@@ -145,10 +145,14 @@ exposed port、volume不在、base digest/name/version/policy labelをinspectす
 imageへ焼き込んだ場合も拒否する。offline container checkはnetwork none、read-only root filesystem、全capability drop、
 `no-new-privileges`、PID 64、256 MiB、1 CPU、16 MiB noexec/nosuid tmpfsで実行する。container内でもcontroller entrypointと
 contracts/domain/Firestore/Google Auth/Zod runtimeの存在、shell/BusyBox/npm/pnpm/TypeScript/`@types/node`/source/declaration/
-source mapの不在を検証する。
+source mapの不在を検証する。さらにNode process reportのshared object一覧を取得できることと、OSの`libssl.so*`が
+loadされていないことを必須にする。
 
 local imageはCycloneDX SBOMを`/tmp/scribe-drop-gpu-controller.cdx.json`だけへ生成し、Trivyのunfixedを含む
-HIGH/CRITICAL fail-close scanを通過した。local image IDとSBOMはrelease artifactでもstaging evidenceでもなく、commitしない。
+HIGH/CRITICAL fail-close scanを通す。[ADR 0090](./adr/0090-scope-controller-openssl-quic-scan-exception.md)の
+非該当`CVE-2026-14456`だけは、controllerの完全package PURL、2026-09-20期限、OS `libssl`未load invariantをすべて
+満たす場合に限り除外する。このignore fileを他の3 image scanへ渡さないこともsource testで固定する。local image IDと
+SBOMはrelease artifactでもstaging evidenceでもなく、commitしない。
 先行candidateでpublish済みの署名付きimageは非GPU preflightだけに利用した。このread-back修正を含む最終candidateのpublish、
 署名/provenance検証、Serviceへのdigest差し替えは実staging gateに残す。
 
