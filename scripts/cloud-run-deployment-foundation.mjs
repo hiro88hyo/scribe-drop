@@ -32,6 +32,7 @@ export const deploymentRolePermissions = Object.freeze([
   "run.services.create",
   "run.services.get",
   "run.services.getIamPolicy",
+  "run.services.setIamPolicy",
   "run.services.update",
   "secretmanager.locations.get",
   "secretmanager.secrets.get",

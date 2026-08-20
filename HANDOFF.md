@@ -344,3 +344,11 @@ proposed fix.
   `validateOnly=true` plus an absence read-back during preflight. The exact
   production plan passed this live validate-only path with 13 read requests and
   `serviceMutationObserved=false`; the Service remains absent.
+- That fix was committed as `c401494`. GPU-free staging recovery `32315737420`
+  succeeded, but production preflight `32315945525` failed safely during the
+  new CreateService validate-only call. Audit Logs showed the workflow identity
+  lacks `run.services.setIamPolicy`, which is required by
+  `invokerIamDisabled`. All mutation/GPU steps were skipped. The current
+  uncommitted change adds exactly that permission to the shared release
+  deployer custom role and fixes the full Service create/update/read-back
+  permission set in a regression test. External IAM has not yet been changed.

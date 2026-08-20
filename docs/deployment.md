@@ -613,6 +613,8 @@ Firestore database objectのread-backには`datastore.databases.getMetadata`が�
 production controller Serviceを初回作成する場合、preflightはCreateService POSTを`validateOnly=true`で実行し、直後も
 Serviceが404であることを確認する。実cutoverは同じnameなしbodyをCreateService POSTへ渡す。field mask付きPATCHの
 `allowMissing=true`は実APIで不存在Serviceを作成できないため使用せず、PATCHは作成済みServiceの更新だけに限定する。
+Service requestで`invokerIamDisabled`を設定するため、shared release deployer roleは`run.services.setIamPolicy`を必須とする。
+production preflightはactual roleの完全一致を確認してからCreateService validate-onlyへ進む。
 acceptance jobはbrowser installを先に完了し、candidate controllerをdisabledでdeployしてから
 `pnpm cloud-run:staging:bootstrap-preflight <candidate-evidence>`を実行する。GPU 0のexact-one
 `EXECUTION_NOT_FOUND` evidenceとJob/Execution 0が得られるまでpaid authorizationを開かない。

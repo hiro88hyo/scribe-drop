@@ -112,6 +112,19 @@ test("keeps deployment role mutation and secret payload access out of scope", ()
   assert.equal(deploymentRolePermissions.includes("datastore.databases.getMetadata"), true);
 });
 
+test("grants every Cloud Run Service permission required by create, update, and read-back", () => {
+  for (const permission of [
+    "run.operations.get",
+    "run.services.create",
+    "run.services.get",
+    "run.services.getIamPolicy",
+    "run.services.setIamPolicy",
+    "run.services.update",
+  ]) {
+    assert.equal(deploymentRolePermissions.includes(permission), true, permission);
+  }
+});
+
 test("converges only the shared release deployer role through its targeted command", () => {
   const managerSource = readFileSync(
     new URL("./manage-cloud-run-deployment-foundation.mjs", import.meta.url),

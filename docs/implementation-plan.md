@@ -1914,6 +1914,11 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
   authorization、GPUは未実行である。Cloud Audit Logは`update_mask requires the resource to exist`を返したため、初回だけ公式
   CreateService POST、既存ServiceだけPATCHへ分離する。初回preflightもPOST `validateOnly=true`を実行し、実production planで
   request受理、13 read-back、Service非作成を確認した。CreateService bodyは実API要件に従いidentifier `name`を含めない。
+- production preflight `32315945525`はGitHub production deployerでCreateService validate-onlyを実行し、全mutationをskipしたまま
+  `invoker_iam_disabled`に必要な`run.services.setIamPolicy`不足を検出した。local userでの成功をworkflow identityの成功と扱った
+  事前検査が不十分だった。cutover全後続stepをAPI/identity/permission/resourceごとに追跡し、D1/R2/RunPodは先行cutoverで実成功、
+  Cloudflare write権限はtoken contractと実upload/read-back、GCP runtime権限はfoundation exact role/bindingとstaging acceptanceで確認した。
+  shared release deployer roleへ不足1権限を追加し、Service create/update/read-backの完全permission集合を回帰testで固定する。
 
 実装:
 
