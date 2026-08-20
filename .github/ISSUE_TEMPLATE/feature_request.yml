@@ -1,0 +1,62 @@
+name: 機能要望
+description: 利用者または運用上の問題と、期待する成果を提案します。
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 解決したい問題
+      description: 実装案ではなく、現在困っていることと対象利用者を記載してください。
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: 期待する成果
+      description: 要望が実現したときに何が可能になるかを記載してください。
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 完了条件
+      description: 外形的に確認できる条件を箇条書きで記載してください。
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: primary_area
+    attributes:
+      label: 主な対象領域
+      options:
+        - Web UI / PWA
+        - API / Orchestrator
+        - RunPod / Cloud Run worker
+        - Storage / Database / Queue
+        - Deployment / Operations
+        - Security / Authorization
+        - Documentation
+        - 不明
+    validations:
+      required: true
+
+  - type: textarea
+    id: constraints
+    attributes:
+      label: 制約・代替案
+      description: 既知の制約、検討済みの代替案、関連IssueやADRがあれば記載してください。
+
+  - type: checkboxes
+    id: safe_content
+    attributes:
+      label: 公開情報の確認
+      options:
+        - label: Issueに秘密情報や利用者データを含めていません。
+          required: true

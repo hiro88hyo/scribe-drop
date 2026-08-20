@@ -1,5 +1,8 @@
 # ローカル開発環境
 
+要望、不具合、dependency更新、運用改善の受付とtriageは
+[Issue管理](./issue-management.md)に従う。未公開の脆弱性は公開Issueへ登録しない。
+
 ## 固定ツール
 
 | Tool      |     Version | 管理方法                             |
