@@ -1970,6 +1970,12 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
   promotion jobsを`skipped`でないとして拒否した。resource mutationとGPU実行は0である。source runはmigration／promotion
   3 jobsが全件`success`のfull staging、または全件`skipped`のresume-only stagingだけを許可し、混在を拒否する。recovery run
   自身は従来どおり全mutation jobのskipを必須とし、同candidate・同source runでGPU-free evidence復旧だけを再実行する。
+- replacement GPU-free recovery `32337567653`は全remote preflight、source lifecycle fingerprint、source-run scoped
+  controller execution history、Cloud Run/Firestore disabled zero、RunPod baseline、全Cloudflare live parity、schema version 3
+  acceptance発行・uploadを成功した。D1 migration、Pages promotion、R2/RunPod/Orchestrator promotion、通常acceptance、
+  automatic recoveryはすべてskipされ、GPU executionは0である。staging evidenceはimmutable candidate commit
+  `d5233fde17fc0ed84fade8953c5d5d9dbb90471f`、application candidate run `32333708361`、Cloud Run candidate run
+  `32333708385`へ固定され、productionではこのcandidateを再build・修正せずdeployだけ行う。
 
 実装:
 
