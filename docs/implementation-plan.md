@@ -1824,7 +1824,7 @@ Remote final Android/download/controller-outage gate (2026-08-15):
 - acceptance失敗時はproduction workflowを起動せず、原因をlocal/fake testまたはprovider証拠へ還元して
   新commitからcandidateを作り直す。
 
-### Phase 16: production cutover and `v0.2.0`
+### Phase 16: production cutover and `v0.2.0`（完了、2026-08-20）
 
 Local gate hardening after the first Phase 16 preflight (2026-08-15):
 
@@ -2012,6 +2012,13 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
   smokeはcutover完了後に投入されるため、D1でE2E成功を検証したjobの`provider_handle`とFirestore recordの`executionHandle`を
   完全一致させる方式へ修正した。別handle拒否の回帰テスト後、live `smoke-paused`、Cloud Run Job/Execution 0、active 0、
   `CLEANED`をread-onlyで確認した。
+- source `5cf23bacfe45bbb9273b20a4d471c95a4c0aa1a2`のGPU-free staging evidence `32349481133`は全remote preflight、
+  source lifecycle、両candidate、live parityを再検証し、migration、Pages/RunPod/Orchestrator promotion、通常acceptance、recoveryを
+  すべてskipして成功した。production finalize `32349830887`は`smoke-paused` entryをmutation前に完全read-backし、smoke枠disable、
+  5 execution/1,250 JPYの有限operational authorization、admission active、final parity、Access、release evidence uploadまで成功した。
+  独立post-readbackもWorker `active` / `cloud_run_jobs_l4_v1`、controller `operational-active`、active execution 0、Cloud Run Job/Execution 0、
+  smoke record `CLEANED`を確認した。追加GPU executionとcandidate再publishは0である。最終記録は
+  [v0.2.0 production deployment record](./deployments/2026-08-20-v0.2.0-production.md)を正とする。
 
 実装:
 
