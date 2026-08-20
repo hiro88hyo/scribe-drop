@@ -2138,6 +2138,46 @@ requireTextCount(
   "deploy-production-candidate.yml",
   "controller preflight before both production mutations",
 );
+requireText(
+  workflowStep(
+    productionCutoverJob,
+    "Build verifier and strictly read production foundation",
+    "deploy-production-candidate.yml cutover job",
+  ),
+  'SCRIBE_DROP_CLOUD_RUN_EXPECTED_RESERVED_EXECUTIONS: "0"',
+  "deploy-production-candidate.yml cutover job",
+  "cutover requires disabled zero authorization before mutation",
+);
+requireText(
+  workflowStep(
+    productionCutoverJob,
+    "Build verifier and strictly read production foundation",
+    "deploy-production-candidate.yml cutover job",
+  ),
+  "SCRIBE_DROP_CLOUD_RUN_EXPECTED_AUTHORIZATION_EPOCH: disabled",
+  "deploy-production-candidate.yml cutover job",
+  "cutover requires the exact disabled authorization epoch",
+);
+requireText(
+  workflowStep(
+    productionFinalizeJob,
+    "Build verifier and reconstruct exact active production configuration",
+    "deploy-production-candidate.yml finalize job",
+  ),
+  'SCRIBE_DROP_CLOUD_RUN_EXPECTED_RESERVED_EXECUTIONS: "1"',
+  "deploy-production-candidate.yml finalize job",
+  "finalize requires exactly one consumed smoke authorization",
+);
+requireText(
+  workflowStep(
+    productionFinalizeJob,
+    "Build verifier and reconstruct exact active production configuration",
+    "deploy-production-candidate.yml finalize job",
+  ),
+  "SCRIBE_DROP_CLOUD_RUN_EXPECTED_AUTHORIZATION_EPOCH: phase16-smoke-${{ inputs.candidate_commit_sha }}-${{ inputs.cutover_run_id }}",
+  "deploy-production-candidate.yml finalize job",
+  "finalize requires the exact source cutover smoke epoch",
+);
 
 requireTextCount(
   productionWorkflowContents,

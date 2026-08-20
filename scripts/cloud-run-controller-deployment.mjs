@@ -115,6 +115,24 @@ export function isExactControllerAuthorizationRetry(selected, observed) {
   );
 }
 
+function isExactSmokeAuthorizationShape(observed, expectedReservedExecutions) {
+  return (
+    new Set([0, 1]).has(expectedReservedExecutions) &&
+    observed.reservedExecutions === expectedReservedExecutions &&
+    observed.reservedWorstCaseJpy === expectedReservedExecutions * WORST_CASE_JPY_PER_EXECUTION &&
+    observed.maxExecutions === 1 &&
+    observed.maxRequestsPerMinute === 60 &&
+    observed.maxWorstCaseJpy === WORST_CASE_JPY_PER_EXECUTION &&
+    typeof observed.validUntil === "string" &&
+    Number.isFinite(Date.parse(observed.validUntil)) &&
+    new Date(Date.parse(observed.validUntil)).toISOString() === observed.validUntil &&
+    observed.worstCaseJpyPerExecution === WORST_CASE_JPY_PER_EXECUTION &&
+    typeof observed.epoch === "string" &&
+    observed.epoch.startsWith("phase16-smoke-") &&
+    AUTHORIZATION_EPOCH_PATTERN.test(observed.epoch)
+  );
+}
+
 export function isAllowedControllerDisable(observed, expectedReservedExecutions) {
   if (
     observed.activeExecutions !== 0 ||
@@ -128,15 +146,26 @@ export function isAllowedControllerDisable(observed, expectedReservedExecutions)
     (expectedReservedExecutions === 0 &&
       observed.epoch === "disabled" &&
       observed.maxExecutions === 0 &&
+      observed.maxRequestsPerMinute === 0 &&
       observed.maxWorstCaseJpy === 0 &&
+      observed.validUntil === "1970-01-01T00:00:00.000Z" &&
       observed.worstCaseJpyPerExecution === 0) ||
     (expectedReservedExecutions === 1 &&
-      observed.maxExecutions === 1 &&
-      observed.maxWorstCaseJpy === WORST_CASE_JPY_PER_EXECUTION &&
-      observed.worstCaseJpyPerExecution === WORST_CASE_JPY_PER_EXECUTION &&
-      typeof observed.epoch === "string" &&
-      observed.epoch.startsWith("phase16-smoke-") &&
-      AUTHORIZATION_EPOCH_PATTERN.test(observed.epoch))
+      isExactSmokeAuthorizationShape(observed, expectedReservedExecutions))
+  );
+}
+
+export function isAllowedControllerPreflightAuthorization(
+  observed,
+  expectedEnvironment,
+  expectedReservedExecutions,
+  expectedEpoch,
+) {
+  return (
+    new Set(["production", "staging"]).has(expectedEnvironment) &&
+    observed.environment === expectedEnvironment &&
+    observed.epoch === expectedEpoch &&
+    isAllowedControllerDisable(observed, expectedReservedExecutions)
   );
 }
 
@@ -144,6 +173,7 @@ export function isAllowedControllerRecoveryDisable(
   observed,
   expectedEpoch,
   expectedEnvironment = "staging",
+  allowConsumedProductionRecovery = false,
 ) {
   if (
     typeof expectedEpoch !== "string" ||
@@ -153,24 +183,21 @@ export function isAllowedControllerRecoveryDisable(
     observed.activeExecutions !== 0 ||
     observed.environment !== expectedEnvironment ||
     !new Set([0, 1]).has(observed.reservedExecutions) ||
-    (expectedEnvironment === "production" && observed.reservedExecutions !== 0) ||
     observed.reservedWorstCaseJpy !== observed.reservedExecutions * WORST_CASE_JPY_PER_EXECUTION
   ) {
     return false;
   }
   if (observed.epoch === "disabled") {
-    return (
-      observed.maxExecutions === 0 &&
-      observed.maxWorstCaseJpy === 0 &&
-      observed.reservedExecutions === 0 &&
-      observed.worstCaseJpyPerExecution === 0
-    );
+    return isAllowedControllerDisable(observed, 0);
   }
+  const allowedReservations =
+    expectedEnvironment === "production"
+      ? new Set([allowConsumedProductionRecovery ? 1 : 0])
+      : new Set([0, 1]);
   return (
+    allowedReservations.has(observed.reservedExecutions) &&
     observed.epoch === expectedEpoch &&
-    observed.maxExecutions === 1 &&
-    observed.maxWorstCaseJpy === WORST_CASE_JPY_PER_EXECUTION &&
-    observed.worstCaseJpyPerExecution === WORST_CASE_JPY_PER_EXECUTION
+    isExactSmokeAuthorizationShape(observed, observed.reservedExecutions)
   );
 }
 

@@ -642,6 +642,18 @@ promotion時点ではRunPod選択を維持し、Cloud Run選択はこのstep成�
 production foundationはdashboardで手作業せず、project/account/environmentと下記planをread-onlyで確認し、
 明示承認後に一度だけ適用する。
 
+production controller preflightはServiceのvalidate-onlyだけでなく、Firestore authorizationを必ず先に読む。
+cutoverではenvironment `production`、epoch `disabled`、epoch expiry、active/max/request-rate/reserved/costの全値0を要求し、
+finalizeではsource cutoverのexact epochを持つexact-one smokeがactive 0、reserved 1、reserved cost 250であることを要求する。
+期待epochとreservationはworkflowの各stepへ明示し、暗黙defaultを共有しない。preflight runと実cutoverの双方で同じ検査を行い、
+旧smoke、operational authorization、別environment、document欠落を最初のproduction mutation前に拒否する。
+
+処理時間修正前のproduction smokeをfinalizeせず保留した場合は、通常cutoverを重ねない。source cutover runに限定した
+`cloud-run:acceptance:clean production <cutover-run-json>`でJob/Execution 0、`CLEANED` record、active 0、reserved 1を
+確認後、[ADR 0091](./adr/0091-require-controller-authorization-precondition.md)の明示承認を得る。exact recovery epochと
+`SCRIBE_DROP_CLOUD_RUN_ALLOW_CONSUMED_PRODUCTION_RECOVERY=1`を指定したcontroller `recover production disabled`だけで
+旧枠を閉じ、disabled/zeroをread-backする。この操作は旧smokeのacceptanceやrelease evidenceを発行せず、GPUを実行しない。
+
 ```bash
 pnpm cloud-run:foundation:apply
 SCRIBE_DROP_PRODUCTION_CLOUD_RUN_CONTROLLER_HMAC_SECRET_VERSION=<version> \

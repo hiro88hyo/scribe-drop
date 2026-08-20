@@ -319,6 +319,8 @@ jobs:
       - name: Build verifier and strictly read production foundation
         env:
           GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+          SCRIBE_DROP_CLOUD_RUN_EXPECTED_AUTHORIZATION_EPOCH: disabled
+          SCRIBE_DROP_CLOUD_RUN_EXPECTED_RESERVED_EXECUTIONS: "0"
         run: |
           pnpm run workflow:build:gpu-controller
           pnpm run cloud-run:foundation:read production
@@ -606,6 +608,10 @@ jobs:
           pnpm run cloud-run:candidate:evidence verify cloud-run-candidate/cloud-run-candidate.json
 
       - name: Build verifier and reconstruct exact active production configuration
+        env:
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+          SCRIBE_DROP_CLOUD_RUN_EXPECTED_AUTHORIZATION_EPOCH: phase16-smoke-${{ inputs.candidate_commit_sha }}-${{ inputs.cutover_run_id }}
+          SCRIBE_DROP_CLOUD_RUN_EXPECTED_RESERVED_EXECUTIONS: "1"
         run: |
           pnpm run workflow:build:gpu-controller
           pnpm run cloud-run:controller:deploy preflight production disabled \
@@ -614,8 +620,6 @@ jobs:
           pnpm run candidate:pages "${RELEASE_CANDIDATE_DIRECTORY}" pages-candidate
           SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION=active \
             pnpm run cloud-run:production:origin:export
-        env:
-          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
 
       - name: Verify production smoke and exact provider cleanup before mutation
         env:

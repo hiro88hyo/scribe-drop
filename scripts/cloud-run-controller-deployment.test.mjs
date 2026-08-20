@@ -11,6 +11,7 @@ import {
   createControllerServicePatchUrl,
   createControllerServiceRequest,
   isAllowedControllerDisable,
+  isAllowedControllerPreflightAuthorization,
   isAllowedControllerRecoveryDisable,
   isExactControllerAuthorizationRetry,
   preflightExistingControllerService,
@@ -280,9 +281,11 @@ test("distinguishes an unconsumed rearm from a consumed smoke disable", () => {
     activeExecutions: 0,
     epoch: `phase16-smoke-${"a".repeat(40)}-123`,
     maxExecutions: 1,
+    maxRequestsPerMinute: 60,
     maxWorstCaseJpy: 250,
     reservedExecutions: 0,
     reservedWorstCaseJpy: 0,
+    validUntil: "2026-08-20T08:00:00.000Z",
     worstCaseJpyPerExecution: 250,
   };
   assert.equal(isAllowedControllerDisable(smoke, 0), false);
@@ -292,7 +295,9 @@ test("distinguishes an unconsumed rearm from a consumed smoke disable", () => {
         ...smoke,
         epoch: "disabled",
         maxExecutions: 0,
+        maxRequestsPerMinute: 0,
         maxWorstCaseJpy: 0,
+        validUntil: "1970-01-01T00:00:00.000Z",
         worstCaseJpyPerExecution: 0,
       },
       0,
@@ -310,6 +315,80 @@ test("distinguishes an unconsumed rearm from a consumed smoke disable", () => {
   );
 });
 
+test("preflight requires the exact declared authorization prerequisite", () => {
+  const disabled = {
+    activeExecutions: 0,
+    environment: "production",
+    epoch: "disabled",
+    maxExecutions: 0,
+    maxRequestsPerMinute: 0,
+    maxWorstCaseJpy: 0,
+    reservedExecutions: 0,
+    reservedWorstCaseJpy: 0,
+    validUntil: "1970-01-01T00:00:00.000Z",
+    worstCaseJpyPerExecution: 0,
+  };
+  const consumedSmoke = {
+    ...disabled,
+    epoch: `phase16-smoke-${"a".repeat(40)}-123`,
+    maxExecutions: 1,
+    maxRequestsPerMinute: 60,
+    maxWorstCaseJpy: 250,
+    reservedExecutions: 1,
+    reservedWorstCaseJpy: 250,
+    validUntil: "2026-08-20T08:00:00.000Z",
+    worstCaseJpyPerExecution: 250,
+  };
+  assert.equal(
+    isAllowedControllerPreflightAuthorization(disabled, "production", 0, "disabled"),
+    true,
+  );
+  assert.equal(
+    isAllowedControllerPreflightAuthorization(consumedSmoke, "production", 0, "disabled"),
+    false,
+  );
+  assert.equal(
+    isAllowedControllerPreflightAuthorization(consumedSmoke, "production", 1, consumedSmoke.epoch),
+    true,
+  );
+  assert.equal(
+    isAllowedControllerPreflightAuthorization(
+      { ...consumedSmoke, environment: "staging" },
+      "production",
+      1,
+      consumedSmoke.epoch,
+    ),
+    false,
+  );
+  assert.equal(
+    isAllowedControllerPreflightAuthorization(
+      { ...disabled, activeExecutions: 1 },
+      "production",
+      0,
+      "disabled",
+    ),
+    false,
+  );
+  assert.equal(
+    isAllowedControllerPreflightAuthorization(
+      { ...disabled, maxRequestsPerMinute: 60 },
+      "production",
+      0,
+      "disabled",
+    ),
+    false,
+  );
+  assert.equal(
+    isAllowedControllerPreflightAuthorization(
+      consumedSmoke,
+      "production",
+      1,
+      `phase16-smoke-${"b".repeat(40)}-123`,
+    ),
+    false,
+  );
+});
+
 test("recovery disables only the same staging smoke epoch after capacity reaches zero", () => {
   const epoch = `phase16-smoke-${"a".repeat(40)}-123`;
   const smoke = {
@@ -317,9 +396,11 @@ test("recovery disables only the same staging smoke epoch after capacity reaches
     environment: "staging",
     epoch,
     maxExecutions: 1,
+    maxRequestsPerMinute: 60,
     maxWorstCaseJpy: 250,
     reservedExecutions: 0,
     reservedWorstCaseJpy: 0,
+    validUntil: "2026-08-20T08:00:00.000Z",
     worstCaseJpyPerExecution: 250,
   };
   assert.equal(isAllowedControllerRecoveryDisable(smoke, epoch), true);
@@ -345,7 +426,9 @@ test("recovery disables only the same staging smoke epoch after capacity reaches
         ...smoke,
         epoch: "disabled",
         maxExecutions: 0,
+        maxRequestsPerMinute: 0,
         maxWorstCaseJpy: 0,
+        validUntil: "1970-01-01T00:00:00.000Z",
         worstCaseJpyPerExecution: 0,
       },
       epoch,
@@ -361,9 +444,11 @@ test("production recovery accepts only the exact unconsumed failed-cutover smoke
     environment: "production",
     epoch,
     maxExecutions: 1,
+    maxRequestsPerMinute: 60,
     maxWorstCaseJpy: 250,
     reservedExecutions: 0,
     reservedWorstCaseJpy: 0,
+    validUntil: "2026-08-20T08:00:00.000Z",
     worstCaseJpyPerExecution: 250,
   };
   assert.equal(isAllowedControllerRecoveryDisable(smoke, epoch, "production"), true);
@@ -390,6 +475,51 @@ test("production recovery accepts only the exact unconsumed failed-cutover smoke
   assert.equal(isAllowedControllerRecoveryDisable(smoke, epoch, "staging"), false);
 });
 
+test("consumed production recovery requires an explicit exact-epoch opt in", () => {
+  const epoch = `phase16-smoke-${"a".repeat(40)}-123`;
+  const consumed = {
+    activeExecutions: 0,
+    environment: "production",
+    epoch,
+    maxExecutions: 1,
+    maxRequestsPerMinute: 60,
+    maxWorstCaseJpy: 250,
+    reservedExecutions: 1,
+    reservedWorstCaseJpy: 250,
+    validUntil: "2026-08-20T08:00:00.000Z",
+    worstCaseJpyPerExecution: 250,
+  };
+  assert.equal(isAllowedControllerRecoveryDisable(consumed, epoch, "production"), false);
+  assert.equal(isAllowedControllerRecoveryDisable(consumed, epoch, "production", true), true);
+  assert.equal(
+    isAllowedControllerRecoveryDisable(
+      { ...consumed, activeExecutions: 1 },
+      epoch,
+      "production",
+      true,
+    ),
+    false,
+  );
+  assert.equal(
+    isAllowedControllerRecoveryDisable(
+      { ...consumed, epoch: `phase16-smoke-${"b".repeat(40)}-123` },
+      epoch,
+      "production",
+      true,
+    ),
+    false,
+  );
+  assert.equal(
+    isAllowedControllerRecoveryDisable(
+      { ...consumed, reservedExecutions: 0, reservedWorstCaseJpy: 0 },
+      epoch,
+      "production",
+      true,
+    ),
+    false,
+  );
+});
+
 test("passes the selected environment through every manager recovery guard", () => {
   const manager = readFileSync(
     new URL("./manage-cloud-run-controller-deployment.mjs", import.meta.url),
@@ -398,8 +528,29 @@ test("passes the selected environment through every manager recovery guard", () 
   const calls = manager.match(/isAllowedControllerRecoveryDisable\s*\(/gu) ?? [];
   const environmentBoundCalls =
     manager.match(
-      /isAllowedControllerRecoveryDisable\(\s*observedAuthorization\(current\.body\),\s*(?:expectedEpoch|recoveryEpoch),\s*selectedEnvironment,\s*\)/gu,
+      /isAllowedControllerRecoveryDisable\(\s*observedAuthorization\(current\.body\),\s*(?:expectedEpoch|recoveryEpoch),\s*selectedEnvironment,\s*allowConsumedProductionRecovery,\s*\)/gu,
     ) ?? [];
   assert.equal(calls.length, 2);
   assert.equal(environmentBoundCalls.length, 2);
+});
+
+test("manager checks the live authorization before service preflight", () => {
+  const manager = readFileSync(
+    new URL("./manage-cloud-run-controller-deployment.mjs", import.meta.url),
+    "utf8",
+  );
+  const preflightBranch = manager.slice(
+    manager.indexOf('if (command === "preflight") {'),
+    manager.indexOf("} else {", manager.indexOf('if (command === "preflight") {')),
+  );
+  assert.match(
+    preflightBranch,
+    /requirePreflightAuthorizationReady\(\s*expectedDisabledReservations,\s*expectedPreflightEpoch,?\s*\)/u,
+  );
+  assert.ok(
+    preflightBranch.indexOf("requirePreflightAuthorizationReady") <
+      preflightBranch.indexOf("preflightService"),
+  );
+  assert.match(manager, /SCRIBE_DROP_CLOUD_RUN_ALLOW_CONSUMED_PRODUCTION_RECOVERY/u);
+  assert.match(manager, /SCRIBE_DROP_CLOUD_RUN_EXPECTED_AUTHORIZATION_EPOCH/u);
 });

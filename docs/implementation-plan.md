@@ -1976,6 +1976,15 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
   automatic recoveryはすべてskipされ、GPU executionは0である。staging evidenceはimmutable candidate commit
   `d5233fde17fc0ed84fade8953c5d5d9dbb90471f`、application candidate run `32333708361`、Cloud Run candidate run
   `32333708385`へ固定され、productionではこのcandidateを再build・修正せずdeployだけ行う。
+- current release headと一致するGPU-free staging evidence `32337888748`、production preflight `32338096197`は成功し、
+  preflightのproduction mutation 9 stepはすべてskipされた。production cutover `32338679303`はmigration/R2 policyとRunPod
+  image promotion後、controller deployが旧cutover `32330064196`で消費済みのsmoke authorizationを検出し、application deploy、
+  provider切替、authorization更新、GPU実行前に停止した。旧smokeは処理時間未取得のためfinalizeを保留してreserved 1のまま
+  だったが、Service validate-only中心のpreflightがFirestore authorizationを読まず合格したことが原因である。
+  [ADR 0091](./adr/0091-require-controller-authorization-precondition.md)に従い、cutover preflightはdisabled/全0、finalize preflightは
+  consumed exact-oneをService検査前にread-onlyで必須化する。旧枠はsource-run scoped cleanup、exact epoch、active/resource 0、
+  explicit consumed-recovery opt-in、CAS、disabled/zero read-backでだけ閉じる。source変更をGPU-free staging gateへ戻すまで、
+  production cleanup、cutover re-run、追加GPUを行わない。
 
 実装:
 

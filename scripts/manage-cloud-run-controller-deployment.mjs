@@ -12,6 +12,7 @@ import {
   createControllerServicePatchUrl,
   createControllerServiceRequest,
   isAllowedControllerDisable,
+  isAllowedControllerPreflightAuthorization,
   isAllowedControllerRecoveryDisable,
   isExactControllerAuthorizationRetry,
   preflightExistingControllerService,
@@ -170,9 +171,25 @@ async function requireRecoveryReady(expectedEpoch) {
       observedAuthorization(current.body),
       expectedEpoch,
       selectedEnvironment,
+      allowConsumedProductionRecovery,
     )
   ) {
     throw new Error("Controller recovery state does not match this workflow run");
+  }
+}
+
+async function requirePreflightAuthorizationReady(expectedReservedExecutions, expectedEpoch) {
+  const { current } = await readAuthorizationDocument();
+  if (
+    current.status !== 200 ||
+    !isAllowedControllerPreflightAuthorization(
+      observedAuthorization(current.body),
+      selectedEnvironment,
+      expectedReservedExecutions,
+      expectedEpoch,
+    )
+  ) {
+    throw new Error("Controller authorization preflight prerequisite does not match");
   }
 }
 
@@ -194,6 +211,7 @@ async function writeAuthorization(selected, expectedReservedExecutions, recovery
               observedAuthorization(current.body),
               recoveryEpoch,
               selectedEnvironment,
+              allowConsumedProductionRecovery,
             ))))
   ) {
     throw new Error("Controller disable reservation expectation does not match");
@@ -360,6 +378,9 @@ if (
 if (command === "recover" && authorizationMode !== "disabled") {
   throw new Error("Controller recovery is restricted to disabled authorization");
 }
+if (command === "preflight" && authorizationMode !== "disabled") {
+  throw new Error("Controller preflight is restricted to disabled authorization");
+}
 const deployment = controllerDeployment(selectedEnvironment);
 const environmentPrefix = `SCRIBE_DROP_${selectedEnvironment.toUpperCase()}`;
 const accessToken = requireValue(
@@ -395,6 +416,16 @@ const expectedDisabledReservations = (() => {
   }
   return Number(value);
 })();
+const expectedPreflightEpoch = (() => {
+  const value =
+    process.env.SCRIBE_DROP_CLOUD_RUN_EXPECTED_AUTHORIZATION_EPOCH ??
+    (expectedDisabledReservations === 0 ? "disabled" : undefined);
+  const pattern =
+    expectedDisabledReservations === 0
+      ? /^disabled$/u
+      : /^phase16-smoke-[a-f0-9]{7,40}-[1-9][0-9]*$/u;
+  return requireValue(value, pattern, "Controller preflight authorization epoch");
+})();
 const recoveryEpoch =
   command === "recover"
     ? requireValue(
@@ -403,6 +434,19 @@ const recoveryEpoch =
         "Controller recovery epoch",
       )
     : undefined;
+const allowConsumedProductionRecovery = (() => {
+  const value = process.env.SCRIBE_DROP_CLOUD_RUN_ALLOW_CONSUMED_PRODUCTION_RECOVERY ?? "0";
+  if (
+    !new Set(["0", "1"]).has(value) ||
+    (value === "1" &&
+      (command !== "recover" ||
+        selectedEnvironment !== "production" ||
+        authorizationMode !== "disabled"))
+  ) {
+    throw new Error("Consumed production recovery opt in is invalid");
+  }
+  return value === "1";
+})();
 const deploymentConfiguration = createControllerDeploymentConfiguration({
   authorization: selectedAuthorization,
   candidate,
@@ -417,6 +461,7 @@ try {
     await import("../apps/gpu-controller/dist/index.js");
   const plan = createControllerServiceDeploymentPlan(deploymentConfiguration);
   if (command === "preflight") {
+    await requirePreflightAuthorizationReady(expectedDisabledReservations, expectedPreflightEpoch);
     const serviceExists = await preflightService(plan);
     const { GoogleControllerDeploymentReadbackClient } =
       await import("../apps/gpu-controller/dist/index.js");
