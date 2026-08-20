@@ -140,14 +140,20 @@ export function isAllowedControllerDisable(observed, expectedReservedExecutions)
   );
 }
 
-export function isAllowedControllerRecoveryDisable(observed, expectedEpoch) {
+export function isAllowedControllerRecoveryDisable(
+  observed,
+  expectedEpoch,
+  expectedEnvironment = "staging",
+) {
   if (
     typeof expectedEpoch !== "string" ||
     !expectedEpoch.startsWith("phase16-smoke-") ||
     !AUTHORIZATION_EPOCH_PATTERN.test(expectedEpoch) ||
+    !new Set(["production", "staging"]).has(expectedEnvironment) ||
     observed.activeExecutions !== 0 ||
-    observed.environment !== "staging" ||
+    observed.environment !== expectedEnvironment ||
     !new Set([0, 1]).has(observed.reservedExecutions) ||
+    (expectedEnvironment === "production" && observed.reservedExecutions !== 0) ||
     observed.reservedWorstCaseJpy !== observed.reservedExecutions * WORST_CASE_JPY_PER_EXECUTION
   ) {
     return false;

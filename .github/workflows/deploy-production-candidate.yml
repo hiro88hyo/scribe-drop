@@ -321,6 +321,7 @@ jobs:
           pnpm run cloud-run:foundation:read production
           pnpm run cloud-run:controller:deploy preflight production disabled \
             "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
+          pnpm run cloud-run:production:origin:export
 
       - name: Render disabled preflight configuration
         env:

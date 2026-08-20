@@ -1919,6 +1919,13 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
   事前検査が不十分だった。cutover全後続stepをAPI/identity/permission/resourceごとに追跡し、D1/R2/RunPodは先行cutoverで実成功、
   Cloudflare write権限はtoken contractと実upload/read-back、GCP runtime権限はfoundation exact role/bindingとstaging acceptanceで確認した。
   shared release deployer roleへ不足1権限を追加し、Service create/update/read-backの完全permission集合を回帰testで固定する。
+- GPU-free staging recovery `32316687544`とproduction preflight `32316969311`は修正後sourceで成功した。production cutover
+  `32317373734`は全external control-plane、migration/R2、RunPod promotion、controller Service作成まで成功したが、Cloud Run v2の
+  main `uri`がhash形式である一方、exporterがproject-number形式だけを`uri`として許可したため、application deploy前に停止した。
+  ServiceはReady、application/providerはRunPodのまま、GPU executionは0である。exporterは対象Service名と公式`urls[]`を検証し、
+  その集合に含まれる既知のproject-number originだけを出力する。production preflightでも同じexporterをactual deployer identityで
+  実行する。失敗runが残した未消費smoke authorizationは、exact failed-run epoch、active 0、reserved 0だけを許すsource-managed
+  production recoveryでdisabled/zeroへ戻し、read-back後に次のpromotion gateへ進む。
 
 実装:
 

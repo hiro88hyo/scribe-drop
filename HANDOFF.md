@@ -4,9 +4,38 @@
 
 - Repository: `/home/hiroyuki/projects/scribe-drop`
 - Branch: `release/0.2.0`
-- Base head: `bbfaa8c69e725e2fafbe8257a8b16e409d42fbbf`
+- Current pushed head before the uncommitted fix: `52fc179de64d4ec96de689a726e431bea32f32de`
 - The continuation after this base contains the complete-preflight
   implementation described below.
+
+## Current status (2026-08-20 09:45 JST)
+
+- Immutable application candidate remains
+  `bb90669e229ca91df582f36455acfdad4837125f`; it has not been rebuilt.
+- Latest successful GPU-free staging evidence: `32316687544`.
+- Latest successful mutation-free production preflight: `32316969311`.
+- Production cutover `32317373734` failed after controller creation and before
+  application deployment. External preflight, D1/R2, RunPod promotion, and the
+  controller apply succeeded. No GPU execution occurred.
+- The controller Service is Ready. Cloud Run reports both the stable
+  project-number URL and a hash main URI. The exporter incorrectly validated
+  only `body.uri`, so it rejected the valid response.
+- The uncommitted fix validates the exact Service resource and selects only the
+  expected project-number URL from the official v2 `urls[]` response. A live
+  read-only production probe passed.
+- Production preflight now executes the same exporter under the actual GitHub
+  production deployer identity. The CI static contract requires that step.
+- A production recovery guard was added for the failed cutover's unconsumed
+  smoke authorization. It permits only the exact failed-run epoch with
+  `activeExecutions=0` and `reservedExecutions=0`; it rejects a missing
+  authorization, a reservation, an active execution, another epoch, and an
+  operational authorization.
+- Full `pnpm check` and both Git/worktree gitleaks scans passed after all code,
+  workflow, recovery-guard, test, and documentation edits.
+- Before a new staging/preflight/cutover sequence, use the source-managed
+  recovery command to return the production controller to disabled/zero and
+  strictly read it back. This is a production mutation and requires explicit
+  user approval. Do not manually patch Firestore.
 
 Read `AGENTS.md` and `docs/implementation-plan.md` before continuing. Treat the
 remaining work as Phase 16.

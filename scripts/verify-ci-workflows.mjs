@@ -1973,6 +1973,8 @@ for (const [description, value] of Object.entries({
   "strict production foundation read-back": "pnpm run cloud-run:foundation:read production",
   "mutation-free production controller preflight":
     "pnpm run cloud-run:controller:deploy preflight production disabled",
+  "mutation-free production controller origin preflight":
+    '"${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"\n          pnpm run cloud-run:production:origin:export',
   "production Pages upload capability preflight":
     "pnpm run cloudflare:pages:upload-permission:verify:production",
   "production Worker route capability preflight":

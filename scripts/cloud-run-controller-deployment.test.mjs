@@ -352,3 +352,39 @@ test("recovery disables only the same staging smoke epoch after capacity reaches
     true,
   );
 });
+
+test("production recovery accepts only the exact unconsumed failed-cutover smoke epoch", () => {
+  const epoch = `phase16-smoke-${"a".repeat(40)}-123`;
+  const smoke = {
+    activeExecutions: 0,
+    environment: "production",
+    epoch,
+    maxExecutions: 1,
+    maxWorstCaseJpy: 250,
+    reservedExecutions: 0,
+    reservedWorstCaseJpy: 0,
+    worstCaseJpyPerExecution: 250,
+  };
+  assert.equal(isAllowedControllerRecoveryDisable(smoke, epoch, "production"), true);
+  assert.equal(
+    isAllowedControllerRecoveryDisable(
+      { ...smoke, reservedExecutions: 1, reservedWorstCaseJpy: 250 },
+      epoch,
+      "production",
+    ),
+    false,
+  );
+  assert.equal(
+    isAllowedControllerRecoveryDisable({ ...smoke, activeExecutions: 1 }, epoch, "production"),
+    false,
+  );
+  assert.equal(
+    isAllowedControllerRecoveryDisable(
+      { ...smoke, epoch: `phase16-operational-${"a".repeat(40)}-123` },
+      epoch,
+      "production",
+    ),
+    false,
+  );
+  assert.equal(isAllowedControllerRecoveryDisable(smoke, epoch, "staging"), false);
+});

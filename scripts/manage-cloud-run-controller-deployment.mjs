@@ -159,9 +159,20 @@ async function readAuthorizationDocument() {
 
 async function requireRecoveryReady(expectedEpoch) {
   const { current } = await readAuthorizationDocument();
-  if (current.status === 404) return;
-  if (!isAllowedControllerRecoveryDisable(observedAuthorization(current.body), expectedEpoch)) {
-    throw new Error("Controller recovery state does not match this staging workflow run");
+  if (current.status === 404) {
+    if (selectedEnvironment === "production") {
+      throw new Error("Production controller recovery authorization is missing");
+    }
+    return;
+  }
+  if (
+    !isAllowedControllerRecoveryDisable(
+      observedAuthorization(current.body),
+      expectedEpoch,
+      selectedEnvironment,
+    )
+  ) {
+    throw new Error("Controller recovery state does not match this workflow run");
   }
 }
 
@@ -345,11 +356,8 @@ if (
     "Usage: manage-cloud-run-controller-deployment <apply|preflight|read|recover> <staging|production> <disabled|operational|smoke> <candidate-evidence>",
   );
 }
-if (
-  command === "recover" &&
-  (selectedEnvironment !== "staging" || authorizationMode !== "disabled")
-) {
-  throw new Error("Controller recovery is restricted to disabled staging authorization");
+if (command === "recover" && authorizationMode !== "disabled") {
+  throw new Error("Controller recovery is restricted to disabled authorization");
 }
 const deployment = controllerDeployment(selectedEnvironment);
 const environmentPrefix = `SCRIBE_DROP_${selectedEnvironment.toUpperCase()}`;
