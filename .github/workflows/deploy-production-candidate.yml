@@ -600,6 +600,9 @@ jobs:
           gh run download "${CUTOVER_RUN_ID}" \
             --name "scribe-drop-production-cutover-${CANDIDATE_COMMIT_SHA}-${CUTOVER_RUN_ID}" \
             --dir production-cutover
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CUTOVER_RUN_ID}" \
+            >"${RUNNER_TEMP}/cutover-run.json"
+          printf 'CUTOVER_RUN_PATH=%s\n' "${RUNNER_TEMP}/cutover-run.json" >>"${GITHUB_ENV}"
           EXPECTED_CUTOVER_RUN_ID="${CUTOVER_RUN_ID}" \
             pnpm run production:cutover:evidence verify production-cutover
           pnpm run candidate:verify "${RELEASE_CANDIDATE_DIRECTORY}"

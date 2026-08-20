@@ -1992,6 +1992,11 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
   current headとreplacement staging run IDを過去cutoverへ要求したため停止した。cutoverは同じrelease branchの成功workflow、
   candidate、cutover runへ固定し、当時のstaging IDを監査記録として保持する。replacement staging evidenceは別のcurrent gateとして
   candidate identityとlive parityを検証し、過去cutover identityへ読み替えない。
+- source identity修正後のGPU-free staging evidence `32343296158`は全mutation/GPU jobをskipして成功した。finalize
+  `32343565236`はcutover evidence、controller consumed exact-one preflight、production smoke、Cloudflare read-backまで成功したが、
+  cleanup verifierへ渡す`CUTOVER_RUN_PATH`をverification jobの`GITHUB_ENV`からfinalize jobへ引き継げると誤認して空文字で停止した。
+  production mutationは行われていない。finalize job自身でexact cutover run JSONを再取得・exportし、同一job内のproducerがcleanup
+  consumerより前にあることをstatic verifierで固定する。
 
 実装:
 

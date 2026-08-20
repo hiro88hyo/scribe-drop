@@ -2100,6 +2100,44 @@ forbidText(
   "deploy-production-candidate.yml finalize job",
   "replacement staging evidence rewritten as the cutover source",
 );
+const productionFinalizeDownloadStep = workflowStep(
+  productionFinalizeJob,
+  "Download immutable candidates and cutover evidence",
+  "deploy-production-candidate.yml finalize job",
+);
+requireText(
+  productionFinalizeDownloadStep,
+  'gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CUTOVER_RUN_ID}"',
+  "deploy-production-candidate.yml finalize job",
+  "same-job cutover run metadata read",
+);
+requireText(
+  productionFinalizeDownloadStep,
+  'printf \'CUTOVER_RUN_PATH=%s\\n\' "${RUNNER_TEMP}/cutover-run.json" >>"${GITHUB_ENV}"',
+  "deploy-production-candidate.yml finalize job",
+  "same-job cutover run path export",
+);
+const productionFinalizeCleanupStep = workflowStep(
+  productionFinalizeJob,
+  "Verify production smoke and exact provider cleanup before mutation",
+  "deploy-production-candidate.yml finalize job",
+);
+requireText(
+  productionFinalizeCleanupStep,
+  'pnpm run cloud-run:acceptance:clean production "${CUTOVER_RUN_PATH}"',
+  "deploy-production-candidate.yml finalize job",
+  "same-job cutover run path consumption",
+);
+if (
+  productionFinalizeJob.indexOf("printf 'CUTOVER_RUN_PATH=%s\\n'") >=
+  productionFinalizeJob.indexOf(
+    'pnpm run cloud-run:acceptance:clean production "${CUTOVER_RUN_PATH}"',
+  )
+) {
+  throw new Error(
+    "deploy-production-candidate.yml finalize job: cutover run path must be produced before cleanup",
+  );
+}
 for (const stepName of [
   "Apply candidate migrations and reviewed R2 policies",
   "Promote exact rollback-compatible RunPod image without execution",
