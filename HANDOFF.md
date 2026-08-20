@@ -325,3 +325,22 @@ proposed fix.
   No commit added a cutover policy export.
 - `verify-staging-acceptance.mjs` is the only other consumer; finalize is
   consistent with it (export at :666 before the verify call).
+
+### Latest production cutover result
+
+- GPU-free staging recovery `32314247491` and mutation-free production
+  preflight `32314590987` succeeded on workflow commit `ae938a2`; the formal
+  preflight verifier confirmed every mutation step was skipped.
+- Cutover `32314997150` passed all preflight checks, migrations/R2 policy, and
+  RunPod image promotion, then stopped before application deploy, provider
+  switching, authorization, or GPU execution. Cloud Run returned 404 while
+  creating the previously absent production controller Service.
+- Cloud Audit Logs gave the exact cause: PATCH with `allowMissing=true` cannot
+  create an absent Service when `updateMask` is present. A subsequent
+  CreateService validate-only call showed that the create body must also omit
+  `service.name`.
+- The current uncommitted fix uses name-free CreateService POST for an absent
+  Service, PATCH only for an existing Service, and performs the same POST with
+  `validateOnly=true` plus an absence read-back during preflight. The exact
+  production plan passed this live validate-only path with 13 read requests and
+  `serviceMutationObserved=false`; the Service remains absent.

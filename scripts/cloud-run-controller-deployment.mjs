@@ -200,10 +200,9 @@ export function createControllerDeploymentConfiguration({
   };
 }
 
-export function createControllerServiceRequest(plan) {
+function controllerServiceMutableFields(plan) {
   const container = plan.template.containers[0];
   return {
-    name: plan.name,
     binaryAuthorization: plan.binaryAuthorization,
     ingress: plan.ingress,
     invokerIamDisabled: plan.invokerIamDisabled,
@@ -221,6 +220,14 @@ export function createControllerServiceRequest(plan) {
     },
     traffic: plan.traffic,
   };
+}
+
+export function createControllerServiceRequest(plan) {
+  return { name: plan.name, ...controllerServiceMutableFields(plan) };
+}
+
+export function createControllerServiceCreateRequest(plan) {
+  return controllerServiceMutableFields(plan);
 }
 
 export function createControllerServicePatchUrl(plan, validateOnly = false) {
@@ -248,6 +255,24 @@ export function createControllerServicePatchUrl(plan, validateOnly = false) {
   return `https://run.googleapis.com/v2/${plan.name}?${query.toString()}`;
 }
 
+export function createControllerServiceCreateUrl(plan, validateOnly = false) {
+  const match =
+    typeof plan?.name === "string"
+      ? /^projects\/(?<project>scribe-drop)\/locations\/(?<location>asia-southeast1)\/services\/(?<service>[a-z0-9-]+)$/u.exec(
+          plan.name,
+        )
+      : null;
+  if (match?.groups === undefined) {
+    throw new Error("Controller Service deployment plan name is invalid");
+  }
+  const query = new URLSearchParams({ serviceId: match.groups.service });
+  if (validateOnly) query.set("validateOnly", "true");
+  return (
+    `https://run.googleapis.com/v2/projects/${match.groups.project}/locations/${match.groups.location}/services?` +
+    query.toString()
+  );
+}
+
 export function requireControllerServiceValidationOperation(value) {
   if (
     typeof value !== "object" ||
@@ -262,9 +287,21 @@ export function requireControllerServiceValidationOperation(value) {
   return { name: value.name };
 }
 
-export async function preflightExistingControllerService({ readSnapshot, sameSnapshot, validate }) {
+export async function preflightExistingControllerService({
+  readSnapshot,
+  sameSnapshot,
+  validate,
+  validateMissing,
+}) {
   const before = await readSnapshot();
-  if (before.exists !== true) return false;
+  if (before.exists !== true) {
+    await validateMissing();
+    const after = await readSnapshot();
+    if (after.exists !== false) {
+      throw new Error("Cloud Run Service was created during validate-only preflight");
+    }
+    return false;
+  }
   await validate();
   const after = await readSnapshot();
   if (!sameSnapshot(before, after)) {

@@ -5,6 +5,8 @@ import {
   controllerDeployment,
   createControllerAuthorization,
   createControllerDeploymentConfiguration,
+  createControllerServiceCreateRequest,
+  createControllerServiceCreateUrl,
   createControllerServicePatchUrl,
   createControllerServiceRequest,
   isAllowedControllerDisable,
@@ -55,7 +57,7 @@ test("isolates the production controller configuration from staging", () => {
 });
 
 test("renders only mutable reviewed Cloud Run Service fields", () => {
-  const request = createControllerServiceRequest({
+  const plan = {
     binaryAuthorization: { useDefault: true },
     ingress: "INGRESS_TRAFFIC_ALL",
     invokerIamDisabled: true,
@@ -73,10 +75,17 @@ test("renders only mutable reviewed Cloud Run Service fields", () => {
       timeout: "60s",
     },
     traffic: [{ percent: 100, type: "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST" }],
-  });
+  };
+  const request = createControllerServiceRequest(plan);
+  const createRequest = createControllerServiceCreateRequest(plan);
   assert.equal(Object.hasOwn(request, "buildConfig"), false);
   assert.equal(Object.hasOwn(request.template, "encryptionKey"), false);
   assert.equal(request.template.containers.length, 1);
+  assert.equal(request.name, plan.name);
+  assert.equal(Object.hasOwn(createRequest, "name"), false);
+  const requestWithoutName = structuredClone(request);
+  delete requestWithoutName.name;
+  assert.deepEqual(createRequest, requestWithoutName);
 });
 
 test("uses the exact Cloud Run PATCH request with an optional validate-only guard", () => {
@@ -97,6 +106,24 @@ test("uses the exact Cloud Run PATCH request with an optional validate-only guar
   );
 });
 
+test("uses the exact Cloud Run create request for an absent Service", () => {
+  const plan = {
+    name: "projects/scribe-drop/locations/asia-southeast1/services/controller",
+  };
+  assert.equal(
+    createControllerServiceCreateUrl(plan),
+    "https://run.googleapis.com/v2/projects/scribe-drop/locations/asia-southeast1/services?serviceId=controller",
+  );
+  assert.equal(
+    createControllerServiceCreateUrl(plan, true),
+    "https://run.googleapis.com/v2/projects/scribe-drop/locations/asia-southeast1/services?serviceId=controller&validateOnly=true",
+  );
+  assert.throws(
+    () => createControllerServiceCreateUrl({ name: "projects/other/services/controller" }, true),
+    /deployment plan name is invalid/u,
+  );
+});
+
 test("accepts only a safe successful validate-only operation identity", () => {
   const name =
     "projects/scribe-drop/locations/asia-southeast1/operations/123e4567-e89b-42d3-a456-426614174000";
@@ -111,19 +138,27 @@ test("accepts only a safe successful validate-only operation identity", () => {
   );
 });
 
-test("skips validate-only PATCH when the production controller Service is absent", async () => {
+test("validates the create request without creating an absent production controller Service", async () => {
   let validationCalls = 0;
+  let reads = 0;
   const serviceExists = await preflightExistingControllerService({
-    readSnapshot: async () => ({ exists: false }),
+    readSnapshot: async () => {
+      reads += 1;
+      return { exists: false };
+    },
     sameSnapshot: () => {
       throw new Error("missing Service snapshots must not be compared");
     },
     validate: async () => {
+      throw new Error("missing Services must use create validation");
+    },
+    validateMissing: async () => {
       validationCalls += 1;
     },
   });
   assert.equal(serviceExists, false);
-  assert.equal(validationCalls, 0);
+  assert.equal(reads, 2);
+  assert.equal(validationCalls, 1);
 });
 
 test("requires a stable snapshot around validate-only PATCH for an existing Service", async () => {
@@ -138,6 +173,9 @@ test("requires a stable snapshot around validate-only PATCH for an existing Serv
     sameSnapshot: (before, after) => before.snapshot === after.snapshot,
     validate: async () => {
       validations += 1;
+    },
+    validateMissing: async () => {
+      throw new Error("existing Services must use update validation");
     },
   });
   assert.equal(serviceExists, true);
@@ -155,6 +193,7 @@ test("rejects a Service changed during validate-only preflight", async () => {
       },
       sameSnapshot: (before, after) => before.snapshot === after.snapshot,
       validate: async () => undefined,
+      validateMissing: async () => undefined,
     }),
     /Cloud Run Service changed during validate-only preflight/u,
   );

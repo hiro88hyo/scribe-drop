@@ -1908,6 +1908,12 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
   deployment read-backが同stepのbackend tokenをPages専用tokenより優先して認証失敗した。Pages commandだけprocess-localに専用
   tokenをbindし、Cloudflare/RunPod個別commandの完全順序とtoken overrideをstatic contractで固定する。両runともmigration、deploy、
   provider切替、authorization、GPU、evidence発行はskipされた。
+- GPU-free staging run `32314247491`とproduction preflight `32314590987`は修正後sourceで成功し、preflightの9 mutation stepも
+  API verifierで全skipを確認した。production cutover `32314997150`はmigration/R2 policyとRunPod image promotionまで成功したが、
+  未作成controller Serviceへ`allowMissing=true`と`updateMask`を併用したPATCHが404で停止した。application deploy、provider切替、
+  authorization、GPUは未実行である。Cloud Audit Logは`update_mask requires the resource to exist`を返したため、初回だけ公式
+  CreateService POST、既存ServiceだけPATCHへ分離する。初回preflightもPOST `validateOnly=true`を実行し、実production planで
+  request受理、13 read-back、Service非作成を確認した。CreateService bodyは実API要件に従いidentifier `name`を含めない。
 
 実装:
 
@@ -1917,6 +1923,8 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
 - source-controlled bootstrapでstaging/production deployment WIF、deployer identity、production controller/runtime
   identity、Firestore/TTL、regional secret、最小IAMを作成・strict read-backする。production controller Serviceは
   staging acceptance前に作らない。
+- 未作成のproduction controller Serviceはcreate requestの`validateOnly=true`と直後の404 read-backをproduction preflightで
+  必須にする。実cutoverは同じbodyをCreateService POSTへ渡し、作成後の更新だけfield mask付きPATCHを使用する。
 - 新candidateのexact artifactと未失効acceptanceだけをproduction workflowへ渡す。
 - migration適用後、new-provider switch disabledのままcontroller、Orchestrator、Web、policyをdeployし、
   production read-backを先に完了する。

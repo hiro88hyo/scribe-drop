@@ -610,6 +610,9 @@ read-back後に明示承認を得て`pnpm cloud-run:foundation:apply:release-dep
 Firestore database objectのread-backには`datastore.databases.getMetadata`が必要であり、transaction用の
 `datastore.databases.get`で代用しない。shared roleのため、このread-only permissionはstagingとproductionの
 既存deployer bindingの両方へ適用される。
+production controller Serviceを初回作成する場合、preflightはCreateService POSTを`validateOnly=true`で実行し、直後も
+Serviceが404であることを確認する。実cutoverは同じnameなしbodyをCreateService POSTへ渡す。field mask付きPATCHの
+`allowMissing=true`は実APIで不存在Serviceを作成できないため使用せず、PATCHは作成済みServiceの更新だけに限定する。
 acceptance jobはbrowser installを先に完了し、candidate controllerをdisabledでdeployしてから
 `pnpm cloud-run:staging:bootstrap-preflight <candidate-evidence>`を実行する。GPU 0のexact-one
 `EXECUTION_NOT_FOUND` evidenceとJob/Execution 0が得られるまでpaid authorizationを開かない。

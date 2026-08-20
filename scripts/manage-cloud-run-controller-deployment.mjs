@@ -7,6 +7,8 @@ import {
   controllerDeployment,
   createControllerAuthorization,
   createControllerDeploymentConfiguration,
+  createControllerServiceCreateRequest,
+  createControllerServiceCreateUrl,
   createControllerServicePatchUrl,
   createControllerServiceRequest,
   isAllowedControllerDisable,
@@ -247,10 +249,20 @@ async function waitForOperation(operation) {
 }
 
 async function deployService(plan) {
-  const response = await googleRequest(createControllerServicePatchUrl(plan), {
-    body: JSON.stringify(createControllerServiceRequest(plan)),
-    method: "PATCH",
-  });
+  const existing = await readServiceGuard(plan);
+  const response = await googleRequest(
+    existing.exists
+      ? createControllerServicePatchUrl(plan)
+      : createControllerServiceCreateUrl(plan),
+    {
+      body: JSON.stringify(
+        existing.exists
+          ? createControllerServiceRequest(plan)
+          : createControllerServiceCreateRequest(plan),
+      ),
+      method: existing.exists ? "PATCH" : "POST",
+    },
+  );
   if (response.status !== 200) {
     throw new Error(`Cloud Run Service update failed: ${response.status}`);
   }
@@ -290,6 +302,16 @@ async function preflightService(plan) {
       });
       if (response.status !== 200) {
         throw new Error(`Cloud Run Service validation failed: ${response.status}`);
+      }
+      requireControllerServiceValidationOperation(response.body);
+    },
+    validateMissing: async () => {
+      const response = await googleRequest(createControllerServiceCreateUrl(plan, true), {
+        body: JSON.stringify(createControllerServiceCreateRequest(plan)),
+        method: "POST",
+      });
+      if (response.status !== 200) {
+        throw new Error(`Cloud Run Service creation validation failed: ${response.status}`);
       }
       requireControllerServiceValidationOperation(response.body);
     },
