@@ -1929,6 +1929,9 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
 - 最初のproduction recoveryは事前guardを通過してServiceをdisabled構成へ更新した後、Firestore書込み直前の同じguardへ
   environment引数を渡していなかったため停止した。Firestore authorizationは旧smoke、Job/Executionは0のままである。manager内の
   全2 call siteでenvironment伝播を必須にし、sourceを直接検査する回帰testで片方だけの修正を拒否する。
+- call-site修正後のsource-managed production recoveryは、旧cutover epochとactive/reserved 0/0を再照合して成功した。
+  独立read-backはcontroller Service Ready、authorization disabled/zero、Firestore TTL 2、Cloud Run Job/Execution 0を確認し、
+  GPU executionは行っていない。
 
 実装:
 

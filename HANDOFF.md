@@ -42,6 +42,10 @@
   environment argument. Firestore remains at the old unconsumed smoke
   authorization and Job/Execution remain zero. The follow-up fix binds the
   environment at both call sites and tests their complete source shape.
+- Follow-up commit `82f3d54b33c5d2bb1704725322d239ba82def70d`
+  passed the full gate and both gitleaks scans. The approved recovery then
+  succeeded: controller Service Ready, authorization disabled/zero, two TTL
+  fields, and Cloud Run Job/Execution zero. No GPU execution occurred.
 
 Read `AGENTS.md` and `docs/implementation-plan.md` before continuing. Treat the
 remaining work as Phase 16.
