@@ -195,6 +195,38 @@ test("rejects every missing post-cleanup prerequisite before the next dispatch",
   }
 });
 
+test("rejects every missing recovered-acceptance prerequisite before dispatch", async () => {
+  for (const fixture of [
+    {
+      error: /recovered acceptance candidate verification CLOUD_RUN_CANDIDATE_RUN_ID/u,
+      required: "          CLOUD_RUN_CANDIDATE_RUN_ID: ${{ inputs.cloud_run_candidate_run_id }}\n",
+      step: "Download and verify both immutable candidates",
+    },
+    {
+      error: /recovered acceptance source lifecycle must run git merge-base --is-ancestor/u,
+      required: '          git merge-base --is-ancestor "${source_head_sha}" "${GITHUB_SHA}"\n',
+      step: "Verify the completed source lifecycle and recovery",
+    },
+    {
+      error: /recovered acceptance live read-back must run pnpm run cloudflare:readback:staging/u,
+      required: "          pnpm run cloudflare:readback:staging\n",
+      step: "Verify recovered provider evidence and current live staging",
+    },
+    {
+      error: /recovered acceptance upload name/u,
+      required:
+        "          name: scribe-drop-staging-acceptance-${{ inputs.candidate_commit_sha }}\n",
+      step: "Upload immutable recovered staging acceptance",
+    },
+  ]) {
+    await assert.rejects(
+      verifyStagingWorkflowStateContract(regressStep(workflow, fixture.step, fixture.required)),
+      fixture.error,
+      fixture.step,
+    );
+  }
+});
+
 test("rejects a workflow verifier whose run ID is not bound to dispatch input", async () => {
   const regressed = workflow.replace(
     "CLOUD_RUN_CANDIDATE_RUN_ID: ${{ inputs.cloud_run_candidate_run_id }}",

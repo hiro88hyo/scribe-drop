@@ -435,6 +435,126 @@ export async function verifyStagingWorkflowStateContract(source) {
     runpodBaseline,
     "recovered acceptance live parity",
   );
+  const resumeJob = jobs["resume-acceptance-evidence"];
+  requireEnvironment(
+    jobEnvironment(resumeJob),
+    {
+      CANDIDATE_RUN_ID: "${{ inputs.candidate_run_id }}",
+      EXPECTED_COMMIT_SHA: "${{ inputs.candidate_commit_sha || github.sha }}",
+      SOURCE_STAGING_RUN_ID: "${{ inputs.completed_acceptance_run_id }}",
+    },
+    "recovered acceptance job",
+  );
+  const resumeCandidateStep = "Download and verify both immutable candidates";
+  requireEnvironment(
+    stepEnvironment(resumeJob, resumeCandidateStep),
+    {
+      CLOUD_RUN_CANDIDATE_RUN_ID: "${{ inputs.cloud_run_candidate_run_id }}",
+      GH_TOKEN: "${{ github.token }}",
+    },
+    "recovered acceptance candidate verification",
+  );
+  const resumeCandidateCommands = stepCommands(resumeJob, resumeCandidateStep);
+  for (const expected of [
+    'gh run download "${CANDIDATE_RUN_ID}"',
+    'pnpm run candidate:verify "${RELEASE_CANDIDATE_DIRECTORY}"',
+    "node scripts/verify-workflow-run.mjs",
+    'gh run download "${CLOUD_RUN_CANDIDATE_RUN_ID}"',
+    "pnpm run cloud-run:candidate:evidence verify cloud-run-candidate/cloud-run-candidate.json",
+  ]) {
+    requireCommand(
+      resumeCandidateCommands,
+      expected,
+      "recovered acceptance candidate verification",
+    );
+  }
+  const sourceLifecycleStep = "Verify the completed source lifecycle and recovery";
+  requireEnvironment(
+    stepEnvironment(resumeJob, sourceLifecycleStep),
+    {
+      GH_TOKEN: "${{ github.token }}",
+    },
+    "recovered acceptance source lifecycle",
+  );
+  const sourceLifecycleCommands = stepCommands(resumeJob, sourceLifecycleStep);
+  for (const expected of [
+    'gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_STAGING_RUN_ID}"',
+    'gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_STAGING_RUN_ID}/jobs?filter=latest&per_page=100"',
+    "pnpm run staging:acceptance:resume:verify",
+    'git merge-base --is-ancestor "${source_head_sha}" "${GITHUB_SHA}"',
+  ]) {
+    requireCommand(sourceLifecycleCommands, expected, "recovered acceptance source lifecycle");
+  }
+  const reconstructCommands = stepCommands(
+    resumeJob,
+    "Reconstruct final policy without changing live resources",
+  );
+  const expectedReconstructCommands = [
+    "pnpm run cloudflare:config:staging",
+    "pnpm run runpod:config:staging",
+    "pnpm run environment:policy:export staging",
+  ];
+  if (
+    reconstructCommands.length !== expectedReconstructCommands.length ||
+    reconstructCommands.some((command, index) => command !== expectedReconstructCommands[index])
+  ) {
+    throw new Error("recovered acceptance must reconstruct the exact final policy");
+  }
+  const liveResumeStep = "Verify recovered provider evidence and current live staging";
+  requireEnvironment(
+    stepEnvironment(resumeJob, liveResumeStep),
+    {
+      CLOUDFLARE_API_TOKEN: "${{ secrets.CLOUDFLARE_API_TOKEN }}",
+      CLOUDFLARE_PAGES_API_TOKEN: "${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}",
+      GOOGLE_OAUTH_ACCESS_TOKEN: GOOGLE_ACCESS_TOKEN,
+      SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY: "runpod_serverless_v1",
+    },
+    "recovered acceptance live read-back",
+  );
+  const liveResumeCommands = stepCommands(resumeJob, liveResumeStep);
+  for (const expected of [
+    "pnpm run cloudflare:config:staging:orchestrator",
+    "pnpm run cloudflare:readback:staging",
+    'pnpm run cloud-run:acceptance:recovered "${RUNNER_TEMP}/source-staging-run.json"',
+  ]) {
+    requireCommand(liveResumeCommands, expected, "recovered acceptance live read-back");
+  }
+  const recoveredEvidenceStep = "Issue short-lived recovered staging acceptance";
+  requireEnvironment(
+    stepEnvironment(resumeJob, recoveredEvidenceStep),
+    {
+      EXPECTED_CLOUD_RUN_CANDIDATE_RUN_ID: "${{ inputs.cloud_run_candidate_run_id }}",
+    },
+    "recovered acceptance issuance",
+  );
+  const recoveredEvidenceCommands = stepCommands(resumeJob, recoveredEvidenceStep);
+  for (const expected of [
+    "pnpm run staging:acceptance:create",
+    'EXPECTED_CANDIDATE_RUN_ID="${CANDIDATE_RUN_ID}"',
+    'EXPECTED_STAGING_RUN_ID="${GITHUB_RUN_ID}"',
+    "pnpm run staging:acceptance:verify",
+  ]) {
+    requireCommand(recoveredEvidenceCommands, expected, "recovered acceptance issuance");
+  }
+  const recoveredUploadStep = "Upload immutable recovered staging acceptance";
+  requireStepValue(
+    resumeJob,
+    recoveredUploadStep,
+    "uses",
+    "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+    "recovered acceptance upload",
+  );
+  requireStepInputs(
+    resumeJob,
+    recoveredUploadStep,
+    {
+      "if-no-files-found": "error",
+      name: "scribe-drop-staging-acceptance-${{ inputs.candidate_commit_sha }}",
+      path: "staging-acceptance",
+      "retention-days": "2",
+    },
+    "recovered acceptance upload",
+  );
   requireProfile(
     stepProfile(
       jobs["recover-acceptance"],

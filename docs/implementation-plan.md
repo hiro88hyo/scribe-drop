@@ -2144,6 +2144,17 @@ staging acceptance remediation（2026-08-22）:
   AST state contractと負例で固定する。未到達だったRunPod復元、最終disabled/zero read-back、acceptance発行・uploadの既存source
   contractもAST検査へ昇格した。修正後のlocal/full gate、worktree secret scan、High以上とPython dependency auditは成功した。
   candidate buildとremote workflowは別の明示承認まで実行しない。
+- cleanup workflow修正commit `b78347e8909fbfaa0d8a1c4936e92cbc71c402fc`についてapplication candidate
+  `32567831438`とCloud Run candidate `32567831435`を並列buildし、mutation-free preflight `32568341748`も成功した。しかし、
+  candidate artifact、image digest、migration、render済みlive設定を変えないdeployment-only修正でcommit単位の無効化を機械的に
+  適用した再buildであり、wall-clockを主要コストとして扱えば不要だった。この2 candidateをproduction昇格根拠に使用せず、実service
+  E2E本体が成功済みの`7fb37b528d2180619d8a1844ed96d8a6b0aa64f7`、application `32561788684`、Cloud Run
+  `32561788726`を維持する。
+- source staging run `32563919828`の処理時間・Discord通知、owner削除、Cloud Run/provider cleanup success、authorization disable
+  failure、source-managed recovery successというexact prefixをresume state machineへ追加する。不完全な通知・削除・cleanup、別source
+  identity、候補commit非ancestor、live read-back欠落を拒否し、current安全状態の再検証後にGPU、再publish、live mutationなしで短命
+  acceptance evidenceだけを発行する。root `AGENTS.md`ではwall-clockをrelease budgetとし、同一artifactの再build禁止、成功済みcheckpoint
+  からのsuffix resume、E2E本体成功後の追加GPU禁止をrepository-wide制約へ昇格した。
 
 実装:
 
