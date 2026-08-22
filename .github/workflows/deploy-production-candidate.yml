@@ -28,6 +28,11 @@ on:
         required: true
         default: "0"
         type: string
+      previous_production_run_id:
+        description: Successful previous production finalize run; required for cutover and use 0 for finalize
+        required: true
+        default: "0"
+        type: string
       cutover_run_id:
         description: Cutover workflow run ID for finalize; use 0 for cutover
         required: true
@@ -115,9 +120,35 @@ jobs:
           PRODUCTION_OPERATION: ${{ inputs.operation }}
           PRODUCTION_PREFLIGHT_ONLY: ${{ inputs.preflight_only }}
           PRODUCTION_PREFLIGHT_RUN_ID: ${{ inputs.preflight_run_id }}
+          PREVIOUS_PRODUCTION_RUN_ID: ${{ inputs.previous_production_run_id }}
           PRODUCTION_SMOKE_JOB_ID: ${{ inputs.production_smoke_job_id }}
           STAGING_RUN_ID: ${{ inputs.staging_run_id }}
         run: pnpm run production:promotion:inputs:verify
+
+      - name: Verify previous production release entry before cutover
+        if: inputs.operation == 'cutover'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_PRODUCTION_RUN_ID: ${{ inputs.previous_production_run_id }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${PREVIOUS_PRODUCTION_RUN_ID}" \
+            >"${RUNNER_TEMP}/previous-production-run.json"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${PREVIOUS_PRODUCTION_RUN_ID}/jobs?filter=latest&per_page=100" \
+            >"${RUNNER_TEMP}/previous-production-jobs.json"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${PREVIOUS_PRODUCTION_RUN_ID}/artifacts?per_page=100" \
+            >"${RUNNER_TEMP}/previous-production-artifacts.json"
+          previous_artifact_name="$(pnpm run --silent production:upgrade:entry resolve \
+            "${RUNNER_TEMP}/previous-production-run.json" \
+            "${RUNNER_TEMP}/previous-production-artifacts.json")"
+          gh run download "${PREVIOUS_PRODUCTION_RUN_ID}" \
+            --name "${previous_artifact_name}" \
+            --dir previous-production-release
+          pnpm run --silent production:upgrade:entry export \
+            "${RUNNER_TEMP}/previous-production-run.json" \
+            "${RUNNER_TEMP}/previous-production-jobs.json" \
+            previous-production-release \
+            >"${RUNNER_TEMP}/previous-production-entry.env"
+          test -s "${RUNNER_TEMP}/previous-production-entry.env"
 
       - name: Validate release and staging run identities
         env:
@@ -330,6 +361,29 @@ jobs:
             MINIMUM_ACCEPTANCE_REMAINING_SECONDS="2700" \
             pnpm run staging:acceptance:verify "${RELEASE_CANDIDATE_DIRECTORY}" staging-acceptance
 
+      - name: Export verified previous production upgrade entry
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_PRODUCTION_RUN_ID: ${{ inputs.previous_production_run_id }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${PREVIOUS_PRODUCTION_RUN_ID}" \
+            >"${RUNNER_TEMP}/previous-production-run.json"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${PREVIOUS_PRODUCTION_RUN_ID}/jobs?filter=latest&per_page=100" \
+            >"${RUNNER_TEMP}/previous-production-jobs.json"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${PREVIOUS_PRODUCTION_RUN_ID}/artifacts?per_page=100" \
+            >"${RUNNER_TEMP}/previous-production-artifacts.json"
+          previous_artifact_name="$(pnpm run --silent production:upgrade:entry resolve \
+            "${RUNNER_TEMP}/previous-production-run.json" \
+            "${RUNNER_TEMP}/previous-production-artifacts.json")"
+          gh run download "${PREVIOUS_PRODUCTION_RUN_ID}" \
+            --name "${previous_artifact_name}" \
+            --dir previous-production-release
+          pnpm run --silent production:upgrade:entry export \
+            "${RUNNER_TEMP}/previous-production-run.json" \
+            "${RUNNER_TEMP}/previous-production-jobs.json" \
+            previous-production-release \
+            >>"${GITHUB_ENV}"
+
       - name: Build verifier and strictly read production foundation
         env:
           GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
@@ -415,15 +469,6 @@ jobs:
           STAGING_ACCEPTANCE_PATH: staging-acceptance/staging-acceptance.json
         run: pnpm run runpod:promote:production
 
-      - name: Deploy bounded controller behind the existing RunPod selection
-        if: ${{ !inputs.preflight_only }}
-        env:
-          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
-        run: |
-          pnpm run cloud-run:controller:deploy apply production smoke \
-            "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
-          pnpm run cloud-run:production:origin:export
-
       - name: Deploy exact application candidate with admission paused
         if: ${{ !inputs.preflight_only }}
         env:
@@ -432,7 +477,7 @@ jobs:
           SCRIBE_DROP_PRODUCTION_CLOUD_RUN_CONTROLLER_HMAC_PRIMARY: ${{ secrets.SCRIBE_DROP_PRODUCTION_CLOUD_RUN_CONTROLLER_HMAC_PRIMARY }}
           SCRIBE_DROP_PRODUCTION_CLOUD_RUN_RUNTIME_DERIVATION_SECRET: ${{ secrets.SCRIBE_DROP_PRODUCTION_CLOUD_RUN_RUNTIME_DERIVATION_SECRET }}
           SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION: paused
-          SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_POLICY: runpod_serverless_v1
+          SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_POLICY: cloud_run_jobs_l4_v1
         run: |
           pnpm run cloudflare:config:production
           pnpm run cloud-run:production:worker-secrets:put
@@ -460,6 +505,23 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: pnpm run production:provider:drain:verify
+
+      - name: Quiesce the expired previous production authorization
+        if: ${{ !inputs.preflight_only }}
+        env:
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+        run: |
+          pnpm run cloud-run:controller:deploy quiesce production disabled \
+            "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
+
+      - name: Deploy bounded controller after admission drain
+        if: ${{ !inputs.preflight_only }}
+        env:
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+        run: |
+          pnpm run cloud-run:controller:deploy apply production smoke \
+            "${CLOUD_RUN_CANDIDATE_EVIDENCE_PATH}"
+          pnpm run cloud-run:production:origin:export
 
       - name: Select Cloud Run while keeping admission paused
         if: ${{ !inputs.preflight_only }}

@@ -5,6 +5,7 @@ import path from "node:path";
 import { parseCloudRunCandidateEvidence } from "./cloud-run-candidate-evidence.mjs";
 import {
   controllerDeployment,
+  controllerUpgradeQuiesceAction,
   createControllerAuthorization,
   createControllerDeploymentConfiguration,
   createControllerServiceCreateRequest,
@@ -13,6 +14,7 @@ import {
   createControllerServiceRequest,
   isAllowedControllerDisable,
   isAllowedControllerPreflightAuthorization,
+  isAllowedControllerUpgradePreflightAuthorization,
   isAllowedControllerRecoveryDisable,
   isExactControllerAuthorizationRetry,
   preflightExistingControllerService,
@@ -134,14 +136,18 @@ function stringField(document, name) {
 
 function observedAuthorization(document) {
   return {
+    activeExecutionHandle:
+      document?.fields?.activeExecutionHandle?.nullValue === null ? null : undefined,
     activeExecutions: integerField(document, "activeExecutions"),
     environment: stringField(document, "environment"),
     epoch: stringField(document, "epoch"),
     maxExecutions: integerField(document, "maxExecutions"),
     maxRequestsPerMinute: integerField(document, "maxRequestsPerMinute"),
     maxWorstCaseJpy: integerField(document, "maxWorstCaseJpy"),
+    policyId: stringField(document, "policyId"),
     reservedExecutions: integerField(document, "reservedExecutions"),
     reservedWorstCaseJpy: integerField(document, "reservedWorstCaseJpy"),
+    schemaVersion: integerField(document, "schemaVersion"),
     validUntil: stringField(document, "validUntil"),
     worstCaseJpyPerExecution: integerField(document, "worstCaseJpyPerExecution"),
   };
@@ -193,6 +199,98 @@ async function requirePreflightAuthorizationReady(expectedReservedExecutions, ex
   }
 }
 
+function previousProductionAuthorization() {
+  if (selectedEnvironment !== "production") return undefined;
+  const epoch = process.env.PREVIOUS_PRODUCTION_AUTHORIZATION_EPOCH;
+  if (epoch === undefined) return undefined;
+  const maxExecutionsValue = requireValue(
+    process.env.PREVIOUS_PRODUCTION_MAX_EXECUTIONS,
+    /^(?:[1-9]|1[0-9]|20)$/u,
+    "Previous production maximum executions",
+  );
+  const maxExecutions = Number(maxExecutionsValue);
+  const maxWorstCaseJpy = Number(
+    requireValue(
+      process.env.PREVIOUS_PRODUCTION_MAX_WORST_CASE_JPY,
+      /^[1-9][0-9]*$/u,
+      "Previous production maximum worst-case JPY",
+    ),
+  );
+  const validUntil = requireValue(
+    process.env.PREVIOUS_PRODUCTION_AUTHORIZATION_VALID_UNTIL,
+    /^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$/u,
+    "Previous production authorization expiry",
+  );
+  if (
+    !/^phase16-operational-[a-f0-9]{7,40}-[1-9][0-9]*$/u.test(epoch) ||
+    !Number.isSafeInteger(maxWorstCaseJpy) ||
+    maxWorstCaseJpy !== maxExecutions * 250 ||
+    !Number.isFinite(Date.parse(validUntil)) ||
+    new Date(Date.parse(validUntil)).toISOString() !== validUntil ||
+    Date.parse(validUntil) > Date.now()
+  ) {
+    throw new Error("Previous production authorization is invalid or not expired");
+  }
+  return {
+    environment: "production",
+    epoch,
+    maxExecutions,
+    maxRequestsPerMinute: 60,
+    maxWorstCaseJpy,
+    validUntil,
+    worstCaseJpyPerExecution: 250,
+  };
+}
+
+async function requireUpgradePreflightAuthorizationReady(previous, targetSmoke) {
+  const { current } = await readAuthorizationDocument();
+  if (
+    current.status !== 200 ||
+    !isAllowedControllerUpgradePreflightAuthorization(
+      observedAuthorization(current.body),
+      previous,
+      targetSmoke,
+    )
+  ) {
+    throw new Error("Controller upgrade authorization preflight prerequisite does not match");
+  }
+}
+
+async function patchAuthorizationDocument(selected, current, documentUrl) {
+  const condition = new URLSearchParams();
+  if (current.status === 200) {
+    const updateTime = requireValue(
+      current.body.updateTime,
+      /^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$/u,
+      "Controller authorization update time",
+    );
+    condition.set("currentDocument.updateTime", updateTime);
+  } else {
+    condition.set("currentDocument.exists", "false");
+  }
+  const written = await googleRequest(`${documentUrl}?${condition.toString()}`, {
+    body: JSON.stringify(authorizationDocumentBody(selected)),
+    method: "PATCH",
+  });
+  if (written.status !== 200) {
+    throw new Error(`Controller authorization update failed: ${written.status}`);
+  }
+}
+
+async function quiescePreviousProductionAuthorization(previous, targetSmoke, disabled) {
+  const { current, documentUrl } = await readAuthorizationDocument();
+  if (current.status !== 200) {
+    throw new Error("Production upgrade authorization is missing");
+  }
+  const observed = observedAuthorization(current.body);
+  const action = controllerUpgradeQuiesceAction(observed, previous, targetSmoke);
+  if (action === "already-smoke") return "smoke";
+  if (action === "already-disabled") return "disabled";
+  await patchAuthorizationDocument(disabled, current, documentUrl);
+  await requirePreflightAuthorizationReady(0, "disabled");
+  return "disabled";
+}
+
 async function writeAuthorization(selected, expectedReservedExecutions, recoveryEpoch) {
   const { current, documentUrl } = await readAuthorizationDocument();
   if (current.status === 200 && integerField(current.body, "activeExecutions") !== 0) {
@@ -237,24 +335,7 @@ async function writeAuthorization(selected, expectedReservedExecutions, recovery
       throw new Error("A finite authorization must start from the disabled zero state");
     }
   }
-  const condition = new URLSearchParams();
-  if (current.status === 200) {
-    const updateTime = requireValue(
-      current.body.updateTime,
-      /^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$/u,
-      "Controller authorization update time",
-    );
-    condition.set("currentDocument.updateTime", updateTime);
-  } else {
-    condition.set("currentDocument.exists", "false");
-  }
-  const written = await googleRequest(`${documentUrl}?${condition.toString()}`, {
-    body: JSON.stringify(authorizationDocumentBody(selected)),
-    method: "PATCH",
-  });
-  if (written.status !== 200) {
-    throw new Error(`Controller authorization update failed: ${written.status}`);
-  }
+  await patchAuthorizationDocument(selected, current, documentUrl);
 }
 
 async function waitForOperation(operation) {
@@ -365,14 +446,14 @@ async function readAndVerify(deploymentConfiguration) {
 
 const [command, selectedEnvironment, authorizationMode, candidatePath] = process.argv.slice(2);
 if (
-  !new Set(["apply", "preflight", "read", "recover"]).has(command) ||
+  !new Set(["apply", "preflight", "quiesce", "read", "recover"]).has(command) ||
   !new Set(["staging", "production"]).has(selectedEnvironment) ||
   !new Set(["disabled", "operational", "smoke"]).has(authorizationMode) ||
   candidatePath === undefined ||
   process.argv.length !== 6
 ) {
   throw new Error(
-    "Usage: manage-cloud-run-controller-deployment <apply|preflight|read|recover> <staging|production> <disabled|operational|smoke> <candidate-evidence>",
+    "Usage: manage-cloud-run-controller-deployment <apply|preflight|quiesce|read|recover> <staging|production> <disabled|operational|smoke> <candidate-evidence>",
   );
 }
 if (command === "recover" && authorizationMode !== "disabled") {
@@ -380,6 +461,12 @@ if (command === "recover" && authorizationMode !== "disabled") {
 }
 if (command === "preflight" && authorizationMode !== "disabled") {
   throw new Error("Controller preflight is restricted to disabled authorization");
+}
+if (
+  command === "quiesce" &&
+  (authorizationMode !== "disabled" || selectedEnvironment !== "production")
+) {
+  throw new Error("Controller quiesce is restricted to disabled production authorization");
 }
 const deployment = controllerDeployment(selectedEnvironment);
 const environmentPrefix = `SCRIBE_DROP_${selectedEnvironment.toUpperCase()}`;
@@ -409,6 +496,8 @@ if (candidate.commit !== process.env.EXPECTED_COMMIT_SHA) {
   throw new Error("Cloud Run candidate commit does not match");
 }
 const selectedAuthorization = authorization(authorizationMode);
+const previousProduction = previousProductionAuthorization();
+const targetUpgradeSmoke = previousProduction === undefined ? undefined : authorization("smoke");
 const expectedDisabledReservations = (() => {
   const value = process.env.SCRIBE_DROP_CLOUD_RUN_EXPECTED_RESERVED_EXECUTIONS ?? "0";
   if (!/^[01]$/u.test(value) || (authorizationMode !== "disabled" && value !== "0")) {
@@ -461,7 +550,14 @@ try {
     await import("../apps/gpu-controller/dist/index.js");
   const plan = createControllerServiceDeploymentPlan(deploymentConfiguration);
   if (command === "preflight") {
-    await requirePreflightAuthorizationReady(expectedDisabledReservations, expectedPreflightEpoch);
+    if (previousProduction === undefined || targetUpgradeSmoke === undefined) {
+      await requirePreflightAuthorizationReady(
+        expectedDisabledReservations,
+        expectedPreflightEpoch,
+      );
+    } else {
+      await requireUpgradePreflightAuthorizationReady(previousProduction, targetUpgradeSmoke);
+    }
     const serviceExists = await preflightService(plan);
     const { GoogleControllerDeploymentReadbackClient } =
       await import("../apps/gpu-controller/dist/index.js");
@@ -486,6 +582,16 @@ try {
         serviceValidateOnly: true,
       }),
     );
+  } else if (command === "quiesce") {
+    if (previousProduction === undefined || targetUpgradeSmoke === undefined) {
+      throw new Error("Production upgrade entry evidence is required for quiesce");
+    }
+    const state = await quiescePreviousProductionAuthorization(
+      previousProduction,
+      targetUpgradeSmoke,
+      selectedAuthorization,
+    );
+    console.log(JSON.stringify({ authorization: state, environment: selectedEnvironment }));
   } else {
     if (command === "apply" || command === "recover") {
       if (command === "recover") await requireRecoveryReady(recoveryEpoch);

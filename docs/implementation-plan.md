@@ -2155,6 +2155,16 @@ staging acceptance remediation（2026-08-22）:
   identity、候補commit非ancestor、live read-back欠落を拒否し、current安全状態の再検証後にGPU、再publish、live mutationなしで短命
   acceptance evidenceだけを発行する。root `AGENTS.md`ではwall-clockをrelease budgetとし、同一artifactの再build禁止、成功済みcheckpoint
   からのsuffix resume、E2E本体成功後の追加GPU禁止をrepository-wide制約へ昇格した。
+- recovered staging acceptance `32569095428`はcandidate、source lifecycle、live staging parityをread-onlyで再検証し、D1、Pages、
+  R2/RunPod/Orchestrator、実E2E、recoveryをすべてskipして短命evidenceだけを発行した。続くmutation-free production preflight
+  `32570250696`はcandidateとacceptance検証後、production foundation read-backで前releaseの`operational-active`認可を
+  初回cutover用`disabled`として扱えず停止した。migration、image promotion、controller/application deploy、provider切替、
+  authorization mutationはすべて未実行である。
+- [ADR 0094](./adr/0094-resume-production-upgrades-from-expired-operational-state.md)に従い、更新cutoverは前回成功finalize evidenceを
+  明示入力とし、期限切れのexact operational認可、disabled/zero、同一cutover smokeだけを再開prefixとして許可する。
+  新applicationをCloud Run選択/admission pausedでdeployし、provider drain後に旧認可をupdate-time CASでdisabledへ収束してから
+  controllerとexact-one smokeを適用する。artifact-identicalなdeployment workflow修正なのでcandidate再buildと追加GPUは行わず、
+  local full gate後にacceptance evidenceだけを再発行してproduction preflightをやり直す。
 
 実装:
 

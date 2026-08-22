@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   controllerDeployment,
+  controllerUpgradeQuiesceAction,
   createControllerAuthorization,
   createControllerDeploymentConfiguration,
   createControllerServiceCreateRequest,
@@ -12,6 +13,7 @@ import {
   createControllerServiceRequest,
   isAllowedControllerDisable,
   isAllowedControllerPreflightAuthorization,
+  isAllowedControllerUpgradePreflightAuthorization,
   isAllowedControllerRecoveryDisable,
   isExactControllerAuthorizationRetry,
   preflightExistingControllerService,
@@ -389,6 +391,109 @@ test("preflight requires the exact declared authorization prerequisite", () => {
   );
 });
 
+test("upgrade preflight accepts only the previous operational, disabled, or same-cutover smoke state", () => {
+  const previousOperational = {
+    environment: "production",
+    epoch: `phase16-operational-${"a".repeat(40)}-123`,
+    maxExecutions: 5,
+    maxRequestsPerMinute: 60,
+    maxWorstCaseJpy: 1250,
+    validUntil: "2026-08-21T00:00:00.000Z",
+    worstCaseJpyPerExecution: 250,
+  };
+  const targetSmoke = {
+    environment: "production",
+    epoch: `phase16-smoke-${"b".repeat(40)}-456`,
+    maxExecutions: 1,
+    maxRequestsPerMinute: 60,
+    maxWorstCaseJpy: 250,
+    validUntil: "2026-08-22T02:00:00.000Z",
+    worstCaseJpyPerExecution: 250,
+  };
+  const observed = {
+    ...previousOperational,
+    activeExecutionHandle: null,
+    activeExecutions: 0,
+    policyId: "cloud_run_jobs_l4_v1",
+    reservedExecutions: 0,
+    reservedWorstCaseJpy: 0,
+    schemaVersion: 1,
+  };
+  assert.equal(
+    isAllowedControllerUpgradePreflightAuthorization(observed, previousOperational, targetSmoke),
+    true,
+  );
+  assert.equal(
+    controllerUpgradeQuiesceAction(observed, previousOperational, targetSmoke),
+    "disable-previous-operational",
+  );
+  assert.equal(
+    isAllowedControllerUpgradePreflightAuthorization(
+      { ...observed, ...targetSmoke },
+      previousOperational,
+      targetSmoke,
+    ),
+    true,
+  );
+  assert.equal(
+    controllerUpgradeQuiesceAction(
+      { ...observed, ...targetSmoke },
+      previousOperational,
+      targetSmoke,
+    ),
+    "already-smoke",
+  );
+  assert.equal(
+    isAllowedControllerUpgradePreflightAuthorization(
+      {
+        ...observed,
+        epoch: "disabled",
+        maxExecutions: 0,
+        maxRequestsPerMinute: 0,
+        maxWorstCaseJpy: 0,
+        validUntil: "1970-01-01T00:00:00.000Z",
+        worstCaseJpyPerExecution: 0,
+      },
+      previousOperational,
+      targetSmoke,
+    ),
+    true,
+  );
+  assert.equal(
+    controllerUpgradeQuiesceAction(
+      {
+        ...observed,
+        epoch: "disabled",
+        maxExecutions: 0,
+        maxRequestsPerMinute: 0,
+        maxWorstCaseJpy: 0,
+        validUntil: "1970-01-01T00:00:00.000Z",
+        worstCaseJpyPerExecution: 0,
+      },
+      previousOperational,
+      targetSmoke,
+    ),
+    "already-disabled",
+  );
+  for (const regressed of [
+    { ...observed, activeExecutions: 1 },
+    { ...observed, epoch: `phase16-operational-${"c".repeat(40)}-123` },
+    { ...observed, maxWorstCaseJpy: 1000 },
+    { ...observed, reservedExecutions: 1, reservedWorstCaseJpy: 250 },
+    { ...observed, activeExecutionHandle: "projects/scribe-drop/locations/x/jobs/y" },
+    { ...observed, policyId: "runpod_serverless_v1" },
+  ]) {
+    assert.equal(
+      isAllowedControllerUpgradePreflightAuthorization(regressed, previousOperational, targetSmoke),
+      false,
+    );
+    assert.throws(
+      () => controllerUpgradeQuiesceAction(regressed, previousOperational, targetSmoke),
+      /not a resumable|identity/u,
+    );
+  }
+});
+
 test("recovery disables only the same staging smoke epoch after capacity reaches zero", () => {
   const epoch = `phase16-smoke-${"a".repeat(40)}-123`;
   const smoke = {
@@ -539,9 +644,11 @@ test("manager checks the live authorization before service preflight", () => {
     new URL("./manage-cloud-run-controller-deployment.mjs", import.meta.url),
     "utf8",
   );
+  const tryStart = manager.indexOf("try {");
+  const preflightStart = manager.indexOf('if (command === "preflight") {', tryStart);
   const preflightBranch = manager.slice(
-    manager.indexOf('if (command === "preflight") {'),
-    manager.indexOf("} else {", manager.indexOf('if (command === "preflight") {')),
+    preflightStart,
+    manager.indexOf('} else if (command === "quiesce") {', preflightStart),
   );
   assert.match(
     preflightBranch,
@@ -549,6 +656,10 @@ test("manager checks the live authorization before service preflight", () => {
   );
   assert.ok(
     preflightBranch.indexOf("requirePreflightAuthorizationReady") <
+      preflightBranch.indexOf("preflightService"),
+  );
+  assert.ok(
+    preflightBranch.indexOf("requireUpgradePreflightAuthorizationReady") <
       preflightBranch.indexOf("preflightService"),
   );
   assert.match(manager, /SCRIBE_DROP_CLOUD_RUN_ALLOW_CONSUMED_PRODUCTION_RECOVERY/u);

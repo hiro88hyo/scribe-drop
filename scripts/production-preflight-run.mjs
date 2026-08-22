@@ -46,6 +46,7 @@ export function verifyProductionPreflightRun(run, jobsEnvelope, expected) {
   );
   for (const name of [
     "Validate bounded production operation inputs",
+    "Verify previous production release entry before cutover",
     "Validate release and staging run identities",
     "Download and inspect immutable staging evidence",
     "Download and verify both exact candidates",
@@ -67,6 +68,7 @@ export function verifyProductionPreflightRun(run, jobsEnvelope, expected) {
   for (const name of [
     "Download acceptance and export exact candidate identity",
     "Download and re-verify exact candidates",
+    "Export verified previous production upgrade entry",
     "Build verifier and strictly read production foundation",
     "Render disabled preflight configuration",
     "Verify accepted production environment policy before external access",
@@ -77,9 +79,10 @@ export function verifyProductionPreflightRun(run, jobsEnvelope, expected) {
   for (const name of [
     "Apply candidate migrations and reviewed R2 policies",
     "Promote exact rollback-compatible RunPod image without execution",
-    "Deploy bounded controller behind the existing RunPod selection",
     "Deploy exact application candidate with admission paused",
     "Drain old provider before changing new-attempt selection",
+    "Quiesce the expired previous production authorization",
+    "Deploy bounded controller after admission drain",
     "Select Cloud Run while keeping admission paused",
     "Verify exact-one L4 authorization and activate admission",
     "Record immutable cutover evidence",

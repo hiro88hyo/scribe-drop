@@ -691,11 +691,14 @@ storage CLEANEDを検証するまで運用枠を開かない。productionにstag
 [ADR 0089](./adr/0089-separate-production-workflow-and-candidate-identity.md)に従い、production workflowには
 staging acceptanceと一致する`candidate_commit_sha`を必ず渡す。workflowの`GITHUB_SHA`はsource runの信頼検証に
 だけ使い、artifact名、deployment label、authorization、evidenceへ流用しない。cutover前に同じ入力で
-`preflight_only=true`、`preflight_run_id=0`を実行し、staging evidence、両candidate、production foundation、
+`preflight_only=true`、`preflight_run_id=0`、直前の成功したproduction finalize runを
+`previous_production_run_id`に指定して実行し、staging evidence、両candidate、前release evidence、production foundation、
 controller validate-only、Cloudflare/Pages/Access/RunPodの全read-backを成功させる。このrunでは全migration/deploy、
 provider切替、authorization、evidence発行がskipされる。実cutoverは成功したrun IDを`preflight_run_id`へ渡し、
 同じworkflow commit/staging run、全preflight step成功、全mutation step skipをAPI read-backで検証させる。
-`finalize`では`preflight_run_id=0`を使用する。
+`finalize`では`preflight_run_id=0`、`previous_production_run_id=0`を使用する。更新cutoverは前releaseの有限認可が
+期限切れでactive/reservedとも0であることを要求し、admission pauseとprovider drain後にdisabled/zeroへCAS収束してから
+同一cutover runのexact-one smokeを開く。途中失敗の同一run rerunはdisabledまたは同一smoke prefixから再開する。
 acceptance artifactからexportしたcandidate run IDは`GITHUB_ENV`へ書いた次stepで初めて使用する。同じstep内で
 参照すると未反映の空IDになるため、cutover/finalizeともacceptance exportとcandidate downloadを分離する。
 同じexternal preflight stepでbackend用`CLOUDFLARE_API_TOKEN`とPages専用tokenを併用する場合、Wrangler Pages
