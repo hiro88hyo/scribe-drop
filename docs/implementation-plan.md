@@ -2066,6 +2066,27 @@ local preparation（2026-08-22）:
 - `release/0.3.0`を作成し、root package、Python worker、uv lockのversionを`0.3.0`へ同期する。
   release-to-main PR、candidate workflow、staging workflow、cloud resource mutation、GPU executionは、
   release commitのlocal gateと全workflow source preflightが成功するまで開始しない。
+- release commit `ebd1e0b`のapplication candidate workflow `32543174078`とCloud Run candidate workflow
+  `32543174345`は成功し、mutation-free staging preflight `32543816140`も成功した。production resourceは
+  変更していない。
+
+staging acceptance remediation（2026-08-22）:
+
+- 同じcandidateに対するstaging workflow `32543983624`は、承認済みexact 1 L4 execution、上限250 JPYで
+  実行した。Cloud Run GPU Jobは約76秒で`cloud-run-one-shot:ok`と`exit(0)`へ成功し、runtime terminalは
+  D1 finalize後にcleanupを要求したが、browser E2Eは900秒の外側timeoutまで終了しなかった。acceptance
+  evidenceは発行しておらず、production deployは開始していない。
+- failure recoveryはfixture削除、reaper convergence、controller authorization無効化、RunPod再選択まで
+  成功したが、最終Cloudflare read-back用R2 configを新しいrecovery jobで生成しておらずfail closedした。
+  独立したsource-managed safety verifierを再実行し、controller authorization disabled、Cloud Run Job 0、
+  Execution 0、reserved execution 0を確認した。
+- staging Access routeのcredential-bearing `route.fetch`を30秒でboundedにし、active job detail pollingは
+  一時network failure後も5秒間隔で再開する。cleanup evidenceをmode 600で永続化した時点でfixture cleanupの
+  所有権をworkflow recoveryへ移し、browser cleanupが元のfailureを外側timeoutで隠さないようにする。
+- recovery final verifierはCloudflare全設定、RunPod planの順に再生成してからfull read-backとCloud Run safetyを
+  実行する。AST workflow contractは4 commandの完全一致と順序を要求し、orchestrator-only configへ戻す変更を
+  回帰として拒否する。修正後の`pnpm check`とlocal browser E2E 26件は成功した。candidateの再build、remote
+  preflight、staging redispatchは別の明示承認まで行わない。
 
 実装:
 

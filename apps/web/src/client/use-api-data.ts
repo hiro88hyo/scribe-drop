@@ -214,6 +214,7 @@ export function useJobDetail(jobId: string | undefined): {
   useEffect(() => {
     const controller = new AbortController();
     let pollTimer: ReturnType<typeof setTimeout> | undefined;
+    let retryPollingAfterFailure = false;
 
     const load = async (): Promise<void> => {
       if (jobId === undefined) {
@@ -229,14 +230,21 @@ export function useJobDetail(jobId: string | undefined): {
           return;
         }
         setState({ status: "ready", value });
-        if (activeStatuses.has(value.status)) {
+        retryPollingAfterFailure = activeStatuses.has(value.status);
+        if (retryPollingAfterFailure) {
           pollTimer = setTimeout(() => {
             void load();
           }, JOB_POLL_INTERVAL_MILLISECONDS);
         }
       } catch (error) {
         if (!controller.signal.aborted && !isAbortError(error)) {
-          setState({ error: toUiError(error), status: "error" });
+          if (retryPollingAfterFailure) {
+            pollTimer = setTimeout(() => {
+              void load();
+            }, JOB_POLL_INTERVAL_MILLISECONDS);
+          } else {
+            setState({ error: toUiError(error), status: "error" });
+          }
         }
       }
     };

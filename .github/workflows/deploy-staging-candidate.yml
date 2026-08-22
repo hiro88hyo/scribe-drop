@@ -1151,7 +1151,7 @@ jobs:
           SCRIBE_DROP_STAGING_GPU_EXECUTION_ADMISSION: active
           SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY: runpod_serverless_v1
         run: |
-          pnpm run cloudflare:config:staging:orchestrator
+          pnpm run cloudflare:config:staging
           pnpm run runpod:config:staging
           pnpm run cloudflare:readback:staging
           pnpm run cloud-run:staging:safety read

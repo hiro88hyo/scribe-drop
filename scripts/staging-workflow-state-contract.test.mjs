@@ -88,6 +88,18 @@ test("rejects a missing recovery workflow branch identity before publish", async
   );
 });
 
+test("rejects recovery read-back without complete staging configuration rendering", async () => {
+  const regressed = workflow.replace(
+    /(name: Verify recovered staging safety without issuing acceptance[\s\S]*?)pnpm run cloudflare:config:staging\n/u,
+    "$1pnpm run cloudflare:config:staging:orchestrator\n",
+  );
+  assert.notEqual(regressed, workflow);
+  await assert.rejects(
+    verifyStagingWorkflowStateContract(regressed),
+    /must render the complete staging configuration before full read-back/u,
+  );
+});
+
 test("rejects a workflow verifier whose run ID is not bound to dispatch input", async () => {
   const regressed = workflow.replace(
     "CLOUD_RUN_CANDIDATE_RUN_ID: ${{ inputs.cloud_run_candidate_run_id }}",

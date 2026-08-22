@@ -6,6 +6,7 @@ test("recovers from a network failure and completes the authenticated job lifecy
   page,
 }) => {
   const backend = await installMockBackend(page, {
+    failDetailRequestAt: 2,
     failFirstCreate: true,
     uploadPartDelayMilliseconds: 400,
   });
@@ -34,6 +35,9 @@ test("recovers from a network failure and completes the authenticated job lifecy
   await page.getByRole("link", { name: "ジョブ詳細を確認" }).click();
   await expect(page.getByText("処理待ち", { exact: true }).first()).toBeVisible();
 
+  await page.clock.fastForward(5_000);
+  await expect.poll(() => backend.detailRequests).toBe(2);
+  await expect(page.getByText("処理待ち", { exact: true }).first()).toBeVisible();
   await page.clock.fastForward(5_000);
   await expect(page.getByText("文字起こし中", { exact: true }).first()).toBeVisible();
   await page.clock.fastForward(5_000);

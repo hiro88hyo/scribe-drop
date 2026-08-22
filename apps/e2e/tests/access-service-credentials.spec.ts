@@ -104,6 +104,7 @@ test("continues both Access layer credentials after the service cookie is issued
   const forwarded: {
     headers?: Record<string, string>;
     maxRedirects?: number;
+    timeout?: number;
   }[] = [];
   const response = { status: 200 };
   let fulfilled = false;
@@ -142,6 +143,7 @@ test("continues both Access layer credentials after the service cookie is issued
         cookie: "CF_Authorization=test-cookie",
       },
       maxRedirects: 0,
+      timeout: 30_000,
     },
   ]);
   expect(fulfilled).toBe(true);

@@ -6,8 +6,8 @@ import { createJobResponseSchema } from "@scribe-drop/contracts";
 
 import { readCandidateFixture } from "../candidate-fixture.js";
 import {
+  handOffStagingFailureEvidence,
   requireStagingFailureEvidencePath,
-  writeStagingFailureEvidence,
 } from "../staging-failure-evidence.js";
 import { deleteStagingFixtureJob, waitForStagingJobCompletion } from "../staging-lifecycle.js";
 import {
@@ -146,7 +146,7 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
     }
     createdJobId = createdJob.data.jobId;
     if (cleanupEvidencePath !== undefined) {
-      writeStagingFailureEvidence(cleanupEvidencePath, createdJobId);
+      fixtureHandedOff = handOffStagingFailureEvidence(cleanupEvidencePath, createdJobId);
     }
 
     const uploadAccepted = page.getByText("アップロードを受け付けました。");

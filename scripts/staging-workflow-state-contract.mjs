@@ -114,6 +114,13 @@ function stepProfile(jobMapping, name) {
   });
 }
 
+function stepCommands(jobMapping, name) {
+  return String(optionalMappingValue(step(jobMapping, name), "run")?.value ?? "")
+    .split("\n")
+    .map((command) => command.trim())
+    .filter(Boolean);
+}
+
 function requireProfile(actual, expected, location) {
   for (const key of ["mode", "policy", "admission"]) {
     if (actual[key] !== expected[key]) {
@@ -302,6 +309,26 @@ export async function verifyStagingWorkflowStateContract(source) {
     runpodBaseline,
     "recovery verification",
   );
+  const recoveryVerificationCommands = stepCommands(
+    jobs["recover-acceptance"],
+    "Verify recovered staging safety without issuing acceptance",
+  );
+  const expectedRecoveryVerificationCommands = [
+    "pnpm run cloudflare:config:staging",
+    "pnpm run runpod:config:staging",
+    "pnpm run cloudflare:readback:staging",
+    "pnpm run cloud-run:staging:safety read",
+  ];
+  if (
+    recoveryVerificationCommands.length !== expectedRecoveryVerificationCommands.length ||
+    recoveryVerificationCommands.some(
+      (command, index) => command !== expectedRecoveryVerificationCommands[index],
+    )
+  ) {
+    throw new Error(
+      "recovery verification must render the complete staging configuration before full read-back",
+    );
+  }
 
   const workflowIdentity = Object.fromEntries(
     allJobs.flatMap(([name, jobMapping]) => {

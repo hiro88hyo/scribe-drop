@@ -68,6 +68,7 @@ export interface MockBackendState {
 
 interface MockBackendOptions {
   readonly detailStatuses?: readonly JobStatus[];
+  readonly failDetailRequestAt?: number;
   readonly failFirstCreate?: boolean;
   readonly listPrivateMarker?: boolean;
   readonly persistCreatedJobInList?: boolean;
@@ -257,6 +258,7 @@ export async function installMockBackend(
     mutationHeadersValid: true,
     uploadPartObserved: false,
   };
+  let successfulDetailResponses = 0;
 
   await installStorageMock(target, state, options.uploadPartDelayMilliseconds ?? 250);
   await target.route("**/api/**", async (route) => {
@@ -335,9 +337,14 @@ export async function installMockBackend(
     }
 
     if (request.method() === "GET" && path === `/api/jobs/${JOB_ID}`) {
-      const index = Math.min(state.detailRequests, detailStatuses.length - 1);
-      const status = detailStatuses[index] ?? "COMPLETED";
       state.detailRequests += 1;
+      if (state.detailRequests === options.failDetailRequestAt) {
+        await route.abort("failed");
+        return;
+      }
+      const index = Math.min(successfulDetailResponses, detailStatuses.length - 1);
+      const status = detailStatuses[index] ?? "COMPLETED";
+      successfulDetailResponses += 1;
       await json(route, detail(status));
       return;
     }

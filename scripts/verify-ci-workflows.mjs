@@ -1570,6 +1570,8 @@ for (const [description, expected] of Object.entries({
   "no acceptance on recovery": "Verify recovered staging safety without issuing acceptance",
   "Pages credential for full Cloudflare recovery read-back":
     "CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}",
+  "complete Cloudflare plan reconstruction before recovery read-back":
+    "pnpm run cloudflare:config:staging\n          pnpm run runpod:config:staging",
   "RunPod plan reconstruction before full recovery read-back": "pnpm run runpod:config:staging",
   "recovery convergence continues after earlier failure":
     "id: wait-convergence\n        if: ${{ always() }}\n        continue-on-error: true",
