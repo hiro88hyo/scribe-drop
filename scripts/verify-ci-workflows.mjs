@@ -1570,6 +1570,8 @@ for (const [description, expected] of Object.entries({
   "no acceptance on recovery": "Verify recovered staging safety without issuing acceptance",
   "Pages credential for full Cloudflare recovery read-back":
     "CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}",
+  "complete Cloudflare plan reconstruction before recovery read-back":
+    "pnpm run cloudflare:config:staging\n          pnpm run runpod:config:staging",
   "RunPod plan reconstruction before full recovery read-back": "pnpm run runpod:config:staging",
   "recovery convergence continues after earlier failure":
     "id: wait-convergence\n        if: ${{ always() }}\n        continue-on-error: true",
@@ -2214,9 +2216,10 @@ for (const required of [
 for (const stepName of [
   "Apply candidate migrations and reviewed R2 policies",
   "Promote exact rollback-compatible RunPod image without execution",
-  "Deploy bounded controller behind the existing RunPod selection",
   "Deploy exact application candidate with admission paused",
   "Drain old provider before changing new-attempt selection",
+  "Quiesce the expired previous production authorization",
+  "Deploy bounded controller after admission drain",
   "Select Cloud Run while keeping admission paused",
   "Verify exact-one L4 authorization and activate admission",
   "Record immutable cutover evidence",
@@ -2304,6 +2307,33 @@ requireText(
 );
 requireText(
   workflowStep(
+    productionVerificationJob,
+    "Verify previous production release entry before cutover",
+    "deploy-production-candidate.yml verification job",
+  ),
+  "pnpm run --silent production:upgrade:entry export",
+  "deploy-production-candidate.yml verification job",
+  "previous production release entry contract",
+);
+for (const [stepName, required] of [
+  [
+    "Export verified previous production upgrade entry",
+    "pnpm run --silent production:upgrade:entry export",
+  ],
+  [
+    "Quiesce the expired previous production authorization",
+    "pnpm run cloud-run:controller:deploy quiesce production disabled",
+  ],
+]) {
+  requireText(
+    workflowStep(productionCutoverJob, stepName, "deploy-production-candidate.yml cutover job"),
+    required,
+    "deploy-production-candidate.yml cutover job",
+    `${stepName} upgrade contract`,
+  );
+}
+requireText(
+  workflowStep(
     productionFinalizeJob,
     "Build verifier and reconstruct exact production entry configuration",
     "deploy-production-candidate.yml finalize job",
@@ -2339,14 +2369,28 @@ requireTextOrder(
 );
 requireTextOrder(
   productionWorkflowContents,
-  "Deploy bounded controller behind the existing RunPod selection",
   "Deploy exact application candidate with admission paused",
+  "Drain old provider before changing new-attempt selection",
   "deploy-production-candidate.yml",
-  "inert controller before application deployment",
+  "admission pause before provider drain",
 );
 requireTextOrder(
   productionWorkflowContents,
   "Drain old provider before changing new-attempt selection",
+  "Quiesce the expired previous production authorization",
+  "deploy-production-candidate.yml",
+  "provider drain before authorization quiesce",
+);
+requireTextOrder(
+  productionWorkflowContents,
+  "Quiesce the expired previous production authorization",
+  "Deploy bounded controller after admission drain",
+  "deploy-production-candidate.yml",
+  "expired authorization quiesce before smoke authorization",
+);
+requireTextOrder(
+  productionWorkflowContents,
+  "Deploy bounded controller after admission drain",
   "Select Cloud Run while keeping admission paused",
   "deploy-production-candidate.yml",
   "old provider drain before provider selection",

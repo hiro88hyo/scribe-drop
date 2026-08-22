@@ -1,0 +1,75 @@
+name: 不具合報告
+description: 再現可能な不具合や期待動作との差異を報告します。
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        秘密情報、token、署名付きURL、録音内容、文字起こし本文は記載しないでください。
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: 概要
+      description: 何が問題で、誰にどのような影響があるかを記載してください。
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 再現手順
+      description: 最小の再現手順を番号付きで記載してください。
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待する結果
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 実際の結果
+      description: 安全に共有できるerror codeや機密情報を除いたログを記載してください。
+    validations:
+      required: true
+
+  - type: dropdown
+    id: environment
+    attributes:
+      label: 確認環境
+      options:
+        - local
+        - staging
+        - production
+        - CI
+        - 複数環境
+        - 不明
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: 影響範囲と頻度
+      description: security、authorization、data loss、課金、可用性への影響も記載してください。
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: safe_content
+    attributes:
+      label: 公開情報の確認
+      options:
+        - label: Issueに秘密情報や利用者データを含めていません。
+          required: true

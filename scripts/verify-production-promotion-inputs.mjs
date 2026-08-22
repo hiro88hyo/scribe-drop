@@ -14,6 +14,7 @@ try {
     productionSmokeJobId: process.env.PRODUCTION_SMOKE_JOB_ID,
     preflightOnly: process.env.PRODUCTION_PREFLIGHT_ONLY,
     preflightRunId: process.env.PRODUCTION_PREFLIGHT_RUN_ID,
+    previousProductionRunId: process.env.PREVIOUS_PRODUCTION_RUN_ID,
     stagingRunId: process.env.STAGING_RUN_ID,
   });
   console.log(`Verified production ${result.operation} inputs.`);

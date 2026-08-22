@@ -4,7 +4,7 @@
       "id": "scribe-drop-browser-multipart-staging",
       "allowed": {
         "origins": ["https://replace-with-staging-web.example.invalid"],
-        "methods": ["POST", "PUT", "DELETE"],
+        "methods": ["GET", "POST", "PUT", "DELETE"],
         "headers": [
           "authorization",
           "content-type",
@@ -16,7 +16,7 @@
           "amz-sdk-request"
         ]
       },
-      "exposeHeaders": ["ETag"],
+      "exposeHeaders": ["ETag", "Content-Length"],
       "maxAgeSeconds": 3600
     }
   ]

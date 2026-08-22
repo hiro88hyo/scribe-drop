@@ -7,6 +7,24 @@ const CSRF_TOKEN = "dummy-csrf-token-value-000000000000";
 const CREATED_AT = "2026-01-01T00:00:00.000Z";
 const UPDATED_AT = "2026-01-01T00:01:00.000Z";
 const STORAGE_ORIGIN = "https://storage.example.invalid";
+const DOWNLOAD_ORIGIN = `https://${"0".repeat(32)}.r2.cloudflarestorage.com`;
+const ARTIFACT_FIXTURES = {
+  json: {
+    body: '{"schemaVersion":1,"segments":[]}\n',
+    contentType: "application/json",
+    filename: "transcript.json",
+  },
+  markdown: {
+    body: "# Dummy E2E artifact\n",
+    contentType: "text/markdown; charset=utf-8",
+    filename: "transcript.md",
+  },
+  srt: {
+    body: "1\n00:00:00,000 --> 00:00:01,000\nDummy\n",
+    contentType: "application/x-subrip; charset=utf-8",
+    filename: "transcript.srt",
+  },
+} as const;
 
 type JobStatus = "COMPLETED" | "FAILED" | "RUNNING" | "SUBMISSION_PENDING" | "UPLOADED";
 
@@ -39,6 +57,7 @@ interface JobDetailFixture extends JobSummaryFixture {
 }
 
 export interface MockBackendState {
+  artifactRequests: number;
   created: boolean;
   createAttempts: number;
   deleted: boolean;
@@ -50,6 +69,9 @@ export interface MockBackendState {
 
 interface MockBackendOptions {
   readonly detailStatuses?: readonly JobStatus[];
+  readonly failArtifactRequestAt?: number;
+  readonly failDetailRequestAt?: number;
+  readonly failDetailRequestsAt?: readonly number[];
   readonly failFirstCreate?: boolean;
   readonly listPrivateMarker?: boolean;
   readonly persistCreatedJobInList?: boolean;
@@ -83,9 +105,12 @@ function detail(status: JobStatus): JobDetailFixture {
     artifacts:
       status === "COMPLETED"
         ? [
-            { format: "markdown", sizeBytes: 128 },
-            { format: "srt", sizeBytes: 96 },
-            { format: "json", sizeBytes: 256 },
+            {
+              format: "markdown",
+              sizeBytes: Buffer.byteLength(ARTIFACT_FIXTURES.markdown.body),
+            },
+            { format: "srt", sizeBytes: Buffer.byteLength(ARTIFACT_FIXTURES.srt.body) },
+            { format: "json", sizeBytes: Buffer.byteLength(ARTIFACT_FIXTURES.json.body) },
           ]
         : [],
     options: {
@@ -129,7 +154,7 @@ async function installStorageMock(
         request.headers()["access-control-request-headers"] ??
         "authorization,content-type,x-amz-content-sha256,x-amz-date,x-amz-security-token",
       "Access-Control-Allow-Methods": "DELETE,POST,PUT",
-      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Origin": request.headers()["origin"] ?? "http://127.0.0.1:4173",
       "Access-Control-Expose-Headers": "ETag,x-amz-request-id",
     };
 
@@ -187,12 +212,35 @@ async function installStorageMock(
     await route.abort("failed");
   });
 
-  await target.route("https://download.example.invalid/**", async (route) => {
+  await target.route(`${DOWNLOAD_ORIGIN}/**`, async (route) => {
+    const request = route.request();
+    const filename = new URL(request.url()).pathname.split("/").at(-1);
+    const fixture = Object.values(ARTIFACT_FIXTURES).find(
+      (candidate) => candidate.filename === filename,
+    );
+    if (fixture === undefined) {
+      await route.abort("failed");
+      return;
+    }
+    const origin = request.headers()["origin"] ?? "http://127.0.0.1:4173";
+    if (request.method() === "OPTIONS") {
+      await route.fulfill({
+        headers: {
+          "Access-Control-Allow-Methods": "GET",
+          "Access-Control-Allow-Origin": origin,
+        },
+        status: 204,
+      });
+      return;
+    }
     await route.fulfill({
-      body: "# Dummy E2E artifact\n",
-      contentType: "text/markdown",
+      body: fixture.body,
+      contentType: fixture.contentType,
       headers: {
-        "Content-Disposition": 'attachment; filename="transcript.md"',
+        "Access-Control-Allow-Origin": origin,
+        "Cache-Control": "no-store",
+        "Content-Disposition": `attachment; filename="${fixture.filename}"`,
+        "Content-Length": String(Buffer.byteLength(fixture.body)),
       },
       status: 200,
     });
@@ -205,6 +253,7 @@ export async function installMockBackend(
 ): Promise<MockBackendState> {
   const detailStatuses = options.detailStatuses ?? ["SUBMISSION_PENDING", "RUNNING", "COMPLETED"];
   const state: MockBackendState = {
+    artifactRequests: 0,
     created: false,
     createAttempts: 0,
     deleted: false,
@@ -213,6 +262,7 @@ export async function installMockBackend(
     mutationHeadersValid: true,
     uploadPartObserved: false,
   };
+  let successfulDetailResponses = 0;
 
   await installStorageMock(target, state, options.uploadPartDelayMilliseconds ?? 250);
   await target.route("**/api/**", async (route) => {
@@ -291,17 +341,39 @@ export async function installMockBackend(
     }
 
     if (request.method() === "GET" && path === `/api/jobs/${JOB_ID}`) {
-      const index = Math.min(state.detailRequests, detailStatuses.length - 1);
-      const status = detailStatuses[index] ?? "COMPLETED";
       state.detailRequests += 1;
+      if (
+        state.detailRequests === options.failDetailRequestAt ||
+        options.failDetailRequestsAt?.includes(state.detailRequests) === true
+      ) {
+        await route.abort("failed");
+        return;
+      }
+      const index = Math.min(successfulDetailResponses, detailStatuses.length - 1);
+      const status = detailStatuses[index] ?? "COMPLETED";
+      successfulDetailResponses += 1;
       await json(route, detail(status));
       return;
     }
 
-    if (request.method() === "GET" && path === `/api/jobs/${JOB_ID}/artifacts/markdown`) {
+    const artifactMatch = new RegExp(
+      `^/api/jobs/${JOB_ID}/artifacts/(markdown|json|srt)$`,
+      "u",
+    ).exec(path);
+    if (request.method() === "GET" && artifactMatch !== null) {
+      state.artifactRequests += 1;
+      if (state.artifactRequests === options.failArtifactRequestAt) {
+        await route.abort("failed");
+        return;
+      }
+      const format = artifactMatch[1];
+      if (format !== "markdown" && format !== "json" && format !== "srt") {
+        await route.abort("failed");
+        return;
+      }
       await json(route, {
         expiresAt: "2030-01-01T00:00:00.000Z",
-        url: "https://download.example.invalid/transcript.md",
+        url: `${DOWNLOAD_ORIGIN}/dummy/results/${ARTIFACT_FIXTURES[format].filename}`,
       });
       return;
     }

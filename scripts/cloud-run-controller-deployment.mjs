@@ -115,6 +115,23 @@ export function isExactControllerAuthorizationRetry(selected, observed) {
   );
 }
 
+export function isExactExpiredOperationalAuthorization(selected, observed) {
+  return (
+    observed.activeExecutions === 0 &&
+    observed.environment === selected.environment &&
+    observed.epoch === selected.epoch &&
+    observed.maxExecutions === selected.maxExecutions &&
+    observed.maxRequestsPerMinute === selected.maxRequestsPerMinute &&
+    observed.maxWorstCaseJpy === selected.maxWorstCaseJpy &&
+    Number.isSafeInteger(observed.reservedExecutions) &&
+    observed.reservedExecutions >= 0 &&
+    observed.reservedExecutions <= selected.maxExecutions &&
+    observed.reservedWorstCaseJpy === observed.reservedExecutions * 250 &&
+    observed.validUntil === selected.validUntil &&
+    observed.worstCaseJpyPerExecution === selected.worstCaseJpyPerExecution
+  );
+}
+
 function isExactSmokeAuthorizationShape(observed, expectedReservedExecutions) {
   return (
     new Set([0, 1]).has(expectedReservedExecutions) &&
@@ -167,6 +184,36 @@ export function isAllowedControllerPreflightAuthorization(
     observed.epoch === expectedEpoch &&
     isAllowedControllerDisable(observed, expectedReservedExecutions)
   );
+}
+
+export function isAllowedControllerUpgradePreflightAuthorization(
+  observed,
+  previousOperational,
+  targetSmoke,
+) {
+  try {
+    controllerUpgradeQuiesceAction(observed, previousOperational, targetSmoke);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function controllerUpgradeQuiesceAction(observed, previousOperational, targetSmoke) {
+  if (
+    observed.environment !== "production" ||
+    observed.activeExecutionHandle !== null ||
+    observed.policyId !== "cloud_run_jobs_l4_v1" ||
+    observed.schemaVersion !== 1
+  ) {
+    throw new Error("Production upgrade authorization identity does not match");
+  }
+  if (isAllowedControllerDisable(observed, 0)) return "already-disabled";
+  if (isExactControllerAuthorizationRetry(targetSmoke, observed)) return "already-smoke";
+  if (isExactExpiredOperationalAuthorization(previousOperational, observed)) {
+    return "disable-previous-operational";
+  }
+  throw new Error("Production upgrade authorization is not a resumable prefix state");
 }
 
 export function isAllowedControllerRecoveryDisable(

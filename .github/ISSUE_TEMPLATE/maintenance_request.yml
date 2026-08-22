@@ -1,0 +1,79 @@
+name: Maintenance・依存関係対応
+description: 公開済みadvisory、dependency更新、運用改善、technical debtを追跡します。
+title: "[Maintenance]: "
+body:
+  - type: dropdown
+    id: category
+    attributes:
+      label: 種別
+      options:
+        - 公開済みsecurity advisory
+        - Dependency update
+        - Operations
+        - Technical debt
+        - CI / Toolchain
+        - Documentation
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 背景
+      description: 対象、発見経路、現在のriskや負債を記載してください。未公開の脆弱性は記載しないでください。
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed_change
+    attributes:
+      label: 想定する変更
+      description: 最小の変更範囲と、変更しない範囲を記載してください。
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 完了条件
+      description: 検証、read-back、Alert closeなど外形的な完了条件を記載してください。
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: release_effect
+    attributes:
+      label: Release candidateへの影響
+      description: 不明な場合はtriageで確定します。
+      options:
+        - code・dependency・migration・deployment設定を変更する
+        - documentation・Issue運用のみ
+        - 不明
+    validations:
+      required: true
+
+  - type: input
+    id: target
+    attributes:
+      label: 希望期限・対象release
+      description: 未定の場合は「triageで決定」と記載してください。
+      placeholder: 次回candidate build前
+    validations:
+      required: true
+
+  - type: textarea
+    id: references
+    attributes:
+      label: 参照情報
+      description: 公開advisory、Dependabot Alert、関連Issue・ADR・PRへのlinkを記載してください。
+
+  - type: checkboxes
+    id: safe_content
+    attributes:
+      label: 公開情報の確認
+      options:
+        - label: 内容は公開済み情報だけで、秘密情報や未公開の脆弱性詳細を含みません。
+          required: true

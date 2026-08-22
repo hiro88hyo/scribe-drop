@@ -27,8 +27,21 @@ function fixture(directory) {
   writeJson(path.join(directory, ".wrangler/deploy/r2-cors-staging.json"), {
     rules: [
       {
-        allowed: { headers: ["content-type"], methods: ["PUT"], origins: [webOrigin] },
-        exposeHeaders: ["etag"],
+        allowed: {
+          headers: [
+            "authorization",
+            "content-type",
+            "x-amz-content-sha256",
+            "x-amz-date",
+            "x-amz-security-token",
+            "x-amz-user-agent",
+            "amz-sdk-invocation-id",
+            "amz-sdk-request",
+          ],
+          methods: ["GET", "POST", "PUT", "DELETE"],
+          origins: [webOrigin],
+        },
+        exposeHeaders: ["etag", "content-length"],
         id: "scribe-drop-browser-multipart-staging",
         maxAgeSeconds: 3600,
       },

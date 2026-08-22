@@ -14,6 +14,7 @@ const defaults = {
   productionSmokeJobId: "none",
   preflightOnly: "false",
   preflightRunId: "789",
+  previousProductionRunId: "456",
   stagingRunId: "123",
 };
 
@@ -21,6 +22,7 @@ test("accepts cutover only with inert finalize inputs", () => {
   assert.deepEqual(validateProductionPromotionInputs(defaults), {
     candidateCommitSha: "a".repeat(40),
     operation: "cutover",
+    previousProductionRunId: "456",
     preflightOnly: false,
     preflightRunId: "789",
     stagingRunId: "123",
@@ -34,6 +36,7 @@ test("accepts cutover only with inert finalize inputs", () => {
     {
       candidateCommitSha: "a".repeat(40),
       operation: "cutover",
+      previousProductionRunId: "456",
       preflightOnly: true,
       preflightRunId: "0",
       stagingRunId: "123",
@@ -57,6 +60,7 @@ test("accepts an explicit bounded finalize budget", () => {
         operationalValidUntil: "2026-08-15T23:00:00.000Z",
         productionSmokeJobId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
         preflightRunId: "0",
+        previousProductionRunId: "0",
       },
       new Date("2026-08-15T00:00:00.000Z"),
     ),
@@ -86,6 +90,7 @@ test("rejects a mismatched, excessive, or expired budget", () => {
     operationalValidUntil: "2026-08-15T23:00:00.000Z",
     productionSmokeJobId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
     preflightRunId: "0",
+    previousProductionRunId: "0",
   };
   assert.throws(
     () => validateProductionPromotionInputs(finalize, new Date("2026-08-15T00:00:00.000Z")),
@@ -138,6 +143,7 @@ test("accepts every explicit resumable finalize entry stage and rejects it for c
           operationalValidUntil: "2026-08-15T23:00:00.000Z",
           productionSmokeJobId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
           preflightRunId: "0",
+          previousProductionRunId: "0",
         },
         new Date("2026-08-15T00:00:00.000Z"),
       ).finalizeEntryStage,
@@ -146,6 +152,10 @@ test("accepts every explicit resumable finalize entry stage and rejects it for c
   }
   assert.throws(
     () => validateProductionPromotionInputs({ ...defaults, finalizeEntryStage: "smoke-paused" }),
+    /finalize-only/u,
+  );
+  assert.throws(
+    () => validateProductionPromotionInputs({ ...defaults, previousProductionRunId: "0" }),
     /finalize-only/u,
   );
 });

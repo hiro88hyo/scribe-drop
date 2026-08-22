@@ -418,7 +418,7 @@ class CapabilityHttpClient:
                 "PUT",
                 url,
                 content=content,
-                headers={"content-type": content_type},
+                headers={"cache-control": "no-store", "content-type": content_type},
                 extensions=extensions,
             ) as response:
                 _validate_put_response(response, error_code)
@@ -454,6 +454,7 @@ class CapabilityHttpClient:
                 url,
                 content=chunks(),
                 headers={
+                    "cache-control": "no-store",
                     "content-length": str(size_bytes),
                     "content-type": content_type,
                 },

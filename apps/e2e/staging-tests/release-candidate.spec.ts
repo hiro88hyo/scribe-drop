@@ -1,12 +1,21 @@
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, unlinkSync } from "node:fs";
 
-import { expect, test, type Download } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { createJobResponseSchema } from "@scribe-drop/contracts";
 
 import { readCandidateFixture } from "../candidate-fixture.js";
 import {
+  readSuccessfulStagingDownload,
+  waitForStagingArtifactDownload,
+} from "../staging-artifact-download.js";
+import {
+  readStagingArtifactPreviewDigest,
+  readStagingClipboardDigest,
+} from "../staging-artifact-preview.js";
+import {
+  handOffStagingFailureEvidence,
   requireStagingFailureEvidencePath,
-  writeStagingFailureEvidence,
 } from "../staging-failure-evidence.js";
 import { deleteStagingFixtureJob, waitForStagingJobCompletion } from "../staging-lifecycle.js";
 import {
@@ -31,11 +40,6 @@ function multipartAction(requestUrl: string, method: string): string | undefined
     return "abort-multipart";
   }
   return undefined;
-}
-
-async function readSuccessfulDownload(download: Download): Promise<Buffer> {
-  expect(await download.failure()).toBeNull();
-  return readFileSync(await download.path());
 }
 
 test("promotes a synthetic Android M4A through the real staging lifecycle", async ({
@@ -145,7 +149,7 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
     }
     createdJobId = createdJob.data.jobId;
     if (cleanupEvidencePath !== undefined) {
-      writeStagingFailureEvidence(cleanupEvidencePath, createdJobId);
+      fixtureHandedOff = handOffStagingFailureEvidence(cleanupEvidencePath, createdJobId);
     }
 
     const uploadAccepted = page.getByText("アップロードを受け付けました。");
@@ -162,16 +166,38 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
 
     await waitForStagingJobCompletion(page);
 
+    await context.grantPermissions(["clipboard-read", "clipboard-write"], {
+      origin: new URL(baseURL).origin,
+    });
+    const previewTrigger = page.getByRole("button", {
+      name: "Markdownをブラウザで確認",
+    });
+    await previewTrigger.click();
+    const previewDialog = page.getByRole("dialog", {
+      name: "Markdownをブラウザで確認",
+    });
+    await expect(previewDialog).toBeVisible();
+    const previewDigest = await readStagingArtifactPreviewDigest(page, "Markdown");
+    expect(previewDigest).toMatch(/^[0-9a-f]{64}$/u);
+    await previewDialog.getByRole("button", { name: "クリップボードにコピー" }).click();
+    await expect(previewDialog.getByText("コピーしました。")).toBeVisible();
+    const clipboardDigest = await readStagingClipboardDigest(page);
+    expect(clipboardDigest).toBe(previewDigest);
+    await page.keyboard.press("Escape");
+    await expect(previewDialog).toBeHidden();
+    await expect(previewTrigger).toBeFocused();
+
     for (const [label, filename, validate] of [
       [
-        "Markdownをダウンロード",
+        "Markdown",
         "transcript.md",
         (content: Buffer) => {
+          expect(createHash("sha256").update(content).digest("hex")).toBe(previewDigest);
           expect(content.toString("utf8")).toContain("# Transcript");
         },
       ],
       [
-        "JSONをダウンロード",
+        "JSON",
         "transcript.json",
         (content: Buffer) => {
           const transcript = JSON.parse(content.toString("utf8")) as unknown;
@@ -184,18 +210,16 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
         },
       ],
       [
-        "SRTをダウンロード",
+        "SRT",
         "transcript.srt",
         (content: Buffer) => {
           expect(content.toString("utf8")).not.toContain("\u0000");
         },
       ],
     ] as const) {
-      const downloadPromise = page.waitForEvent("download");
-      await page.getByRole("button", { name: label }).click();
-      const download = await downloadPromise;
+      const download = await waitForStagingArtifactDownload(page, label);
       expect(download.suggestedFilename()).toBe(filename);
-      validate(await readSuccessfulDownload(download));
+      validate(await readSuccessfulStagingDownload(download, label));
     }
 
     if (cleanupEvidencePath === undefined) {

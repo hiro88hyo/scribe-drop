@@ -23,6 +23,7 @@ export function validateProductionPromotionInputs(input, now = new Date()) {
   const finalizeEntryStage = requireProductionFinalizeStage(input.finalizeEntryStage);
   if (input.operation === "cutover") {
     if (
+      !runIdPattern.test(input.previousProductionRunId) ||
       input.cutoverRunId !== "0" ||
       input.productionSmokeJobId !== "none" ||
       input.operationalMaxExecutions !== "0" ||
@@ -38,6 +39,7 @@ export function validateProductionPromotionInputs(input, now = new Date()) {
     return {
       candidateCommitSha: input.candidateCommitSha,
       operation: "cutover",
+      previousProductionRunId: input.previousProductionRunId,
       preflightOnly: input.preflightOnly === "true",
       preflightRunId: input.preflightRunId,
       stagingRunId: input.stagingRunId,
@@ -51,6 +53,9 @@ export function validateProductionPromotionInputs(input, now = new Date()) {
   }
   if (input.preflightRunId !== "0") {
     throw new Error("Finalize must not include a preflight run ID");
+  }
+  if (input.previousProductionRunId !== "0") {
+    throw new Error("Finalize must not include a previous production run ID");
   }
   if (!runIdPattern.test(input.cutoverRunId) || !ulidPattern.test(input.productionSmokeJobId)) {
     throw new Error("Finalize evidence identity is invalid");

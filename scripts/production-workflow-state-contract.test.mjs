@@ -8,12 +8,40 @@ const workflow = readFileSync(".github/workflows/deploy-production-candidate.yml
 
 test("binds every production input and policy producer before external access", () => {
   assert.deepEqual(verifyProductionWorkflowStateContract(workflow), {
+    cutoverMutationCount: 8,
     finalizeMutationCount: 4,
     finalizePrefixStateCount: 5,
     policyProducer: "Verify accepted production environment policy before external access",
     secretReferences: 6,
     variableReferences: 15,
   });
+});
+
+test("rejects an upgrade cutover that opens smoke before admission is paused and drained", () => {
+  const controller =
+    /\n[ ]{6}- name: Deploy bounded controller after admission drain[\s\S]*?(?=\n[ ]{6}- name:)/u;
+  const match = workflow.match(controller);
+  assert.equal(match?.length, 1);
+  const regressed = workflow
+    .replace(match[0], "")
+    .replace(
+      "      - name: Deploy exact application candidate with admission paused",
+      `${match[0]}\n      - name: Deploy exact application candidate with admission paused`,
+    );
+  assert.throws(() => verifyProductionWorkflowStateContract(regressed), /missing or out of order/u);
+});
+
+test("rejects a cutover without previous production evidence or quiesce", () => {
+  for (const required of [
+    "PREVIOUS_PRODUCTION_RUN_ID: ${{ inputs.previous_production_run_id }}",
+    "pnpm run --silent production:upgrade:entry resolve",
+    "pnpm run cloud-run:controller:deploy quiesce production disabled",
+    "SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_POLICY: cloud_run_jobs_l4_v1",
+  ]) {
+    const regressed = workflow.replaceAll(required, "REMOVED_UPGRADE_CONTRACT");
+    assert.notEqual(regressed, workflow);
+    assert.throws(() => verifyProductionWorkflowStateContract(regressed), /incomplete/u, required);
+  }
 });
 
 test("rejects each missing finalize state-machine prerequisite", () => {

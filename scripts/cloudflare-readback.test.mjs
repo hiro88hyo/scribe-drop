@@ -11,7 +11,7 @@ const expected = {
       {
         allowed: {
           headers: ["authorization", "content-type"],
-          methods: ["POST", "PUT", "DELETE"],
+          methods: ["GET", "POST", "PUT", "DELETE"],
           origins: ["https://staging.example.invalid"],
         },
         exposeHeaders: ["ETag"],
@@ -67,7 +67,7 @@ const outputs = {
     },
   ]),
   cors: `allowed_origins:  https://staging.example.invalid
-allowed_methods:  POST, PUT, DELETE
+allowed_methods:  GET, POST, PUT, DELETE
 allowed_headers:  authorization, content-type
 exposed_headers:  ETag
 max_age_seconds:  3600
