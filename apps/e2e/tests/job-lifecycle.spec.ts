@@ -195,7 +195,7 @@ test("reports a preview API failure instead of waiting for missing content", asy
 
   await page.getByRole("button", { name: "Markdownをブラウザで確認" }).click();
   await expect(readStagingArtifactPreviewDigest(page, "Markdown", 1_000)).rejects.toThrow(
-    "Staging Markdown artifact preview request failed",
+    "Staging Markdown artifact preview request failed: capability_network",
   );
   expect(backend.artifactRequests).toBe(1);
 });

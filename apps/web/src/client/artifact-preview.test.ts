@@ -23,6 +23,7 @@ function responseFor(
     srt: "application/x-subrip; charset=utf-8",
   };
   const responseHeaders = new Headers({
+    "Cache-Control": "no-store",
     "Content-Length": String(bytes.byteLength),
     "Content-Type": contentTypes[format],
   });
@@ -101,9 +102,10 @@ describe("artifact preview", () => {
   });
 
   it.each([
-    ["missing content length", { "Content-Length": "" }, "invalid_response"],
+    ["different cache control", { "Cache-Control": "public" }, "cache_control_mismatch"],
+    ["missing content length", { "Content-Length": "" }, "invalid_content_length"],
     ["different content length", { "Content-Length": "4" }, "size_mismatch"],
-    ["different content type", { "Content-Type": "text/html" }, "invalid_response"],
+    ["different content type", { "Content-Type": "text/html" }, "content_type_mismatch"],
   ] as const)("rejects %s", async (_name, headers, code) => {
     const deps = dependencies(responseFor("hello", "markdown", headers));
 
@@ -123,6 +125,7 @@ describe("artifact preview", () => {
     const deps = dependencies(
       new Response(stream, {
         headers: {
+          "Cache-Control": "no-store",
           "Content-Length": "5",
           "Content-Type": "text/html",
         },
@@ -131,7 +134,7 @@ describe("artifact preview", () => {
 
     await expect(
       requestArtifactPreview(JOB_ID, "markdown", 5, undefined, deps),
-    ).rejects.toMatchObject({ code: "invalid_response" });
+    ).rejects.toMatchObject({ code: "content_type_mismatch" });
     expect(cancel).toHaveBeenCalledOnce();
   });
 
@@ -145,6 +148,7 @@ describe("artifact preview", () => {
     const deps = dependencies(
       new Response(stream, {
         headers: {
+          "Cache-Control": "no-store",
           "Content-Length": "5",
           "Content-Type": "text/markdown",
         },
@@ -173,6 +177,7 @@ describe("artifact preview", () => {
     const deps = dependencies(
       new Response(stream, {
         headers: {
+          "Cache-Control": "no-store",
           "Content-Length": "5",
           "Content-Type": "text/markdown",
         },

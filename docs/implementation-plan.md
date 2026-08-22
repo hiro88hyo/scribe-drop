@@ -2102,6 +2102,17 @@ staging acceptance remediation（2026-08-22）:
   新candidateのlocal gateとstaging acceptanceが成功するまでPhase 17を完了扱いにしない。修正後の`pnpm check`、
   local browser E2E 31件、worktree secret scan、Node High以上とPython dependency auditは成功した（既知Node
   Moderate 1件は別dependency issueのまま）。candidate buildとremote dispatchはまだ行っていない。
+- bounded修正candidate `f78bafeeac017c38ea607eca643842774f1d1350`のapplication candidate
+  `32552657050`、Cloud Run candidate `32552656968`、mutation-free preflight `32553183758`は成功した。
+  承認済みexact 1 L4 execution、上限250 JPYのstaging workflow `32553361331`では実M4AのGPU処理とartifact生成後、
+  Markdown previewが安全な汎用errorへ潰れて失敗分類を残せず停止した。後続の処理時間、Discord、owner deletion、
+  evidence発行は未実行である。source-managed recovery `96984971794`はfixture削除、authorization disabled/zero、
+  Cloud Run Job/Execution 0、RunPod復元、full safety read-backを成功し、productionは変更していない。
+- Cloudflare R2の公式S3互換表はPUT時の`Cache-Control` system metadataを明示する一方、GET response overrideを
+  対応featureとして列挙していない。今回追加した未保証の`response-cache-control`署名queryを再試行せず除去し、
+  workerがartifact PUT時に`Cache-Control: no-store`を保存する契約へ変更する。preview failureは本文、署名URL、
+  request IDを含めず、capability、URL、fetch、HTTP、cache control、content type/length、size、encodingの安全な分類をDOMとE2Eへ
+  必須化する。この修正のlocal/full gateと新candidateのmutation-free preflightが成功するまで有料stagingを再実行しない。
 
 実装:
 

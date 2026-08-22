@@ -21,7 +21,11 @@ export async function readStagingArtifactPreviewDigest(
   );
   const outcome = await Promise.race([contentOutcome, errorOutcome]);
   if (outcome === "error") {
-    throw new Error(`Staging ${label} artifact preview request failed`);
+    const diagnosticCode = await error.getAttribute("data-diagnostic-code");
+    if (diagnosticCode === null || !/^[a-z][a-z0-9_]{0,63}$/u.test(diagnosticCode)) {
+      throw new Error(`Staging ${label} artifact preview failed without a safe diagnostic code`);
+    }
+    throw new Error(`Staging ${label} artifact preview request failed: ${diagnosticCode}`);
   }
   if (outcome === "timeout") {
     throw new Error(`Staging ${label} artifact preview did not settle within the bounded wait`);

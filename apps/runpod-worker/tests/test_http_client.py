@@ -161,10 +161,10 @@ def test_bounded_file_upload_verifies_regular_file_integrity_and_streams(
     tmp_path: Path,
 ) -> None:
     """The one-shot publisher path sends a fixed-length prehashed regular file."""
-    observed: list[bytes] = []
+    observed: list[tuple[bytes, str]] = []
 
     def responder(request: httpx.Request) -> httpx.Response:
-        observed.append(request.read())
+        observed.append((request.read(), request.headers["cache-control"]))
         return httpx.Response(200, request=request)
 
     client, _transport = build_client(responder)
@@ -180,7 +180,7 @@ def test_bounded_file_upload_verifies_regular_file_integrity_and_streams(
             sha256=hashlib.sha256(payload).hexdigest(),
         )
 
-    assert observed == [payload]
+    assert observed == [(payload, "no-store")]
 
 
 def test_all_claim_capability_paths_are_validated_before_use() -> None:
@@ -383,6 +383,7 @@ def test_artifact_and_manifest_put_use_separate_error_codes() -> None:
     assert artifact.value.code == "ARTIFACT_UPLOAD_FAILED"
     assert manifest.value.code == "MANIFEST_UPLOAD_FAILED"
     assert [request.method for request in transport.requests] == ["PUT", "PUT"]
+    assert all(request.headers["cache-control"] == "no-store" for request in transport.requests)
     client.close()
 
 

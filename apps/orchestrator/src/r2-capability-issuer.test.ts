@@ -45,6 +45,11 @@ describe("R2 claim capability issuer", () => {
     expect(sign.mock.calls.filter(([command]) => command instanceof PutObjectCommand)).toHaveLength(
       4,
     );
+    for (const [command] of sign.mock.calls) {
+      if (command instanceof PutObjectCommand) {
+        expect(command.input.CacheControl).toBe("no-store");
+      }
+    }
     expect(result.sourceGetUrl).toContain("method=GET");
     expect(result.markdownPutUrl).toContain("transcript.md?method=PUT");
     expect(result.jsonPutUrl).toContain("transcript.json?method=PUT");
