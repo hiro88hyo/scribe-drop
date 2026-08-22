@@ -6,6 +6,19 @@ import { verifyStagingWorkflowStateContract } from "./staging-workflow-state-con
 
 const workflow = readFileSync(".github/workflows/deploy-staging-candidate.yml", "utf8");
 
+function regressStep(contents, stepName, required) {
+  const marker = `      - name: ${stepName}\n`;
+  const start = contents.indexOf(marker);
+  assert.notEqual(start, -1, `missing workflow step: ${stepName}`);
+  const remainder = contents.slice(start + marker.length);
+  const nextStep = remainder.search(/^ {6}- name: /mu);
+  const end = nextStep === -1 ? contents.length : start + marker.length + nextStep;
+  const selected = contents.slice(start, end);
+  const regressed = selected.replace(required, "");
+  assert.notEqual(regressed, selected, `missing required source in ${stepName}`);
+  return `${contents.slice(0, start)}${regressed}${contents.slice(end)}`;
+}
+
 test("accepts the reviewed staging state transition contract", async () => {
   assert.deepEqual(await verifyStagingWorkflowStateContract(workflow), {
     acceptedParity: {
@@ -98,6 +111,88 @@ test("rejects recovery read-back without complete staging configuration renderin
     verifyStagingWorkflowStateContract(regressed),
     /must render the complete staging configuration before full read-back/u,
   );
+});
+
+test("rejects a post-cleanup controller disable without the exact consumed smoke epoch", async () => {
+  const regressed = workflow.replace(
+    / {10}SCRIBE_DROP_CLOUD_RUN_EXPECTED_AUTHORIZATION_EPOCH: phase16-smoke-\$\{\{ inputs\.candidate_commit_sha \|\| github\.sha \}\}-\$\{\{ github\.run_id \}\}\n/u,
+    "",
+  );
+  assert.notEqual(regressed, workflow);
+  await assert.rejects(
+    verifyStagingWorkflowStateContract(regressed),
+    /post-cleanup controller disable SCRIBE_DROP_CLOUD_RUN_EXPECTED_AUTHORIZATION_EPOCH must be phase16-smoke/u,
+  );
+});
+
+test("rejects an initial disabled controller deployment without an explicit disabled epoch", async () => {
+  const regressed = workflow.replace(
+    / {10}SCRIBE_DROP_CLOUD_RUN_EXPECTED_AUTHORIZATION_EPOCH: disabled\n/u,
+    "",
+  );
+  assert.notEqual(regressed, workflow);
+  await assert.rejects(
+    verifyStagingWorkflowStateContract(regressed),
+    /initial disabled controller deployment SCRIBE_DROP_CLOUD_RUN_EXPECTED_AUTHORIZATION_EPOCH must be disabled/u,
+  );
+});
+
+test("rejects exact-one authorization without the source-run-bound smoke epoch", async () => {
+  const regressed = workflow.replace(
+    '          SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_EPOCH="phase16-smoke-${EXPECTED_COMMIT_SHA}-${GITHUB_RUN_ID}" \\\n',
+    "",
+  );
+  assert.notEqual(regressed, workflow);
+  await assert.rejects(
+    verifyStagingWorkflowStateContract(regressed),
+    /exact-one controller authorization must run SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_EPOCH/u,
+  );
+});
+
+test("rejects recovery without the source-run-bound recovery epoch", async () => {
+  const regressed = workflow.replace(
+    / {6}SCRIBE_DROP_CLOUD_RUN_RECOVERY_EPOCH: phase16-smoke-\$\{\{ inputs\.candidate_commit_sha \|\| github\.sha \}\}-\$\{\{ github\.run_id \}\}\n/u,
+    "",
+  );
+  assert.notEqual(regressed, workflow);
+  await assert.rejects(
+    verifyStagingWorkflowStateContract(regressed),
+    /recovery job SCRIBE_DROP_CLOUD_RUN_RECOVERY_EPOCH must be phase16-smoke/u,
+  );
+});
+
+test("rejects every missing post-cleanup prerequisite before the next dispatch", async () => {
+  for (const fixture of [
+    {
+      error: /post-acceptance RunPod restore CLOUDFLARE_API_TOKEN/u,
+      required: "          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}\n",
+      step: "Restore RunPod selection while preserving the Cloud Run reaper",
+    },
+    {
+      error: /final staging safety read-back GOOGLE_OAUTH_ACCESS_TOKEN/u,
+      required:
+        "          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}\n",
+      step: "Verify final disabled zero state before issuing acceptance",
+    },
+    {
+      error: /staging acceptance issuance EXPECTED_CLOUD_RUN_CANDIDATE_RUN_ID/u,
+      required:
+        "          EXPECTED_CLOUD_RUN_CANDIDATE_RUN_ID: ${{ inputs.cloud_run_candidate_run_id }}\n",
+      step: "Issue short-lived staging acceptance",
+    },
+    {
+      error: /staging acceptance upload uses/u,
+      required:
+        "        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n",
+      step: "Upload immutable staging acceptance",
+    },
+  ]) {
+    await assert.rejects(
+      verifyStagingWorkflowStateContract(regressStep(workflow, fixture.step, fixture.required)),
+      fixture.error,
+      fixture.step,
+    );
+  }
 });
 
 test("rejects a workflow verifier whose run ID is not bound to dispatch input", async () => {

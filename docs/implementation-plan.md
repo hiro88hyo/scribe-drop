@@ -2132,6 +2132,18 @@ staging acceptance remediation（2026-08-22）:
   D1の5 MiB事前上限とbounded streaming byte countの完全一致を維持し、`Content-Length`は存在時のみ整数・D1 sizeを
   完全照合する。header欠落を再現するunit testと、malformed/mismatch/truncated/oversized stream拒否を同じgateへ固定し、
   未到達stepを含むworkflow source監査とlocal/full gateが成功するまでcandidate buildと有料stagingを再実行しない。
+- header省略対応commit `7fb37b528d2180619d8a1844ed96d8a6b0aa64f7`のapplication candidate
+  `32561788684`、Cloud Run candidate `32561788726`、mutation-free preflight `32562328831`は成功した。承認済み
+  exact 1 L4 execution、上限250 JPYのstaging workflow `32563919828`では、実M4A lifecycle、artifact生成、実R2の
+  preview/copy/download、処理時間、Discord通知、owner削除、Cloud Run/provider storage収束まで成功した。
+  その後のcontroller authorization disableは、予約済み1件を消費したexact smoke epochを示す
+  `SCRIBE_DROP_CLOUD_RUN_EXPECTED_AUTHORIZATION_EPOCH`がstepに未設定だったため、外部mutation前の入力検証で停止した。
+  source-managed recoveryは同じrun-bound epochでauthorization disabled、Cloud Run Job/Execution 0、RunPod復元、full safety
+  read-backまで成功し、追加GPUとproduction変更は行っていない。通常cleanupはcandidate commitとstaging run IDからexact epochを
+  明示し、初期disabled、exact-one smoke、通常cleanup、recoveryの全controller commandについてtoken、予約数、epoch、command形を
+  AST state contractと負例で固定する。未到達だったRunPod復元、最終disabled/zero read-back、acceptance発行・uploadの既存source
+  contractもAST検査へ昇格した。修正後のlocal/full gate、worktree secret scan、High以上とPython dependency auditは成功した。
+  candidate buildとremote workflowは別の明示承認まで実行しない。
 
 実装:
 

@@ -3,6 +3,9 @@ import { parsers } from "prettier/plugins/yaml";
 const MODE = "SCRIBE_DROP_STAGING_CLOUD_RUN_RUNTIME_MODE";
 const POLICY = "SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY";
 const ADMISSION = "SCRIBE_DROP_STAGING_GPU_EXECUTION_ADMISSION";
+const STAGING_SMOKE_EPOCH =
+  "phase16-smoke-${{ inputs.candidate_commit_sha || github.sha }}-${{ github.run_id }}";
+const GOOGLE_ACCESS_TOKEN = "${{ steps.google-auth.outputs.access_token }}";
 
 function unwrap(node) {
   let current = node;
@@ -119,6 +122,41 @@ function stepCommands(jobMapping, name) {
     .split("\n")
     .map((command) => command.trim())
     .filter(Boolean);
+}
+
+function stepEnvironment(jobMapping, name) {
+  return {
+    ...jobEnvironment(jobMapping),
+    ...mappingObject(optionalMappingValue(step(jobMapping, name), "env")),
+  };
+}
+
+function requireEnvironment(actual, expected, location) {
+  for (const [name, value] of Object.entries(expected)) {
+    if (actual[name] !== value) {
+      throw new Error(
+        `${location} ${name} must be ${value}, received ${actual[name] ?? "missing"}`,
+      );
+    }
+  }
+}
+
+function requireCommand(commands, expected, location) {
+  if (!commands.some((command) => command.includes(expected))) {
+    throw new Error(`${location} must run ${expected}`);
+  }
+}
+
+function requireStepValue(jobMapping, stepName, key, expected, location) {
+  const actual = optionalMappingValue(step(jobMapping, stepName), key)?.value;
+  if (actual !== expected) {
+    throw new Error(`${location} ${key} must be ${expected}, received ${actual ?? "missing"}`);
+  }
+}
+
+function requireStepInputs(jobMapping, stepName, expected, location) {
+  const actual = mappingObject(optionalMappingValue(step(jobMapping, stepName), "with"));
+  requireEnvironment(actual, expected, location);
 }
 
 function requireProfile(actual, expected, location) {
@@ -272,6 +310,118 @@ export async function verifyStagingWorkflowStateContract(source) {
     runpodBaseline,
     "acceptance restore",
   );
+  requireEnvironment(
+    stepEnvironment(jobs.acceptance, "Deploy the candidate controller with authorization disabled"),
+    {
+      GOOGLE_OAUTH_ACCESS_TOKEN: GOOGLE_ACCESS_TOKEN,
+      SCRIBE_DROP_CLOUD_RUN_EXPECTED_AUTHORIZATION_EPOCH: "disabled",
+      SCRIBE_DROP_CLOUD_RUN_EXPECTED_RESERVED_EXECUTIONS: "0",
+    },
+    "initial disabled controller deployment",
+  );
+  requireCommand(
+    stepCommands(jobs.acceptance, "Deploy the candidate controller with authorization disabled"),
+    "pnpm run cloud-run:controller:deploy apply staging disabled",
+    "initial disabled controller deployment",
+  );
+  const smokeAuthorizationCommands = stepCommands(
+    jobs.acceptance,
+    "Authorize exact one bounded staging execution and deploy the candidate controller",
+  );
+  requireEnvironment(
+    stepEnvironment(
+      jobs.acceptance,
+      "Authorize exact one bounded staging execution and deploy the candidate controller",
+    ),
+    { GH_TOKEN: "${{ github.token }}", GOOGLE_OAUTH_ACCESS_TOKEN: GOOGLE_ACCESS_TOKEN },
+    "exact-one controller authorization",
+  );
+  for (const expected of [
+    'SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_EPOCH="phase16-smoke-${EXPECTED_COMMIT_SHA}-${GITHUB_RUN_ID}"',
+    'SCRIBE_DROP_CLOUD_RUN_AUTHORIZATION_VALID_UNTIL="${authorization_expiry}"',
+    "pnpm run cloud-run:controller:deploy apply staging smoke",
+  ]) {
+    requireCommand(smokeAuthorizationCommands, expected, "exact-one controller authorization");
+  }
+  requireEnvironment(
+    stepEnvironment(jobs.acceptance, "Disable staging controller authorization after cleanup"),
+    {
+      GOOGLE_OAUTH_ACCESS_TOKEN: GOOGLE_ACCESS_TOKEN,
+      SCRIBE_DROP_CLOUD_RUN_EXPECTED_AUTHORIZATION_EPOCH: STAGING_SMOKE_EPOCH,
+      SCRIBE_DROP_CLOUD_RUN_EXPECTED_RESERVED_EXECUTIONS: "1",
+    },
+    "post-cleanup controller disable",
+  );
+  requireCommand(
+    stepCommands(jobs.acceptance, "Disable staging controller authorization after cleanup"),
+    "pnpm run cloud-run:controller:deploy apply staging disabled",
+    "post-cleanup controller disable",
+  );
+  const restoreStep = "Restore RunPod selection while preserving the Cloud Run reaper";
+  requireEnvironment(
+    stepEnvironment(jobs.acceptance, restoreStep),
+    {
+      CLOUDFLARE_API_TOKEN: "${{ secrets.CLOUDFLARE_API_TOKEN }}",
+      SCRIBE_DROP_STAGING_GPU_EXECUTION_ADMISSION: "active",
+      SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY: "runpod_serverless_v1",
+    },
+    "post-acceptance RunPod restore",
+  );
+  const restoreCommands = stepCommands(jobs.acceptance, restoreStep);
+  for (const expected of [
+    "pnpm run cloudflare:config:staging:orchestrator",
+    'pnpm exec wrangler deploy "${RELEASE_CANDIDATE_DIRECTORY}/orchestrator/index.js"',
+    "pnpm run cloudflare:readback:staging",
+  ]) {
+    requireCommand(restoreCommands, expected, "post-acceptance RunPod restore");
+  }
+  requireEnvironment(
+    stepEnvironment(jobs.acceptance, "Verify final disabled zero state before issuing acceptance"),
+    { GOOGLE_OAUTH_ACCESS_TOKEN: GOOGLE_ACCESS_TOKEN },
+    "final staging safety read-back",
+  );
+  requireCommand(
+    stepCommands(jobs.acceptance, "Verify final disabled zero state before issuing acceptance"),
+    "pnpm run cloud-run:staging:safety read",
+    "final staging safety read-back",
+  );
+  const acceptanceEvidenceStep = "Issue short-lived staging acceptance";
+  requireEnvironment(
+    stepEnvironment(jobs.acceptance, acceptanceEvidenceStep),
+    {
+      CANDIDATE_RUN_ID: "${{ inputs.candidate_run_id }}",
+      EXPECTED_CLOUD_RUN_CANDIDATE_RUN_ID: "${{ inputs.cloud_run_candidate_run_id }}",
+    },
+    "staging acceptance issuance",
+  );
+  const acceptanceEvidenceCommands = stepCommands(jobs.acceptance, acceptanceEvidenceStep);
+  for (const expected of [
+    "pnpm run staging:acceptance:create",
+    'EXPECTED_CANDIDATE_RUN_ID="${CANDIDATE_RUN_ID}"',
+    'EXPECTED_STAGING_RUN_ID="${GITHUB_RUN_ID}"',
+    "pnpm run staging:acceptance:verify",
+  ]) {
+    requireCommand(acceptanceEvidenceCommands, expected, "staging acceptance issuance");
+  }
+  const uploadStep = "Upload immutable staging acceptance";
+  requireStepValue(
+    jobs.acceptance,
+    uploadStep,
+    "uses",
+    "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+    "staging acceptance upload",
+  );
+  requireStepInputs(
+    jobs.acceptance,
+    uploadStep,
+    {
+      "if-no-files-found": "error",
+      name: "scribe-drop-staging-acceptance-${{ inputs.candidate_commit_sha || github.sha }}",
+      path: "staging-acceptance",
+      "retention-days": "2",
+    },
+    "staging acceptance upload",
+  );
   requireProfile(
     profile(jobEnvironment(jobs["resume-acceptance-evidence"])),
     finalPolicy,
@@ -308,6 +458,29 @@ export async function verifyStagingWorkflowStateContract(source) {
     ),
     runpodBaseline,
     "recovery verification",
+  );
+  requireEnvironment(
+    jobEnvironment(jobs["recover-acceptance"]),
+    {
+      SCRIBE_DROP_CLOUD_RUN_RECOVERY_EPOCH: STAGING_SMOKE_EPOCH,
+    },
+    "recovery job",
+  );
+  requireEnvironment(
+    stepEnvironment(
+      jobs["recover-acceptance"],
+      "Disable only this failed run's staging controller authorization",
+    ),
+    { GOOGLE_OAUTH_ACCESS_TOKEN: GOOGLE_ACCESS_TOKEN },
+    "recovery controller disable",
+  );
+  requireCommand(
+    stepCommands(
+      jobs["recover-acceptance"],
+      "Disable only this failed run's staging controller authorization",
+    ),
+    "pnpm run cloud-run:controller:deploy recover staging disabled",
+    "recovery controller disable",
   );
   const recoveryVerificationCommands = stepCommands(
     jobs["recover-acceptance"],

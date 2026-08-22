@@ -637,6 +637,7 @@ jobs:
       - name: Deploy the candidate controller with authorization disabled
         env:
           GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+          SCRIBE_DROP_CLOUD_RUN_EXPECTED_AUTHORIZATION_EPOCH: disabled
           SCRIBE_DROP_CLOUD_RUN_EXPECTED_RESERVED_EXECUTIONS: "0"
         run: |
           pnpm run cloud-run:controller:deploy apply staging disabled \
@@ -740,6 +741,7 @@ jobs:
       - name: Disable staging controller authorization after cleanup
         env:
           GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+          SCRIBE_DROP_CLOUD_RUN_EXPECTED_AUTHORIZATION_EPOCH: phase16-smoke-${{ inputs.candidate_commit_sha || github.sha }}-${{ github.run_id }}
           SCRIBE_DROP_CLOUD_RUN_EXPECTED_RESERVED_EXECUTIONS: "1"
         run: |
           pnpm run cloud-run:controller:deploy apply staging disabled \
