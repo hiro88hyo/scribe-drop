@@ -758,8 +758,9 @@ request bodyは空objectだけを許可し、browserが観測したETag、size�
 response objectは`Cache-Control: no-store`へ署名する。署名URLはdownloadまたは5 MiB以下の
 raw text previewにだけ使用し、DOM attribute、log、service worker、browser storageへ保存しない。
 
-previewはR2 responseのformat別`Content-Type`、D1と同じ`Content-Length`、streaming byte count、
-fatal UTF-8 decodeを検証する。close、切替、unmountで取得をabortし、5 MiB超または検証失敗時も
+previewはR2 responseのformat別`Content-Type`、streaming byte count、fatal UTF-8 decodeを検証する。
+`Content-Length`が返る場合はD1 sizeとの完全一致も要求するが、R2が省略する場合は上限付きstreamの
+最終byte数をD1 sizeと完全一致させる。close、切替、unmountで取得をabortし、5 MiB超または検証失敗時も
 downloadを利用可能に保つ。MarkdownはHTMLへrenderしない。
 
 許可形式:

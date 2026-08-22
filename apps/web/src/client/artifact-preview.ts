@@ -78,9 +78,12 @@ function validateCapabilityUrl(value: string): string {
   return url.href;
 }
 
-function parseContentLength(response: Response): number {
+function parseContentLength(response: Response): number | undefined {
   const rawLength = response.headers.get("Content-Length");
-  if (rawLength === null || !/^(0|[1-9][0-9]*)$/u.test(rawLength)) {
+  if (rawLength === null) {
+    return undefined;
+  }
+  if (!/^(0|[1-9][0-9]*)$/u.test(rawLength)) {
     throw new ArtifactPreviewError("invalid_content_length");
   }
   const contentLength = Number(rawLength);
@@ -109,10 +112,10 @@ function validateResponseMetadata(
     throw new ArtifactPreviewError("content_type_mismatch");
   }
   const contentLength = parseContentLength(response);
-  if (contentLength > MAX_ARTIFACT_PREVIEW_BYTES) {
+  if (contentLength !== undefined && contentLength > MAX_ARTIFACT_PREVIEW_BYTES) {
     throw new ArtifactPreviewError("oversized");
   }
-  if (contentLength !== expectedSizeBytes) {
+  if (contentLength !== undefined && contentLength !== expectedSizeBytes) {
     throw new ArtifactPreviewError("size_mismatch");
   }
 }

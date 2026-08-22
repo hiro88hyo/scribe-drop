@@ -101,9 +101,19 @@ describe("artifact preview", () => {
     expect(deps.fetchArtifact).not.toHaveBeenCalled();
   });
 
+  it("accepts an omitted content length and relies on the bounded stream byte count", async () => {
+    const response = responseFor("hello");
+    response.headers.delete("Content-Length");
+    const deps = dependencies(response);
+
+    await expect(requestArtifactPreview(JOB_ID, "markdown", 5, undefined, deps)).resolves.toBe(
+      "hello",
+    );
+  });
+
   it.each([
     ["different cache control", { "Cache-Control": "public" }, "cache_control_mismatch"],
-    ["missing content length", { "Content-Length": "" }, "invalid_content_length"],
+    ["malformed content length", { "Content-Length": "invalid" }, "invalid_content_length"],
     ["different content length", { "Content-Length": "4" }, "size_mismatch"],
     ["different content type", { "Content-Type": "text/html" }, "content_type_mismatch"],
   ] as const)("rejects %s", async (_name, headers, code) => {

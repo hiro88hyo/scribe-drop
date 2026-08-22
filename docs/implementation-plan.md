@@ -2122,6 +2122,16 @@ staging acceptance remediation（2026-08-22）:
   production変更は行っていない。R2公式CORS文書どおり`Content-Length`を`ExposeHeaders`へ固定し、environment parity
   gateで欠落・追加を拒否する。設定変更を含む新candidateのlocal/full gateとmutation-free preflightが成功するまで
   有料stagingを再実行しない。
+- CORS修正commit `d205e15540aa6124da45849194ef0a4e8ac60fe3`のapplication candidate
+  `32558696545`、Cloud Run candidate `32558696272`、mutation-free preflight `32559320058`は成功した。
+  承認済みexact 1 L4 execution、上限250 JPYのstaging workflow `32559439377`はCORS policy promotionとlive
+  config read-back後も、実R2 Markdown responseの`Content-Length`がbrowserから得られず同じ
+  `invalid_content_length`で停止した。CORS `ExposeHeaders`は存在しないresponse headerを生成しないため、前修正は
+  live data-plane契約を満たしていなかった。source-managed recoveryはfixture削除、Cloud Run Job/Execution 0、
+  authorization disabled、RunPod復元、full safety read-backを成功し、追加GPUとproduction変更は行っていない。
+  D1の5 MiB事前上限とbounded streaming byte countの完全一致を維持し、`Content-Length`は存在時のみ整数・D1 sizeを
+  完全照合する。header欠落を再現するunit testと、malformed/mismatch/truncated/oversized stream拒否を同じgateへ固定し、
+  未到達stepを含むworkflow source監査とlocal/full gateが成功するまでcandidate buildと有料stagingを再実行しない。
 
 実装:
 
@@ -2129,7 +2139,8 @@ staging acceptance remediation（2026-08-22）:
   raw text modalへ表示する。HTML/Markdown render、search、編集、部分copyは行わない。
 - owner検証済みの既存artifact APIから操作時だけ短命capabilityを取得し、HTTPSのR2 account host allowlist、
   no-store、credential omit、redirect拒否をbrowser境界で強制する。
-- `Content-Type`、`Content-Length`、streaming byte count、UTF-8を検証し、close、切替、unmountでabortする。
+- `Content-Type`、streaming byte count、UTF-8を検証し、返された`Content-Length`はD1 sizeと照合する。
+  `Content-Length`省略時も上限付きstreamの最終byte数をD1 sizeと完全一致させ、close、切替、unmountでabortする。
   本文と署名URLをservice worker、browser storage、log、error、DOM attributeへ保存しない。
 - native dialogでaccessible name、初期focus、focus containment、Escape、triggerへのfocus復帰を提供し、
   明示操作で全文をclipboardへcopyする。5 MiB超とpreview failureでもdownloadを利用可能に保つ。
