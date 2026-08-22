@@ -2059,6 +2059,14 @@ RunPod adapter、`runpod_submissions`、RunPod固有列は`0.2.0`に残す。rol
 
 目的: 完了したMarkdown、JSON、SRTをdownload操作を維持したままbrowser内で安全に確認・copyできるようにする。
 
+local preparation（2026-08-22）:
+
+- feature PR #26をstrict required checks成功、未解決conversation 0、approval 0のsolo-maintainer policyで
+  merge commit `62b478a`により`develop`へ統合した。
+- `release/0.3.0`を作成し、root package、Python worker、uv lockのversionを`0.3.0`へ同期する。
+  release-to-main PR、candidate workflow、staging workflow、cloud resource mutation、GPU executionは、
+  release commitのlocal gateと全workflow source preflightが成功するまで開始しない。
+
 実装:
 
 - [ADR 0093](./adr/0093-preview-artifacts-with-bounded-direct-r2-reads.md)に従い、5 MiB以下のartifactだけを

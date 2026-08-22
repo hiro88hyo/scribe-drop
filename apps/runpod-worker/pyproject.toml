@@ -1,6 +1,6 @@
 [project]
 name = "scribe-drop-runpod-worker"
-version = "0.2.0"
+version = "0.3.0"
 description = "RunPod Serverless worker for ScribeDrop"
 requires-python = ">=3.12,<3.13"
 dependencies = [
