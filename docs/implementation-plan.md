@@ -2165,6 +2165,11 @@ staging acceptance remediation（2026-08-22）:
   新applicationをCloud Run選択/admission pausedでdeployし、provider drain後に旧認可をupdate-time CASでdisabledへ収束してから
   controllerとexact-one smokeを適用する。artifact-identicalなdeployment workflow修正なのでcandidate再buildと追加GPUは行わず、
   local full gate後にacceptance evidenceだけを再発行してproduction preflightをやり直す。
+- 修正後preflight `32571407896`は前回production evidenceのexportまで成功し、live認可が同じepoch、5件/1,250円、期限切れ、
+  active 0である一方、前release後に消費された累積reservation 1件/250円を保持していたためread-onlyで停止した。有限認可の
+  `reservedExecutions`は現在稼働数ではなくepoch内の累積消費数であるため、0固定をせず、evidence上限内かつ
+  `reservedWorstCaseJpy = reservedExecutions * 250`の完全一致を許可する。上限超過、active execution、epoch・期限・budget driftは
+  引き続き拒否し、mutationは行わない。
 
 実装:
 

@@ -16,6 +16,7 @@ import {
   isAllowedControllerUpgradePreflightAuthorization,
   isAllowedControllerRecoveryDisable,
   isExactControllerAuthorizationRetry,
+  isExactExpiredOperationalAuthorization,
   preflightExistingControllerService,
   requireControllerServiceValidationOperation,
 } from "./cloud-run-controller-deployment.mjs";
@@ -269,7 +270,11 @@ test("accepts only an unconsumed exact finite authorization retry", () => {
   };
   assert.equal(isExactControllerAuthorizationRetry(selected, observed), true);
   assert.equal(
-    isExactControllerAuthorizationRetry(selected, { ...observed, reservedExecutions: 1 }),
+    isExactControllerAuthorizationRetry(selected, {
+      ...observed,
+      reservedExecutions: 1,
+      reservedWorstCaseJpy: 250,
+    }),
     false,
   );
   assert.equal(
@@ -415,8 +420,8 @@ test("upgrade preflight accepts only the previous operational, disabled, or same
     activeExecutionHandle: null,
     activeExecutions: 0,
     policyId: "cloud_run_jobs_l4_v1",
-    reservedExecutions: 0,
-    reservedWorstCaseJpy: 0,
+    reservedExecutions: 1,
+    reservedWorstCaseJpy: 250,
     schemaVersion: 1,
   };
   assert.equal(
@@ -427,9 +432,10 @@ test("upgrade preflight accepts only the previous operational, disabled, or same
     controllerUpgradeQuiesceAction(observed, previousOperational, targetSmoke),
     "disable-previous-operational",
   );
+  assert.equal(isExactExpiredOperationalAuthorization(previousOperational, observed), true);
   assert.equal(
     isAllowedControllerUpgradePreflightAuthorization(
-      { ...observed, ...targetSmoke },
+      { ...observed, ...targetSmoke, reservedExecutions: 0, reservedWorstCaseJpy: 0 },
       previousOperational,
       targetSmoke,
     ),
@@ -437,7 +443,7 @@ test("upgrade preflight accepts only the previous operational, disabled, or same
   );
   assert.equal(
     controllerUpgradeQuiesceAction(
-      { ...observed, ...targetSmoke },
+      { ...observed, ...targetSmoke, reservedExecutions: 0, reservedWorstCaseJpy: 0 },
       previousOperational,
       targetSmoke,
     ),
@@ -451,6 +457,8 @@ test("upgrade preflight accepts only the previous operational, disabled, or same
         maxExecutions: 0,
         maxRequestsPerMinute: 0,
         maxWorstCaseJpy: 0,
+        reservedExecutions: 0,
+        reservedWorstCaseJpy: 0,
         validUntil: "1970-01-01T00:00:00.000Z",
         worstCaseJpyPerExecution: 0,
       },
@@ -467,6 +475,8 @@ test("upgrade preflight accepts only the previous operational, disabled, or same
         maxExecutions: 0,
         maxRequestsPerMinute: 0,
         maxWorstCaseJpy: 0,
+        reservedExecutions: 0,
+        reservedWorstCaseJpy: 0,
         validUntil: "1970-01-01T00:00:00.000Z",
         worstCaseJpyPerExecution: 0,
       },
@@ -479,7 +489,8 @@ test("upgrade preflight accepts only the previous operational, disabled, or same
     { ...observed, activeExecutions: 1 },
     { ...observed, epoch: `phase16-operational-${"c".repeat(40)}-123` },
     { ...observed, maxWorstCaseJpy: 1000 },
-    { ...observed, reservedExecutions: 1, reservedWorstCaseJpy: 250 },
+    { ...observed, reservedExecutions: 6, reservedWorstCaseJpy: 1500 },
+    { ...observed, reservedWorstCaseJpy: 0 },
     { ...observed, activeExecutionHandle: "projects/scribe-drop/locations/x/jobs/y" },
     { ...observed, policyId: "runpod_serverless_v1" },
   ]) {

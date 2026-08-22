@@ -115,6 +115,23 @@ export function isExactControllerAuthorizationRetry(selected, observed) {
   );
 }
 
+export function isExactExpiredOperationalAuthorization(selected, observed) {
+  return (
+    observed.activeExecutions === 0 &&
+    observed.environment === selected.environment &&
+    observed.epoch === selected.epoch &&
+    observed.maxExecutions === selected.maxExecutions &&
+    observed.maxRequestsPerMinute === selected.maxRequestsPerMinute &&
+    observed.maxWorstCaseJpy === selected.maxWorstCaseJpy &&
+    Number.isSafeInteger(observed.reservedExecutions) &&
+    observed.reservedExecutions >= 0 &&
+    observed.reservedExecutions <= selected.maxExecutions &&
+    observed.reservedWorstCaseJpy === observed.reservedExecutions * 250 &&
+    observed.validUntil === selected.validUntil &&
+    observed.worstCaseJpyPerExecution === selected.worstCaseJpyPerExecution
+  );
+}
+
 function isExactSmokeAuthorizationShape(observed, expectedReservedExecutions) {
   return (
     new Set([0, 1]).has(expectedReservedExecutions) &&
@@ -193,7 +210,7 @@ export function controllerUpgradeQuiesceAction(observed, previousOperational, ta
   }
   if (isAllowedControllerDisable(observed, 0)) return "already-disabled";
   if (isExactControllerAuthorizationRetry(targetSmoke, observed)) return "already-smoke";
-  if (isExactControllerAuthorizationRetry(previousOperational, observed)) {
+  if (isExactExpiredOperationalAuthorization(previousOperational, observed)) {
     return "disable-previous-operational";
   }
   throw new Error("Production upgrade authorization is not a resumable prefix state");

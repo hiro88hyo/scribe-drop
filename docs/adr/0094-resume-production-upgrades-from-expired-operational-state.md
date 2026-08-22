@@ -19,8 +19,10 @@ Neither transition is an acceptable promotion prerequisite.
   derives the exact previous operational epoch, budget, and expiry from that evidence.
 - Upgrade cutover is allowed only after the previous finite authorization has expired. Live
   authorization must be one of three exact prefix states: the evidenced previous operational state,
-  disabled/zero, or the same cutover run's unconsumed smoke state. Active or reserved executions,
-  another epoch, or another budget fail closed.
+  disabled/zero, or the same cutover run's unconsumed smoke state. The expired operational state may
+  retain a cumulative consumed reservation between zero and its evidenced maximum, with an exact
+  250 JPY per execution total; active executions, an out-of-budget reservation, another epoch, or
+  another budget fail closed.
 - The new application is deployed with Cloud Run selected and admission paused before provider
   drain. The expired previous authorization is then changed to disabled/zero with a Firestore
   update-time precondition. Only after that convergence may the new controller and exact-one smoke
