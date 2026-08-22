@@ -39,6 +39,51 @@ test("recovers from a network failure and completes the authenticated job lifecy
   await page.clock.fastForward(5_000);
   await expect(page.getByText("完了", { exact: true }).first()).toBeVisible();
 
+  const previewTrigger = page.getByRole("button", { name: "Markdownをブラウザで確認" });
+  await previewTrigger.click();
+  const previewDialog = page.getByRole("dialog", { name: "Markdownをブラウザで確認" });
+  await expect(previewDialog).toBeVisible();
+  await expect(previewDialog.locator("pre")).toHaveText("# Dummy E2E artifact");
+  await page.keyboard.press("Shift+Tab");
+  expect(await previewDialog.evaluate((element) => element.contains(document.activeElement))).toBe(
+    true,
+  );
+
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        async writeText(value: string) {
+          const bytes = new TextEncoder().encode(value);
+          const digest = await crypto.subtle.digest("SHA-256", bytes);
+          Reflect.set(
+            window,
+            "copiedArtifactDigest",
+            Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(
+              "",
+            ),
+          );
+        },
+      },
+    });
+  });
+  await previewDialog.getByRole("button", { name: "クリップボードにコピー" }).click();
+  await expect(previewDialog.getByText("コピーしました。")).toBeVisible();
+  const previewDigest = await previewDialog.locator("pre").evaluate(async (element) => {
+    const bytes = new TextEncoder().encode(element.textContent);
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(
+      "",
+    );
+  });
+  await expect
+    .poll(() => page.evaluate((): unknown => Reflect.get(window, "copiedArtifactDigest")))
+    .toBe(previewDigest);
+
+  await page.keyboard.press("Escape");
+  await expect(previewDialog).toBeHidden();
+  await expect(previewTrigger).toBeFocused();
+
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Markdownをダウンロード" }).click();
   const download = await downloadPromise;

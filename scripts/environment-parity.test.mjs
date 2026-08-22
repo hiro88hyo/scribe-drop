@@ -43,8 +43,17 @@ function input(environment, overrides = {}) {
         {
           id: `scribe-drop-browser-multipart-${environment}`,
           allowed: {
-            headers: ["content-type"],
-            methods: ["PUT"],
+            headers: [
+              "authorization",
+              "content-type",
+              "x-amz-content-sha256",
+              "x-amz-date",
+              "x-amz-security-token",
+              "x-amz-user-agent",
+              "amz-sdk-invocation-id",
+              "amz-sdk-request",
+            ],
+            methods: ["GET", "POST", "PUT", "DELETE"],
             origins: [webOrigin],
           },
           exposeHeaders: ["etag"],
@@ -116,6 +125,38 @@ test("rejects a CORS rule identifier from another environment", () => {
   production.cors.rules[0].id = "scribe-drop-browser-multipart-staging";
   assert.throws(
     () => environmentPolicyId(production),
+    /R2 CORS policy does not match the environment/u,
+  );
+});
+
+test("rejects a CORS policy without bounded-preview GET or with an extra method", () => {
+  const withoutGet = input("staging");
+  withoutGet.cors.rules[0].allowed.methods = ["POST", "PUT", "DELETE"];
+  assert.throws(
+    () => environmentPolicyId(withoutGet),
+    /R2 CORS policy does not match the environment/u,
+  );
+
+  const withHead = input("staging");
+  withHead.cors.rules[0].allowed.methods.push("HEAD");
+  assert.throws(
+    () => environmentPolicyId(withHead),
+    /R2 CORS policy does not match the environment/u,
+  );
+});
+
+test("rejects wildcard or expanded R2 CORS headers", () => {
+  const wildcardOrigin = input("staging");
+  wildcardOrigin.cors.rules[0].allowed.origins = ["*"];
+  assert.throws(
+    () => environmentPolicyId(wildcardOrigin),
+    /R2 CORS policy does not match the environment/u,
+  );
+
+  const wildcardHeader = input("staging");
+  wildcardHeader.cors.rules[0].allowed.headers.push("*");
+  assert.throws(
+    () => environmentPolicyId(wildcardHeader),
     /R2 CORS policy does not match the environment/u,
   );
 });

@@ -54,6 +54,7 @@ export async function createArtifactDownload(
     new GetObjectCommand({
       Bucket: input.bucket,
       Key: input.key,
+      ResponseCacheControl: "no-store",
       ResponseContentDisposition: "attachment",
     }),
     {

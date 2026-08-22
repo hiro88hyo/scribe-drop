@@ -892,6 +892,87 @@ h3 {
   min-width: 8.5rem;
 }
 
+.artifact-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(8.5rem, auto));
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.artifact-preview-button {
+  min-width: 8.5rem;
+}
+
+.artifact-preview-limit {
+  grid-column: 1 / -1;
+  color: #69736e;
+  font-size: 0.72rem;
+  text-align: center;
+}
+
+.artifact-preview-dialog {
+  width: min(58rem, calc(100% - 2rem));
+  max-width: none;
+  height: min(44rem, calc(100% - 2rem));
+  max-height: none;
+  padding: 1.25rem;
+  border: 1px solid rgb(20 35 31 / 24%);
+  border-radius: 0.85rem;
+  background: #fffdf8;
+  color: #14231f;
+  box-shadow: 0 1.5rem 5rem rgb(20 35 31 / 28%);
+}
+
+.artifact-preview-dialog::backdrop {
+  background: rgb(20 35 31 / 62%);
+}
+
+.artifact-preview-dialog[open] {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 1rem;
+}
+
+.artifact-preview-dialog header,
+.artifact-preview-toolbar {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.artifact-preview-dialog h2,
+.artifact-preview-dialog p {
+  margin: 0;
+}
+
+.artifact-preview-toolbar span {
+  color: #52605a;
+  font-size: 0.8rem;
+}
+
+.artifact-preview-content {
+  min-height: 0;
+  margin: 0;
+  padding: 1rem;
+  overflow: auto;
+  border: 1px solid rgb(20 35 31 / 18%);
+  border-radius: 0.6rem;
+  background: #f6f4ee;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.artifact-preview-feedback {
+  display: grid;
+  gap: 1rem;
+  justify-items: start;
+  color: #873b35;
+}
+
 .artifact-download-error {
   grid-column: 1 / -1;
   color: #873b35;
@@ -990,8 +1071,15 @@ h3 {
     grid-template-columns: 1fr;
   }
 
-  .artifact-download-button {
-    justify-self: start;
+  .artifact-actions {
+    grid-template-columns: 1fr;
+    justify-items: start;
+  }
+
+  .artifact-preview-dialog {
+    width: calc(100% - 1rem);
+    height: calc(100% - 1rem);
+    padding: 1rem;
   }
 }
 

@@ -199,7 +199,9 @@ D1には`0001_initial.sql`、`0002_job_admission_indexes.sql`、
 `0003_attempt_capability_lifecycle.sql`を順に適用した。R2 Event Notificationは
 `incoming/` prefixのobject createをmain Queueへ送る。R2 CORSの追跡対象templateは
 `infra/cloudflare/r2-cors.staging.json`であり、設定済みのstaging exact originからの
-preflightは204、不許可originは403になることを実bucketで確認した。
+`GET`、`POST`、`PUT`、`DELETE` preflightは204、不許可origin、追加method、wildcardは拒否される。
+artifact previewではowner検証済みの5分GET capabilityだけを使い、実bucketでno-store、content
+metadata、本文byte数をbrowserから照合する。
 
 固定dummy objectを`incoming/`へ`PutObject`し、実R2 notificationがQueueと
 Orchestratorへ到達して、不許可actionとして対象jobを`PROCESSING_FAILED`で`FAILED`へ

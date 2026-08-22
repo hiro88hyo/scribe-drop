@@ -24,6 +24,7 @@ describe("R2 artifact download", () => {
     expect(url.pathname).toBe(`/recording-transcriber-test/${key}`);
     expect(url.searchParams.get("X-Amz-Expires")).toBe("300");
     expect(url.searchParams.get("X-Amz-Signature")).toMatch(/^[0-9a-f]{64}$/u);
+    expect(url.searchParams.get("response-cache-control")).toBe("no-store");
     expect(url.searchParams.get("response-content-disposition")).toBe("attachment");
   });
 });
