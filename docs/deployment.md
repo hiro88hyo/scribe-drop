@@ -201,7 +201,8 @@ D1には`0001_initial.sql`、`0002_job_admission_indexes.sql`、
 `infra/cloudflare/r2-cors.staging.json`であり、設定済みのstaging exact originからの
 `GET`、`POST`、`PUT`、`DELETE` preflightは204、不許可origin、追加method、wildcardは拒否される。
 artifact previewではowner検証済みの5分GET capabilityだけを使い、実bucketでno-store、content
-metadata、本文byte数をbrowserから照合する。
+metadata、本文byte数をbrowserから照合する。R2 CORSはbrowserが照合に使う`Content-Length`を
+明示的に公開し、environment parity gateがその欠落や追加headerを拒否する。
 
 固定dummy objectを`incoming/`へ`PutObject`し、実R2 notificationがQueueと
 Orchestratorへ到達して、不許可actionとして対象jobを`PROCESSING_FAILED`で`FAILED`へ

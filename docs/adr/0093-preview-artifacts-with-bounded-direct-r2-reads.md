@@ -26,6 +26,8 @@ capabilityと組み合わせて初めてreadできる。
 - preview対象はD1のartifact sizeが5 MiB以下のMarkdown、JSON、SRTだけとする。responseの
   `Cache-Control: no-store`、`Content-Type`、`Content-Length`、streaming byte countを期待値と完全一致させ、5 MiBを
   超える前にstreamをcancelする。UTF-8はfatal decodeし、不正encodingを表示しない。
+- browserが`Content-Length`を検証できるよう、R2 CORSの`ExposeHeaders`へ同headerを固定し、environment parity
+  gateで完全一致を検証する。
 - artifact uploadはR2が正式に対応するsystem metadataとして`Cache-Control: no-store`を保存し、GET capabilityへ
   S3互換表にないresponse overrideを追加しない。browser fetchも`cache: no-store`、`credentials: omit`、
   `redirect: error`、`referrerPolicy: no-referrer`を指定する。

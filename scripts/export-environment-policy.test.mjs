@@ -41,7 +41,7 @@ function fixture(directory) {
           methods: ["GET", "POST", "PUT", "DELETE"],
           origins: [webOrigin],
         },
-        exposeHeaders: ["etag"],
+        exposeHeaders: ["etag", "content-length"],
         id: "scribe-drop-browser-multipart-staging",
         maxAgeSeconds: 3600,
       },

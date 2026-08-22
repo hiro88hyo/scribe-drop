@@ -56,7 +56,7 @@ function input(environment, overrides = {}) {
             methods: ["GET", "POST", "PUT", "DELETE"],
             origins: [webOrigin],
           },
-          exposeHeaders: ["etag"],
+          exposeHeaders: ["etag", "content-length"],
           maxAgeSeconds: 3600,
         },
       ],
@@ -157,6 +157,15 @@ test("rejects wildcard or expanded R2 CORS headers", () => {
   wildcardHeader.cors.rules[0].allowed.headers.push("*");
   assert.throws(
     () => environmentPolicyId(wildcardHeader),
+    /R2 CORS policy does not match the environment/u,
+  );
+});
+
+test("rejects R2 CORS without the artifact preview content length", () => {
+  const withoutContentLength = input("staging");
+  withoutContentLength.cors.rules[0].exposeHeaders = ["etag"];
+  assert.throws(
+    () => environmentPolicyId(withoutContentLength),
     /R2 CORS policy does not match the environment/u,
   );
 });

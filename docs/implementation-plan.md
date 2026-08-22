@@ -2113,6 +2113,15 @@ staging acceptance remediation（2026-08-22）:
   workerがartifact PUT時に`Cache-Control: no-store`を保存する契約へ変更する。preview failureは本文、署名URL、
   request IDを含めず、capability、URL、fetch、HTTP、cache control、content type/length、size、encodingの安全な分類をDOMとE2Eへ
   必須化する。この修正のlocal/full gateと新candidateのmutation-free preflightが成功するまで有料stagingを再実行しない。
+- cache policy修正candidate `46a9ca4a08fbcba2395685bb7ed0b5fd4e31e1f0`のapplication candidate
+  `32555472401`、Cloud Run candidate `32555472496`、mutation-free preflight `32556105597`は成功した。
+  承認済みexact 1 L4 execution、上限250 JPYのstaging workflow `32557490394`は実M4A処理とartifact生成後、
+  Markdown previewを`invalid_content_length`として停止した。前段のcache controlとcontent type検証は成功しており、
+  R2 CORSがJavaScriptへ公開していたresponse headerは`ETag`だけだった。source-managed recoveryはfixture削除、
+  Cloud Run Job/Execution収束、controller authorization無効化、RunPod復元、full safety read-backを成功し、追加GPUと
+  production変更は行っていない。R2公式CORS文書どおり`Content-Length`を`ExposeHeaders`へ固定し、environment parity
+  gateで欠落・追加を拒否する。設定変更を含む新candidateのlocal/full gateとmutation-free preflightが成功するまで
+  有料stagingを再実行しない。
 
 実装:
 
