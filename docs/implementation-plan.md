@@ -2059,13 +2059,136 @@ RunPod adapter、`runpod_submissions`、RunPod固有列は`0.2.0`に残す。rol
 
 目的: 完了したMarkdown、JSON、SRTをdownload操作を維持したままbrowser内で安全に確認・copyできるようにする。
 
+local preparation（2026-08-22）:
+
+- feature PR #26をstrict required checks成功、未解決conversation 0、approval 0のsolo-maintainer policyで
+  merge commit `62b478a`により`develop`へ統合した。
+- `release/0.3.0`を作成し、root package、Python worker、uv lockのversionを`0.3.0`へ同期する。
+  release-to-main PR、candidate workflow、staging workflow、cloud resource mutation、GPU executionは、
+  release commitのlocal gateと全workflow source preflightが成功するまで開始しない。
+- release commit `ebd1e0b`のapplication candidate workflow `32543174078`とCloud Run candidate workflow
+  `32543174345`は成功し、mutation-free staging preflight `32543816140`も成功した。production resourceは
+  変更していない。
+
+staging acceptance remediation（2026-08-22）:
+
+- 同じcandidateに対するstaging workflow `32543983624`は、承認済みexact 1 L4 execution、上限250 JPYで
+  実行した。Cloud Run GPU Jobは約76秒で`cloud-run-one-shot:ok`と`exit(0)`へ成功し、runtime terminalは
+  D1 finalize後にcleanupを要求したが、browser E2Eは900秒の外側timeoutまで終了しなかった。acceptance
+  evidenceは発行しておらず、production deployは開始していない。
+- failure recoveryはfixture削除、reaper convergence、controller authorization無効化、RunPod再選択まで
+  成功したが、最終Cloudflare read-back用R2 configを新しいrecovery jobで生成しておらずfail closedした。
+  独立したsource-managed safety verifierを再実行し、controller authorization disabled、Cloud Run Job 0、
+  Execution 0、reserved execution 0を確認した。
+- staging Access routeのcredential-bearing `route.fetch`を30秒でboundedにし、active job detail pollingは
+  一時network failure後も5秒間隔で再開する。cleanup evidenceをmode 600で永続化した時点でfixture cleanupの
+  所有権をworkflow recoveryへ移し、browser cleanupが元のfailureを外側timeoutで隠さないようにする。
+- recovery final verifierはCloudflare全設定、RunPod planの順に再生成してからfull read-backとCloud Run safetyを
+  実行する。AST workflow contractは4 commandの完全一致と順序を要求し、orchestrator-only configへ戻す変更を
+  回帰として拒否する。修正後の`pnpm check`とlocal browser E2E 26件は成功した。candidateの再build、remote
+  preflight、staging redispatchは別の明示承認まで行わない。
+- remediation commit `6218594`のapplication candidate workflow `32546198892`、Cloud Run candidate workflow
+  `32546198909`、mutation-free staging preflight `32546725100`は成功した。承認済みexact 1 L4 execution、上限
+  250 JPYのstaging workflow `32550414318`では、Cloud Run GPU Jobが04:05:04 UTCに開始し、04:05:58 UTCに
+  `cloud-run-one-shot:ok`と`exit(0)`へ成功した。controller create/reconcile/attestも成功し、GPU処理失敗ではない。
+- 同workflowのbrowser E2EはGPU完了後も終了せず、04:19:50 UTCに900秒の外側timeoutとなった。失敗時の
+  stage evidenceがなかったため、preview content待ちとdownload event待ちのどちらかを事後に推測して成功根拠に
+  しない。source監査で判明した全経路を閉じ、job detail pollingは連続3回の通信失敗で明示error、previewは
+  content/error/30秒、clipboard readは10秒、各downloadはevent/error/30秒の完全なbounded outcomeにする。
+  API failure、欠落content、未発火downloadを900秒のsuite timeoutまで待たない回帰をbrowser E2Eへ追加した。
+- recovery jobはfixture削除、Cloud Run Job/Execution収束、controller authorization無効化、RunPod再選択、full
+  Cloudflare/RunPod read-backをすべて成功し、最終値はauthorization disabled、Job 0、Execution 0、reserved
+  execution 0だった。acceptance evidenceは発行せず、production deployは開始していない。bounded outcomeを含む
+  新candidateのlocal gateとstaging acceptanceが成功するまでPhase 17を完了扱いにしない。修正後の`pnpm check`、
+  local browser E2E 31件、worktree secret scan、Node High以上とPython dependency auditは成功した（既知Node
+  Moderate 1件は別dependency issueのまま）。candidate buildとremote dispatchはまだ行っていない。
+- bounded修正candidate `f78bafeeac017c38ea607eca643842774f1d1350`のapplication candidate
+  `32552657050`、Cloud Run candidate `32552656968`、mutation-free preflight `32553183758`は成功した。
+  承認済みexact 1 L4 execution、上限250 JPYのstaging workflow `32553361331`では実M4AのGPU処理とartifact生成後、
+  Markdown previewが安全な汎用errorへ潰れて失敗分類を残せず停止した。後続の処理時間、Discord、owner deletion、
+  evidence発行は未実行である。source-managed recovery `96984971794`はfixture削除、authorization disabled/zero、
+  Cloud Run Job/Execution 0、RunPod復元、full safety read-backを成功し、productionは変更していない。
+- Cloudflare R2の公式S3互換表はPUT時の`Cache-Control` system metadataを明示する一方、GET response overrideを
+  対応featureとして列挙していない。今回追加した未保証の`response-cache-control`署名queryを再試行せず除去し、
+  workerがartifact PUT時に`Cache-Control: no-store`を保存する契約へ変更する。preview failureは本文、署名URL、
+  request IDを含めず、capability、URL、fetch、HTTP、cache control、content type/length、size、encodingの安全な分類をDOMとE2Eへ
+  必須化する。この修正のlocal/full gateと新candidateのmutation-free preflightが成功するまで有料stagingを再実行しない。
+- cache policy修正candidate `46a9ca4a08fbcba2395685bb7ed0b5fd4e31e1f0`のapplication candidate
+  `32555472401`、Cloud Run candidate `32555472496`、mutation-free preflight `32556105597`は成功した。
+  承認済みexact 1 L4 execution、上限250 JPYのstaging workflow `32557490394`は実M4A処理とartifact生成後、
+  Markdown previewを`invalid_content_length`として停止した。前段のcache controlとcontent type検証は成功しており、
+  R2 CORSがJavaScriptへ公開していたresponse headerは`ETag`だけだった。source-managed recoveryはfixture削除、
+  Cloud Run Job/Execution収束、controller authorization無効化、RunPod復元、full safety read-backを成功し、追加GPUと
+  production変更は行っていない。R2公式CORS文書どおり`Content-Length`を`ExposeHeaders`へ固定し、environment parity
+  gateで欠落・追加を拒否する。設定変更を含む新candidateのlocal/full gateとmutation-free preflightが成功するまで
+  有料stagingを再実行しない。
+- CORS修正commit `d205e15540aa6124da45849194ef0a4e8ac60fe3`のapplication candidate
+  `32558696545`、Cloud Run candidate `32558696272`、mutation-free preflight `32559320058`は成功した。
+  承認済みexact 1 L4 execution、上限250 JPYのstaging workflow `32559439377`はCORS policy promotionとlive
+  config read-back後も、実R2 Markdown responseの`Content-Length`がbrowserから得られず同じ
+  `invalid_content_length`で停止した。CORS `ExposeHeaders`は存在しないresponse headerを生成しないため、前修正は
+  live data-plane契約を満たしていなかった。source-managed recoveryはfixture削除、Cloud Run Job/Execution 0、
+  authorization disabled、RunPod復元、full safety read-backを成功し、追加GPUとproduction変更は行っていない。
+  D1の5 MiB事前上限とbounded streaming byte countの完全一致を維持し、`Content-Length`は存在時のみ整数・D1 sizeを
+  完全照合する。header欠落を再現するunit testと、malformed/mismatch/truncated/oversized stream拒否を同じgateへ固定し、
+  未到達stepを含むworkflow source監査とlocal/full gateが成功するまでcandidate buildと有料stagingを再実行しない。
+- header省略対応commit `7fb37b528d2180619d8a1844ed96d8a6b0aa64f7`のapplication candidate
+  `32561788684`、Cloud Run candidate `32561788726`、mutation-free preflight `32562328831`は成功した。承認済み
+  exact 1 L4 execution、上限250 JPYのstaging workflow `32563919828`では、実M4A lifecycle、artifact生成、実R2の
+  preview/copy/download、処理時間、Discord通知、owner削除、Cloud Run/provider storage収束まで成功した。
+  その後のcontroller authorization disableは、予約済み1件を消費したexact smoke epochを示す
+  `SCRIBE_DROP_CLOUD_RUN_EXPECTED_AUTHORIZATION_EPOCH`がstepに未設定だったため、外部mutation前の入力検証で停止した。
+  source-managed recoveryは同じrun-bound epochでauthorization disabled、Cloud Run Job/Execution 0、RunPod復元、full safety
+  read-backまで成功し、追加GPUとproduction変更は行っていない。通常cleanupはcandidate commitとstaging run IDからexact epochを
+  明示し、初期disabled、exact-one smoke、通常cleanup、recoveryの全controller commandについてtoken、予約数、epoch、command形を
+  AST state contractと負例で固定する。未到達だったRunPod復元、最終disabled/zero read-back、acceptance発行・uploadの既存source
+  contractもAST検査へ昇格した。修正後のlocal/full gate、worktree secret scan、High以上とPython dependency auditは成功した。
+  candidate buildとremote workflowは別の明示承認まで実行しない。
+- cleanup workflow修正commit `b78347e8909fbfaa0d8a1c4936e92cbc71c402fc`についてapplication candidate
+  `32567831438`とCloud Run candidate `32567831435`を並列buildし、mutation-free preflight `32568341748`も成功した。しかし、
+  candidate artifact、image digest、migration、render済みlive設定を変えないdeployment-only修正でcommit単位の無効化を機械的に
+  適用した再buildであり、wall-clockを主要コストとして扱えば不要だった。この2 candidateをproduction昇格根拠に使用せず、実service
+  E2E本体が成功済みの`7fb37b528d2180619d8a1844ed96d8a6b0aa64f7`、application `32561788684`、Cloud Run
+  `32561788726`を維持する。
+- source staging run `32563919828`の処理時間・Discord通知、owner削除、Cloud Run/provider cleanup success、authorization disable
+  failure、source-managed recovery successというexact prefixをresume state machineへ追加する。不完全な通知・削除・cleanup、別source
+  identity、候補commit非ancestor、live read-back欠落を拒否し、current安全状態の再検証後にGPU、再publish、live mutationなしで短命
+  acceptance evidenceだけを発行する。root `AGENTS.md`ではwall-clockをrelease budgetとし、同一artifactの再build禁止、成功済みcheckpoint
+  からのsuffix resume、E2E本体成功後の追加GPU禁止をrepository-wide制約へ昇格した。
+- recovered staging acceptance `32569095428`はcandidate、source lifecycle、live staging parityをread-onlyで再検証し、D1、Pages、
+  R2/RunPod/Orchestrator、実E2E、recoveryをすべてskipして短命evidenceだけを発行した。続くmutation-free production preflight
+  `32570250696`はcandidateとacceptance検証後、production foundation read-backで前releaseの`operational-active`認可を
+  初回cutover用`disabled`として扱えず停止した。migration、image promotion、controller/application deploy、provider切替、
+  authorization mutationはすべて未実行である。
+- [ADR 0094](./adr/0094-resume-production-upgrades-from-expired-operational-state.md)に従い、更新cutoverは前回成功finalize evidenceを
+  明示入力とし、期限切れのexact operational認可、disabled/zero、同一cutover smokeだけを再開prefixとして許可する。
+  新applicationをCloud Run選択/admission pausedでdeployし、provider drain後に旧認可をupdate-time CASでdisabledへ収束してから
+  controllerとexact-one smokeを適用する。artifact-identicalなdeployment workflow修正なのでcandidate再buildと追加GPUは行わず、
+  local full gate後にacceptance evidenceだけを再発行してproduction preflightをやり直す。
+- 修正後preflight `32571407896`は前回production evidenceのexportまで成功し、live認可が同じepoch、5件/1,250円、期限切れ、
+  active 0である一方、前release後に消費された累積reservation 1件/250円を保持していたためread-onlyで停止した。有限認可の
+  `reservedExecutions`は現在稼働数ではなくepoch内の累積消費数であるため、0固定をせず、evidence上限内かつ
+  `reservedWorstCaseJpy = reservedExecutions * 250`の完全一致を許可する。上限超過、active execution、epoch・期限・budget driftは
+  引き続き拒否し、mutationは行わない。
+- bounded reservation修正後のGPU-free staging evidence recovery `32571641642`は、同じcandidate `7fb37b5`とsource staging
+  lifecycle `32563919828`を再検証し、build、publish、GPU、staging mutationをすべてskipして成功した。mutation-free production
+  preflight `32571778914`は、前回release evidence、累積reservation 1件/250円、active execution 0、全control planeをmutation前に
+  read-backし、production mutationとGPU枠確保をすべてskipして成功した。
+- production cutover `32571969400`は同じcandidateとstaging evidenceを使用し、migration/R2 policy、RunPod image、application、
+  provider drain、旧authorization停止、controller、Cloud Run選択を順に適用してexact-one L4 smoke枠だけを開いた。実画面job
+  `01M0MP29SM4QF6034PBDEN5QQC`はCloud Run workerの`cloud-run-one-shot:ok`、3 artifact、manifest、正の処理時間、cleanup、Discord通知を
+  成功した。production finalize `32572808971`はmutation前にこの完全なsmoke lifecycleを再検証し、smoke枠を無効化して、最大5件、
+  上限1,250円、有効期限2026-08-23 12:20 UTCの有限運用枠を適用した。最終parity、Access、secret read-backとimmutable production
+  release evidence uploadまで成功し、candidateの再build、再publish、追加staging E2E、追加GPU実行は行っていない。
+
 実装:
 
 - [ADR 0093](./adr/0093-preview-artifacts-with-bounded-direct-r2-reads.md)に従い、5 MiB以下のartifactだけを
   raw text modalへ表示する。HTML/Markdown render、search、編集、部分copyは行わない。
 - owner検証済みの既存artifact APIから操作時だけ短命capabilityを取得し、HTTPSのR2 account host allowlist、
   no-store、credential omit、redirect拒否をbrowser境界で強制する。
-- `Content-Type`、`Content-Length`、streaming byte count、UTF-8を検証し、close、切替、unmountでabortする。
+- `Content-Type`、streaming byte count、UTF-8を検証し、返された`Content-Length`はD1 sizeと照合する。
+  `Content-Length`省略時も上限付きstreamの最終byte数をD1 sizeと完全一致させ、close、切替、unmountでabortする。
   本文と署名URLをservice worker、browser storage、log、error、DOM attributeへ保存しない。
 - native dialogでaccessible name、初期focus、focus containment、Escape、triggerへのfocus復帰を提供し、
   明示操作で全文をclipboardへcopyする。5 MiB超とpreview failureでもdownloadを利用可能に保つ。

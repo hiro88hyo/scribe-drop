@@ -5,6 +5,7 @@ import path from "node:path";
 import { expect, test } from "@playwright/test";
 
 import {
+  handOffStagingFailureEvidence,
   parseStagingFailureEvidence,
   readStagingFailureEvidence,
   requireStagingFailureEvidencePath,
@@ -24,6 +25,17 @@ test("round-trips mode-600 staging failure evidence", () => {
     });
     expect(statSync(evidencePath).mode & 0o777).toBe(0o600);
     expect(readFileSync(evidencePath, "utf8")).not.toContain("token");
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+test("hands cleanup ownership to workflow recovery only after evidence is durable", () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "scribe-drop-failure-handoff-"));
+  try {
+    const evidencePath = path.join(directory, "failure.json");
+    expect(handOffStagingFailureEvidence(evidencePath, JOB_ID)).toBe(true);
+    expect(readStagingFailureEvidence(evidencePath).jobId).toBe(JOB_ID);
   } finally {
     rmSync(directory, { force: true, recursive: true });
   }

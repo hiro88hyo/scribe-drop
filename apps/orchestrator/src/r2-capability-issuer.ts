@@ -75,14 +75,17 @@ export function createR2CapabilityIssuer(options: R2CapabilityIssuerOptions): R2
       const commands = {
         jsonPutUrl: new PutObjectCommand({
           Bucket: request.sourceBucket,
+          CacheControl: "no-store",
           Key: resultKey("transcript.json"),
         }),
         manifestPutUrl: new PutObjectCommand({
           Bucket: request.sourceBucket,
+          CacheControl: "no-store",
           Key: resultKey("manifest.json"),
         }),
         markdownPutUrl: new PutObjectCommand({
           Bucket: request.sourceBucket,
+          CacheControl: "no-store",
           Key: resultKey("transcript.md"),
         }),
         sourceGetUrl: new GetObjectCommand({
@@ -91,6 +94,7 @@ export function createR2CapabilityIssuer(options: R2CapabilityIssuerOptions): R2
         }),
         srtPutUrl: new PutObjectCommand({
           Bucket: request.sourceBucket,
+          CacheControl: "no-store",
           Key: resultKey("transcript.srt"),
         }),
       };

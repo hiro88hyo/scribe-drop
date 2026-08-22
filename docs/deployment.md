@@ -201,7 +201,8 @@ D1には`0001_initial.sql`、`0002_job_admission_indexes.sql`、
 `infra/cloudflare/r2-cors.staging.json`であり、設定済みのstaging exact originからの
 `GET`、`POST`、`PUT`、`DELETE` preflightは204、不許可origin、追加method、wildcardは拒否される。
 artifact previewではowner検証済みの5分GET capabilityだけを使い、実bucketでno-store、content
-metadata、本文byte数をbrowserから照合する。
+metadata、本文byte数をbrowserから照合する。R2 CORSはbrowserが照合に使う`Content-Length`を
+明示的に公開し、environment parity gateがその欠落や追加headerを拒否する。
 
 固定dummy objectを`incoming/`へ`PutObject`し、実R2 notificationがQueueと
 Orchestratorへ到達して、不許可actionとして対象jobを`PROCESSING_FAILED`で`FAILED`へ
@@ -690,11 +691,14 @@ storage CLEANEDを検証するまで運用枠を開かない。productionにstag
 [ADR 0089](./adr/0089-separate-production-workflow-and-candidate-identity.md)に従い、production workflowには
 staging acceptanceと一致する`candidate_commit_sha`を必ず渡す。workflowの`GITHUB_SHA`はsource runの信頼検証に
 だけ使い、artifact名、deployment label、authorization、evidenceへ流用しない。cutover前に同じ入力で
-`preflight_only=true`、`preflight_run_id=0`を実行し、staging evidence、両candidate、production foundation、
+`preflight_only=true`、`preflight_run_id=0`、直前の成功したproduction finalize runを
+`previous_production_run_id`に指定して実行し、staging evidence、両candidate、前release evidence、production foundation、
 controller validate-only、Cloudflare/Pages/Access/RunPodの全read-backを成功させる。このrunでは全migration/deploy、
 provider切替、authorization、evidence発行がskipされる。実cutoverは成功したrun IDを`preflight_run_id`へ渡し、
 同じworkflow commit/staging run、全preflight step成功、全mutation step skipをAPI read-backで検証させる。
-`finalize`では`preflight_run_id=0`を使用する。
+`finalize`では`preflight_run_id=0`、`previous_production_run_id=0`を使用する。更新cutoverは前releaseの有限認可が
+期限切れでactive/reservedとも0であることを要求し、admission pauseとprovider drain後にdisabled/zeroへCAS収束してから
+同一cutover runのexact-one smokeを開く。途中失敗の同一run rerunはdisabledまたは同一smoke prefixから再開する。
 acceptance artifactからexportしたcandidate run IDは`GITHUB_ENV`へ書いた次stepで初めて使用する。同じstep内で
 参照すると未反映の空IDになるため、cutover/finalizeともacceptance exportとcandidate downloadを分離する。
 同じexternal preflight stepでbackend用`CLOUDFLARE_API_TOKEN`とPages専用tokenを併用する場合、Wrangler Pages

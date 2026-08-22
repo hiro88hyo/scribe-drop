@@ -74,7 +74,9 @@ function normalizedCors(untrustedCors, webOrigin, environment) {
     !hasExactStringSet(cors.rules[0].allowed.headers, expectedCorsHeaders, (entry) =>
       entry.toLowerCase(),
     ) ||
-    !hasExactStringSet(cors.rules[0].exposeHeaders, ["etag"], (entry) => entry.toLowerCase()) ||
+    !hasExactStringSet(cors.rules[0].exposeHeaders, ["etag", "content-length"], (entry) =>
+      entry.toLowerCase(),
+    ) ||
     cors.rules[0].maxAgeSeconds !== 3600
   ) {
     throw new Error("R2 CORS policy does not match the environment");

@@ -19,7 +19,11 @@ export async function waitForStagingJobCompletion(
 ): Promise<void> {
   const completed = page.getByText("完了", { exact: true }).first();
   const failed = terminalFailureLocator(page);
-  await expect(completed.or(failed)).toBeVisible({ timeout });
+  const pollingError = page.locator(".detail-card > .feedback-panel.error-panel[role=alert]");
+  await expect(completed.or(failed).or(pollingError)).toBeVisible({ timeout });
+  if (await pollingError.isVisible()) {
+    throw new Error("Staging job detail polling reached its bounded failure limit");
+  }
   if (await failed.isVisible()) {
     throw new Error("Staging job reached a terminal non-success state");
   }

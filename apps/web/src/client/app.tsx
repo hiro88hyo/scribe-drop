@@ -25,6 +25,7 @@ import { requestArtifactDownload } from "./artifact-download.js";
 import {
   MAX_ARTIFACT_PREVIEW_BYTES,
   ArtifactPreviewError,
+  artifactPreviewFailureCode,
   requestArtifactPreview,
 } from "./artifact-preview.js";
 import { apiClient } from "./api-client.js";
@@ -917,7 +918,7 @@ interface ArtifactPreviewButtonProps {
 type ArtifactPreviewState =
   | { readonly status: "idle" }
   | { readonly status: "loading" }
-  | { readonly message: string; readonly status: "error" }
+  | { readonly diagnosticCode: string; readonly message: string; readonly status: "error" }
   | { readonly content: string; readonly status: "ready" };
 
 function artifactPreviewErrorMessage(error: unknown): string {
@@ -996,7 +997,11 @@ function ArtifactPreviewButton({
           !nextController.signal.aborted &&
           !(previewError instanceof DOMException && previewError.name === "AbortError")
         ) {
-          setState({ message: artifactPreviewErrorMessage(previewError), status: "error" });
+          setState({
+            diagnosticCode: artifactPreviewFailureCode(previewError),
+            message: artifactPreviewErrorMessage(previewError),
+            status: "error",
+          });
         }
       });
   };
@@ -1089,7 +1094,11 @@ function ArtifactPreviewButton({
           </header>
           {state.status === "loading" ? <p aria-live="polite">成果物を読み込んでいます…</p> : null}
           {state.status === "error" ? (
-            <div className="artifact-preview-feedback" role="alert">
+            <div
+              className="artifact-preview-feedback"
+              data-diagnostic-code={state.diagnosticCode}
+              role="alert"
+            >
               <p>{state.message}</p>
               <button className="secondary-button" onClick={preview} type="button">
                 再試行

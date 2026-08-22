@@ -58,3 +58,8 @@ export function writeStagingFailureEvidence(
   });
   return evidence;
 }
+
+export function handOffStagingFailureEvidence(evidencePath: string, jobId: string): true {
+  writeStagingFailureEvidence(evidencePath, jobId);
+  return true;
+}

@@ -55,10 +55,20 @@ function requireStepValues(source, name, values) {
 export function verifyProductionWorkflowStateContract(source) {
   const producerName = "Verify accepted production environment policy before external access";
   requireOrdered(source, [
+    "Verify previous production release entry before cutover",
     "Render disabled preflight configuration",
     producerName,
     "Verify every external control plane before production mutation",
     "Promote exact rollback-compatible RunPod image without execution",
+  ]);
+  requireOrdered(source, [
+    "Promote exact rollback-compatible RunPod image without execution",
+    "Deploy exact application candidate with admission paused",
+    "Drain old provider before changing new-attempt selection",
+    "Quiesce the expired previous production authorization",
+    "Deploy bounded controller after admission drain",
+    "Select Cloud Run while keeping admission paused",
+    "Verify exact-one L4 authorization and activate admission",
   ]);
   const producer = stepBlock(source, producerName);
   for (const required of [
@@ -123,7 +133,33 @@ export function verifyProductionWorkflowStateContract(source) {
   requireOrdered(source, finalizeSteps);
   requireStepValues(source, "Validate bounded production operation inputs", [
     "PRODUCTION_FINALIZE_ENTRY_STAGE: ${{ inputs.finalize_entry_stage }}",
+    "PREVIOUS_PRODUCTION_RUN_ID: ${{ inputs.previous_production_run_id }}",
     "pnpm run production:promotion:inputs:verify",
+  ]);
+  requireStepValues(source, "Verify previous production release entry before cutover", [
+    "if: inputs.operation == 'cutover'",
+    "PREVIOUS_PRODUCTION_RUN_ID: ${{ inputs.previous_production_run_id }}",
+    "pnpm run --silent production:upgrade:entry resolve",
+    "pnpm run --silent production:upgrade:entry export",
+  ]);
+  requireStepValues(source, "Export verified previous production upgrade entry", [
+    "PREVIOUS_PRODUCTION_RUN_ID: ${{ inputs.previous_production_run_id }}",
+    "pnpm run --silent production:upgrade:entry resolve",
+    "pnpm run --silent production:upgrade:entry export",
+    '>>"${GITHUB_ENV}"',
+  ]);
+  requireStepValues(source, "Deploy exact application candidate with admission paused", [
+    "SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_ADMISSION: paused",
+    "SCRIBE_DROP_PRODUCTION_GPU_EXECUTION_POLICY: cloud_run_jobs_l4_v1",
+    "pnpm run cloudflare:readback:production",
+  ]);
+  requireStepValues(source, "Quiesce the expired previous production authorization", [
+    "GOOGLE_OAUTH_ACCESS_TOKEN:",
+    "pnpm run cloud-run:controller:deploy quiesce production disabled",
+  ]);
+  requireStepValues(source, "Deploy bounded controller after admission drain", [
+    "GOOGLE_OAUTH_ACCESS_TOKEN:",
+    "pnpm run cloud-run:controller:deploy apply production smoke",
   ]);
   requireStepValues(source, finalizeSteps[0], [
     "GOOGLE_OAUTH_ACCESS_TOKEN:",
@@ -189,6 +225,7 @@ export function verifyProductionWorkflowStateContract(source) {
     throw new Error("Production operational epoch must be stable across finalize retries");
   }
   return {
+    cutoverMutationCount: 8,
     finalizeMutationCount: 4,
     finalizePrefixStateCount: productionFinalizeStages.length,
     policyProducer: producerName,

@@ -34,6 +34,25 @@ test("accepts only the completed staging state", async ({ page }) => {
   await expect(waitForStagingJobCompletion(page, 5_000)).resolves.toBeUndefined();
 });
 
+test("stops the staging wait at the bounded detail-polling error", async ({ page }) => {
+  const backend = await installMockBackend(page, {
+    detailStatuses: ["SUBMISSION_PENDING"],
+    failDetailRequestsAt: [2, 3, 4],
+  });
+  await page.clock.install();
+  await page.goto(`/jobs/${JOB_ID}`);
+  await expect(page.getByText("処理待ち", { exact: true }).first()).toBeVisible();
+  const completion = expect(waitForStagingJobCompletion(page, 30_000)).rejects.toThrow(
+    "bounded failure limit",
+  );
+
+  for (const expectedRequests of [2, 3, 4]) {
+    await page.clock.fastForward(5_000);
+    await expect.poll(() => backend.detailRequests).toBe(expectedRequests);
+  }
+  await completion;
+});
+
 test("accepts only FAILED for a staging failure fixture", async ({ page }) => {
   await installMockBackend(page, {
     detailStatuses: ["FAILED"],

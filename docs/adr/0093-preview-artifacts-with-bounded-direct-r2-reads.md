@@ -24,10 +24,14 @@ capabilityと組み合わせて初めてreadできる。
 - R2 CORSはenvironmentごとの単一exact Web originに対して、既存`POST`、`PUT`、`DELETE`に`GET`だけを
   追加する。wildcard origin/header、credentialed CORS、`HEAD`、bucket listingは許可しない。
 - preview対象はD1のartifact sizeが5 MiB以下のMarkdown、JSON、SRTだけとする。responseの
-  `Content-Type`、`Content-Length`、streaming byte countを期待format/sizeと完全一致させ、5 MiBを
-  超える前にstreamをcancelする。UTF-8はfatal decodeし、不正encodingを表示しない。
-- GET capabilityは`Cache-Control: no-store`をresponse overrideへ署名する。browser fetchも
-  `cache: no-store`、`credentials: omit`、`redirect: error`、`referrerPolicy: no-referrer`を指定する。
+  `Cache-Control: no-store`、`Content-Type`、streaming byte countを期待値と完全一致させ、5 MiBを超える前に
+  streamをcancelする。`Content-Length`は存在する場合だけ安全な整数とD1 sizeとの完全一致を要求し、R2が省略する
+  場合は上限付きstreamの最終byte数を唯一のresponse size証明とする。UTF-8はfatal decodeし、不正encodingを表示しない。
+- browserが返された`Content-Length`を検証できるよう、R2 CORSの`ExposeHeaders`へ同headerを固定し、environment
+  parity gateで完全一致を検証する。CORS設定はresponseに存在しないheaderを生成するものとは扱わない。
+- artifact uploadはR2が正式に対応するsystem metadataとして`Cache-Control: no-store`を保存し、GET capabilityへ
+  S3互換表にないresponse overrideを追加しない。browser fetchも`cache: no-store`、`credentials: omit`、
+  `redirect: error`、`referrerPolicy: no-referrer`を指定する。
 - modalはraw textだけをReact text nodeとして表示し、Markdown/HTMLをrenderしない。native `dialog`で
   focus containment、Escape、初期focus、triggerへのfocus復帰を提供する。
 - modalを閉じた時、別request開始時、component unmount時はfetchをabortし、本文stateを破棄する。
@@ -36,6 +40,8 @@ capabilityと組み合わせて初めてreadできる。
 - 5 MiB超、期限切れ、削除競合、CORS/network failure、encoding/size不一致でも既存download操作は維持する。
 - staging acceptanceは実R2からのpreview、clipboard copy、同じbyte列のdownloadをSHA-256で照合する。
   CORS GETとWeb runtime変更を含むため既存staging evidenceは無効とし、新candidateで再検証する。
+- staging E2Eは本文、署名URL、request IDを出力せず、capability、URL、fetch、HTTP、metadata、size、encodingの
+  安全な失敗分類だけを出力する。分類不能な失敗も明示的に拒否する。
 
 ## Consequences
 

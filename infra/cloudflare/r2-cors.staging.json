@@ -16,7 +16,7 @@
           "amz-sdk-request"
         ]
       },
-      "exposeHeaders": ["ETag"],
+      "exposeHeaders": ["ETag", "Content-Length"],
       "maxAgeSeconds": 3600
     }
   ]

@@ -1,17 +1,29 @@
 import type { OutputFormat } from "@scribe-drop/contracts";
 
-import { apiClient, type ScribeDropApiClient } from "./api-client.js";
+import {
+  ApiClientError,
+  apiClient,
+  type ApiClientErrorKind,
+  type ScribeDropApiClient,
+} from "./api-client.js";
 
 export const MAX_ARTIFACT_PREVIEW_BYTES = 5 * 1024 * 1024;
 
 export type ArtifactPreviewErrorCode =
+  | "cache_control_mismatch"
+  | "content_type_mismatch"
   | "fetch_failed"
+  | "http_failure"
   | "invalid_encoding"
+  | "invalid_content_length"
   | "invalid_request"
-  | "invalid_response"
   | "invalid_url"
+  | "missing_body"
   | "oversized"
   | "size_mismatch";
+
+export type ArtifactPreviewFailureCode =
+  ArtifactPreviewErrorCode | `capability_${ApiClientErrorKind}` | "unexpected";
 
 export class ArtifactPreviewError extends Error {
   readonly code: ArtifactPreviewErrorCode;
@@ -66,14 +78,17 @@ function validateCapabilityUrl(value: string): string {
   return url.href;
 }
 
-function parseContentLength(response: Response): number {
+function parseContentLength(response: Response): number | undefined {
   const rawLength = response.headers.get("Content-Length");
-  if (rawLength === null || !/^(0|[1-9][0-9]*)$/u.test(rawLength)) {
-    throw new ArtifactPreviewError("invalid_response");
+  if (rawLength === null) {
+    return undefined;
+  }
+  if (!/^(0|[1-9][0-9]*)$/u.test(rawLength)) {
+    throw new ArtifactPreviewError("invalid_content_length");
   }
   const contentLength = Number(rawLength);
   if (!Number.isSafeInteger(contentLength)) {
-    throw new ArtifactPreviewError("invalid_response");
+    throw new ArtifactPreviewError("invalid_content_length");
   }
   return contentLength;
 }
@@ -83,18 +98,24 @@ function validateResponseMetadata(
   format: OutputFormat,
   expectedSizeBytes: number,
 ): void {
-  if (!response.ok || response.body === null) {
-    throw new ArtifactPreviewError("invalid_response");
+  if (!response.ok) {
+    throw new ArtifactPreviewError("http_failure");
+  }
+  if (response.body === null) {
+    throw new ArtifactPreviewError("missing_body");
+  }
+  if (response.headers.get("Cache-Control")?.trim().toLowerCase() !== "no-store") {
+    throw new ArtifactPreviewError("cache_control_mismatch");
   }
   const mediaType = response.headers.get("Content-Type")?.split(";", 1)[0]?.trim().toLowerCase();
   if (mediaType !== expectedContentTypes[format]) {
-    throw new ArtifactPreviewError("invalid_response");
+    throw new ArtifactPreviewError("content_type_mismatch");
   }
   const contentLength = parseContentLength(response);
-  if (contentLength > MAX_ARTIFACT_PREVIEW_BYTES) {
+  if (contentLength !== undefined && contentLength > MAX_ARTIFACT_PREVIEW_BYTES) {
     throw new ArtifactPreviewError("oversized");
   }
-  if (contentLength !== expectedSizeBytes) {
+  if (contentLength !== undefined && contentLength !== expectedSizeBytes) {
     throw new ArtifactPreviewError("size_mismatch");
   }
 }
@@ -112,7 +133,7 @@ async function cancelResponseBody(response: Response): Promise<void> {
 
 async function readBoundedUtf8(response: Response, expectedSizeBytes: number): Promise<string> {
   if (response.body === null) {
-    throw new ArtifactPreviewError("invalid_response");
+    throw new ArtifactPreviewError("missing_body");
   }
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -160,6 +181,16 @@ async function readBoundedUtf8(response: Response, expectedSizeBytes: number): P
   } catch {
     throw new ArtifactPreviewError("invalid_encoding");
   }
+}
+
+export function artifactPreviewFailureCode(error: unknown): ArtifactPreviewFailureCode {
+  if (error instanceof ArtifactPreviewError) {
+    return error.code;
+  }
+  if (error instanceof ApiClientError) {
+    return `capability_${error.kind}`;
+  }
+  return "unexpected";
 }
 
 export async function requestArtifactPreview(

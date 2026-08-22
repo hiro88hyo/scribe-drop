@@ -23,6 +23,7 @@ function fixture() {
   const jobs = [
     job("Verify immutable candidate, acceptance, and operation inputs", "success", [
       step("Validate bounded production operation inputs"),
+      step("Verify previous production release entry before cutover"),
       step("Validate release and staging run identities"),
       step("Download and inspect immutable staging evidence"),
       step("Download and verify both exact candidates"),
@@ -32,15 +33,17 @@ function fixture() {
     job("Cut over safely and open exactly one production smoke slot", "success", [
       step("Download acceptance and export exact candidate identity"),
       step("Download and re-verify exact candidates"),
+      step("Export verified previous production upgrade entry"),
       step("Build verifier and strictly read production foundation"),
       step("Render disabled preflight configuration"),
       step("Verify accepted production environment policy before external access"),
       step("Verify every external control plane before production mutation"),
       step("Apply candidate migrations and reviewed R2 policies", "skipped"),
       step("Promote exact rollback-compatible RunPod image without execution", "skipped"),
-      step("Deploy bounded controller behind the existing RunPod selection", "skipped"),
       step("Deploy exact application candidate with admission paused", "skipped"),
       step("Drain old provider before changing new-attempt selection", "skipped"),
+      step("Quiesce the expired previous production authorization", "skipped"),
+      step("Deploy bounded controller after admission drain", "skipped"),
       step("Select Cloud Run while keeping admission paused", "skipped"),
       step("Verify exact-one L4 authorization and activate admission", "skipped"),
       step("Record immutable cutover evidence", "skipped"),
@@ -75,7 +78,9 @@ test("accepts only a successful mutation-free production preflight", () => {
 
 test("rejects a preflight that ran a production mutation", () => {
   const value = fixture();
-  value.jobs.jobs[1].steps[6].conclusion = "success";
+  value.jobs.jobs[1].steps.find(
+    (candidate) => candidate.name === "Apply candidate migrations and reviewed R2 policies",
+  ).conclusion = "success";
   assert.throws(
     () => verifyProductionPreflightRun(value.run, value.jobs, expected),
     /migrations.*skipped/u,

@@ -6,6 +6,8 @@ import {
   type AccessServiceCredentials,
 } from "./access-service-credentials.js";
 
+const STAGING_ACCESS_REQUEST_TIMEOUT_MS = 30_000;
+
 export function requireStagingEnvironment(name: string): string {
   const value = process.env[name];
   if (value === undefined || value.length === 0) {
@@ -66,7 +68,11 @@ export function createStagingAccessRouteHandler(
 
       // The route is registered only for the exact application origin. The
       // browser follows redirects and sends R2 requests without this adapter.
-      const response = await route.fetch({ headers, maxRedirects: 0 });
+      const response = await route.fetch({
+        headers,
+        maxRedirects: 0,
+        timeout: STAGING_ACCESS_REQUEST_TIMEOUT_MS,
+      });
       await route.fulfill({ response });
     } catch {
       // route.fetch errors can include request headers in their diagnostic

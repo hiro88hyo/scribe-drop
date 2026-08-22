@@ -72,6 +72,17 @@
 - stagingとproductionはresourceとsecretを分離するが、application artifact、RunPod image digest、migration集合は同一candidateを使用する。
 - production deployは任意のbranch、commit、image、local buildを入力に取らず、成功したstaging evidenceに紐付くcandidateだけを昇格する。
 - code、dependency、migration、deployment設定を変更した時点で既存のstaging evidenceを無効とし、candidateのbuildとstaging acceptanceをやり直す。
+- remote publish、image build、staging acceptance、recoveryのwall-clockを料金と同等以上に重いrelease budgetとして扱う。下流で発見できる
+  不備を残したまま長時間のworkflowをdispatchすることや、成功済みprefixを安易に再実行することを許容しない。
+- candidate artifact、image digest、migration集合、render済みlive設定を変更しないworkflow、verifier、test、文書だけの修正は、上記の
+  evidence無効化を理由に同一内容を再buildしない。ancestor candidateとの内容同一性、source run、成功済みstep、current live stateを
+  source-managed verifierで結び直し、短命evidenceだけを再発行する。安全な再利用経路が未実装なら、再buildで回避せず先にその経路と
+  state-machine testを実装する。
+- publishまたは実service lifecycle後に失敗したworkflowは、最後に証明済みのcheckpointから未完了suffixだけを再開する。artifact内容が
+  実際に変わったことを機械的に証明できない限りcandidate buildへ戻らず、E2E本体が成功済みなら追加GPU executionを行わない。
+- production昇格前には、各immutable candidateについて実service staging E2Eを最初から最後まで少なくとも1回成功させる。この初回の
+  完全E2Eをmock、部分実行、過去candidateの結果で代替しない。一方、その同一candidateの完全E2E本体が成功した後の通知、cleanup、
+  read-back、evidence発行だけの失敗では、E2E本体を再実行せず上記checkpoint resumeを使用する。
 - mock E2Eやunit testは実service staging acceptanceの代替にしない。変更経路を固定dummy dataで実R2、Queue、RunPod、成果物downloadまで検証する。
 - OSやbrowser固有のfile picker、PWA、offline動作を変更した場合は、対象実機のstaging smokeも必須とする。
 - deploy前後に実resourceをread-backし、許可したenvironment固有値以外の構成差分を拒否する。

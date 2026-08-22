@@ -1,6 +1,6 @@
 {
   "name": "scribe-drop",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.17.0",
@@ -72,6 +72,7 @@
     "production:promotion:inputs:verify": "node scripts/verify-production-promotion-inputs.mjs",
     "production:dispatch:verify": "node scripts/verify-ci-workflows.mjs && node scripts/verify-production-workflow-state-contract.mjs",
     "production:preflight:verify": "node scripts/verify-production-preflight-run.mjs",
+    "production:upgrade:entry": "node scripts/production-upgrade-entry.mjs",
     "production:environment:verify": "node scripts/verify-production-environment-contract.mjs",
     "production:finalize:entry:verify": "node scripts/verify-production-finalize-entry.mjs",
     "production:workflow:verify": "node scripts/verify-production-workflow-state-contract.mjs",
