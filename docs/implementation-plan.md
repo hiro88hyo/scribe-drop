@@ -2170,6 +2170,16 @@ staging acceptance remediation（2026-08-22）:
   `reservedExecutions`は現在稼働数ではなくepoch内の累積消費数であるため、0固定をせず、evidence上限内かつ
   `reservedWorstCaseJpy = reservedExecutions * 250`の完全一致を許可する。上限超過、active execution、epoch・期限・budget driftは
   引き続き拒否し、mutationは行わない。
+- bounded reservation修正後のGPU-free staging evidence recovery `32571641642`は、同じcandidate `7fb37b5`とsource staging
+  lifecycle `32563919828`を再検証し、build、publish、GPU、staging mutationをすべてskipして成功した。mutation-free production
+  preflight `32571778914`は、前回release evidence、累積reservation 1件/250円、active execution 0、全control planeをmutation前に
+  read-backし、production mutationとGPU枠確保をすべてskipして成功した。
+- production cutover `32571969400`は同じcandidateとstaging evidenceを使用し、migration/R2 policy、RunPod image、application、
+  provider drain、旧authorization停止、controller、Cloud Run選択を順に適用してexact-one L4 smoke枠だけを開いた。実画面job
+  `01M0MP29SM4QF6034PBDEN5QQC`はCloud Run workerの`cloud-run-one-shot:ok`、3 artifact、manifest、正の処理時間、cleanup、Discord通知を
+  成功した。production finalize `32572808971`はmutation前にこの完全なsmoke lifecycleを再検証し、smoke枠を無効化して、最大5件、
+  上限1,250円、有効期限2026-08-23 12:20 UTCの有限運用枠を適用した。最終parity、Access、secret read-backとimmutable production
+  release evidence uploadまで成功し、candidateの再build、再publish、追加staging E2E、追加GPU実行は行っていない。
 
 実装:
 
