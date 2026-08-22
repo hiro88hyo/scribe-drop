@@ -41,6 +41,7 @@ test("stops the staging wait at the bounded detail-polling error", async ({ page
   });
   await page.clock.install();
   await page.goto(`/jobs/${JOB_ID}`);
+  await expect(page.getByText("処理待ち", { exact: true }).first()).toBeVisible();
   const completion = expect(waitForStagingJobCompletion(page, 30_000)).rejects.toThrow(
     "bounded failure limit",
   );
