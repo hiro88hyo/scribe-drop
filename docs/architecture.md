@@ -59,8 +59,9 @@ AWS SDK、React、HTTP clientはdomainから外し、時刻、乱数、外部API
    検証する。active attemptとversionのCASを満たす一つだけがjobを`COMPLETED`にする。
    同じCronの通知境界は未通知の`COMPLETED`と`FAILED`を集中走査してnotification outboxを
    作り、失敗経路ごとのenqueue漏れを防ぐ。
-7. Browserはowner検証済みAPIから操作時だけexact artifact GET capabilityを取得して
-   downloadする。API responseやartifact本文をservice workerへ渡さない。
+7. Browserはowner検証済みAPIから操作時だけexact artifact GET capabilityを取得してdownloadする。
+   5 MiB以下ではR2をbounded streaming readし、size、content type、UTF-8を検証してraw text modalへ
+   一時表示・明示copyできる。API responseやartifact本文をservice workerまたはbrowser storageへ渡さない。
 
 ## 状態遷移と競合制御
 

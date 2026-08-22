@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 
 import { expect, test, type Download } from "@playwright/test";
@@ -162,11 +163,45 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
 
     await waitForStagingJobCompletion(page);
 
+    await context.grantPermissions(["clipboard-read", "clipboard-write"], {
+      origin: new URL(baseURL).origin,
+    });
+    const previewTrigger = page.getByRole("button", {
+      name: "Markdownをブラウザで確認",
+    });
+    await previewTrigger.click();
+    const previewDialog = page.getByRole("dialog", {
+      name: "Markdownをブラウザで確認",
+    });
+    await expect(previewDialog).toBeVisible();
+    const previewDigest = await previewDialog.locator("pre").evaluate(async (element) => {
+      const bytes = new TextEncoder().encode(element.textContent);
+      const digest = await crypto.subtle.digest("SHA-256", bytes);
+      return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(
+        "",
+      );
+    });
+    expect(previewDigest).toMatch(/^[0-9a-f]{64}$/u);
+    await previewDialog.getByRole("button", { name: "クリップボードにコピー" }).click();
+    await expect(previewDialog.getByText("コピーしました。")).toBeVisible();
+    const clipboardDigest = await page.evaluate(async () => {
+      const bytes = new TextEncoder().encode(await navigator.clipboard.readText());
+      const digest = await crypto.subtle.digest("SHA-256", bytes);
+      return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(
+        "",
+      );
+    });
+    expect(clipboardDigest).toBe(previewDigest);
+    await page.keyboard.press("Escape");
+    await expect(previewDialog).toBeHidden();
+    await expect(previewTrigger).toBeFocused();
+
     for (const [label, filename, validate] of [
       [
         "Markdownをダウンロード",
         "transcript.md",
         (content: Buffer) => {
+          expect(createHash("sha256").update(content).digest("hex")).toBe(previewDigest);
           expect(content.toString("utf8")).toContain("# Transcript");
         },
       ],

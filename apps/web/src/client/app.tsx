@@ -19,9 +19,14 @@ import {
   useParams,
 } from "react-router";
 import { useEffect, useRef, useState } from "react";
-import type { ChangeEvent, DragEvent, JSX, SyntheticEvent } from "react";
+import type { ChangeEvent, DragEvent, JSX, KeyboardEvent, SyntheticEvent } from "react";
 
 import { requestArtifactDownload } from "./artifact-download.js";
+import {
+  MAX_ARTIFACT_PREVIEW_BYTES,
+  ArtifactPreviewError,
+  requestArtifactPreview,
+} from "./artifact-preview.js";
 import { apiClient } from "./api-client.js";
 import { normalizeSelectedMediaType } from "./media-selection.js";
 import {
@@ -667,11 +672,19 @@ function DetailContent({ job, onDeleted, onRefresh }: DetailContentProps): JSX.E
                   <strong>{formatOutputFormats([artifact.format])}</strong>
                   <span>{formatByteSize(artifact.sizeBytes)}</span>
                 </div>
-                <ArtifactDownloadButton
-                  format={artifact.format}
-                  jobId={job.id}
-                  label={formatOutputFormats([artifact.format])}
-                />
+                <div className="artifact-actions">
+                  <ArtifactPreviewButton
+                    format={artifact.format}
+                    jobId={job.id}
+                    label={formatOutputFormats([artifact.format])}
+                    sizeBytes={artifact.sizeBytes}
+                  />
+                  <ArtifactDownloadButton
+                    format={artifact.format}
+                    jobId={job.id}
+                    label={formatOutputFormats([artifact.format])}
+                  />
+                </div>
               </li>
             ))}
           </ul>
@@ -892,6 +905,220 @@ interface ArtifactDownloadButtonProps {
   readonly format: OutputFormat;
   readonly jobId: string;
   readonly label: string;
+}
+
+interface ArtifactPreviewButtonProps {
+  readonly format: OutputFormat;
+  readonly jobId: string;
+  readonly label: string;
+  readonly sizeBytes: number;
+}
+
+type ArtifactPreviewState =
+  | { readonly status: "idle" }
+  | { readonly status: "loading" }
+  | { readonly message: string; readonly status: "error" }
+  | { readonly content: string; readonly status: "ready" };
+
+function artifactPreviewErrorMessage(error: unknown): string {
+  if (error instanceof ArtifactPreviewError) {
+    if (error.code === "oversized") {
+      return "ブラウザ表示の上限を超えています。ダウンロードして確認してください。";
+    }
+    if (error.code === "invalid_encoding") {
+      return "成果物をUTF-8テキストとして表示できません。ダウンロードして確認してください。";
+    }
+    if (error.code === "size_mismatch") {
+      return "成果物のサイズを確認できませんでした。時間をおいて再試行してください。";
+    }
+    return "成果物を表示できませんでした。時間をおいて再試行してください。";
+  }
+  return toUiError(error).message;
+}
+
+function ArtifactPreviewButton({
+  format,
+  jobId,
+  label,
+  sizeBytes,
+}: ArtifactPreviewButtonProps): JSX.Element {
+  const controller = useRef<AbortController | undefined>(undefined);
+  const closeButton = useRef<HTMLButtonElement>(null);
+  const dialog = useRef<HTMLDialogElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "error">("idle");
+  const [state, setState] = useState<ArtifactPreviewState>({ status: "idle" });
+  const open = state.status !== "idle";
+  const oversized = sizeBytes > MAX_ARTIFACT_PREVIEW_BYTES;
+  const titleId = `artifact-preview-title-${jobId}-${format}`;
+
+  useEffect(() => {
+    if (open && dialog.current?.open === false) {
+      dialog.current.showModal();
+      closeButton.current?.focus();
+    }
+  }, [open]);
+
+  useEffect(
+    () => () => {
+      controller.current?.abort();
+    },
+    [],
+  );
+
+  const close = (): void => {
+    controller.current?.abort();
+    controller.current = undefined;
+    if (dialog.current?.open === true) {
+      dialog.current.close();
+    }
+    setCopyStatus("idle");
+    setState({ status: "idle" });
+    window.requestAnimationFrame(() => {
+      trigger.current?.focus();
+    });
+  };
+
+  const preview = (): void => {
+    controller.current?.abort();
+    const nextController = new AbortController();
+    controller.current = nextController;
+    setCopyStatus("idle");
+    setState({ status: "loading" });
+    void requestArtifactPreview(jobId, format, sizeBytes, nextController.signal)
+      .then((content) => {
+        if (!nextController.signal.aborted) {
+          setState({ content, status: "ready" });
+        }
+      })
+      .catch((previewError: unknown) => {
+        if (
+          !nextController.signal.aborted &&
+          !(previewError instanceof DOMException && previewError.name === "AbortError")
+        ) {
+          setState({ message: artifactPreviewErrorMessage(previewError), status: "error" });
+        }
+      });
+  };
+
+  const copy = (): void => {
+    if (state.status !== "ready") {
+      return;
+    }
+    setCopyStatus("idle");
+    void Promise.resolve()
+      .then(() => navigator.clipboard.writeText(state.content))
+      .then(() => {
+        setCopyStatus("copied");
+      })
+      .catch(() => {
+        setCopyStatus("error");
+      });
+  };
+
+  const containFocus = (event: KeyboardEvent<HTMLDialogElement>): void => {
+    if (event.key !== "Tab") {
+      return;
+    }
+    const focusable = Array.from(
+      event.currentTarget.querySelectorAll<HTMLElement>(
+        'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+      ),
+    );
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (first === undefined || last === undefined) {
+      event.preventDefault();
+      return;
+    }
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    } else if (!event.currentTarget.contains(document.activeElement)) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
+  return (
+    <>
+      <button
+        aria-describedby={oversized ? `${titleId}-limit` : undefined}
+        aria-label={`${label}をブラウザで確認`}
+        className="secondary-button artifact-preview-button"
+        disabled={oversized}
+        onClick={preview}
+        ref={trigger}
+        type="button"
+      >
+        プレビュー
+      </button>
+      {oversized ? (
+        <span className="artifact-preview-limit" id={`${titleId}-limit`}>
+          5 MiB超はダウンロードのみ
+        </span>
+      ) : null}
+      {open ? (
+        <dialog
+          aria-labelledby={titleId}
+          className="artifact-preview-dialog"
+          onCancel={(event) => {
+            event.preventDefault();
+            close();
+          }}
+          onKeyDown={containFocus}
+          ref={dialog}
+        >
+          <header>
+            <div>
+              <p className="eyebrow">PREVIEW</p>
+              <h2 id={titleId}>{label}をブラウザで確認</h2>
+            </div>
+            <button
+              aria-label="プレビューを閉じる"
+              className="secondary-button"
+              onClick={close}
+              ref={closeButton}
+              type="button"
+            >
+              閉じる
+            </button>
+          </header>
+          {state.status === "loading" ? <p aria-live="polite">成果物を読み込んでいます…</p> : null}
+          {state.status === "error" ? (
+            <div className="artifact-preview-feedback" role="alert">
+              <p>{state.message}</p>
+              <button className="secondary-button" onClick={preview} type="button">
+                再試行
+              </button>
+            </div>
+          ) : null}
+          {state.status === "ready" ? (
+            <>
+              <div className="artifact-preview-toolbar">
+                <button className="secondary-button" onClick={copy} type="button">
+                  クリップボードにコピー
+                </button>
+                <span aria-live="polite">
+                  {copyStatus === "copied"
+                    ? "コピーしました。"
+                    : copyStatus === "error"
+                      ? "コピーできませんでした。"
+                      : ""}
+                </span>
+              </div>
+              <pre className="artifact-preview-content" tabIndex={0}>
+                {state.content}
+              </pre>
+            </>
+          ) : null}
+        </dialog>
+      ) : null}
+    </>
+  );
 }
 
 function ArtifactDownloadButton({

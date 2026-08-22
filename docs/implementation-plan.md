@@ -2054,3 +2054,28 @@ Local gate hardening after the first Phase 16 preflight (2026-08-15):
 RunPod adapter、`runpod_submissions`、RunPod固有列は`0.2.0`に残す。rollback期間、保持期限、進行中attempt、
 監査要件がすべて終了した後、別releaseとforward-only table rebuildで除去する。これは`0.2.0`の
 完了条件へ含めず、別ADRとPhaseで扱う。
+
+### Phase 17: bounded artifact preview
+
+目的: 完了したMarkdown、JSON、SRTをdownload操作を維持したままbrowser内で安全に確認・copyできるようにする。
+
+実装:
+
+- [ADR 0093](./adr/0093-preview-artifacts-with-bounded-direct-r2-reads.md)に従い、5 MiB以下のartifactだけを
+  raw text modalへ表示する。HTML/Markdown render、search、編集、部分copyは行わない。
+- owner検証済みの既存artifact APIから操作時だけ短命capabilityを取得し、HTTPSのR2 account host allowlist、
+  no-store、credential omit、redirect拒否をbrowser境界で強制する。
+- `Content-Type`、`Content-Length`、streaming byte count、UTF-8を検証し、close、切替、unmountでabortする。
+  本文と署名URLをservice worker、browser storage、log、error、DOM attributeへ保存しない。
+- native dialogでaccessible name、初期focus、focus containment、Escape、triggerへのfocus復帰を提供し、
+  明示操作で全文をclipboardへcopyする。5 MiB超とpreview failureでもdownloadを利用可能に保つ。
+- staging/production R2 CORSの単一exact origin ruleへGETだけを追加する。environment parity verifierは
+  method/header/origin/expose/max-ageの完全集合を検査し、wildcardや追加methodを拒否する。
+- unit test、browser E2E、実staging acceptanceでbounded read、malformed UTF-8、size/content-type不一致、
+  abort、raw text表示、copy、focus、download非回帰、実R2 preview/download byte一致を検証する。
+
+完了条件:
+
+- standard lint、format、typecheck、test、build、security scanが成功する。
+- Web runtimeとR2 CORS変更を含む同一candidateが新しいstaging acceptanceを通過する。既存evidenceは再利用しない。
+- productionではstaging verified candidateを再build・修正せずdeployする。

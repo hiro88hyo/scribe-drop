@@ -169,7 +169,8 @@ DLQ/retry、CORS、lifecycle、D1 migration、PagesのGit provider無効、activ
 binding、RunPod endpointをread-backする。main QueueはR2 notificationとWeb `CONTROL_EVENTS`の
 producer 2件、Orchestrator consumer 1件を必須とする。Pagesはdeploy済みproduction
 `wrangler_config_hash`と生成した追跡外configのSHA-256も照合する。Access service tokenの
-claimと認証済み`GET /api/me`をupload前に検証し、実M4A、manifest-last、3成果物download、
+claimと認証済み`GET /api/me`をupload前に検証し、実M4A、manifest-last、Markdownのbounded preview、
+clipboard copy、同一byte digest、3成果物download、
 削除受付を確認する。続いて音声を含まない合成破損M4Aを同じ経路へ投入し、exact
 `FAILED`、現在versionのoutbox `SENT`、job/outbox送信時刻を固定Wranglerで確認する。
 failure job IDはmode `0600`のrunner一時fileだけで受け渡し、実配送確認後に同じAccess

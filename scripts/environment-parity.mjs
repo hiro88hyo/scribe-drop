@@ -4,6 +4,29 @@ import { validateRunpodPlan } from "./runpod-environment-config.mjs";
 import { parseCloudRunCandidateEvidence } from "./cloud-run-candidate-evidence.mjs";
 
 const digestPattern = /^[0-9a-f]{64}$/u;
+const expectedCorsHeaders = [
+  "authorization",
+  "content-type",
+  "x-amz-content-sha256",
+  "x-amz-date",
+  "x-amz-security-token",
+  "x-amz-user-agent",
+  "amz-sdk-invocation-id",
+  "amz-sdk-request",
+];
+const expectedCorsMethods = ["DELETE", "GET", "POST", "PUT"];
+
+function hasExactStringSet(value, expected, normalize = (entry) => entry) {
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+    return false;
+  }
+  const normalized = value.map((entry) => normalize(entry));
+  return (
+    new Set(normalized).size === normalized.length &&
+    normalized.length === expected.length &&
+    normalized.every((entry) => expected.includes(entry))
+  );
+}
 
 function requireRecord(value, name) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -44,7 +67,15 @@ function normalizedCors(untrustedCors, webOrigin, environment) {
     cors.rules[0]?.id !== `scribe-drop-browser-multipart-${environment}` ||
     !Array.isArray(cors.rules[0]?.allowed?.origins) ||
     cors.rules[0].allowed.origins.length !== 1 ||
-    cors.rules[0].allowed.origins[0] !== webOrigin
+    cors.rules[0].allowed.origins[0] !== webOrigin ||
+    !hasExactStringSet(cors.rules[0].allowed.methods, expectedCorsMethods, (entry) =>
+      entry.toUpperCase(),
+    ) ||
+    !hasExactStringSet(cors.rules[0].allowed.headers, expectedCorsHeaders, (entry) =>
+      entry.toLowerCase(),
+    ) ||
+    !hasExactStringSet(cors.rules[0].exposeHeaders, ["etag"], (entry) => entry.toLowerCase()) ||
+    cors.rules[0].maxAgeSeconds !== 3600
   ) {
     throw new Error("R2 CORS policy does not match the environment");
   }

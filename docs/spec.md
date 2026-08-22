@@ -288,7 +288,8 @@ R2のCORSは次に限定する。
 
 * Allowed Origin: environmentごとのAccess保護対象と同一の単一exact origin。stagingの
   実値は`SCRIBE_DROP_STAGING_WEB_ORIGIN`から追跡外設定へ生成する
-* Allowed Methods: `POST`、`PUT`、`DELETE`
+* Allowed Methods: `GET`、`POST`、`PUT`、`DELETE`。`GET`はowner検証後に発行した
+  単一artifactの短命presigned URLをbrowser preview/downloadする場合だけ使用する
 * Allowed Headers: AWS Signature v4とアップロードに必要なheaderだけ。stagingの
   追跡対象templateは`infra/cloudflare/r2-cors.staging.json`
 * Expose Headers: `ETag`
@@ -754,6 +755,12 @@ request bodyは空objectだけを許可し、browserが観測したETag、size�
 ### `GET /api/jobs/:id/artifacts/:format`
 
 所有権と完了状態を確認したうえで、5分間だけ有効なGET presigned URLを発行する。
+response objectは`Cache-Control: no-store`へ署名する。署名URLはdownloadまたは5 MiB以下の
+raw text previewにだけ使用し、DOM attribute、log、service worker、browser storageへ保存しない。
+
+previewはR2 responseのformat別`Content-Type`、D1と同じ`Content-Length`、streaming byte count、
+fatal UTF-8 decodeを検証する。close、切替、unmountで取得をabortし、5 MiB超または検証失敗時も
+downloadを利用可能に保つ。MarkdownはHTMLへrenderしない。
 
 許可形式:
 
@@ -1402,8 +1409,9 @@ FFPROBE_INVALID_CONTAINER
 4. 処理待ち
 5. 処理中
 6. 完了
-7. Markdownダウンロード
-8. 削除
+7. Markdownのraw text preview、clipboard copy、modal focus/Escape
+8. previewと同じMarkdownのダウンロード
+9. 削除
 
 ---
 
