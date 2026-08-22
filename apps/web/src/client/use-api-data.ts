@@ -6,6 +6,7 @@ import { apiClient } from "./api-client.js";
 import { toUiError, type UiError } from "./job-presentation.js";
 
 const JOB_POLL_INTERVAL_MILLISECONDS = 5000;
+const MAX_CONSECUTIVE_JOB_POLL_FAILURES = 3;
 const activeStatuses: ReadonlySet<JobStatus> = new Set(ACTIVE_JOB_STATUSES);
 
 export type ResourceState<Value> =
@@ -215,6 +216,7 @@ export function useJobDetail(jobId: string | undefined): {
     const controller = new AbortController();
     let pollTimer: ReturnType<typeof setTimeout> | undefined;
     let retryPollingAfterFailure = false;
+    let consecutivePollingFailures = 0;
 
     const load = async (): Promise<void> => {
       if (jobId === undefined) {
@@ -230,6 +232,7 @@ export function useJobDetail(jobId: string | undefined): {
           return;
         }
         setState({ status: "ready", value });
+        consecutivePollingFailures = 0;
         retryPollingAfterFailure = activeStatuses.has(value.status);
         if (retryPollingAfterFailure) {
           pollTimer = setTimeout(() => {
@@ -239,9 +242,14 @@ export function useJobDetail(jobId: string | undefined): {
       } catch (error) {
         if (!controller.signal.aborted && !isAbortError(error)) {
           if (retryPollingAfterFailure) {
-            pollTimer = setTimeout(() => {
-              void load();
-            }, JOB_POLL_INTERVAL_MILLISECONDS);
+            consecutivePollingFailures += 1;
+            if (consecutivePollingFailures < MAX_CONSECUTIVE_JOB_POLL_FAILURES) {
+              pollTimer = setTimeout(() => {
+                void load();
+              }, JOB_POLL_INTERVAL_MILLISECONDS);
+            } else {
+              setState({ error: toUiError(error), status: "error" });
+            }
           } else {
             setState({ error: toUiError(error), status: "error" });
           }

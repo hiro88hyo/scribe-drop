@@ -2087,6 +2087,21 @@ staging acceptance remediation（2026-08-22）:
   実行する。AST workflow contractは4 commandの完全一致と順序を要求し、orchestrator-only configへ戻す変更を
   回帰として拒否する。修正後の`pnpm check`とlocal browser E2E 26件は成功した。candidateの再build、remote
   preflight、staging redispatchは別の明示承認まで行わない。
+- remediation commit `6218594`のapplication candidate workflow `32546198892`、Cloud Run candidate workflow
+  `32546198909`、mutation-free staging preflight `32546725100`は成功した。承認済みexact 1 L4 execution、上限
+  250 JPYのstaging workflow `32550414318`では、Cloud Run GPU Jobが04:05:04 UTCに開始し、04:05:58 UTCに
+  `cloud-run-one-shot:ok`と`exit(0)`へ成功した。controller create/reconcile/attestも成功し、GPU処理失敗ではない。
+- 同workflowのbrowser E2EはGPU完了後も終了せず、04:19:50 UTCに900秒の外側timeoutとなった。失敗時の
+  stage evidenceがなかったため、preview content待ちとdownload event待ちのどちらかを事後に推測して成功根拠に
+  しない。source監査で判明した全経路を閉じ、job detail pollingは連続3回の通信失敗で明示error、previewは
+  content/error/30秒、clipboard readは10秒、各downloadはevent/error/30秒の完全なbounded outcomeにする。
+  API failure、欠落content、未発火downloadを900秒のsuite timeoutまで待たない回帰をbrowser E2Eへ追加した。
+- recovery jobはfixture削除、Cloud Run Job/Execution収束、controller authorization無効化、RunPod再選択、full
+  Cloudflare/RunPod read-backをすべて成功し、最終値はauthorization disabled、Job 0、Execution 0、reserved
+  execution 0だった。acceptance evidenceは発行せず、production deployは開始していない。bounded outcomeを含む
+  新candidateのlocal gateとstaging acceptanceが成功するまでPhase 17を完了扱いにしない。修正後の`pnpm check`、
+  local browser E2E 31件、worktree secret scan、Node High以上とPython dependency auditは成功した（既知Node
+  Moderate 1件は別dependency issueのまま）。candidate buildとremote dispatchはまだ行っていない。
 
 実装:
 

@@ -57,6 +57,7 @@ interface JobDetailFixture extends JobSummaryFixture {
 }
 
 export interface MockBackendState {
+  artifactRequests: number;
   created: boolean;
   createAttempts: number;
   deleted: boolean;
@@ -68,7 +69,9 @@ export interface MockBackendState {
 
 interface MockBackendOptions {
   readonly detailStatuses?: readonly JobStatus[];
+  readonly failArtifactRequestAt?: number;
   readonly failDetailRequestAt?: number;
+  readonly failDetailRequestsAt?: readonly number[];
   readonly failFirstCreate?: boolean;
   readonly listPrivateMarker?: boolean;
   readonly persistCreatedJobInList?: boolean;
@@ -250,6 +253,7 @@ export async function installMockBackend(
 ): Promise<MockBackendState> {
   const detailStatuses = options.detailStatuses ?? ["SUBMISSION_PENDING", "RUNNING", "COMPLETED"];
   const state: MockBackendState = {
+    artifactRequests: 0,
     created: false,
     createAttempts: 0,
     deleted: false,
@@ -338,7 +342,10 @@ export async function installMockBackend(
 
     if (request.method() === "GET" && path === `/api/jobs/${JOB_ID}`) {
       state.detailRequests += 1;
-      if (state.detailRequests === options.failDetailRequestAt) {
+      if (
+        state.detailRequests === options.failDetailRequestAt ||
+        options.failDetailRequestsAt?.includes(state.detailRequests) === true
+      ) {
         await route.abort("failed");
         return;
       }
@@ -354,6 +361,11 @@ export async function installMockBackend(
       "u",
     ).exec(path);
     if (request.method() === "GET" && artifactMatch !== null) {
+      state.artifactRequests += 1;
+      if (state.artifactRequests === options.failArtifactRequestAt) {
+        await route.abort("failed");
+        return;
+      }
       const format = artifactMatch[1];
       if (format !== "markdown" && format !== "json" && format !== "srt") {
         await route.abort("failed");
