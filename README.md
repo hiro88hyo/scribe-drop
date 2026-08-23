@@ -8,7 +8,7 @@ productionではGoogle Cloud Run JobsのL4 GPUを使用し、RunPod Serverless�
 - Cloudflare AccessによるGoogleアカウント認証
 - PC・スマートフォンからprivate R2へのmultipart upload
 - QueueとOrchestratorによる非同期処理、進捗・処理時間の表示、キャンセルと削除
-- faster-whisper `large-v3-turbo`によるCUDA/float16文字起こし
+- 日本語・英語の固定指定と自動判定に対応した、faster-whisper `large-v3-turbo`によるCUDA/float16文字起こし
 - Markdown、JSON、SRT成果物のdownload
 - 5 MiB以下の成果物をbrowser内でraw text previewし、明示操作でclipboardへcopy
 - 完了・失敗時のDiscord通知

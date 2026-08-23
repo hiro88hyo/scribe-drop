@@ -79,6 +79,13 @@ def granted_claim() -> RunpodClaimGranted:
     return RunpodClaimGranted.model_validate(
         {
             "granted": True,
+            "options": {
+                "contractVersion": 1,
+                "language": "en",
+                "model": "large-v3-turbo",
+                "outputFormats": ("markdown", "json", "srt"),
+                "vad": True,
+            },
             "source": {
                 "getUrl": (
                     "https://storage.example.invalid/bucket/"
@@ -223,24 +230,30 @@ class FakeTranscriber:
         """Configure normal or unexpected failure behavior."""
         self.operations = operations
         self.fail = fail
+        self.languages: list[str] = []
+        self.vad_values: list[bool] = []
 
     def transcribe(
         self,
         source: Path,
         *,
         duration_seconds: float,
+        language: str,
         on_segment: Callable[[], None] | None = None,
+        vad: bool,
     ) -> TranscriptionResult:
         """Return one safe segment."""
         assert source.exists()
         self.operations.append("transcribe")
+        self.languages.append(language)
+        self.vad_values.append(vad)
         if self.fail:
             detail = "https://storage.example.invalid/?X-Amz-Signature=sensitive"
             raise RuntimeError(detail)
         if on_segment is not None:
             on_segment()
         return TranscriptionResult(
-            language="ja",
+            language="ja" if language == "auto" else language,
             language_probability=0.99,
             duration_seconds=duration_seconds,
             segments=(TranscriptSegment(id=0, start=0.0, end=1.0, text="transcript text"),),
@@ -287,6 +300,7 @@ def test_winner_runs_in_security_order_and_writes_manifest_last() -> None:
     result = service.run(envelope())
 
     assert result.status == "completed"
+    assert result.detected_language == "en"
     assert operations == [
         "claim",
         "validate",

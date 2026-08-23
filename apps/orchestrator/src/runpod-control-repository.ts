@@ -3,10 +3,12 @@ import {
   attemptStatusSchema,
   jobStatusSchema,
   runpodJobIdSchema,
+  runpodExecutionOptionsSchema,
   ulidSchema,
   utcDateTimeSchema,
   type AttemptStatus,
   type JobStatus,
+  type RunpodExecutionOptions,
 } from "@scribe-drop/contracts";
 import { z } from "zod";
 
@@ -55,7 +57,7 @@ const PREPARE_SUBMISSION_SQL = `
     AND execution_contract_version = 1
     AND execution_options_json IS NOT NULL
     AND json_extract(execution_options_json, '$.contractVersion') = 1
-    AND json_extract(execution_options_json, '$.language') IN ('auto', 'ja')
+    AND json_extract(execution_options_json, '$.language') IN ('auto', 'en', 'ja')
     AND json_extract(execution_options_json, '$.model') = 'large-v3-turbo'
     AND json_type(execution_options_json, '$.vad') IN ('true', 'false')
     AND json_type(execution_options_json, '$.outputFormats') = 'array'
@@ -227,6 +229,7 @@ const FIND_CLAIM_CONTEXT_SQL = `
     attempts.heartbeat_revoked_at,
     attempts.winning_runpod_job_id,
     attempts.result_prefix,
+    attempts.execution_options_json,
     jobs.status AS job_status,
     jobs.active_attempt_id,
     jobs.source_bucket,
@@ -769,6 +772,14 @@ const claimContextRowSchema = z
     claim_issued_at: utcDateTimeSchema,
     claim_token_hash: sha256HexSchema,
     generation: z.number().int().positive(),
+    execution_options_json: z.string().transform((value, context) => {
+      try {
+        return runpodExecutionOptionsSchema.parse(JSON.parse(value));
+      } catch {
+        context.addIssue({ code: "custom", message: "Invalid execution options" });
+        return z.NEVER;
+      }
+    }),
     heartbeat_expires_at: utcDateTimeSchema.nullable(),
     heartbeat_issued_at: utcDateTimeSchema.nullable(),
     heartbeat_revoked_at: utcDateTimeSchema.nullable(),
@@ -816,6 +827,7 @@ export interface ClaimContext {
   readonly claimExpiresAt: string;
   readonly claimIssuedAt: string;
   readonly claimTokenHash: string;
+  readonly executionOptions: RunpodExecutionOptions;
   readonly generation: number;
   readonly heartbeatExpiresAt: string | null;
   readonly heartbeatIssuedAt: string | null;
@@ -939,6 +951,7 @@ function mapClaimContext(row: z.infer<typeof claimContextRowSchema>): ClaimConte
     claimIssuedAt: row.claim_issued_at,
     claimTokenHash: row.claim_token_hash,
     generation: row.generation,
+    executionOptions: row.execution_options_json,
     heartbeatExpiresAt: row.heartbeat_expires_at,
     heartbeatIssuedAt: row.heartbeat_issued_at,
     heartbeatRevokedAt: row.heartbeat_revoked_at,

@@ -7,11 +7,20 @@ import {
   boundedResultManifestSchema,
 } from "./bounded-execution.js";
 
-describe("bounded execution v2 schemas", () => {
+describe("bounded execution v2 and result manifest v3 schemas", () => {
   it("accepts the shared exact-format fixture", () => {
     expect(boundedExecutionOptionsSchema.safeParse(fixture.options).success).toBe(true);
     expect(boundedResultCapabilitiesSchema.safeParse(fixture.capabilities).success).toBe(true);
     expect(boundedResultManifestSchema.safeParse(fixture.manifest).success).toBe(true);
+  });
+
+  it("accepts English and rejects unknown execution languages", () => {
+    expect(
+      boundedExecutionOptionsSchema.safeParse({ ...fixture.options, language: "en" }).success,
+    ).toBe(true);
+    expect(
+      boundedExecutionOptionsSchema.safeParse({ ...fixture.options, language: "en-US" }).success,
+    ).toBe(false);
   });
 
   it.each([
@@ -28,7 +37,7 @@ describe("bounded execution v2 schemas", () => {
     ).toBe(false);
   });
 
-  it("rejects extra, missing, reordered, and v1 manifest artifacts", () => {
+  it("rejects language drift, extra, missing, reordered, and old manifest artifacts", () => {
     const manifest = fixture.manifest as {
       artifacts: unknown[];
       requestedFormats: string[];
@@ -38,6 +47,18 @@ describe("bounded execution v2 schemas", () => {
       boundedResultManifestSchema.safeParse({
         ...manifest,
         artifacts: manifest.artifacts.slice(0, 1),
+      }).success,
+    ).toBe(false);
+    expect(
+      boundedResultManifestSchema.safeParse({
+        ...manifest,
+        detectedLanguage: "ja",
+      }).success,
+    ).toBe(false);
+    expect(
+      boundedResultManifestSchema.safeParse({
+        ...manifest,
+        requestedLanguage: "en-US",
       }).success,
     ).toBe(false);
     expect(
@@ -68,7 +89,7 @@ describe("bounded execution v2 schemas", () => {
         }),
       }).success,
     ).toBe(false);
-    expect(boundedResultManifestSchema.safeParse({ ...manifest, schemaVersion: 1 }).success).toBe(
+    expect(boundedResultManifestSchema.safeParse({ ...manifest, schemaVersion: 2 }).success).toBe(
       false,
     );
     expect(boundedResultManifestSchema.safeParse({ ...manifest, token: "forbidden" }).success).toBe(

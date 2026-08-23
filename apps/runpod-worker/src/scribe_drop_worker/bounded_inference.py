@@ -116,11 +116,10 @@ class BoundedInferenceCoordinator:
         return self._prompt.value or None
 
     def _requested_language(self) -> str | None:
-        if self._options.language == "ja":
-            return "ja"
-        if self._language_result is None:
-            return None
-        return self._language_result.language
+        if self._options.language != "auto":
+            return self._options.language
+        language_result = self._language_result
+        return None if language_result is None else language_result.language
 
     def _bind_language(
         self,

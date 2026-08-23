@@ -20,7 +20,7 @@ from .bounded_contracts import (
     HttpsCapabilityUrlV2,
     ManifestArtifactV2,
     OutputFormatV2,
-    ResultManifestV2,
+    ResultManifestV3,
     ResultObjectKey,
     validate_https_capability_url,
 )
@@ -125,7 +125,7 @@ class StreamingArtifactUploadPort(Protocol):
 class PublishedResult:
     """Safe counters and the exact manifest produced by one publication."""
 
-    manifest: ResultManifestV2
+    manifest: ResultManifestV3
     artifact_count: int
 
 
@@ -271,12 +271,14 @@ class BoundedArtifactPublisher:
                 )
             if on_progress is not None:
                 on_progress()
-        manifest = ResultManifestV2(
+        manifest = ResultManifestV3(
             schemaVersion=RESULT_MANIFEST_SCHEMA_VERSION,
             executionContractVersion=EXECUTION_CONTRACT_VERSION,
             jobId=plan.job_id,
             attemptId=plan.attempt_id,
             complete=True,
+            requestedLanguage=plan.options.language,
+            detectedLanguage=plan.metadata.language,
             requestedFormats=plan.options.output_formats,
             artifacts=tuple(manifest_artifacts),
         )

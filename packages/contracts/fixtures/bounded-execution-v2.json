@@ -29,14 +29,16 @@
     ],
     "attemptId": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
     "complete": true,
+    "detectedLanguage": "en",
     "executionContractVersion": 2,
     "jobId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    "requestedLanguage": "en",
     "requestedFormats": ["markdown", "json"],
-    "schemaVersion": 2
+    "schemaVersion": 3
   },
   "options": {
     "contractVersion": 2,
-    "language": "ja",
+    "language": "en",
     "model": "large-v3-turbo",
     "outputFormats": ["markdown", "json"],
     "vad": false

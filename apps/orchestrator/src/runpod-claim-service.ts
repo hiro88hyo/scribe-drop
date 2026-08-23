@@ -241,6 +241,7 @@ export async function claimRunpodExecution(
       token: heartbeat.raw,
       url: new URL("/internal/runpod/heartbeat", environment.RUNPOD_INTERNAL_BASE_URL).toString(),
     },
+    options: context.executionOptions,
     results: {
       jsonPutUrl: capabilities.jsonPutUrl,
       manifestPutUrl: capabilities.manifestPutUrl,

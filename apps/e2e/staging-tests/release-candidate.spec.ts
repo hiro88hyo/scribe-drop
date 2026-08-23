@@ -87,6 +87,7 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
     });
     const title = `Release candidate ${requireStagingEnvironment("GITHUB_SHA").slice(0, 12)}`;
     await page.getByLabel("タイトル").fill(title);
+    await page.getByLabel("言語").selectOption("en");
     for (const label of ["Markdown", "JSON", "SRT"]) {
       await page.getByLabel(label, { exact: true }).check();
     }
@@ -104,6 +105,12 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
     );
     await uploadButton.click();
     const createResponse = await createJobResponse;
+    const createRequestBody = JSON.parse(createResponse.request().postData() ?? "") as unknown;
+    expect(createRequestBody).toEqual(
+      expect.objectContaining({
+        options: expect.objectContaining({ language: "en" }),
+      }),
+    );
     const createRequestHeaders = await createResponse.request().allHeaders();
     const fetchSite = createRequestHeaders["sec-fetch-site"];
     const requestSecurityObservation = [
@@ -203,6 +210,7 @@ test("promotes a synthetic Android M4A through the real staging lifecycle", asyn
           const transcript = JSON.parse(content.toString("utf8")) as unknown;
           expect(transcript).toEqual(
             expect.objectContaining({
+              language: "en",
               schemaVersion: 1,
               segments: expect.any(Array),
             }),

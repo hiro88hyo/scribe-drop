@@ -321,12 +321,12 @@ Service/security、IAM、Firestoreは同じdeployment expectationから導出し
 [ADR 0069](./adr/0069-use-bounded-memory-transcription-windows.md)を採用する場合、providerに依存せず次を
 既存controlへ統合する。offline gateと採用ADRが完了するまでは現行runtimeのsecurity controlではない。
 
-| Threat                            | Proposed control                                                                                                       | Required evidence                                                   |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| 長時間mediaのmemory amplification | single-pass decode、15分core/30秒context、bounded buffer/spool/artifact、3 GiB scratch。OOM後のresource増量retryを禁止 | 8時間合成入力、chunk境界、overlap、volume full、memory/tmpfs metric |
-| job optionsとexecutionの不一致    | attempt immutable snapshot、contract/manifest v2、selected capability、exact format集合。version推測とfallbackを禁止   | ja/auto、VAD on/off、1～3形式、v1/v2混同、extra/missing artifact    |
-| manifest keyの別attempt差し替え   | manifest自身のjob/attempt/formatと各exact object keyを再照合し、credentialなしHTTPS capabilityだけを受理               | 別attempt ULID、format/key拡張子不一致、HTTP、credential、非443 URL |
-| spool/artifactのlocal path攻撃    | `/tmp`配下のtask固有directory、exclusive create、symlink拒否、regular file、mode 0600、hard byte limit、finally削除    | 既存file/symlink、corrupt row、short/partial failure、cleanup       |
+| Threat                            | Proposed control                                                                                                                                  | Required evidence                                                                                  |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| 長時間mediaのmemory amplification | single-pass decode、15分core/30秒context、bounded buffer/spool/artifact、3 GiB scratch。OOM後のresource増量retryを禁止                            | 8時間合成入力、chunk境界、overlap、volume full、memory/tmpfs metric                                |
+| job optionsとexecutionの不一致    | attempt immutable snapshot、contract v1/v2、language-bound claim、manifest v3、selected capability、exact format集合。version推測とfallbackを禁止 | ja/en/auto、未知・方言code、VAD on/off、1～3形式、requested/detected drift、extra/missing artifact |
+| manifest keyの別attempt差し替え   | manifest自身のjob/attempt/formatと各exact object keyを再照合し、credentialなしHTTPS capabilityだけを受理                                          | 別attempt ULID、format/key拡張子不一致、HTTP、credential、非443 URL                                |
+| spool/artifactのlocal path攻撃    | `/tmp`配下のtask固有directory、exclusive create、symlink拒否、regular file、mode 0600、hard byte limit、finally削除                               | 既存file/symlink、corrupt row、short/partial failure、cleanup                                      |
 
 ## Test boundary
 

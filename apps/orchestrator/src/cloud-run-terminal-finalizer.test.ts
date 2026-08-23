@@ -50,10 +50,12 @@ const manifest = {
   ],
   attemptId: ATTEMPT_ID,
   complete: true,
+  detectedLanguage: "en",
   executionContractVersion: 2,
   jobId: JOB_ID,
+  requestedLanguage: "auto",
   requestedFormats: ["markdown", "json"],
-  schemaVersion: 2,
+  schemaVersion: 3,
 } as const;
 
 function dependencies(
@@ -71,7 +73,7 @@ function dependencies(
 }
 
 describe("Cloud Run terminal finalizer", () => {
-  it("verifies the exact v2 manifest and every selected artifact before finalizing", async () => {
+  it("verifies the exact option-bound manifest and every selected artifact", async () => {
     const repository: CloudRunTerminalRepository = {
       finalizeFailure: () => Promise.resolve(false),
       finalizeSuccess: () => Promise.resolve(true),
@@ -103,5 +105,22 @@ describe("Cloud Run terminal finalizer", () => {
       }).finalize({ context, request }),
     ).rejects.toThrow("artifact was rejected");
     expect(vi.spyOn(repository, "finalizeSuccess")).not.toHaveBeenCalled();
+  });
+
+  it("does not finalize when the manifest language differs from the immutable options", async () => {
+    const repository: CloudRunTerminalRepository = {
+      finalizeFailure: () => Promise.resolve(false),
+      finalizeSuccess: () => Promise.resolve(true),
+    };
+    await expect(
+      new CloudRunTerminalFinalizer(
+        {} as D1Database,
+        {} as R2Bucket,
+        dependencies(repository),
+      ).finalize({
+        context: { ...context, options: { ...context.options, language: "en" } },
+        request,
+      }),
+    ).rejects.toThrow("manifest was rejected");
   });
 });

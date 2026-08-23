@@ -2,11 +2,11 @@
 
 ## Status and scope
 
-- Status: Phase 14 final synthetic staging execution succeeded; all execution resources cleaned
-- Date: 2026-08-13
+- Status: production採用済み。Phase 18 English language candidateはlocal preparation中
+- Date: 2026-08-23
 - Policy: `cloud_run_jobs_l4_v1`
-- Runtime contract: v1 bootstrap/session protocol、bounded execution contract v2、manifest v2
-- Product routing: RunPod Serverlessのまま
+- Runtime contract: v1 bootstrap/session protocol、bounded execution contract v2、manifest v3
+- Product routing: Cloud Run Jobs。RunPod Serverlessはrollback互換
 
 Phase 13はsynthetic contractとlocal fakeだけを実装した。Phase 14 local preparationでforward-only D1 schema/repositoryと
 disabled shadow namespaceを追加したが、remote D1、Cloud Run、Firestore、R2、IAM、Secret Manager、staging、production、
@@ -80,7 +80,7 @@ CycloneDX SBOMは追跡外`/tmp/scribe-drop-cloud-run-worker.cdx.json`へ生成�
 
 local integrationはidentity、controller read-back、clock、network、durable storeをfakeにし、forged signature、stale/wrong
 audience、resource drift、bootstrap/claim response loss、capability replay、heartbeat stale、terminal conflict/cancel、cleanup
-schedule response lossを検証する。Python/TypeScript共有fixtureはlanguage、VAD、selected format、exact result key、manifest v2を
+schedule response lossを検証する。Python/TypeScript共有fixtureはlanguage、VAD、selected format、exact result key、manifest v3を
 同じ値で検証する。
 
 second exact-one executionではruntime bootstrapがHTTP 500で拒否され、D1 bootstrap/event 0のまま終了した。remote D1の

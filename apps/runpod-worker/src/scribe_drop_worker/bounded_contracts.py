@@ -8,15 +8,15 @@ from urllib.parse import urlsplit
 from pydantic import Field, StringConstraints, field_validator, model_validator
 
 from .constants import MAX_URL_LENGTH
-from .contracts import Sha256Hex, StrictModel, Ulid
+from .contracts import LanguageCode, Sha256Hex, StrictModel, Ulid
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
 EXECUTION_CONTRACT_VERSION: Final = 2
-RESULT_MANIFEST_SCHEMA_VERSION: Final = 2
+RESULT_MANIFEST_SCHEMA_VERSION: Final = 3
 OutputFormatV2 = Literal["markdown", "json", "srt"]
-ExecutionLanguageV2 = Literal["ja", "auto"]
+ExecutionLanguageV2 = Literal["ja", "en", "auto"]
 CANONICAL_OUTPUT_FORMATS: Final[tuple[OutputFormatV2, ...]] = ("markdown", "json", "srt")
 ARTIFACT_FILENAMES_V2: Final[dict[OutputFormatV2, str]] = {
     "markdown": "transcript.md",
@@ -130,14 +130,16 @@ class ManifestArtifactV2(StrictModel):
     size_bytes: int = Field(alias="sizeBytes", ge=0, le=128 * 1024 * 1024)
 
 
-class ResultManifestV2(StrictModel):
-    """Completion marker for an exact execution contract v2 format set."""
+class ResultManifestV3(StrictModel):
+    """Completion marker for an exact execution contract v2 option set."""
 
-    schema_version: Literal[2] = Field(alias="schemaVersion")
+    schema_version: Literal[3] = Field(alias="schemaVersion")
     execution_contract_version: Literal[2] = Field(alias="executionContractVersion")
     job_id: Ulid = Field(alias="jobId")
     attempt_id: Ulid = Field(alias="attemptId")
     complete: Literal[True]
+    requested_language: ExecutionLanguageV2 = Field(alias="requestedLanguage")
+    detected_language: LanguageCode = Field(alias="detectedLanguage")
     requested_formats: tuple[OutputFormatV2, ...] = Field(
         alias="requestedFormats",
         min_length=1,
@@ -146,8 +148,11 @@ class ResultManifestV2(StrictModel):
     artifacts: tuple[ManifestArtifactV2, ...] = Field(min_length=1, max_length=3)
 
     @model_validator(mode="after")
-    def require_exact_artifact_set(self) -> ResultManifestV2:
-        """Bind the manifest to the canonical requested format set exactly once."""
+    def require_exact_artifact_set(self) -> ResultManifestV3:
+        """Bind the manifest to the exact language and canonical format set."""
+        if self.requested_language not in {"auto", self.detected_language}:
+            msg = "detectedLanguage must match a fixed requestedLanguage"
+            raise ValueError(msg)
         requested = canonicalize_output_formats(self.requested_formats)
         artifact_formats = tuple(artifact.format for artifact in self.artifacts)
         if self.requested_formats != requested or artifact_formats != requested:
@@ -175,7 +180,7 @@ __all__ = [
     "ManifestArtifactV2",
     "OutputFormatV2",
     "ResultCapabilitiesV2",
-    "ResultManifestV2",
+    "ResultManifestV3",
     "canonicalize_output_formats",
     "validate_https_capability_url",
 ]
