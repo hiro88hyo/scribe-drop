@@ -32,6 +32,12 @@ describe("createJobRequestSchema", () => {
         title: "a".repeat(MAX_JOB_TITLE_LENGTH),
       }).success,
     ).toBe(true);
+    expect(
+      createJobRequestSchema.safeParse({
+        ...validRequest,
+        options: { ...validRequest.options, language: "en" },
+      }).success,
+    ).toBe(true);
   });
 
   it.each([
@@ -45,6 +51,13 @@ describe("createJobRequestSchema", () => {
       },
     ],
     ["unsupported MIME", { ...validRequest, contentType: "application/octet-stream" }],
+    [
+      "unsupported language",
+      {
+        ...validRequest,
+        options: { ...validRequest.options, language: "en-US" },
+      },
+    ],
     [
       "unsupported model",
       {

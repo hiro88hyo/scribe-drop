@@ -1,4 +1,4 @@
-import type { BrowserContext, Page, Route } from "@playwright/test";
+import type { BrowserContext, Page, Request, Route } from "@playwright/test";
 
 export const JOB_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 export const PRIVATE_MARKER = "PRIVATE_E2E_JOB_MARKER";
@@ -49,7 +49,7 @@ interface JobDetailFixture extends JobSummaryFixture {
     readonly sizeBytes: number;
   }[];
   readonly options: {
-    readonly language: "ja";
+    readonly language: "auto" | "en" | "ja";
     readonly model: "large-v3-turbo";
     readonly outputFormats: readonly ["markdown", "srt", "json"];
     readonly vad: true;
@@ -60,6 +60,7 @@ export interface MockBackendState {
   artifactRequests: number;
   created: boolean;
   createAttempts: number;
+  createdLanguage: "auto" | "en" | "ja" | null;
   deleted: boolean;
   detailRequests: number;
   multipartCompleted: boolean;
@@ -99,7 +100,7 @@ function summary(status: JobStatus, title = "E2E meeting"): JobSummaryFixture {
   };
 }
 
-function detail(status: JobStatus): JobDetailFixture {
+function detail(status: JobStatus, language: "auto" | "en" | "ja"): JobDetailFixture {
   return {
     ...summary(status),
     artifacts:
@@ -114,12 +115,27 @@ function detail(status: JobStatus): JobDetailFixture {
           ]
         : [],
     options: {
-      language: "ja",
+      language,
       model: "large-v3-turbo",
       outputFormats: ["markdown", "srt", "json"],
       vad: true,
     },
   };
+}
+
+function readCreateLanguage(request: Request): "auto" | "en" | "ja" | null {
+  let body: unknown;
+  try {
+    body = JSON.parse(request.postData() ?? "") as unknown;
+  } catch {
+    return null;
+  }
+  if (typeof body !== "object" || body === null || !("options" in body)) return null;
+  const options = body.options;
+  if (typeof options !== "object" || options === null || !("language" in options)) return null;
+  return options.language === "auto" || options.language === "en" || options.language === "ja"
+    ? options.language
+    : null;
 }
 
 async function json(route: Route, body: unknown, status = 200): Promise<void> {
@@ -256,6 +272,7 @@ export async function installMockBackend(
     artifactRequests: 0,
     created: false,
     createAttempts: 0,
+    createdLanguage: null,
     deleted: false,
     detailRequests: 0,
     multipartCompleted: false,
@@ -263,6 +280,7 @@ export async function installMockBackend(
     uploadPartObserved: false,
   };
   let successfulDetailResponses = 0;
+  let detailLanguage: "auto" | "en" | "ja" = "ja";
 
   await installStorageMock(target, state, options.uploadPartDelayMilliseconds ?? 250);
   await target.route("**/api/**", async (route) => {
@@ -303,6 +321,19 @@ export async function installMockBackend(
     if (request.method() === "POST" && path === "/api/jobs") {
       state.createAttempts += 1;
       state.mutationHeadersValid &&= hasValidMutationHeaders(route);
+      const language = readCreateLanguage(request);
+      if (language === null) {
+        await json(
+          route,
+          {
+            error: { code: "INVALID_REQUEST", message: "Invalid", requestId: "dummy-e2e-request" },
+          },
+          400,
+        );
+        return;
+      }
+      state.createdLanguage = language;
+      detailLanguage = language;
       if (options.failFirstCreate === true && state.createAttempts === 1) {
         await json(
           route,
@@ -352,7 +383,7 @@ export async function installMockBackend(
       const index = Math.min(successfulDetailResponses, detailStatuses.length - 1);
       const status = detailStatuses[index] ?? "COMPLETED";
       successfulDetailResponses += 1;
-      await json(route, detail(status));
+      await json(route, detail(status, detailLanguage));
       return;
     }
 

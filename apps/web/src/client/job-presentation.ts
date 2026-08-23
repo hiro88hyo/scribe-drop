@@ -45,6 +45,12 @@ const outputFormatLabels = {
   srt: "SRT",
 } as const satisfies Readonly<Record<OutputFormat, string>>;
 
+const languageLabels = {
+  auto: "自動判定",
+  en: "英語",
+  ja: "日本語",
+} as const satisfies Readonly<Record<TranscriptionLanguage, string>>;
+
 const publicErrorMessages: Partial<Readonly<Record<PublicErrorCode, string>>> = {
   FORBIDDEN: "このデータを表示する権限がありません。",
   INTERNAL_ERROR: "サーバーで問題が発生しました。時間をおいて再試行してください。",
@@ -97,7 +103,7 @@ export function formatDateTime(value: string, timeZone?: string): string {
 }
 
 export function formatLanguage(language: TranscriptionLanguage): string {
-  return language === "ja" ? "日本語" : "自動判定";
+  return languageLabels[language];
 }
 
 export function formatDuration(seconds: number): string {

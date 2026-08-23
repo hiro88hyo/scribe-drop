@@ -366,6 +366,10 @@ timeoutでは「10分ちょうどでprovider queueから消える」と扱わな
   `pnpm cloudflare:waf:cloud-run:remove:staging`を実行する。tokenは終了後にshellから除去する。
 
 - terminal statusをD1で観測していないjobは、manifestが存在しても`COMPLETED`にしない。
+- Phase 18以降の新規jobはlanguageを`ja | en | auto`のimmutable optionsへ固定する。RunPod claimはcontract v1 options、
+  Cloud Run claimはcontract v2 optionsを返し、固定`en`を全inference windowへ渡す。Cloud Run成功はmanifest v3の
+  requested/detected languageがsnapshotと一致する場合だけfinalizeする。更新deploy前にactive provider executionをdrainし、
+  旧manifest v2 producerとv3-only finalizerを同時稼働させない。
 - 手動修復が必要でもjob/attempt/outboxを直接SQLで更新しない。同じrepositoryとserviceを
   使う専用repair commandを先に実装し、dry-run、CAS、監査eventを必須とする。
 

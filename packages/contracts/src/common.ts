@@ -8,7 +8,7 @@ export const MAX_ORIGINAL_FILENAME_LENGTH = 255;
 export const MAX_RECORDING_DURATION_SECONDS = 8 * 60 * 60;
 
 export const OUTPUT_FORMATS = ["markdown", "json", "srt"] as const;
-export const TRANSCRIPTION_LANGUAGES = ["ja", "auto"] as const;
+export const TRANSCRIPTION_LANGUAGES = ["ja", "en", "auto"] as const;
 export const TRANSCRIPTION_MODELS = ["large-v3-turbo"] as const;
 export const ALLOWED_MEDIA_TYPES = [
   "audio/flac",

@@ -26,7 +26,7 @@ beforeEach(async () => {
       ) VALUES (
         ?1, 'owner-sub', 'owner@example.invalid', 'Upload', 'source.m4a',
         'recording-transcriber-test', ?2, 'audio/mp4', 1024, 'UPLOADING',
-        '{"language":"auto","model":"large-v3-turbo","outputFormats":["markdown","json","srt"],"vad":true}',
+        '{"language":"en","model":"large-v3-turbo","outputFormats":["markdown","json","srt"],"vad":true}',
         ?3, ?3
       )
     `,
@@ -81,7 +81,7 @@ describe("D1 upload provider snapshot", () => {
     expect(row).toEqual({
       execution_contract_version: 2,
       execution_options_json:
-        '{"contractVersion":2,"language":"auto","model":"large-v3-turbo","outputFormats":["markdown","json","srt"],"vad":true}',
+        '{"contractVersion":2,"language":"en","model":"large-v3-turbo","outputFormats":["markdown","json","srt"],"vad":true}',
       execution_provider_kind: "cloud_run_jobs",
       execution_provider_policy: "cloud_run_jobs_l4_v1",
       execution_status: "PENDING",

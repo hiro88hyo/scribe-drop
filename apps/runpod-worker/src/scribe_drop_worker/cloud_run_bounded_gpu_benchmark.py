@@ -22,7 +22,7 @@ from .bounded_artifacts import (
     StreamingArtifactUploadPort,
     TranscriptMetadataV2,
 )
-from .bounded_contracts import ExecutionOptionsV2, OutputFormatV2, ResultManifestV2
+from .bounded_contracts import ExecutionOptionsV2, OutputFormatV2, ResultManifestV3
 from .bounded_decoder import FfmpegFloat32Stream, PcmStream, decode_pcm_windows
 from .bounded_inference import BoundedInferenceCoordinator, WindowWhisperModelPort
 from .bounded_transcription import PromptTail, SegmentSpool, WindowSegmentMerger
@@ -188,7 +188,7 @@ class DiscardingArtifactUpload(StreamingArtifactUploadPort):
     def put_manifest(self, url: str, content: bytes) -> None:
         """Validate and discard the exact completion marker last."""
         del url
-        ResultManifestV2.model_validate_json(content)
+        ResultManifestV3.model_validate_json(content)
         self.manifest_written = True
 
 

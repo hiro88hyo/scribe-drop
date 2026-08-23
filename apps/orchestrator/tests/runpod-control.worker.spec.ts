@@ -215,6 +215,51 @@ describe("D1 RunPod control repository", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("allows English and rejects an unknown immutable language", async () => {
+    await env.SCRIBE_DROP_DB.prepare("DELETE FROM jobs WHERE id = ?1").bind(SECOND_JOB_ID).run();
+    await seedPendingJob(
+      SECOND_JOB_ID,
+      SECOND_ATTEMPT_ID,
+      JSON.stringify({
+        contractVersion: 1,
+        language: "en",
+        model: "large-v3-turbo",
+        outputFormats: ["markdown", "json", "srt"],
+        vad: true,
+      }),
+    );
+    const repository = createD1RunpodControlRepository(env.SCRIBE_DROP_DB);
+    await expect(
+      repository.prepareSubmission({
+        claimExpiresAt: "2026-07-25T00:15:00.000Z",
+        claimTokenHash: await hashCapabilityToken(CLAIM_TOKEN),
+        jobId: SECOND_JOB_ID,
+        timestamp: NOW,
+      }),
+    ).resolves.toMatchObject({ attemptId: SECOND_ATTEMPT_ID });
+
+    await env.SCRIBE_DROP_DB.prepare("DELETE FROM jobs WHERE id = ?1").bind(SECOND_JOB_ID).run();
+    await seedPendingJob(
+      SECOND_JOB_ID,
+      SECOND_ATTEMPT_ID,
+      JSON.stringify({
+        contractVersion: 1,
+        language: "en-US",
+        model: "large-v3-turbo",
+        outputFormats: ["markdown", "json", "srt"],
+        vad: true,
+      }),
+    );
+    await expect(
+      repository.prepareSubmission({
+        claimExpiresAt: "2026-07-25T00:15:00.000Z",
+        claimTokenHash: await hashCapabilityToken(CLAIM_TOKEN),
+        jobId: SECOND_JOB_ID,
+        timestamp: NOW,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it("fails only an expired unknown submission with no recorded RunPod job", async () => {
     const repository = createD1RunpodControlRepository(env.SCRIBE_DROP_DB);
     const claimHash = await hashCapabilityToken(CLAIM_TOKEN);
@@ -714,6 +759,10 @@ describe("D1 RunPod control repository", () => {
     const claim = runpodClaimResponseSchema.parse(await claimResponse.json());
     expect(claim).toMatchObject({
       granted: true,
+      options: {
+        contractVersion: 1,
+        language: "auto",
+      },
       source: {
         expectedEtag: "etag",
         expectedSizeBytes: 1024,

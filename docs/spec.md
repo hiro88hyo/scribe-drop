@@ -713,6 +713,9 @@ WHERE id = ?
 * MIME type
 * 同時実行数
 * 利用者ごとのレート制限
+
+`options.language`は`ja | en | auto`の完全一致だけを許可する。`en`は英語accentを一つのWhisper
+language tokenとして扱い、`en-US`や`en-GB`などの方言別tokenは受理しない。
 * optionsのallowlist
 * model名のallowlist
 * output formatのallowlist
@@ -998,7 +1001,7 @@ condition_on_previous_text = True
 
 実行時に未固定の最新版を自動取得しない。
 
-日本語が指定された場合は`language="ja"`を設定する。
+日本語または英語が指定された場合は、それぞれ`language="ja"`、`language="en"`を全windowへ設定する。
 
 `auto`の場合だけ言語自動判定を利用する。
 
@@ -1083,6 +1086,10 @@ manifestは他の成果物のPUT成功後、最後に書く。
 ```
 
 manifestがないattemptを完了扱いにしてはならない。
+
+Cloud Run bounded executionはmanifest v3を使用し、上記identity、complete、artifact integrityに加えて
+`executionContractVersion: 2`、`requestedLanguage`、`detectedLanguage`、`requestedFormats`を持つ。
+固定言語ではrequested/detected languageの完全一致を要求し、`auto`だけ検出された2～3文字のlanguage codeを許可する。
 
 ### 13.6 コンテナセキュリティ
 
@@ -1195,7 +1202,7 @@ Discord Webhook URLはCloudflare secretに保存する。
 * ファイル選択ボタン
 * スマートフォンの音声・動画ファイル選択
 * タイトル
-* 言語
+* 言語（日本語、英語、自動判定）
 * VAD有無
 * 出力形式
 * アップロード開始ボタン

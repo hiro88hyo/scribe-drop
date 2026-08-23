@@ -11,7 +11,7 @@ import {
 import { sha256Schema } from "./manifest.js";
 
 export const BOUNDED_EXECUTION_CONTRACT_VERSION = 2;
-export const BOUNDED_RESULT_MANIFEST_SCHEMA_VERSION = 2;
+export const BOUNDED_RESULT_MANIFEST_SCHEMA_VERSION = 3;
 export const MAX_BOUNDED_ARTIFACT_BYTES = 128 * 1024 * 1024;
 
 export const BOUNDED_ARTIFACT_FILENAMES = {
@@ -81,8 +81,10 @@ export const boundedResultManifestSchema = z
     artifacts: z.array(boundedManifestArtifactSchema).min(1).max(OUTPUT_FORMATS.length),
     attemptId: ulidSchema,
     complete: z.literal(true),
+    detectedLanguage: z.string().regex(/^[a-z]{2,3}$/u),
     executionContractVersion: z.literal(BOUNDED_EXECUTION_CONTRACT_VERSION),
     jobId: ulidSchema,
+    requestedLanguage: transcriptionLanguageSchema,
     requestedFormats: canonicalOutputFormatsSchema,
     schemaVersion: z.literal(BOUNDED_RESULT_MANIFEST_SCHEMA_VERSION),
   })
@@ -99,6 +101,11 @@ export const boundedResultManifestSchema = z
         key.endsWith(`/${jobId}/${attemptId}/${BOUNDED_ARTIFACT_FILENAMES[format]}`),
       ),
     "Manifest artifact key must match its attempt and format",
+  )
+  .refine(
+    ({ detectedLanguage, requestedLanguage }) =>
+      requestedLanguage === "auto" || detectedLanguage === requestedLanguage,
+    "Manifest detected language must match a fixed requested language",
   );
 
 export type BoundedExecutionOptions = z.infer<typeof boundedExecutionOptionsSchema>;
