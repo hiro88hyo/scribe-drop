@@ -22,8 +22,8 @@ const acceptanceSteps = [
   step("Verify candidate and live resource read-back"),
   step("Verify authenticated data plane, then run real staging M4A lifecycle"),
   step("Preserve only unresolved fixture identity for automatic recovery"),
-  step("Verify completed Cloud Run processing time and notification delivery", "skipped"),
-  step("Delete the verified staging fixture through the authenticated owner path", "skipped"),
+  step("Verify completed Cloud Run processing time and notification delivery"),
+  step("Delete the verified staging fixture through the authenticated owner path"),
   step("Verify exact-one Cloud Run cleanup and provider storage convergence", "failure"),
   step("Disable staging controller authorization after cleanup", "skipped"),
   step("Restore RunPod selection while preserving the Cloud Run reaper", "skipped"),
@@ -93,24 +93,27 @@ test("accepts a full staging source whose promotion jobs all succeeded", () => {
   });
 });
 
-test("accepts a recovered source that failed while disabling the consumed authorization", () => {
-  const value = fixture();
-  for (const name of [
-    "Verify completed Cloud Run processing time and notification delivery",
-    "Delete the verified staging fixture through the authenticated owner path",
+test("accepts every recovered finalization failure prefix", () => {
+  const finalizationSteps = [
     "Verify exact-one Cloud Run cleanup and provider storage convergence",
-  ]) {
-    value.jobs.jobs[4].steps.find((candidate) => candidate.name === name).conclusion = "success";
+    "Disable staging controller authorization after cleanup",
+    "Restore RunPod selection while preserving the Cloud Run reaper",
+    "Verify final disabled zero state before issuing acceptance",
+    "Issue short-lived staging acceptance",
+    "Upload immutable staging acceptance",
+  ];
+  for (const [failureIndex, failureName] of finalizationSteps.entries()) {
+    const value = fixture();
+    for (const [index, name] of finalizationSteps.entries()) {
+      value.jobs.jobs[4].steps.find((candidate) => candidate.name === name).conclusion =
+        index < failureIndex ? "success" : name === failureName ? "failure" : "skipped";
+    }
+    assert.deepEqual(verifyStagingAcceptanceResume(value.run, value.jobs, expected), {
+      headSha: "a".repeat(40),
+      recoveryRequiresLiveReverification: false,
+      sourceRunId: "123",
+    });
   }
-  value.jobs.jobs[4].steps.find(
-    (candidate) => candidate.name === "Disable staging controller authorization after cleanup",
-  ).conclusion = "failure";
-
-  assert.deepEqual(verifyStagingAcceptanceResume(value.run, value.jobs, expected), {
-    headSha: "a".repeat(40),
-    recoveryRequiresLiveReverification: false,
-    sourceRunId: "123",
-  });
 });
 
 test("rejects an incomplete prefix before a post-cleanup disable failure", () => {
@@ -122,6 +125,10 @@ test("rejects an incomplete prefix before a post-cleanup disable failure", () =>
   value.jobs.jobs[4].steps.find(
     (candidate) => candidate.name === "Disable staging controller authorization after cleanup",
   ).conclusion = "failure";
+  value.jobs.jobs[4].steps.find(
+    (candidate) =>
+      candidate.name === "Verify completed Cloud Run processing time and notification delivery",
+  ).conclusion = "skipped";
 
   assert.throws(
     () => verifyStagingAcceptanceResume(value.run, value.jobs, expected),

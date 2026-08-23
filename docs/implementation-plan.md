@@ -2207,6 +2207,16 @@ staging acceptance remediation（2026-08-22）:
 
 目的: 利用者が英語音声を既知の場合に自動判定へ依存せず、`en`を全provider executionへ固定できるようにする。
 
+release preparation（2026-08-23）:
+
+- feature PR #30をstrict required checks成功、未解決conversation 0、approval 0のsolo-maintainer policyで
+  merge commit `90addece100a722617e66a342eb36ad3fa9848c5`により`develop`へ統合した。
+- dependency-only PR #31を同じpolicyでmerge commit `5ef439cb60b3caf026e3587b33da9e727ff26822`により
+  `develop`へ統合し、PostCSS Dependabot alert #8がfixedであることをread-backした。
+- `release/0.4.0`を作成し、root package、Python worker、uv lockのversionを`0.4.0`へ同期する。
+  release-to-main PR、candidate workflow、staging workflow、cloud resource mutation、GPU executionは、release commitの
+  local gateと全workflow source preflightが成功するまで開始しない。
+
 実装:
 
 - [ADR 0095](./adr/0095-add-fixed-english-language.md)に従い、公開language contractを`ja | en | auto`へ拡張する。

@@ -362,6 +362,7 @@ export async function verifyStagingWorkflowStateContract(source) {
     stepEnvironment(jobs.acceptance, restoreStep),
     {
       CLOUDFLARE_API_TOKEN: "${{ secrets.CLOUDFLARE_API_TOKEN }}",
+      CLOUDFLARE_PAGES_API_TOKEN: "${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}",
       SCRIBE_DROP_STAGING_GPU_EXECUTION_ADMISSION: "active",
       SCRIBE_DROP_STAGING_GPU_EXECUTION_POLICY: "runpod_serverless_v1",
     },
