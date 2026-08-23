@@ -1,4 +1,4 @@
-"""Parity tests for the proposed execution and result contract v2."""
+"""Parity tests for execution contract v2 and result manifest v3."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from pydantic import TypeAdapter, ValidationError
 from scribe_drop_worker.bounded_contracts import (
     ExecutionOptionsV2,
     ResultCapabilitiesV2,
-    ResultManifestV2,
+    ResultManifestV3,
     canonicalize_output_formats,
 )
 
@@ -35,12 +35,24 @@ def test_shared_v2_fixture_is_strictly_validated() -> None:
     fixture = _fixture()
     options = ExecutionOptionsV2.model_validate_json(json.dumps(fixture["options"]))
     capabilities = ResultCapabilitiesV2.model_validate_json(json.dumps(fixture["capabilities"]))
-    manifest = ResultManifestV2.model_validate_json(json.dumps(fixture["manifest"]))
+    manifest = ResultManifestV3.model_validate_json(json.dumps(fixture["manifest"]))
 
     assert options.output_formats == ("markdown", "json")
+    assert options.language == "en"
     assert options.vad is False
     assert tuple(item.format for item in capabilities.artifacts) == options.output_formats
     assert manifest.requested_formats == options.output_formats
+    assert manifest.requested_language == options.language
+    assert manifest.detected_language == "en"
+
+
+def test_execution_options_accept_english_and_reject_unknown_language() -> None:
+    """Only shared language tokens cross the Python boundary."""
+    fixture_options = _fixture()["options"]
+    payload = {**fixture_options, "outputFormats": tuple(fixture_options["outputFormats"])}
+    assert ExecutionOptionsV2.model_validate({**payload, "language": "en"}).language == "en"
+    with pytest.raises(ValidationError):
+        ExecutionOptionsV2.model_validate({**payload, "language": "en-US"})
 
 
 @pytest.mark.parametrize(
@@ -55,11 +67,13 @@ def test_execution_options_reject_invalid_format_sets(formats: tuple[str, ...]) 
 
 
 def test_manifest_rejects_contract_guessing_and_artifact_drift() -> None:
-    """A v2 attempt cannot accept v1, missing, extra, or reordered artifacts."""
+    """A v2 attempt cannot accept old, language-drifted, or malformed manifests."""
     payload = _fixture()["manifest"]
     for replacement in (
-        {"schemaVersion": 1},
+        {"schemaVersion": 2},
         {"executionContractVersion": 1},
+        {"detectedLanguage": "ja"},
+        {"requestedLanguage": "en-US"},
         {"artifacts": payload["artifacts"][:1]},
         {"artifacts": list(reversed(payload["artifacts"]))},
         {
@@ -88,7 +102,7 @@ def test_manifest_rejects_contract_guessing_and_artifact_drift() -> None:
         {"token": "forbidden"},
     ):
         with pytest.raises(ValidationError):
-            ResultManifestV2.model_validate({**payload, **replacement})
+            ResultManifestV3.model_validate({**payload, **replacement})
 
 
 def test_canonicalize_output_formats_preserves_only_fixed_order() -> None:

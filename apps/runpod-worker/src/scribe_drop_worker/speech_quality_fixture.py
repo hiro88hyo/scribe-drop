@@ -27,7 +27,9 @@ MIN_SPEECH_SECONDS: Final = 12
 MAX_SPEECH_SECONDS: Final = 30
 MAX_SYNTHESIZED_PCM_BYTES: Final = MAX_SPEECH_SECONDS * SAMPLE_RATE * PCM_BYTES_PER_SAMPLE
 ZERO_WRITE_CHUNK_BYTES: Final = 1024 * 1024
+EXPECTED_SPEECH_INTERVALS: Final = 3
 ESPEAK_VOICE: Final = "ja"
+ENGLISH_ESPEAK_VOICE: Final = "en-us"
 ESPEAK_RATE: Final = "140"
 ESPEAK_PITCH: Final = "50"
 ESPEAK_AMPLITUDE: Final = "100"
@@ -53,6 +55,24 @@ SYNTHETIC_JAPANESE_TEXTS: Final = (
         "これは ろくおんの しゅうりょうちかくを かくにんする ための べつの ごうせいおんせいです。"
         "やまの みどりと かわの ながれを おもいうかべながら、さいごの ことばを ゆっくり よみます。"
         "しゅうたんまで けっかを うしなわず、きめられた じゅんじょで かんりょうします。"
+    ),
+)
+
+SYNTHETIC_ENGLISH_TEXTS: Final = (
+    (
+        "This synthetic recording checks the beginning of an English transcription. "
+        "Morning light reaches a quiet room while each word is spoken in a fixed order. "
+        "The position and duration of the audio remain inside the reviewed interval."
+    ),
+    (
+        "This longer sentence crosses the fifteen minute boundary without changing language. "
+        "The window before the boundary and the window after it must preserve every phrase, "
+        "avoid repetitions, and join the ordered context into one stable English transcript."
+    ),
+    (
+        "This separate synthetic recording checks the end of the file. "
+        "Green hills and a flowing river provide harmless fixed words for the final interval. "
+        "The result keeps its order and completes without losing the last sentence."
     ),
 )
 
@@ -109,6 +129,28 @@ class SpeechQualityFixture:
         return matches[0]
 
 
+@dataclass(frozen=True, slots=True)
+class _SpeechFixtureDefinition:
+    destination_name: str
+    source_prefix: str
+    texts: tuple[str, ...]
+    voice: str
+
+
+JAPANESE_FIXTURE: Final = _SpeechFixtureDefinition(
+    destination_name="speech-quality.wav",
+    source_prefix="synthesized-source",
+    texts=SYNTHETIC_JAPANESE_TEXTS,
+    voice=ESPEAK_VOICE,
+)
+ENGLISH_FIXTURE: Final = _SpeechFixtureDefinition(
+    destination_name="english-speech-quality.wav",
+    source_prefix="english-synthesized-source",
+    texts=SYNTHETIC_ENGLISH_TEXTS,
+    voice=ENGLISH_ESPEAK_VOICE,
+)
+
+
 CommandRunner = Callable[[tuple[str, ...], float], None]
 
 
@@ -134,16 +176,42 @@ def generate_speech_quality_fixture(
     run_command: CommandRunner = _run_command,
 ) -> SpeechQualityFixture:
     """Generate one fixed 16-minute WAV with three distinct synthesized speech islands."""
+    return _generate_speech_quality_fixture(
+        task_directory,
+        definition=JAPANESE_FIXTURE,
+        run_command=run_command,
+    )
+
+
+def generate_english_speech_quality_fixture(
+    task_directory: Path,
+    *,
+    run_command: CommandRunner = _run_command,
+) -> SpeechQualityFixture:
+    """Generate the fixed non-human English fixture used by the native language gate."""
+    return _generate_speech_quality_fixture(
+        task_directory,
+        definition=ENGLISH_FIXTURE,
+        run_command=run_command,
+    )
+
+
+def _generate_speech_quality_fixture(
+    task_directory: Path,
+    *,
+    definition: _SpeechFixtureDefinition,
+    run_command: CommandRunner,
+) -> SpeechQualityFixture:
     _validate_task_directory(task_directory)
     source_waves = tuple(
-        task_directory / f"synthesized-source-{index}.wav"
-        for index in range(len(SYNTHETIC_JAPANESE_TEXTS))
+        task_directory / f"{definition.source_prefix}-{index}.wav"
+        for index in range(len(definition.texts))
     )
     source_pcms = tuple(
-        task_directory / f"synthesized-source-{index}.s16le"
-        for index in range(len(SYNTHETIC_JAPANESE_TEXTS))
+        task_directory / f"{definition.source_prefix}-{index}.s16le"
+        for index in range(len(definition.texts))
     )
-    destination = task_directory / "speech-quality.wav"
+    destination = task_directory / definition.destination_name
     if any(
         path.exists() or path.is_symlink() for path in (*source_waves, *source_pcms, destination)
     ):
@@ -153,7 +221,7 @@ def generate_speech_quality_fixture(
     try:
         speech_pcm_values: list[bytes] = []
         for text, source_wave, source_pcm in zip(
-            SYNTHETIC_JAPANESE_TEXTS,
+            definition.texts,
             source_waves,
             source_pcms,
             strict=True,
@@ -162,7 +230,7 @@ def generate_speech_quality_fixture(
                 (
                     ESPEAK_PATH,
                     "-v",
-                    ESPEAK_VOICE,
+                    definition.voice,
                     "-s",
                     ESPEAK_RATE,
                     "-p",
@@ -249,7 +317,7 @@ def _validate_generated_file(path: Path, *, max_bytes: int) -> None:
 
 
 def _fixture_intervals(pcm_size_bytes: tuple[int, ...]) -> tuple[SpeechInterval, ...]:
-    if len(pcm_size_bytes) != len(SYNTHETIC_JAPANESE_TEXTS):
+    if len(pcm_size_bytes) != EXPECTED_SPEECH_INTERVALS:
         raise SpeechQualityFixtureError(FIXTURE_INVALID)
     if any(size % PCM_BYTES_PER_SAMPLE != 0 for size in pcm_size_bytes):
         raise SpeechQualityFixtureError(FIXTURE_INVALID)
@@ -353,11 +421,15 @@ def _validate_fixture_file(path: Path) -> None:
 
 __all__ = [
     "BOUNDARY_SECONDS",
+    "ENGLISH_ESPEAK_VOICE",
     "ESPEAK_PATH",
     "FFMPEG_PATH",
     "FIXTURE_DURATION_SECONDS",
+    "SYNTHETIC_ENGLISH_TEXTS",
+    "SYNTHETIC_JAPANESE_TEXTS",
     "SpeechInterval",
     "SpeechQualityFixture",
     "SpeechQualityFixtureError",
+    "generate_english_speech_quality_fixture",
     "generate_speech_quality_fixture",
 ]

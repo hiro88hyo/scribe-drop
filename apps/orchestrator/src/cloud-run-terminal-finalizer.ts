@@ -49,6 +49,7 @@ function manifestMatchesContext(
     manifest.attemptId === context.attemptId &&
     manifest.jobId === context.jobId &&
     manifest.artifacts.length === request.artifactCount &&
+    manifest.requestedLanguage === context.options.language &&
     manifest.requestedFormats.length === context.options.outputFormats.length &&
     manifest.requestedFormats.every(
       (format, index) => format === context.options.outputFormats[index],

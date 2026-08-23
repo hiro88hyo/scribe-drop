@@ -169,6 +169,11 @@ test("rejects every missing post-cleanup prerequisite before the next dispatch",
       step: "Restore RunPod selection while preserving the Cloud Run reaper",
     },
     {
+      error: /post-acceptance RunPod restore CLOUDFLARE_PAGES_API_TOKEN/u,
+      required: "          CLOUDFLARE_PAGES_API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_API_TOKEN }}\n",
+      step: "Restore RunPod selection while preserving the Cloud Run reaper",
+    },
+    {
       error: /final staging safety read-back GOOGLE_OAUTH_ACCESS_TOKEN/u,
       required:
         "          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}\n",

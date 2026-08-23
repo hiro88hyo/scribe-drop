@@ -105,6 +105,13 @@ def granted_claim() -> RunpodClaimGranted:
     return RunpodClaimGranted.model_validate(
         {
             "granted": True,
+            "options": {
+                "contractVersion": 1,
+                "language": "en",
+                "model": "large-v3-turbo",
+                "outputFormats": ("markdown", "json", "srt"),
+                "vad": True,
+            },
             "source": {
                 "getUrl": (
                     f"{storage}incoming/{OWNER_HASH}/{JOB_ID}/{'b' * 22}/"

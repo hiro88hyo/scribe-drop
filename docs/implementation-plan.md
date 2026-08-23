@@ -2202,3 +2202,48 @@ staging acceptance remediation（2026-08-22）:
 - standard lint、format、typecheck、test、build、security scanが成功する。
 - Web runtimeとR2 CORS変更を含む同一candidateが新しいstaging acceptanceを通過する。既存evidenceは再利用しない。
 - productionではstaging verified candidateを再build・修正せずdeployする。
+
+### Phase 18: fixed English transcription language
+
+目的: 利用者が英語音声を既知の場合に自動判定へ依存せず、`en`を全provider executionへ固定できるようにする。
+
+release preparation（2026-08-23）:
+
+- feature PR #30をstrict required checks成功、未解決conversation 0、approval 0のsolo-maintainer policyで
+  merge commit `90addece100a722617e66a342eb36ad3fa9848c5`により`develop`へ統合した。
+- dependency-only PR #31を同じpolicyでmerge commit `5ef439cb60b3caf026e3587b33da9e727ff26822`により
+  `develop`へ統合し、PostCSS Dependabot alert #8がfixedであることをread-backした。
+- `release/0.4.0`を作成し、root package、Python worker、uv lockのversionを`0.4.0`へ同期する。
+  release-to-main PR、candidate workflow、staging workflow、cloud resource mutation、GPU executionは、release commitの
+  local gateと全workflow source preflightが成功するまで開始しない。
+
+実装:
+
+- [ADR 0095](./adr/0095-add-fixed-english-language.md)に従い、公開language contractを`ja | en | auto`へ拡張する。
+  `en-US`、`en-GB`、インド英語、シングリッシュなどの方言別tokenは追加しない。
+- Webの選択とjob detail、API、Queue ingestion、D1 immutable snapshot、RunPod contract v1 claim、Cloud Run contract v2
+  claimで同じ値をstrict検証する。未知値を日本語へfallbackしない。
+- `ja`と`en`は全bounded windowへ明示し、native metadataの完全一致を要求する。`auto`は初回検出後固定する既存動作を維持する。
+- Cloud Run result manifestをv3へ上げ、requested/detected languageをattempt snapshotとfinalize時に完全照合する。
+  D1 migrationは不要だが、deploy前にactive executionをdrainしてmanifest v2 producerとの混在を避ける。
+- 既存の非機密eSpeak fixtureに固定English variantを追加し、同じworker/quality imageのGPU 0、CUDA/float16 native gateで
+  Japanese autoとEnglish fixedを実行する。
+- staging acceptanceは言語selectorで英語を選択し、create request、JSON artifact、manifest/finalize、通知、cleanupまで
+  `en`を同一candidateで検証する。
+
+local verification（2026-08-23）:
+
+- `pnpm check`、local browser E2E 31件、Git履歴とworktreeのsecret scanが成功した。
+- DockerからGPU 0（NVIDIA GeForce RTX 5070 Ti）を確認してからworker imageと、その同一worker imageを基底にした
+  quality imageを各1回buildした。両imageのHIGH/CRITICAL vulnerability scanは成功した。
+- networkを無効化したquality containerで実`large-v3-turbo`、CUDA、float16 gateを1回実行した。Japanese autoは
+  global error 47,101 ppm、boundary error 94,118 ppmで既存上限内、English fixedはglobal/boundaryとも0 ppmだった。
+- 実service staging acceptance、candidate build、remote workflow、cloud resource mutation、production deployは未実施である。
+  Phase 18はlocal実装完了であり、staging完了条件をまだ満たしていない。
+
+完了条件:
+
+- contract、repository、worker、UI、manifest、文書の回帰testと未知値拒否が成功する。
+- standard lint、format、typecheck、test、build、security scanが成功する。
+- 同じcandidateのnative CUDA/float16 English gateと実service staging acceptanceが成功する。
+- productionではstaging verified candidateを再build・修正せずdeployする。

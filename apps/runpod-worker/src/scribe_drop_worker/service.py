@@ -15,6 +15,7 @@ from .contracts import (
     RunpodClaimDeduplicated,
     RunpodClaimGranted,
     RunpodClaimRequest,
+    RunpodExecutionLanguage,
     RunpodHeartbeatRequest,
     RunpodHeartbeatResponse,
     RunpodJobEnvelope,
@@ -101,7 +102,9 @@ class TranscriberPort(Protocol):
         source: Path,
         *,
         duration_seconds: float,
+        language: RunpodExecutionLanguage,
         on_segment: Callable[[], None] | None = None,
+        vad: bool,
     ) -> TranscriptionResult:
         """Transcribe a validated local source."""
 
@@ -332,7 +335,9 @@ class RunpodWorkerService:
             transcription = self._transcriber.transcribe(
                 source,
                 duration_seconds=media.duration_seconds,
+                language=claim.options.language,
                 on_segment=heartbeat.check,
+                vad=claim.options.vad,
             )
             self._logger.emit(
                 "info",

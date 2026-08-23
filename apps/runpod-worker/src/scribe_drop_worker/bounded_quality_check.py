@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Literal, Protocol, cast
 
-from .bounded_contracts import ExecutionOptionsV2
+from .bounded_contracts import ExecutionLanguageV2, ExecutionOptionsV2
 from .bounded_decoder import FfmpegFloat32Stream, decode_pcm_windows
 from .bounded_inference import (
     BEAM_SIZE,
@@ -37,6 +37,7 @@ from .speech_quality_fixture import (
     SpeechInterval,
     SpeechQualityFixture,
     SpeechQualityFixtureError,
+    generate_english_speech_quality_fixture,
     generate_speech_quality_fixture,
 )
 
@@ -175,14 +176,30 @@ class QualityCheckPorts:
 
 
 DEFAULT_QUALITY_CHECK_PORTS: Final = QualityCheckPorts()
+ENGLISH_QUALITY_CHECK_PORTS: Final = QualityCheckPorts(
+    fixture_factory=generate_english_speech_quality_fixture,
+    reference_runner=lambda model, source, duration: run_full_file_reference(
+        model,
+        source,
+        duration,
+        requested_language="en",
+    ),
+    candidate_runner=lambda model, source, media, task_directory: run_bounded_candidate(
+        model,
+        source,
+        media,
+        task_directory,
+        requested_language="en",
+    ),
+)
 
 
-def create_quality_options() -> ExecutionOptionsV2:
-    """Return the exact auto-language, VAD-enabled comparison snapshot."""
+def create_quality_options(language: ExecutionLanguageV2 = "auto") -> ExecutionOptionsV2:
+    """Return one exact language, VAD-enabled comparison snapshot."""
     return ExecutionOptionsV2.model_validate(
         {
             "contractVersion": 2,
-            "language": "auto",
+            "language": language,
             "model": "large-v3-turbo",
             "outputFormats": ("json",),
             "vad": True,
@@ -194,6 +211,8 @@ def run_full_file_reference(
     model: QualityWhisperModelPort,
     source: Path,
     duration_seconds: float,
+    *,
+    requested_language: ExecutionLanguageV2 = "auto",
 ) -> QualityTranscript:
     """Run the current full-file inference once as a comparison oracle."""
     try:
@@ -201,7 +220,7 @@ def run_full_file_reference(
             str(source),
             beam_size=BEAM_SIZE,
             condition_on_previous_text=True,
-            language=None,
+            language=None if requested_language == "auto" else requested_language,
             log_progress=False,
             vad_filter=True,
             word_timestamps=False,
@@ -253,6 +272,8 @@ def run_bounded_candidate(
     source: Path,
     media: MediaInfo,
     task_directory: Path,
+    *,
+    requested_language: ExecutionLanguageV2 = "auto",
 ) -> QualityTranscript:
     """Run the bounded decoder and inference path once with the same model."""
     try:
@@ -260,7 +281,7 @@ def run_bounded_candidate(
         with SegmentSpool(task_directory) as spool:
             coordinator = BoundedInferenceCoordinator(
                 model=NumpyWindowWhisperModel(cast("NativeArrayWhisperPort", model)),
-                options=create_quality_options(),
+                options=create_quality_options(requested_language),
                 merger=WindowSegmentMerger(spool, prompt),
                 prompt=prompt,
             )
@@ -283,6 +304,7 @@ def run_bounded_candidate(
 def run_bounded_quality_check(
     *,
     ports: QualityCheckPorts = DEFAULT_QUALITY_CHECK_PORTS,
+    expected_language: Literal["en", "ja"] = "ja",
 ) -> QualityMetrics:
     """Generate, compare exactly once, cleanup, and return only numeric evidence."""
     task_directory_path: Path | None = None
@@ -293,7 +315,7 @@ def run_bounded_quality_check(
             dir=ports.temporary_root,
         ) as task_directory_value:
             task_directory_path = Path(task_directory_value)
-            result = _execute_quality_check(ports, task_directory_path)
+            result = _execute_quality_check(ports, task_directory_path, expected_language)
     except BoundedQualityCheckError:
         raise
     except Exception:  # noqa: BLE001 - normalize scratch and cleanup details.
@@ -305,24 +327,34 @@ def run_bounded_quality_check(
     return result
 
 
-def _execute_quality_check(ports: QualityCheckPorts, task_directory: Path) -> QualityMetrics:
+def _execute_quality_check(
+    ports: QualityCheckPorts,
+    task_directory: Path,
+    expected_language: Literal["en", "ja"],
+) -> QualityMetrics:
     # Fail before fixture synthesis when CUDA or the fixed model is unavailable.
     model = _load_quality_model(ports)
-    fixture, media = _create_fixture_and_media(ports, task_directory)
+    fixture, media = _create_fixture_and_media(ports, task_directory, expected_language)
     reference = _run_reference(ports, model, fixture, media.duration_seconds)
     candidate = _run_candidate(ports, model, fixture, media, task_directory)
-    return evaluate_quality(reference, candidate, fixture.speech_intervals)
+    return evaluate_quality(
+        reference,
+        candidate,
+        fixture.speech_intervals,
+        expected_language=expected_language,
+    )
 
 
 def _create_fixture_and_media(
     ports: QualityCheckPorts,
     task_directory: Path,
+    expected_language: Literal["en", "ja"],
 ) -> tuple[SpeechQualityFixture, MediaInfo]:
     try:
         fixture = ports.fixture_factory(task_directory)
     except Exception:  # noqa: BLE001 - normalize replaceable fixture boundary.
         raise BoundedQualityCheckError(FIXTURE_FAILED) from None
-    _validate_fixture_metadata(fixture, task_directory)
+    _validate_fixture_metadata(fixture, task_directory, expected_language)
     try:
         media = ports.media_probe(fixture.path, FIXTURE_DURATION_SECONDS)
     except Exception:  # noqa: BLE001 - normalize ffprobe details.
@@ -379,10 +411,17 @@ def _run_candidate(
         raise BoundedQualityCheckError(CANDIDATE_FAILED) from None
 
 
-def _validate_fixture_metadata(fixture: SpeechQualityFixture, task_directory: Path) -> None:
+def _validate_fixture_metadata(
+    fixture: SpeechQualityFixture,
+    task_directory: Path,
+    expected_language: Literal["en", "ja"],
+) -> None:
+    expected_filename = (
+        "english-speech-quality.wav" if expected_language == "en" else "speech-quality.wav"
+    )
     if (
         fixture.duration_seconds != FIXTURE_DURATION_SECONDS
-        or fixture.path != task_directory / "speech-quality.wav"
+        or fixture.path != task_directory / expected_filename
         or fixture.path.is_symlink()
         or not fixture.path.is_file()
         or len(fixture.speech_intervals) != EXPECTED_SPEECH_INTERVALS
@@ -398,6 +437,8 @@ def evaluate_quality(
     reference: QualityTranscript,
     candidate: QualityTranscript,
     speech_intervals: tuple[SpeechInterval, ...],
+    *,
+    expected_language: Literal["en", "ja"] = "ja",
 ) -> QualityMetrics:
     """Apply pre-registered quality thresholds without returning either transcript."""
     # The oracle mirrors the current full-file adapter, which validates native
@@ -406,8 +447,8 @@ def evaluate_quality(
     _validate_transcript(reference, enforce_media_bounds=False)
     _validate_transcript(candidate, enforce_media_bounds=True)
     if (
-        reference.language != "ja"
-        or candidate.language != "ja"
+        reference.language != expected_language
+        or candidate.language != expected_language
         or reference.language_probability < MIN_LANGUAGE_PROBABILITY
         or candidate.language_probability < MIN_LANGUAGE_PROBABILITY
         or not math.isclose(
@@ -579,26 +620,48 @@ def _metrics_fields(metrics: QualityMetrics) -> str:
     )
 
 
-def _metrics_line(metrics: QualityMetrics) -> str:
-    return f"{QUALITY_CHECK_OK}{_metrics_fields(metrics)}\n"
+def _metrics_line(metrics: QualityMetrics, case: str) -> str:
+    return f"{QUALITY_CHECK_OK} case={case}{_metrics_fields(metrics)}\n"
 
 
-def _failure_line(failure: BoundedQualityCheckError) -> str:
+def _failure_line(failure: BoundedQualityCheckError, case: str) -> str:
     fields = "" if failure.metrics is None else _metrics_fields(failure.metrics)
-    return f"{QUALITY_CHECK_FAILED}:{failure.code}{fields}\n"
+    return f"{QUALITY_CHECK_FAILED}:{failure.code} case={case}{fields}\n"
+
+
+def _run_main_case(
+    case: str,
+    *,
+    ports: QualityCheckPorts,
+    expected_language: Literal["en", "ja"],
+) -> None:
+    try:
+        metrics = run_bounded_quality_check(
+            ports=ports,
+            expected_language=expected_language,
+        )
+    except BoundedQualityCheckError as failure:
+        sys.stderr.write(_failure_line(failure, case))
+        raise SystemExit(1) from None
+    sys.stdout.write(_metrics_line(metrics, case))
 
 
 def main() -> None:
-    """Run once and emit only safe terminal evidence."""
+    """Run the Japanese auto and English fixed cases with safe terminal evidence."""
     try:
-        metrics = run_bounded_quality_check()
-    except BoundedQualityCheckError as failure:
-        sys.stderr.write(_failure_line(failure))
-        raise SystemExit(1) from None
+        _run_main_case(
+            "ja-auto",
+            ports=DEFAULT_QUALITY_CHECK_PORTS,
+            expected_language="ja",
+        )
+        _run_main_case(
+            "en-fixed",
+            ports=ENGLISH_QUALITY_CHECK_PORTS,
+            expected_language="en",
+        )
     except Exception:  # noqa: BLE001 - prevent transcript or native detail disclosure.
         sys.stderr.write(f"{QUALITY_CHECK_FAILED}:CLEANUP_FAILED\n")
         raise SystemExit(1) from None
-    sys.stdout.write(_metrics_line(metrics))
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ import {
   MAX_ORIGINAL_FILENAME_LENGTH,
   OUTPUT_FORMATS,
   createJobRequestSchema,
+  transcriptionLanguageSchema,
   type JobDetail,
   type JobSummary,
   type OutputFormat,
@@ -293,11 +294,12 @@ function UploadPanel(): JSX.Element {
           <select
             disabled={active}
             onChange={(event) => {
-              setLanguage(event.currentTarget.value === "auto" ? "auto" : "ja");
+              setLanguage(transcriptionLanguageSchema.parse(event.currentTarget.value));
             }}
             value={language}
           >
             <option value="ja">日本語</option>
+            <option value="en">英語</option>
             <option value="auto">自動判定</option>
           </select>
         </label>

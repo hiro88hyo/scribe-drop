@@ -175,6 +175,13 @@ describe("RunPod schemas", () => {
           token: TOKEN,
           url: "https://orchestrator.example.invalid/internal/runpod/heartbeat",
         },
+        options: {
+          contractVersion: 1,
+          language: "en",
+          model: "large-v3-turbo",
+          outputFormats: ["markdown", "json", "srt"],
+          vad: true,
+        },
         results: {
           jsonPutUrl: "https://storage.example.invalid/transcript.json?signature=redacted",
           manifestPutUrl: "https://storage.example.invalid/manifest.json?signature=redacted",
@@ -188,6 +195,34 @@ describe("RunPod schemas", () => {
         },
       }).success,
     ).toBe(true);
+    expect(
+      runpodClaimResponseSchema.safeParse({
+        expiresAt: "2026-07-25T02:00:00.000Z",
+        granted: true,
+        heartbeat: {
+          token: TOKEN,
+          url: "https://orchestrator.example.invalid/internal/runpod/heartbeat",
+        },
+        options: {
+          contractVersion: 1,
+          language: "en-US",
+          model: "large-v3-turbo",
+          outputFormats: ["markdown"],
+          vad: true,
+        },
+        results: {
+          jsonPutUrl: "https://storage.example.invalid/transcript.json?signature=redacted",
+          manifestPutUrl: "https://storage.example.invalid/manifest.json?signature=redacted",
+          markdownPutUrl: "https://storage.example.invalid/transcript.md?signature=redacted",
+          srtPutUrl: "https://storage.example.invalid/transcript.srt?signature=redacted",
+        },
+        source: {
+          expectedEtag: "etag",
+          expectedSizeBytes: 1024,
+          getUrl: "https://storage.example.invalid/source?signature=redacted",
+        },
+      }).success,
+    ).toBe(false);
   });
 
   it("accepts documented RunPod terminal status metadata", () => {

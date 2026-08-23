@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from scribe_drop_worker.contracts import (
     CLAIM_RESPONSE_ADAPTER,
     RunpodClaimDeduplicated,
+    RunpodExecutionOptions,
     RunpodJobEnvelope,
     RunpodWorkerInput,
     TranscriptSegment,
@@ -64,6 +65,20 @@ def test_claim_response_is_a_strict_discriminated_shape() -> None:
         )
 
 
+def test_runpod_execution_options_accept_english_and_reject_unknown_values() -> None:
+    """The fallback worker consumes the same exact language allowlist."""
+    options = {
+        "contractVersion": 1,
+        "language": "en",
+        "model": "large-v3-turbo",
+        "outputFormats": ("markdown", "json", "srt"),
+        "vad": True,
+    }
+    assert RunpodExecutionOptions.model_validate(options).language == "en"
+    with pytest.raises(ValidationError):
+        RunpodExecutionOptions.model_validate({**options, "language": "en-US"})
+
+
 @pytest.mark.parametrize(
     "expires_at",
     [
@@ -76,6 +91,13 @@ def test_claim_expiry_requires_a_valid_utc_z_timestamp(expires_at: str) -> None:
     """Capability expiry follows the strict cross-language UTC representation."""
     response = {
         "granted": True,
+        "options": {
+            "contractVersion": 1,
+            "language": "en",
+            "model": "large-v3-turbo",
+            "outputFormats": ("markdown", "json", "srt"),
+            "vad": True,
+        },
         "source": {
             "getUrl": "https://source.example.invalid/object?signature=redacted",
             "expectedSizeBytes": 1024,

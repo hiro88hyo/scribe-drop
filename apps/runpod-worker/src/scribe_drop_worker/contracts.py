@@ -100,10 +100,40 @@ class HeartbeatCapability(StrictModel):
     token: CapabilityToken
 
 
+RunpodExecutionLanguage = Literal["ja", "en", "auto"]
+RunpodOutputFormat = Literal["markdown", "json", "srt"]
+
+
+class RunpodExecutionOptions(StrictModel):
+    """Immutable contract-v1 options attached to a winning RunPod claim."""
+
+    contract_version: Literal[1] = Field(alias="contractVersion")
+    language: RunpodExecutionLanguage
+    model: Literal["large-v3-turbo"]
+    output_formats: tuple[RunpodOutputFormat, ...] = Field(
+        alias="outputFormats",
+        min_length=1,
+        max_length=3,
+    )
+    vad: bool
+
+    @field_validator("output_formats")
+    @classmethod
+    def output_formats_are_unique(
+        cls, value: tuple[RunpodOutputFormat, ...]
+    ) -> tuple[RunpodOutputFormat, ...]:
+        """Reject an ambiguous legacy snapshot before inference starts."""
+        if len(set(value)) != len(value):
+            msg = "outputFormats must not contain duplicates"
+            raise ValueError(msg)
+        return value
+
+
 class RunpodClaimGranted(StrictModel):
     """Capabilities issued only to the winning RunPod job."""
 
     granted: Literal[True]
+    options: RunpodExecutionOptions
     source: SourceCapability
     results: ResultCapabilities
     heartbeat: HeartbeatCapability
