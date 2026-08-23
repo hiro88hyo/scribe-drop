@@ -41,6 +41,24 @@ function stepConclusion(job, name) {
   return selected.conclusion;
 }
 
+function requireFailurePrefix(job, names) {
+  const conclusions = names.map((name) => stepConclusion(job, name));
+  const failureIndexes = conclusions.flatMap((conclusion, index) =>
+    conclusion === "failure" ? [index] : [],
+  );
+  if (failureIndexes.length !== 1) {
+    throw new Error("Source staging finalization must contain exactly one failed step");
+  }
+  const failureIndex = failureIndexes[0];
+  for (const [index, name] of names.entries()) {
+    requireStep(
+      job,
+      name,
+      index < failureIndex ? "success" : index === failureIndex ? "failure" : "skipped",
+    );
+  }
+}
+
 function requirePromotionMode(jobs) {
   const conclusions = [
     "Apply candidate D1 migrations",
@@ -103,37 +121,20 @@ export function verifyStagingAcceptanceResume(runValue, jobsValue, expected) {
   ]) {
     requireStep(acceptance, name, "success");
   }
-  const cleanupStep = "Verify exact-one Cloud Run cleanup and provider storage convergence";
-  const cleanupConclusion = stepConclusion(acceptance, cleanupStep);
-  if (cleanupConclusion === "failure") {
-    for (const name of [
-      "Disable staging controller authorization after cleanup",
-      "Restore RunPod selection while preserving the Cloud Run reaper",
-      "Verify final disabled zero state before issuing acceptance",
-      "Issue short-lived staging acceptance",
-      "Upload immutable staging acceptance",
-    ]) {
-      requireStep(acceptance, name, "skipped");
-    }
-  } else if (cleanupConclusion === "success") {
-    for (const name of [
-      "Verify completed Cloud Run processing time and notification delivery",
-      "Delete the verified staging fixture through the authenticated owner path",
-    ]) {
-      requireStep(acceptance, name, "success");
-    }
-    requireStep(acceptance, "Disable staging controller authorization after cleanup", "failure");
-    for (const name of [
-      "Restore RunPod selection while preserving the Cloud Run reaper",
-      "Verify final disabled zero state before issuing acceptance",
-      "Issue short-lived staging acceptance",
-      "Upload immutable staging acceptance",
-    ]) {
-      requireStep(acceptance, name, "skipped");
-    }
-  } else {
-    throw new Error(`Source staging step ${cleanupStep} did not finish with failure or success`);
+  for (const name of [
+    "Verify completed Cloud Run processing time and notification delivery",
+    "Delete the verified staging fixture through the authenticated owner path",
+  ]) {
+    requireStep(acceptance, name, "success");
   }
+  requireFailurePrefix(acceptance, [
+    "Verify exact-one Cloud Run cleanup and provider storage convergence",
+    "Disable staging controller authorization after cleanup",
+    "Restore RunPod selection while preserving the Cloud Run reaper",
+    "Verify final disabled zero state before issuing acceptance",
+    "Issue short-lived staging acceptance",
+    "Upload immutable staging acceptance",
+  ]);
 
   const recoveryMatches = jobs.filter(
     (job) => job?.name === "Converge a failed staging acceptance to the safe state",
