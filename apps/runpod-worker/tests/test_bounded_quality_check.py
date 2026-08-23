@@ -134,6 +134,7 @@ def test_quality_options_match_the_pre_registered_native_case() -> None:
     assert options.language == "auto"
     assert options.vad is True
     assert options.output_formats == ("json",)
+    assert create_quality_options("en").language == "en"
 
 
 def test_native_quality_model_uses_production_gpu_settings(
@@ -194,6 +195,22 @@ def test_full_file_reference_uses_exact_options_and_validates_segments(tmp_path:
         "vad_filter": True,
         "word_timestamps": False,
     }
+
+
+def test_full_file_reference_fixes_english_at_the_native_boundary(tmp_path: Path) -> None:
+    """The English oracle passes en explicitly instead of invoking auto detection."""
+    source = tmp_path / "english-speech-quality.wav"
+    source.write_bytes(b"synthetic")
+    model = ReferenceModel()
+
+    run_full_file_reference(
+        model,
+        source,
+        FIXTURE_DURATION_SECONDS,
+        requested_language="en",
+    )
+
+    assert model.calls[0][1]["language"] == "en"
 
 
 @pytest.mark.parametrize(
@@ -301,6 +318,15 @@ def test_quality_evaluation_accepts_equal_transcripts_and_returns_only_metrics()
     assert metrics.boundary_error_rate == 0
     assert metrics.reference_characters == metrics.candidate_characters
     assert metrics.reference_segments == metrics.candidate_segments == EXPECTED_SEGMENT_COUNT
+
+    english = _transcript(language="en")
+    english_metrics = evaluate_quality(
+        english,
+        english,
+        SPEECH_INTERVALS,
+        expected_language="en",
+    )
+    assert english_metrics.global_error_rate == 0
 
 
 def test_quality_evaluation_allows_reference_padding_but_rejects_candidate_overrun() -> None:
@@ -513,15 +539,16 @@ def test_main_emits_only_allowlisted_metrics_or_failure(
     metrics = QualityMetrics(0.01, 0.02, 100, 101, 20, 21, 3, 3)
     monkeypatch.setattr(
         "scribe_drop_worker.bounded_quality_check.run_bounded_quality_check",
-        lambda: metrics,
+        lambda **_options: metrics,
     )
     main()
     captured = capsys.readouterr()
-    assert captured.out.startswith(f"{QUALITY_CHECK_OK} global_error_ppm=10000")
+    assert captured.out.startswith(f"{QUALITY_CHECK_OK} case=ja-auto global_error_ppm=10000")
+    assert f"{QUALITY_CHECK_OK} case=en-fixed global_error_ppm=10000" in captured.out
     assert GLOBAL_TEXT not in captured.out
     assert captured.err == ""
 
-    def fail() -> QualityMetrics:
+    def fail(**_options: object) -> QualityMetrics:
         raise BoundedQualityCheckError(QUALITY_REJECTED)
 
     monkeypatch.setattr("scribe_drop_worker.bounded_quality_check.run_bounded_quality_check", fail)
@@ -529,9 +556,9 @@ def test_main_emits_only_allowlisted_metrics_or_failure(
         main()
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert captured.err == f"{QUALITY_CHECK_FAILED}:QUALITY_REJECTED\n"
+    assert captured.err == f"{QUALITY_CHECK_FAILED}:QUALITY_REJECTED case=ja-auto\n"
 
-    def reject_with_metrics() -> QualityMetrics:
+    def reject_with_metrics(**_options: object) -> QualityMetrics:
         raise BoundedQualityCheckError(QUALITY_REJECTED, metrics=metrics)
 
     monkeypatch.setattr(
@@ -543,6 +570,6 @@ def test_main_emits_only_allowlisted_metrics_or_failure(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err.startswith(
-        f"{QUALITY_CHECK_FAILED}:QUALITY_REJECTED global_error_ppm=10000"
+        f"{QUALITY_CHECK_FAILED}:QUALITY_REJECTED case=ja-auto global_error_ppm=10000"
     )
     assert GLOBAL_TEXT not in captured.err

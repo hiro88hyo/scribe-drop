@@ -76,7 +76,7 @@ native比較とは別に、networkとnative modelをfakeにして次を通常CI�
 - fixture duration、sample format、3つのspeech interval、15分境界交差、logical/file size上限を検証する。
 - empty/oversize/malformed WAV、subprocess timeout/non-zero、symlink、foreign pathを拒否する。
 - normalization、bounded edit distance、empty/minimum length、global/boundary閾値の境界値を検証する。
-- `ja | auto`、VAD true/false、1～3 selected formatのexact propagationはPhase 10Aの既存testを再利用し、
+- `ja | en | auto`、VAD true/false、1～3 selected formatのexact propagationはcontract testを再利用し、
   quality gateからtest名と件数をread-backする。native比較1ケースで全組合せを推測しない。
 - stdout/stderrとexceptionにdummy text、transcript、path、native errorが含まれないことを検証する。
 
@@ -85,8 +85,8 @@ native比較とは別に、networkとnative modelをfakeにして次を通常CI�
 local成功だけではCloud Runをproduction採用しない。Phase 14のsynthetic dark deploymentとPhase 15のformal
 stagingで、同一candidateに次を追加する。
 
-- boundary speech、長発話、日本語固定、auto language、VAD true/false、selected format 1～3。
-- 実R2 download/upload、manifest v2、artifact download、heartbeat/cancel、partial cleanup。
+- boundary speech、長発話、日本語auto、英語固定、VAD true/false、selected format 1～3。
+- 実R2 download/upload、manifest v3、artifact download、heartbeat/cancel、partial cleanup。
 - provider execution、application attempt、artifact、cleanup、課金終了を同じ期限付きevidenceへ結び付ける。
 - fixtureと全artifactをacceptance後に削除し、録音またはtranscriptをworkflow artifactへuploadしない。
 

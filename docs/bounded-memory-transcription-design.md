@@ -66,7 +66,7 @@ flowchart LR
   T --> M[Timestamp merge and bounded spool]
   M --> A[One artifact writer at a time]
   A -->|streaming PUT| O[(Selected R2 artifacts)]
-  O --> X[Manifest v2 written last]
+  O --> X[Manifest v3 written last]
 ```
 
 presigned URLは`CapabilityHttpClient`だけが扱う。FFmpeg argv、log、exception、spool metadataへURL、object
@@ -137,6 +137,7 @@ job optionsはjob rowの可変参照ではなく、attempt作成時のimmutable 
 ```
 
 - `language=ja`: 全windowへ`language="ja"`を渡す。
+- `language=ja | en`: 選択値を全windowへ明示し、native metadataの完全一致を要求する。
 - `language=auto`: 最初のwindowだけ`language=None`とし、strict検証した検出言語とprobabilityをattempt結果に
   固定する。後続windowは検出済みlanguageを明示する。
 - `vad`: 全windowへexact booleanを渡す。benchmarkはfull scanのためfalse、productはattempt snapshotを使う。
@@ -146,10 +147,11 @@ job optionsはjob rowの可変参照ではなく、attempt作成時のimmutable 
 claim/bootstrap responseはこのsnapshotを返し、Workerが別値を選べないようにする。provider ID、URL、tokenと
 同様にboundary schemaでstrict検証する。
 
-## 8. Manifest v2 and bounded artifacts
+## 8. Manifest v3 and bounded artifacts
 
-manifest v2は`schemaVersion: 2`、`executionContractVersion: 2`、requested format集合、存在するartifactだけを
-含む。Orchestratorはattempt snapshotとの集合完全一致に加え、各keyのjob ID、attempt ID、format拡張子、
+manifest v3は`schemaVersion: 3`、`executionContractVersion: 2`、requested/detected language、requested format集合、
+存在するartifactだけを含む。Orchestratorはattempt snapshotとのlanguage/format完全一致に加え、固定言語では
+detected languageの一致、各keyのjob ID、attempt ID、format拡張子、
 size、SHA-256を確認する。余分、不足、別attempt key、format/key不一致、v1 fallbackは拒否する。execution
 contractのversionとresult manifest schemaのversionを同じfieldへ過積載しない。capability URLはcontractで
 credentialなしHTTPS構文を要求し、HTTP adapterでpurpose別exact hostとpublic DNSをさらに検証する。
@@ -195,7 +197,7 @@ product serviceへ接続する前に、isolated moduleとbenchmark entrypointで
 - merge: boundary跨ぎ、30秒overlap、monotonic watermark、segmentation drift、逆順、重複、範囲外、
   NaN/Infinity、global ID
 - prompt: 8 KiB、multi-byte UTF-8、空text、本文のlog不在
-- options: ja/auto、VAD true/false、1～3 output formats、snapshot drift、contract v1/v2混同拒否
+- options: ja/en/auto、VAD true/false、1～3 output formats、snapshot drift、contract v1/v2混同拒否
 - limits: segment数、per-text、total text、spool、artifact、volume full
 - artifacts: 選択形式だけ、incremental hash/size、partial PUT、manifest-last、symlink/foreign path拒否
 - recovery: cancel、FFmpeg/model exception、artifact response loss、finally cleanup
@@ -210,8 +212,8 @@ Phase 10Aのisolated実装は次で構成する。
 - `bounded_decoder.py`: exact streamを一つのFFmpeg processでdecodeし、actual EOF sample数から最大32 windowを
   動的に確定する。8時間float32全体を事前確保しない。
 - `bounded_transcription.py`: pure planner、monotonic overlap watermark、8 KiB prompt、mode 0600 JSON Lines spool。
-- `bounded_inference.py`: model instance一つ、逐次window、ja/auto一度固定、exact VAD。
-- `bounded_artifacts.py`: 選択形式だけを一件ずつfile-backed生成し、hash/size付きでuploadしてmanifest v2を最後に
+- `bounded_inference.py`: model instance一つ、逐次window、ja/en固定またはauto一度固定、exact VAD。
+- `bounded_artifacts.py`: 選択形式だけを一件ずつfile-backed生成し、hash/size付きでuploadしてmanifest v3を最後に
   書く。
 - `bounded_contracts.py`と`packages/contracts/src/bounded-execution.ts`: 同じfixtureを読むstrict v2 contract。
 - `bounded_container_check.py`: production定数の8時間virtual PCM、32 window、空segment spool、3形式artifact、
@@ -266,7 +268,7 @@ timeout、OOM、native failureはRejectとする。synthetic成功後も非機�
 | Severity | Finding                                                                     | Resolution                                                                                       |
 | -------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | Blocker  | 8時間入力をpathのままfaster-whisperへ渡すと入力時間比例のmemoryを使う       | single-pass decoderと最大16分windowへ制限し、同じ経路のmemory増量retryを禁止する                 |
-| Blocker  | job optionsがclaimへ渡らず、利用者のlanguage、VAD、formatと実行が一致しない | immutable execution contract v2とmanifest v2をPhase 11のmigration、capability、completionへ通す  |
+| Blocker  | job optionsがclaimへ渡らず、利用者のlanguage、VAD、formatと実行が一致しない | immutable execution contract v2とlanguage-bound manifest v3をcapability、completionへ通す        |
 | Blocker  | Phase 12以降が停止済みのRunPod Podsを採用済みとしていた                     | 採用ADRまでprovider固有実装をBlockedにし、selected-provider control plane/runtimeへ一般化した    |
 | High     | source、segment、3 artifactを同時に保持すると別のmemory amplificationが残る | 3 GiB scratch、128 MiB spool、1 artifactずつのstreaming uploadとhard limitを固定した             |
 | High     | window境界で重複、欠落、言語driftが起こり得る                               | 30秒context、monotonic watermark、bounded prompt、auto language一度固定をfixtureでacceptanceする |

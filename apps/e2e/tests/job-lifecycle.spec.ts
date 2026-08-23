@@ -27,6 +27,7 @@ test("recovers from a network failure and completes the authenticated job lifecy
     mimeType: "audio/mpeg",
     name: "meeting.mp3",
   });
+  await page.getByLabel("言語").selectOption("en");
   await page.getByRole("button", { name: "アップロードを開始" }).click();
 
   await expect(page.getByRole("alert")).toContainText(
@@ -37,10 +38,12 @@ test("recovers from a network failure and completes the authenticated job lifecy
   await expect(page.getByRole("progressbar")).toBeVisible();
   await expect(page.getByText("アップロードを受け付けました。")).toBeVisible();
   expect(backend.createAttempts).toBe(2);
+  expect(backend.createdLanguage).toBe("en");
   expect(backend.uploadPartObserved).toBe(true);
   expect(backend.multipartCompleted).toBe(true);
 
   await page.getByRole("link", { name: "ジョブ詳細を確認" }).click();
+  await expect(page.getByText("英語", { exact: true })).toBeVisible();
   await expect(page.getByText("処理待ち", { exact: true }).first()).toBeVisible();
 
   await page.clock.fastForward(5_000);

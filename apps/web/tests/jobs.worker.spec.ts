@@ -331,11 +331,11 @@ function requestData(owner = OWNER_A): WebRequestData {
   };
 }
 
-function validCreateBody(): CreateJobRequest {
+function validCreateBody(language: JobOptions["language"] = "ja"): CreateJobRequest {
   return createJobRequestSchema.parse({
     contentType: "audio/mp4",
     filename: "recording.m4a",
-    options: OPTIONS,
+    options: { ...OPTIONS, language },
     sizeBytes: 1024,
     title: "Weekly meeting",
   });
@@ -1216,7 +1216,7 @@ describe("job API handlers", () => {
         data: requestData(),
         env: handlerEnvironment(),
         request: new Request("https://example.test/api/jobs", {
-          body: JSON.stringify(validCreateBody()),
+          body: JSON.stringify(validCreateBody("en")),
           headers: { "Content-Type": "application/json" },
           method: "POST",
         }),
@@ -1265,7 +1265,7 @@ describe("job API handlers", () => {
     expect(detailResponse.status).toBe(200);
     expect(jobDetailSchema.parse(await detailResponse.json())).toMatchObject({
       id: jobId,
-      options: OPTIONS,
+      options: { ...OPTIONS, language: "en" },
       status: "UPLOADING",
     });
 

@@ -23,7 +23,7 @@ from scribe_drop_worker.bounded_artifacts import (
 from scribe_drop_worker.bounded_contracts import (
     ExecutionOptionsV2,
     OutputFormatV2,
-    ResultManifestV2,
+    ResultManifestV3,
 )
 from scribe_drop_worker.bounded_transcription import SegmentSpool
 from scribe_drop_worker.errors import WorkerError
@@ -151,7 +151,7 @@ def _plan(
 
 
 def test_selected_artifacts_stream_sequentially_and_manifest_is_last(tmp_path: Path) -> None:
-    """Only markdown and JSON exist, upload, disappear, then enter manifest v2."""
+    """Only selected artifacts exist, then an option-bound manifest v3 is written last."""
     upload = FakeStreamingUpload()
     progress = 0
 
@@ -173,7 +173,9 @@ def test_selected_artifacts_stream_sequentially_and_manifest_is_last(tmp_path: P
     assert upload.operations == ["file:1", "file:2", "manifest"]
     assert result.artifact_count == EXPECTED_SELECTED_ARTIFACTS
     assert upload.manifest is not None
-    manifest = ResultManifestV2.model_validate_json(upload.manifest)
+    manifest = ResultManifestV3.model_validate_json(upload.manifest)
+    assert manifest.requested_language == "ja"
+    assert manifest.detected_language == "ja"
     assert manifest.requested_formats == ("markdown", "json")
     assert tuple(item.format for item in manifest.artifacts) == ("markdown", "json")
     assert all(item.mode == SECURE_FILE_MODE for item in upload.files)

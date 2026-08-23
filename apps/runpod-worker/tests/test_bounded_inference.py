@@ -181,6 +181,30 @@ def test_japanese_and_vad_are_applied_to_every_window(tmp_path: Path) -> None:
     assert coordinator.language_result.language == "ja"
 
 
+def test_english_is_applied_to_every_window(tmp_path: Path) -> None:
+    """The fixed English path never falls back to auto after the first window."""
+    model = FakeWindowModel(("en", "en"))
+    prompt = PromptTail()
+    with SegmentSpool(tmp_path) as spool:
+        coordinator = BoundedInferenceCoordinator(
+            model=model,
+            options=_options(language="en", vad=True),
+            merger=WindowSegmentMerger(spool, prompt),
+            prompt=prompt,
+        )
+        first = _pcm_window(0)
+        second = _pcm_window(1)
+        try:
+            coordinator.consume(first)
+            coordinator.consume(second)
+        finally:
+            first.pcm.release()
+            second.pcm.release()
+
+    assert [call["language"] for call in model.calls] == ["en", "en"]
+    assert coordinator.language_result.language == "en"
+
+
 def test_language_drift_and_malformed_native_values_fail_closed(tmp_path: Path) -> None:
     """Model metadata or segment drift cannot be logged or accepted."""
     model = FakeWindowModel(("en", "fr"))

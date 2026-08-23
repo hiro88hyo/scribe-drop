@@ -244,7 +244,7 @@ capabilityだけでこのprotocolを実装し、Phase 15 acceptanceが残余リ�
 - Job delete受理、container exit、terminal reportのいずれか一つだけでcleanup completeにしない。
 - `GPU_EXECUTION_POLICY`は新規generation-one attemptだけへsnapshotする。switchをRunPodへ戻しても保存済みCloud Run
   attemptはCronでobserve/cancel/cleanupし続け、`cleanup_status=SUCCEEDED`まで利用者deleteとretentionの物理削除を止める。
-- runtime terminal成功はmanifest v2、requested format、exact result prefix、全artifact sizeをR2で確認してからproduct
+- runtime terminal成功はmanifest v3、requested/detected language、requested format、exact result prefix、全artifact sizeをR2で確認してからproduct
   jobとnotification outboxを確定する。controllerだけがterminalになりruntime terminalを欠く場合はjobを安全な失敗へ収束させる。
 
 ## 11. Error mapping

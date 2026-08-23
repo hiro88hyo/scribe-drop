@@ -1,10 +1,10 @@
 import {
   boundedExecutionOptionsSchema,
-  jobOptionsSchema,
+  runpodExecutionOptionsSchema,
   ulidSchema,
   utcDateTimeSchema,
   type BoundedExecutionOptions,
-  type JobOptions,
+  type RunpodExecutionOptions,
 } from "@scribe-drop/contracts";
 import type { GpuCleanupStatus, GpuExecutionStatus } from "@scribe-drop/domain";
 import { z } from "zod";
@@ -95,10 +95,6 @@ const COMPLETE_CLEANUP_SQL = `
 
 const updatedIdRowsSchema = z.array(z.object({ id: ulidSchema }).strict()).max(1);
 
-const legacyExecutionOptionsSchema = jobOptionsSchema
-  .extend({ contractVersion: z.literal(1) })
-  .strict();
-
 const compatibilityRowSchema = z
   .object({
     attempt_id: ulidSchema,
@@ -136,7 +132,7 @@ const compatibilityRowSchema = z
   })
   .strict();
 
-type ExecutionOptions = BoundedExecutionOptions | ({ readonly contractVersion: 1 } & JobOptions);
+type ExecutionOptions = BoundedExecutionOptions | RunpodExecutionOptions;
 
 export interface ProviderExecutionCompatibility {
   readonly attemptId: string;
@@ -191,7 +187,7 @@ function parseOptions(version: 1 | 2, serialized: string): ExecutionOptions {
     throw new Error("Provider execution compatibility check failed");
   }
   return version === 1
-    ? legacyExecutionOptionsSchema.parse(parsed)
+    ? runpodExecutionOptionsSchema.parse(parsed)
     : boundedExecutionOptionsSchema.parse(parsed);
 }
 

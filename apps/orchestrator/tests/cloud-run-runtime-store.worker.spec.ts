@@ -29,6 +29,7 @@ const OPTIONS = {
   vad: true,
 };
 const STAGING_OPTIONS = { ...OPTIONS, language: "ja" as const };
+const ENGLISH_OPTIONS = { ...OPTIONS, language: "en" as const };
 const CLOUD_RUN_CONTROLLER_SECRET = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc";
 const CLOUD_RUN_DERIVATION_SECRET = "CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg";
 
@@ -38,7 +39,7 @@ beforeAll(async () => {
 
 async function seedRuntimeContext(
   overrides: {
-    readonly options?: typeof OPTIONS | typeof STAGING_OPTIONS;
+    readonly options?: typeof ENGLISH_OPTIONS | typeof OPTIONS | typeof STAGING_OPTIONS;
     readonly sourceContentType?: string;
     readonly sourceEtag?: string;
     readonly sourceKey?: string;
@@ -223,7 +224,15 @@ async function claim(repository: D1CloudRunRuntimeStore): Promise<void> {
 }
 
 describe("Cloud Run runtime D1 store", () => {
-  it("verifies manifest v2 and atomically finalizes artifacts, job, outbox, and cleanup", async () => {
+  it("preserves English in the immutable runtime claim context", async () => {
+    await env.SCRIBE_DROP_DB.exec("DELETE FROM jobs;");
+    await seedRuntimeContext({ options: ENGLISH_OPTIONS });
+    await expect(store().getAttempt(HANDLE)).resolves.toMatchObject({
+      options: ENGLISH_OPTIONS,
+    });
+  });
+
+  it("verifies manifest v3 and atomically finalizes artifacts, job, outbox, and cleanup", async () => {
     const repository = store();
     await claim(repository);
     const common = {
@@ -271,10 +280,12 @@ describe("Cloud Run runtime D1 store", () => {
       })),
       attemptId: ATTEMPT_ID,
       complete: true,
+      detectedLanguage: "ja",
       executionContractVersion: 2,
       jobId: JOB_ID,
+      requestedLanguage: "auto",
       requestedFormats: ["markdown", "json", "srt"],
-      schemaVersion: 2,
+      schemaVersion: 3,
     } as const;
     await env.RECORDINGS.put(`${prefix}manifest.json`, JSON.stringify(manifest));
     const finalizer = new CloudRunTerminalFinalizer(env.SCRIBE_DROP_DB, env.RECORDINGS, {

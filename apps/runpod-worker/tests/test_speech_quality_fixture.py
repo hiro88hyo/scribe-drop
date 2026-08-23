@@ -14,17 +14,20 @@ if TYPE_CHECKING:
 from scribe_drop_worker.bounded_transcription import SAMPLE_RATE
 from scribe_drop_worker.speech_quality_fixture import (
     BOUNDARY_SECONDS,
+    ENGLISH_ESPEAK_VOICE,
     ESPEAK_PATH,
     FFMPEG_PATH,
     FIXTURE_DURATION_SECONDS,
     MAX_SPEECH_SECONDS,
     MIN_SPEECH_SECONDS,
     PCM_BYTES_PER_SAMPLE,
+    SYNTHETIC_ENGLISH_TEXTS,
     SYNTHETIC_JAPANESE_TEXTS,
     WAVE_HEADER_BYTES,
     SpeechQualityFixtureError,
     _fixture_intervals,
     _run_command,
+    generate_english_speech_quality_fixture,
     generate_speech_quality_fixture,
 )
 
@@ -83,6 +86,27 @@ def test_generator_uses_fixed_commands_writes_exact_wave_and_removes_intermediat
         assert source.read(4) == b"RIFF"
     assert fixture.path.stat().st_mode & 0o077 == 0
     assert not any(tmp_path.glob("synthesized-source-*"))
+
+
+def test_english_generator_uses_fixed_non_human_text_and_voice(tmp_path: Path) -> None:
+    """The English native fixture has reviewed provenance and a distinct safe path."""
+    commands: list[tuple[str, ...]] = []
+
+    fixture = generate_english_speech_quality_fixture(
+        tmp_path,
+        run_command=_successful_runner(commands),
+    )
+
+    assert len(commands) == EXPECTED_COMMAND_COUNT
+    for index in range(EXPECTED_INTERVAL_COUNT):
+        synthesize = commands[index * 2]
+        assert synthesize[1:3] == ("-v", ENGLISH_ESPEAK_VOICE)
+        assert synthesize[-1] == SYNTHETIC_ENGLISH_TEXTS[index]
+    assert len(set(SYNTHETIC_ENGLISH_TEXTS)) == EXPECTED_INTERVAL_COUNT
+    assert fixture.path == tmp_path / "english-speech-quality.wav"
+    assert fixture.boundary_interval.start_seconds < BOUNDARY_SECONDS
+    assert fixture.boundary_interval.end_seconds > BOUNDARY_SECONDS
+    assert not any(tmp_path.glob("english-synthesized-source-*"))
 
 
 @pytest.mark.parametrize(

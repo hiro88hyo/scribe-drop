@@ -181,7 +181,7 @@ retryは新しいreview packetなしに行わない。
 [ADR 0069](./adr/0069-use-bounded-memory-transcription-windows.md)では、provider taskを分散せず、1 task内で
 single-pass FFmpeg decode、15分core、前後30秒context、1 model instanceを順次処理する方式をProposedと
 した。segmentはtimestamp ownershipでmergeしてbounded spoolへ書き、選択されたartifactを1形式ずつ生成・
-uploadしてmanifest v2を最後に書く。job optionsはattempt作成時のimmutable execution contractへ固定し、
+uploadしてmanifestを最後に書く。job optionsはattempt作成時のimmutable execution contractへ固定し、
 language、VAD、output formatをworkerが暗黙に上書きしない。詳細は
 [bounded-memory transcription design](./bounded-memory-transcription-design.md)を正とする。
 
@@ -208,7 +208,7 @@ staging接続はPhase 14まで導入しない。
 Phase 13では[Cloud Run one-shot runtime](./cloud-run-one-shot-runtime.md)をlocal実装した。runtimeはGoogle
 service identityの検証とcontroller live read-backが成功してもchallengeだけを受け取り、memory-only Ed25519署名を
 CAS消費した後に初めてsynthetic source/result capabilityを得る。ack前にsource download、CUDA discovery、model loadを
-行わず、bounded contract v2のlanguage、VAD、selected format、manifest v2をそのまま実行する。terminalはsessionを失効し
+行わず、bounded contract v2のlanguage、VAD、selected format、manifest v3をそのまま実行する。terminalはsessionを失効し
 exact cleanupをscheduleするが、provider absenceとartifact/finalize確認前にproduct `COMPLETED`へ遷移しない。
 service identityがExecution UIDを署名しない残余riskはsingle-activeとlive read-backで補償し、host attestationとは扱わない。
 
@@ -278,6 +278,10 @@ legacy列とaggregateのprovider identity、状態、create outcome、opaque han
 新しいRunPod attemptはlanguage、VAD、model、selected output formatをimmutable snapshotへ固定する。ただし接続中の
 RunPod workerとmanifestはv1であるため、snapshotも明示的なcontract v1とする。offline検証済みv2を同じattemptへ混在
 させず、provider固有bootstrapからcompletionまで同時に接続できる後続Phaseの新attemptまで発行を停止する。
+
+Phase 18では[ADR 0095](./adr/0095-add-fixed-english-language.md)に従い、公開languageを`ja | en | auto`へ拡張する。
+RunPod contract v1 claimとCloud Run contract v2 claimはいずれもimmutable optionsを返し、固定言語をnative inferenceへ
+明示する。Cloud Run manifest v3はrequested/detected languageを持ち、attempt snapshotとfinalize時に完全照合する。
 
 採用時のtarget releaseは`0.2.0`とし、現行RunPod修正の`0.1.1`へcode、migration、cloud
 resourceを混在させない。

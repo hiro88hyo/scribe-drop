@@ -8,6 +8,7 @@ import {
   ulidSchema,
   utcDateTimeSchema,
 } from "./common.js";
+import { jobOptionsSchema } from "./job.js";
 
 export const RUNPOD_MIN_EXECUTION_TIMEOUT_MS = 5_000;
 export const RUNPOD_MIN_TTL_MS = 10_000;
@@ -58,6 +59,10 @@ export const runpodClaimRequestSchema = z
   })
   .strict();
 
+export const runpodExecutionOptionsSchema = jobOptionsSchema
+  .extend({ contractVersion: z.literal(1) })
+  .strict();
+
 export const runpodClaimResponseSchema = z.union([
   z
     .object({
@@ -69,6 +74,7 @@ export const runpodClaimResponseSchema = z.union([
           url: httpsUrlSchema,
         })
         .strict(),
+      options: runpodExecutionOptionsSchema,
       results: z
         .object({
           jsonPutUrl: httpsUrlSchema,
@@ -221,6 +227,7 @@ export type RunpodWorkerInput = z.infer<typeof runpodWorkerInputSchema>;
 export type RunpodRunRequest = z.infer<typeof runpodRunRequestSchema>;
 export type RunpodClaimRequest = z.infer<typeof runpodClaimRequestSchema>;
 export type RunpodClaimResponse = z.infer<typeof runpodClaimResponseSchema>;
+export type RunpodExecutionOptions = z.infer<typeof runpodExecutionOptionsSchema>;
 export type RunpodHeartbeatRequest = z.infer<typeof runpodHeartbeatRequestSchema>;
 export type RunpodHeartbeatResponse = z.infer<typeof runpodHeartbeatResponseSchema>;
 export type RunpodStatus = z.infer<typeof runpodStatusValueSchema>;

@@ -48,6 +48,8 @@ describe("job presentation", () => {
     expect(formatDuration(7)).toBe("7秒");
     expect(formatDuration(67)).toBe("1分7秒");
     expect(formatDuration(3661)).toBe("1時間1分1秒");
+    expect(formatLanguage("ja")).toBe("日本語");
+    expect(formatLanguage("en")).toBe("英語");
     expect(formatLanguage("auto")).toBe("自動判定");
     expect(formatOutputFormats(["markdown", "srt", "json"])).toBe("Markdown・SRT・JSON");
   });

@@ -53,6 +53,13 @@ async function claimContext(overrides: Partial<ClaimContext> = {}): Promise<Clai
     claimExpiresAt: "2026-07-25T00:15:00.000Z",
     claimIssuedAt: NOW.toISOString(),
     claimTokenHash: await hashCapabilityToken(CLAIM_TOKEN),
+    executionOptions: {
+      contractVersion: 1,
+      language: "en",
+      model: "large-v3-turbo",
+      outputFormats: ["markdown", "json", "srt"],
+      vad: true,
+    },
     generation: 1,
     heartbeatExpiresAt: null,
     heartbeatIssuedAt: null,
@@ -171,6 +178,7 @@ describe("RunPod claim service", () => {
       heartbeat: {
         url: "https://orchestrator.example.invalid/internal/runpod/heartbeat",
       },
+      options: context.executionOptions,
       source: {
         expectedEtag: "etag",
         expectedSizeBytes: 1024,

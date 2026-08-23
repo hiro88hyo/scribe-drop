@@ -10,7 +10,7 @@ from typing import Final, Protocol, cast
 from pydantic import BaseModel, ConfigDict, Field
 
 from .constants import MODEL_NAME
-from .contracts import TranscriptSegment
+from .contracts import RunpodExecutionLanguage, TranscriptSegment
 from .errors import WorkerError
 
 TRANSCRIPTION_FAILED: Final = "TRANSCRIPTION_FAILED"
@@ -118,20 +118,24 @@ class FasterWhisperTranscriber:
         source: Path,
         *,
         duration_seconds: float,
+        language: RunpodExecutionLanguage,
         on_segment: Callable[[], None] | None = None,
+        vad: bool,
     ) -> TranscriptionResult:
         """Transcribe with fixed decoding settings and validate every result segment."""
         try:
+            requested_language = None if language == "auto" else language
             segments, raw_info = self._get_model().transcribe(
                 str(source),
                 beam_size=5,
                 condition_on_previous_text=True,
-                language=None,
+                language=requested_language,
                 log_progress=False,
-                vad_filter=True,
+                vad_filter=vad,
                 word_timestamps=False,
             )
             info = RawTranscriptionInfo.model_validate(raw_info)
+            _require_requested_language(info.language, requested_language)
             validated_segments: list[TranscriptSegment] = []
             for raw_segment in segments:
                 segment = RawSegment.model_validate(raw_segment)
@@ -160,6 +164,14 @@ class FasterWhisperTranscriber:
         if self._model is None:
             self._model = self._model_factory(self._model_path)
         return self._model
+
+
+def _require_requested_language(
+    detected_language: str,
+    requested_language: RunpodExecutionLanguage | None,
+) -> None:
+    if requested_language is not None and detected_language != requested_language:
+        raise WorkerError(TRANSCRIPTION_FAILED)
 
 
 __all__ = [
