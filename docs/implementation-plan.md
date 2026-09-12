@@ -2257,6 +2257,7 @@ incident（2026-09-12）:
 - production job `01M29V5KMCYFW7GABVWZ5J8C0C`はupload後`SUBMISSION_PENDING`に留まり、controllerは各create requestを`BUDGET_EXHAUSTED`でfail closedした。
 - production controller ServiceとFirestoreは同じ`phase16-operational-7fb37b528d2180619d8a1844ed96d8a6b0aa64f7-32571969400`、最大5件、上限1,250円を保持していたが、expiryは`2026-08-23T12:20:00.000Z`だった。
 - Firestore active/reservedは0、Cloud Run Job/Executionも0であり、GPU executionと課金は開始していない。deployed controller imageはimmutable digest `sha256:3eb35546e0907d3ffd05fa2743d7c799d439ac5136691d02b4481cc36f1509a3`のまま変更しない。
+- 初回renewal run `34675701883`はlocal/input/workflow/OIDC検証後、最初のremote readでFirestore server-managed `updateTime`の小数秒精度をapplication timestampと同じ3桁に限定していたため停止した。Service/Firestore mutationとGPU executionは0である。Firestoreが返すUTC RFC 3339の0/3/6/9桁をcalendar-validに検査し、受信文字列をCAS preconditionへそのまま渡す回帰testを追加するまでredispatchしない。
 
 実装:
 
