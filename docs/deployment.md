@@ -680,6 +680,14 @@ productionの通常UIで固定smoke mediaを1件uploadし、artifactと通知を
 `execution数 * 250`円、24時間以内のISO expiryを渡す。finalizeはD1/R2、Cloud Run resource 0、controller
 storage CLEANEDを検証するまで運用枠を開かない。productionにstaging Access service principalを作成しない。
 
+application artifact、controller image digest、migration、provider選択を変更せず、有限のproduction運用認可だけが
+失効した場合は、[ADR 0096](./adr/0096-renew-expired-production-authorization-without-redeployment.md)の`renew`を使う。
+失効済みepoch・expiry・上限と現在のcontroller image digestを完全一致入力し、新しい1〜20件、1件250円、24時間以内の
+expiryを指定する。workflowはCloud Run Job/Execution 0とactive execution 0をread-backしてから、Serviceの6認可env、
+Firestore documentの順にだけ更新する。各prefixからのrerunは未完了suffixだけを実行し、candidate build、staging E2E、
+application deploy、provider切替、追加synthetic GPU executionを行わない。production workload identityがexact workflow pathと
+`release/*`を要求するため、同一source commitを指すrelease branchからdispatchする。
+
 [ADR 0092](./adr/0092-make-production-finalize-resumable.md)に従い、finalizeはread-back済み入口状態を
 `smoke-active`、`smoke-paused`、`disabled-paused`、`operational-paused`、`operational-active`から明示する。
 最初のmutation前にadmission、authorization、provider 0、D1のproduction smoke `provider_handle`と同じFirestore

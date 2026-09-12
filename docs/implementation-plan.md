@@ -2247,3 +2247,26 @@ local verification（2026-08-23）:
 - standard lint、format、typecheck、test、build、security scanが成功する。
 - 同じcandidateのnative CUDA/float16 English gateと実service staging acceptanceが成功する。
 - productionではstaging verified candidateを再build・修正せずdeployする。
+
+### Phase 19: resumable production authorization renewal
+
+目的: application candidateを変更せず有限production GPU認可だけが失効した場合に、再publish・再deploy・追加staging E2Eなしで安全に運用を再開する。
+
+incident（2026-09-12）:
+
+- production job `01M29V5KMCYFW7GABVWZ5J8C0C`はupload後`SUBMISSION_PENDING`に留まり、controllerは各create requestを`BUDGET_EXHAUSTED`でfail closedした。
+- production controller ServiceとFirestoreは同じ`phase16-operational-7fb37b528d2180619d8a1844ed96d8a6b0aa64f7-32571969400`、最大5件、上限1,250円を保持していたが、expiryは`2026-08-23T12:20:00.000Z`だった。
+- Firestore active/reservedは0、Cloud Run Job/Executionも0であり、GPU executionと課金は開始していない。deployed controller imageはimmutable digest `sha256:3eb35546e0907d3ffd05fa2743d7c799d439ac5136691d02b4481cc36f1509a3`のまま変更しない。
+
+実装:
+
+- [ADR 0096](./adr/0096-renew-expired-production-authorization-without-redeployment.md)に従い、既存production promotion workflowへ独立した`renew` operationを追加する。
+- exact previous authorizationとcontroller image digestを入力に固定し、新epochはcandidate identityを維持してworkflow run IDへ結び付ける。上限1〜20件、1件250円、expiry 30分超24時間以内だけを許可する。
+- `expired`、`service-updated`、`firestore-updated`、`active`の4 prefixをstate-machine testで固定する。inactive prefixではJob/Execution 0とactive 0を要求し、Service env更新後にFirestoreを`updateTime` CASで更新する。
+- workflow source contractはlocal verifier、入力検証、OIDC、remote preflight、2 mutation、final read-back、evidenceの完全な順序を検査し、candidate build、staging acceptance、RunPod、Wranglerをrenewal jobから拒否する。
+
+完了条件:
+
+- unit/state-machine/workflow contractとstandard local gateが成功する。
+- production Environment承認後、同一source runのread-backと2 mutationが成功し、認可が最大5件・上限1,250円・24時間以内で`active`に収束する。
+- 保留中jobが追加uploadなしで再開し、既存のproduction lifecycleでterminal stateへ進む。candidate build、publish、staging E2E、production application deployは行わない。

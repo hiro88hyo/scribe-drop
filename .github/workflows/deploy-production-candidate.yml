@@ -4,12 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: cutover opens one approved smoke slot; finalize verifies it and opens the reviewed operational window
+        description: cutover opens smoke, finalize opens operation, renew extends only expired authorization
         required: true
         type: choice
         options:
           - cutover
           - finalize
+          - renew
       staging_run_id:
         description: Successful staging acceptance workflow run ID
         required: true
@@ -69,6 +70,26 @@ on:
         required: true
         default: "1970-01-01T00:00:00.000Z"
         type: string
+      previous_authorization_epoch:
+        description: Exact expired production authorization epoch; required only for renew
+        required: true
+        default: none
+        type: string
+      previous_authorization_valid_until:
+        description: Exact expired production authorization timestamp; required only for renew
+        required: true
+        default: "1970-01-01T00:00:00.000Z"
+        type: string
+      previous_authorization_max_executions:
+        description: Exact previous execution cap; required only for renew
+        required: true
+        default: "0"
+        type: string
+      expected_controller_image_digest:
+        description: Exact currently deployed immutable controller image; required only for renew
+        required: true
+        default: none
+        type: string
 
 run-name: Production ${{ inputs.preflight_only && 'preflight' || inputs.operation }} from staging run ${{ inputs.staging_run_id }}
 
@@ -87,6 +108,7 @@ env:
 jobs:
   verify-promotion:
     name: Verify immutable candidate, acceptance, and operation inputs
+    if: inputs.operation != 'renew'
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
@@ -833,3 +855,87 @@ jobs:
           path: production-release
           if-no-files-found: error
           retention-days: 90
+
+  renew-authorization:
+    name: Renew bounded production GPU authorization
+    if: inputs.operation == 'renew'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EXPECTED_CONTROLLER_IMAGE_DIGEST: ${{ inputs.expected_controller_image_digest }}
+      PREVIOUS_PRODUCTION_AUTHORIZATION_EPOCH: ${{ inputs.previous_authorization_epoch }}
+      PREVIOUS_PRODUCTION_AUTHORIZATION_MAX_EXECUTIONS: ${{ inputs.previous_authorization_max_executions }}
+      PREVIOUS_PRODUCTION_AUTHORIZATION_VALID_UNTIL: ${{ inputs.previous_authorization_valid_until }}
+      PRODUCTION_AUTHORIZATION_MAX_EXECUTIONS: ${{ inputs.operational_max_executions }}
+      PRODUCTION_AUTHORIZATION_MAX_WORST_CASE_JPY: ${{ inputs.operational_max_worst_case_jpy }}
+      PRODUCTION_AUTHORIZATION_VALID_UNTIL: ${{ inputs.operational_valid_until }}
+    steps:
+      - name: Check out production authorization source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Volta
+        uses: volta-cli/action@615a78f6c83e116339c53b94f3f82b4d6c0b7d18 # v5.0.0
+        with:
+          volta-version: 2.0.2
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate source-managed renewal workflow contract
+        run: pnpm run production:authorization:renewal:workflow:verify
+
+      - name: Validate bounded renewal inputs before external access
+        run: pnpm run production:authorization:renewal inputs
+
+      - name: Authenticate isolated production deployer
+        id: google-auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: projects/601035271372/locations/global/workloadIdentityPools/scribe-drop-release/providers/github-production-deployment
+          service_account: sd-production-deployer@scribe-drop.iam.gserviceaccount.com
+          project_id: scribe-drop
+          token_format: access_token
+          access_token_lifetime: 1800s
+
+      - name: Set up pinned Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          version: 579.0.0
+          project_id: scribe-drop
+
+      - name: Read back the complete resumable renewal prefix
+        env:
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+        run: pnpm run production:authorization:renewal preflight
+
+      - name: Apply only the controller Service authorization
+        env:
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+        run: pnpm run production:authorization:renewal apply-service
+
+      - name: Apply only the conditional Firestore authorization
+        env:
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+        run: pnpm run production:authorization:renewal apply-firestore
+
+      - name: Verify converged production authorization
+        env:
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+        run: pnpm run production:authorization:renewal verify
+
+      - name: Record bounded production authorization evidence
+        env:
+          GOOGLE_OAUTH_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+        run: pnpm run production:authorization:renewal evidence production-authorization-renewal/evidence.json
+
+      - name: Upload production authorization evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: scribe-drop-production-authorization-${{ github.run_id }}
+          path: production-authorization-renewal
+          if-no-files-found: error
+          retention-days: 30
