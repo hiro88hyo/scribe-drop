@@ -95,7 +95,7 @@ function document(authorization = previous, overrides = {}) {
       validUntil: stringValue(authorization.validUntil),
       worstCaseJpyPerExecution: integerValue(authorization.worstCaseJpyPerExecution),
     },
-    updateTime: "2026-09-12T04:00:00.000Z",
+    updateTime: overrides.updateTime ?? "2026-09-12T04:00:00.000Z",
   };
 }
 
@@ -183,6 +183,29 @@ test("parses the exact production service and Firestore authorization", () => {
   assert.throws(() => parseProductionControllerService(changed));
 });
 
+test("preserves Firestore server updateTime with nanosecond precision for CAS", () => {
+  const updateTime = "2026-09-12T04:00:00.123456789Z";
+  assert.equal(
+    parseProductionAuthorizationDocument(document(previous, { updateTime })).updateTime,
+    updateTime,
+  );
+  assert.throws(() =>
+    parseProductionAuthorizationDocument(
+      document(previous, { updateTime: "2026-09-12T04:00:00.1234567890Z" }),
+    ),
+  );
+  assert.throws(() =>
+    parseProductionAuthorizationDocument(
+      document(previous, { updateTime: "2026-09-12T04:00:00.1Z" }),
+    ),
+  );
+  assert.throws(() =>
+    parseProductionAuthorizationDocument(
+      document(previous, { updateTime: "2026-09-12T04:00:00.123+00:00" }),
+    ),
+  );
+});
+
 test("accepts every two-mutation recovery prefix", () => {
   const prefixes = [
     [previous, previous, "expired"],
@@ -234,10 +257,10 @@ test("builds an exact service env set and conditional Firestore reset patch", ()
   assert.equal(Object.keys(serviceAuthorizationEnvironment(desired)).length, 6);
   const patch = firestoreAuthorizationPatch(
     desired,
-    "2026-09-12T04:00:00.000Z",
+    "2026-09-12T04:00:00.123456Z",
     "2026-09-12T04:30:00.000Z",
   );
-  assert.equal(patch.updateTime, "2026-09-12T04:00:00.000Z");
+  assert.equal(patch.updateTime, "2026-09-12T04:00:00.123456Z");
   assert.equal(patch.body.fields.reservedExecutions.integerValue, "0");
   assert.equal(patch.body.fields.updatedAt.stringValue, "2026-09-12T04:30:00.000Z");
   assert.deepEqual(patch.body.fields.recentAcceptedAt.arrayValue.values, []);

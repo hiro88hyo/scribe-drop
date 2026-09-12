@@ -44,6 +44,23 @@ function canonicalTimestamp(value, label) {
   return value;
 }
 
+function canonicalFirestoreUpdateTime(value, label) {
+  if (typeof value !== "string") throw new Error(`${label} is invalid`);
+  const match =
+    /^(20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(?:\.([0-9]{3}|[0-9]{6}|[0-9]{9}))?Z$/u.exec(
+      value,
+    );
+  const base = match?.[1];
+  if (base === undefined) throw new Error(`${label} is invalid`);
+  const milliseconds = (match?.[2] ?? "").padEnd(3, "0").slice(0, 3);
+  const normalized = `${base}.${milliseconds}Z`;
+  const parsed = Date.parse(normalized);
+  if (!Number.isFinite(parsed) || new Date(parsed).toISOString() !== normalized) {
+    throw new Error(`${label} is invalid`);
+  }
+  return value;
+}
+
 export function createProductionAuthorizationRenewal(input) {
   const now = input?.now;
   if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
@@ -292,7 +309,10 @@ export function parseProductionAuthorizationDocument(value) {
     recentAcceptedCount: recentValues?.length ?? 0,
     reservedExecutions,
     reservedWorstCaseJpy,
-    updateTime: canonicalTimestamp(document.updateTime, "Production authorization update time"),
+    updateTime: canonicalFirestoreUpdateTime(
+      document.updateTime,
+      "Production authorization update time",
+    ),
   };
 }
 
@@ -369,7 +389,7 @@ export function serviceAuthorizationEnvironment(authorization) {
 }
 
 export function firestoreAuthorizationPatch(authorization, updateTime, updatedAt) {
-  canonicalTimestamp(updateTime, "Production authorization update precondition");
+  canonicalFirestoreUpdateTime(updateTime, "Production authorization update precondition");
   canonicalTimestamp(updatedAt, "Production authorization update timestamp");
   const integerValue = (value) => ({ integerValue: String(value) });
   const stringValue = (value) => ({ stringValue: value });
